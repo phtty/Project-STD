@@ -153,6 +153,8 @@ void InitialTask(void *argument)
     tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
 
+    printf("Init Done\n");
+
     osThreadExit();
     /* Infinite loop */
     for (;;) {

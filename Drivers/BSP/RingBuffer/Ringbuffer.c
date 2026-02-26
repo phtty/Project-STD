@@ -6,7 +6,7 @@
  * @retval 1 缓冲区为空
  * @retval 0 缓冲区非空
  */
-uint8_t BSP_RB_IsEmpty(RingBuffer *fifo)
+__always_inline uint8_t BSP_RB_IsEmpty(RingBuffer *fifo)
 {
     return fifo->read_index == fifo->write_index;
 }
@@ -17,7 +17,7 @@ uint8_t BSP_RB_IsEmpty(RingBuffer *fifo)
  * @retval 1 缓冲区已满
  * @retval 0 缓冲区未满
  */
-uint8_t BSP_RB_IsFull(RingBuffer *fifo)
+__always_inline uint8_t BSP_RB_IsFull(RingBuffer *fifo)
 {
     return ((fifo->write_index + 1) & (BUFFER_SIZE - 1)) == fifo->read_index;
 }
@@ -27,7 +27,7 @@ uint8_t BSP_RB_IsFull(RingBuffer *fifo)
  * @param fifo 指向环形缓冲区的指针
  * @return 当前可读取的字节数
  */
-uint16_t BSP_RB_GetAvailable(RingBuffer *fifo)
+__always_inline uint16_t BSP_RB_GetAvailable(RingBuffer *fifo)
 {
     return (fifo->write_index - fifo->read_index) & (BUFFER_SIZE - 1);
 }
@@ -62,7 +62,7 @@ uint8_t BSP_RB_FreeBuff(RingBuffer *fifo)
  * @retval 1 写入成功
  * @retval 0 缓冲区已满，写入失败
  */
-uint8_t BSP_RB_PutByte(RingBuffer *fifo, uint8_t byte)
+__always_inline uint8_t BSP_RB_PutByte(RingBuffer *fifo, uint8_t byte)
 {
     if (BSP_RB_IsFull(fifo)) {
         return 0; // 缓冲区满，写入失败
@@ -100,7 +100,7 @@ uint16_t BSP_RB_PutByte_Bulk(RingBuffer *fifo, const uint8_t *data, uint16_t len
  * @retval 1 读取成功
  * @retval 0 缓冲区为空，读取失败
  */
-uint8_t BSP_RB_GetByte(RingBuffer *fifo, uint8_t *byte)
+__always_inline uint8_t BSP_RB_GetByte(RingBuffer *fifo, uint8_t *byte)
 {
     if (BSP_RB_IsEmpty(fifo)) {
         return 0; // 缓冲区空，读取失败
