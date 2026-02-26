@@ -253,8 +253,6 @@ void pwm_light_handle(void)
 
 void RefreshTask(void *argument)
 {
-    uint32_t refresh_flag = 0;
-
     __HAL_DBGMCU_FREEZE_TIM3();
     __HAL_DBGMCU_FREEZE_TIM4();
 
@@ -264,8 +262,7 @@ void RefreshTask(void *argument)
     HAL_TIM_Base_Start_IT(&htim4);
 
     for (;;) {
-        refresh_flag = osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
-        if (refresh_flag)
-            convert_pixelmap();
+        osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
+        convert_pixelmap();
     }
 }
