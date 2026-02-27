@@ -91,7 +91,7 @@ void RefreshTask(void *argument);
 void InitialTask(void *argument);
 
 extern void MX_LWIP_Init(void);
-void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+void MX_FREERTOS_Init(void);
 
 /**
  * @brief  FreeRTOS initialization
@@ -153,7 +153,7 @@ void InitialTask(void *argument)
     RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    RenderString(0, 0, (uint8_t *)"≤‚ ‘", strlen("≤‚ ‘"), green, font_32, font_ht);
+    RenderString(0, 0, (uint8_t *)"ab", strlen("ab"), green, font_32, font_ht);
 
     printf("Init Done\n");
 

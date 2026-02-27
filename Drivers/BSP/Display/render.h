@@ -6,11 +6,11 @@
 #include "stdbool.h"
 
 // 步进值
-#define ASCII_16_STEP (3072U)
+#define ASCII_16_STEP (1536U)
 #define GBK_16_STEP   (766080U)
-#define ASCII_24_STEP (6912U)
+#define ASCII_24_STEP (4608U)
 #define GBK_24_STEP   (1723680U)
-#define ASCII_32_STEP (12288U)
+#define ASCII_32_STEP (6144U)
 #define GBK_32_STEP   (3064320U)
 
 // 初始偏移值
