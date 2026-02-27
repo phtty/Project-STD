@@ -75,8 +75,8 @@ int main(void)
 {
 
     /* USER CODE BEGIN 1 */
-    SCB->VTOR = FLASH_BASE | 0x40000;
-    __enable_irq();
+    // SCB->VTOR = FLASH_BASE | 0x40000;
+    // __enable_irq();
     /* USER CODE END 1 */
 
     /* MCU Configuration--------------------------------------------------------*/

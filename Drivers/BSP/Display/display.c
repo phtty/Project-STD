@@ -126,12 +126,12 @@ void convert_pixelmap(void)
         row_cnt = map_cnt / SCREEN_PIXEL_ROW; // 屏幕的行标
         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
 
-        group_cnt = (row_cnt / 16 * 8 + row_cnt % 8) * MODULE_PER_ROW + col_cnt / 32;
+        group_cnt = row_cnt / 16 * 8 + row_cnt % 8; // 组标
 
         if (row_cnt % 16 / 8) // 下半行
-            hub75_buff[group_cnt * GROUP_SIZE + col_cnt % 32] = pixel_map[map_cnt];
+            hub75_buff[col_cnt * 2 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
         else // 上半行
-            hub75_buff[group_cnt * GROUP_SIZE + col_cnt % 32 + 32] = pixel_map[map_cnt];
+            hub75_buff[col_cnt * 2 + 1 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
     }
 }
 
@@ -144,16 +144,25 @@ void convert_pixelmap(void)
  */
 static void scan_channel(uint8_t line_cnt)
 {
-    if (0 == line_cnt)
+    if (line_cnt & 0x01U)
+        HUB75_A = 1;
+    else
+        HUB75_A = 0;
+
+    if (line_cnt & 0x02U)
         HUB75_B = 1;
-    HUB75_A = 1;
-
-    for (uint8_t i = 0; i < 2; i++)
-        __NOP();
-
-    HUB75_A = 0;
-    if (0 == line_cnt)
+    else
         HUB75_B = 0;
+
+    if (line_cnt & 0x04U)
+        HUB75_C = 1;
+    else
+        HUB75_C = 0;
+
+    if (line_cnt & 0x08U)
+        HUB75_D = 1;
+    else
+        HUB75_D = 0;
 }
 
 /**
@@ -174,8 +183,8 @@ void send_hub75_buff(void)
 
         // CLK给1个脉冲，LED驱动芯片移位寄存器移位
         HUB75_CLK = 1;
-        __NOP();
-        __NOP();
+        for (uint8_t i = 0; i < 2; i++)
+            __NOP();
         HUB75_CLK = 0;
     }
 
@@ -256,7 +265,7 @@ void RefreshTask(void *argument)
     __HAL_DBGMCU_FREEZE_TIM3();
     __HAL_DBGMCU_FREEZE_TIM4();
 
-    light_level = 1;
+    light_level = 4;
     bsp_init_hub75();
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);

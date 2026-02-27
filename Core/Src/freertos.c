@@ -60,12 +60,12 @@ const osThreadAttr_t HalfSecTask_attributes = {
     .priority   = (osPriority_t)osPriorityLow,
 };
 
-// osThreadId_t PointTestTaskHandle;
-// const osThreadAttr_t PointTestTask_attributes = {
-//     .name       = "PointTestTask",
-//     .stack_size = 1024 * 4,
-//     .priority   = (osPriority_t)osPriorityAboveNormal,
-// };
+osThreadId_t PointTestTaskHandle;
+const osThreadAttr_t PointTestTask_attributes = {
+    .name       = "PointTestTask",
+    .stack_size = 1024 * 4,
+    .priority   = (osPriority_t)osPriorityAboveNormal,
+};
 
 /* USER CODE END Variables */
 /* Definitions for InitTask */
@@ -148,10 +148,12 @@ void InitialTask(void *argument)
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
     BSP_W25Qx_Init(&hw25q64, &hspi1);
-    bsp_init_hub75();
 
     tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
+
+    RenderString(0, 0, (uint8_t *)"≤‚ ‘", strlen("≤‚ ‘"), green, font_32, font_ht);
 
     printf("Init Done\n");
 
@@ -184,7 +186,8 @@ void HalfSecTask(void *argument)
 
 void PointTestTask(void *argument)
 {
-    // HAL_TIM_Base_Stop_IT(&htim3);
+    HAL_TIM_Base_Start_IT(&htim3);
+    HAL_TIM_Base_Start_IT(&htim4);
 
     // pixel_map[32] = green;
     // convert_pixelmap();
@@ -194,13 +197,13 @@ void PointTestTask(void *argument)
             pixel_map[i] = green;
 
             convert_pixelmap();
-            osDelay(50);
+            osDelay(250);
 
             pixel_map[i] = black;
         }
 
-        point_order_test(green, 1, 0);
-        osDelay(500);
+        // point_order_test(green, 1, 0);
+        // osDelay(500);
     }
 }
 /* USER CODE END Application */

@@ -2,26 +2,19 @@
 #include "w25qxx.h"
 #include "cmsis_os2.h"
 
-uint8_t font_buf[128] = {0};
-typedef uint32_t (*getFontLibraryAddr)(uint32_t, const uint8_t *, FontType_t);
+typedef uint32_t (*getFontLibraryAddr)(uint32_t, const uint8_t *, FontType_t, uint16_t);
 extern osThreadId_t RefreshTaskHandle;
 
-uint32_t getFontLibraryAddr_08x16(uint32_t offset, const uint8_t *p_text, FontType_t type);
-uint32_t getFontLibraryAddr_16x16(uint32_t offset, const uint8_t *p_text, FontType_t type);
-uint32_t getFontLibraryAddr_12x24(uint32_t offset, const uint8_t *p_text, FontType_t type);
-uint32_t getFontLibraryAddr_24x24(uint32_t offset, const uint8_t *p_text, FontType_t type);
-uint32_t getFontLibraryAddr_16x32(uint32_t offset, const uint8_t *p_text, FontType_t type);
-uint32_t getFontLibraryAddr_32x32(uint32_t offset, const uint8_t *p_text, FontType_t type);
+uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
+uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
 
+// 不同大小字体的分发跳转
 static getFontLibraryAddr calcu_addr[] = {
-    getFontLibraryAddr_08x16,
-    getFontLibraryAddr_16x16,
-    getFontLibraryAddr_12x24,
-    getFontLibraryAddr_24x24,
-    getFontLibraryAddr_16x32,
-    getFontLibraryAddr_32x32,
+    getFontLibraryAddr_ASCII,
+    getFontLibraryAddr_GBK,
 };
 
+// 字体大小对应表
 static uint8_t Font_Height_Table[] = {
     font16,
     font24,
@@ -29,8 +22,33 @@ static uint8_t Font_Height_Table[] = {
     font48,
 };
 
+// 字号决定基地址偏移
+static const uint32_t size_table[] = {
+    ASCII_16_OFFSET,
+    GBK_16_OFFSET,
+    ASCII_24_OFFSET,
+    GBK_24_OFFSET,
+    ASCII_32_OFFSET,
+    GBK_32_OFFSET,
+};
+
+// 字型决定步进值
+static const uint32_t type_table[] = {
+    ASCII_16_STEP,
+    GBK_16_STEP,
+    ASCII_24_STEP,
+    GBK_24_STEP,
+    ASCII_32_STEP,
+    GBK_32_STEP,
+};
+
 static void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode);
 
+/**
+ * @brief 全屏填充
+ *
+ * @param color 要填充的颜色
+ */
 void Disp_Fill(DispColor_t color)
 {
     for (uint32_t k = 0; k < DISRAM_SIZE; k++) { // 清空原始点阵区
@@ -39,10 +57,18 @@ void Disp_Fill(DispColor_t color)
     osThreadFlagsSet(RefreshTaskHandle, 0x01);
 }
 
-// 检查是否为GB2312编码
-static inline bool IsGB2312(uint8_t high, uint8_t low)
+// 检查是否为GBK编码
+static inline bool IsGBK(uint8_t high, uint8_t low)
 {
-    return (high >= 0xA1 && high <= 0xF7 && low >= 0xA1 && low <= 0xFE);
+    // 检查高位：0x81 - 0xFE
+    if (high >= 0x81 && high <= 0xFE) {
+        // 检查低位：0x40 - 0xFE，且排除 0x7F
+        if (low >= 0x40 && low <= 0xFE && low != 0x7F) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -86,7 +112,7 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
             RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, false, true, color);
             i += 1;
 
-        } else if (IsGB2312(p_text[i], p_text[i + 1])) { // 判断是否为GB2312
+        } else if (IsGBK(p_text[i], p_text[i + 1])) { // 判断是否为GBK
             RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, true, true, color);
             i += 2;
 
@@ -109,16 +135,16 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
  * @param y 纵坐标指针
  * @param font_size 字号选择
  * @param font_type 字型选择
- * @param mode ASCII码/GB2312码选择
+ * @param mode ASCII码/GBK码选择
  * @param line_break 是否自动换行
  * @param color 字符颜色
  */
 void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color)
 {
-    static uint8_t font_buff[128] = {0};
+    static uint8_t font_buff[512] = {0};
     getFontLibraryBuff(p_text, font_buff, font_type, font_size, mode);
 
-    // 若是显示GB2312文字，则先判断此行剩余空间是否足够
+    // 若是显示GBK文字，则先判断此行剩余空间是否足够
     if ((*x > SCREEN_PIXEL_ROW - CHAR_WEIGHT) && line_break && mode) {
         *y += CHAR_HEIGHT;
         *x = 0;
@@ -126,7 +152,7 @@ void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font
 
     for (uint8_t i = 0; i < CHAR_HEIGHT; i++) {     // 行遍历
         for (uint8_t j = 0; j < CHAR_WEIGHT; j++) { // 列遍历
-            if (((font_buf[i * ((CHAR_WEIGHT + 7) / 8) + j / 8] << j % 8) & 0x80) == 0)
+            if (((font_buff[i * ((CHAR_WEIGHT + 7) / 8) + j / 8] << j % 8) & 0x80) == 0)
                 pixel_map[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = black;
             else
                 pixel_map[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = color;
@@ -148,215 +174,41 @@ void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font
  * @param font_buff 位图缓冲区指针
  * @param font_type 字型选择
  * @param font_size 字号选择
- * @param mode ASCII码/GB2312码选择
+ * @param mode ASCII码/GBK码选择
  */
 void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode)
 {
-    // 字号决定基地址偏移
-    static const uint32_t size_table[] = {
-        ASCII_16_OFFSET,
-        GB2312_16_OFFSET,
-        ASCII_24_OFFSET,
-        GB2312_24_OFFSET,
-        ASCII_32_OFFSET,
-        GB2312_32_OFFSET,
-    };
-
-    // 字型决定步进值
-    static const uint32_t type_table[] = {
-        ASCII_16_STEP,
-        GB2312_16_STEP,
-        ASCII_24_STEP,
-        GB2312_24_STEP,
-        ASCII_32_STEP,
-        GB2312_32_STEP,
-    };
-
     // 计算需要从字库芯片中读取的字节数
-    uint16_t buff_size = CHAR_HEIGHT * ((CHAR_WEIGHT + 7) / 8);
+    uint16_t bytes_per_char = CHAR_HEIGHT * ((CHAR_WEIGHT + 7) / 8);
 
     // 计算点阵位图在字库中的地址
-    uint32_t buff_offset = (size_table[font_size * 2 + mode] + type_table[font_size * 2 + mode] * font_type) & 0xfffff000;
-    uint32_t buff_addr   = calcu_addr[font_size * 2 + mode](buff_offset, p_text, font_type);
+    uint32_t base_offset = size_table[font_size * 2 + mode] + type_table[font_size * 2 + mode] * font_type;
 
-    BSP_W25Qx_ReadDMA(&hw25q64, font_buf, buff_addr, buff_size);
+    // 目标地址 = 该字库分区的基地址 + (字符在字库中的序号 × 每个字符占用的字节数)
+    uint32_t buff_addr = calcu_addr[mode](base_offset, p_text, font_type, bytes_per_char);
+
+    BSP_W25Qx_ReadDMA(&hw25q64, font_buff, buff_addr, bytes_per_char);
 }
 
-uint32_t getFontLibraryAddr_08x16(uint32_t offset, const uint8_t *p_text, FontType_t type)
+uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char)
 {
     uint32_t buff_addr = 0;
-    uint32_t font_addr = (*p_text) * 16;
 
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
-
-    switch (type) {
-        case font_st:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr;
-            break;
-
-        case font_fs:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr;
-            break;
-
-        case font_kt:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr + 64;
-            break;
-
-        case font_ht:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr + 64;
-            break;
-    }
+    buff_addr = offset + (p_text[0] - 0x20) * bytes_per_char;
 
     return buff_addr;
 }
 
-uint32_t getFontLibraryAddr_16x16(uint32_t offset, const uint8_t *p_text, FontType_t type)
+uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char)
 {
-    uint32_t buff_addr = 0;
-    uint32_t font_addr = (94 * (p_text[0] - 0xA1) + (p_text[1] - 0xA1)) * 32;
+    uint32_t buff_addr = 0, index = 0;
 
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
+    if (p_text[1] < 0x7f)
+        index = (uint32_t)(p_text[0] - 0x81) * 190 + (p_text[1] - 0x40);
+    else
+        index = (uint32_t)(p_text[0] - 0x81) * 190 + (p_text[1] - 0x41);
 
-    switch (type) {
-        case font_st:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr + 128;
-            break;
-
-        case font_fs:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr + 288;
-            break;
-
-        case font_kt:
-            buff_addr = offset + sector_addr * 4096 + page_addr * 256 + byte_addr + 448;
-            break;
-
-        case font_ht:
-            buff_addr = offset + sector_addr * 4096 + (page_addr + 2) * 256 + byte_addr + 96;
-    }
-
-    return buff_addr;
-}
-
-uint32_t getFontLibraryAddr_12x24(uint32_t offset, const uint8_t *p_text, FontType_t type)
-{
-    uint32_t buff_addr = 0;
-    uint32_t font_addr = (*p_text) * 48;
-
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
-
-    switch (type) {
-        case font_st:
-            buff_addr = offset + sector_addr * 4096 + (page_addr + 3) * 256 + byte_addr;
-            break;
-
-        case font_fs:
-            buff_addr = offset + sector_addr * 4096 + (page_addr + 12) * 256 + byte_addr - 224;
-            break;
-
-        case font_kt:
-            buff_addr = offset + sector_addr * 4096 + (page_addr + 3) * 256 + byte_addr + 64;
-            break;
-
-        case font_ht:
-            buff_addr = offset + sector_addr * 4096 + (page_addr + 12) * 256 + byte_addr - 160;
-            break;
-    }
-
-    return buff_addr;
-}
-
-uint32_t getFontLibraryAddr_24x24(uint32_t offset, const uint8_t *p_text, FontType_t type)
-{
-    uint32_t buff_addr = 0;
-    uint32_t font_addr = (94 * (p_text[0] - 0xA1) + (p_text[1] - 0xA1)) * 72;
-
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
-
-    switch (type) {
-        case font_st:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 12) * 256 + byte_addr - 128;
-            break;
-
-        case font_fs:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr - 64;
-            break;
-
-        case font_kt:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 2) * 256 + byte_addr;
-            break;
-
-        case font_ht:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 12) * 256 + byte_addr - 192;
-            break;
-    }
-
-    return buff_addr;
-}
-
-uint32_t getFontLibraryAddr_16x32(uint32_t offset, const uint8_t *p_text, FontType_t type)
-{
-    uint32_t buff_addr = 0;
-    uint32_t font_addr = (*p_text) * 64;
-
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
-
-    switch (type) {
-        case font_st:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr - 128;
-            break;
-
-        case font_fs:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr - 96;
-            break;
-
-        case font_kt:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr - 64;
-            break;
-
-        case font_ht:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr - 32;
-            break;
-    }
-
-    return buff_addr;
-}
-
-uint32_t getFontLibraryAddr_32x32(uint32_t offset, const uint8_t *p_text, FontType_t type)
-{
-    uint32_t buff_addr = 0;
-    uint32_t font_addr = (94 * (p_text[0] - 0xA1) + (p_text[1] - 0xA1)) * 128;
-
-    uint32_t sector_addr = font_addr / 4096;
-    uint32_t page_addr   = (font_addr % 4096) / 256;
-    uint32_t byte_addr   = (font_addr % 4096) % 256;
-
-    switch (type) {
-        case font_st:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 7) * 256 + byte_addr;
-            break;
-
-        case font_fs:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 5) * 256 + byte_addr + 32;
-            break;
-
-        case font_kt:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 3) * 256 + byte_addr + 64;
-            break;
-
-        case font_ht:
-            buff_addr = offset + (sector_addr + 1) * 4096 + (page_addr - 1) * 256 + byte_addr + 96;
-            break;
-    }
+    buff_addr = offset + index * bytes_per_char;
 
     return buff_addr;
 }

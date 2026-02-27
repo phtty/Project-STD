@@ -22,11 +22,13 @@
 #define W25Qx_TIMEOUT_VALUE            1000
 
 /* Reset Operations */
-#define RESET_ENABLE_CMD   0x66
-#define RESET_MEMORY_CMD   0x99
+#define RESET_ENABLE_CMD     0x66
+#define RESET_MEMORY_CMD     0x99
 
-#define ENTER_QPI_MODE_CMD 0x38
-#define EXIT_QPI_MODE_CMD  0xFF
+#define ENTER_QPI_MODE_CMD   0x38
+#define EXIT_QPI_MODE_CMD    0xFF
+
+#define ENTER_4BYTE_MODE_CMD 0xB7
 
 /* Identification Operations */
 #define READ_ID_CMD       0x90

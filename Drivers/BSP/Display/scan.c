@@ -101,6 +101,21 @@ void convert_pixelmap_p6old(void)
             hub75_buff[group_cnt * GROUP_SIZE + col_cnt % 32 + 32] = pixel_map[src_cnt];
     }
 }
+#define LINE_OFFSET    (scan_line * SCAN_LINE_PIXEL_NUM) // 像素点在扫描行的偏移
+#define CHANNEL_OFFSET (channel_cnt * CHANNEL_PIXEL_NUM) // 像素点在通道的偏移
+static void scan_channel(uint8_t line_cnt)
+{
+    if (0 == line_cnt)
+        HUB75_B = 1;
+    HUB75_A = 1;
+
+    for (uint8_t i = 0; i < 2; i++)
+        __NOP();
+
+    HUB75_A = 0;
+    if (0 == line_cnt)
+        HUB75_B = 0;
+}
 
 /**
  * @brief P10模组的扫描
@@ -164,6 +179,7 @@ const ChannelStruct_TypeDef channel_blue[10] = {
     {B10_GPIO_Port, B10_Pin},
     {B9_GPIO_Port, B9_Pin},
 };
+
 /**
  * @brief p5垂直排列扫描
  *
@@ -182,7 +198,7 @@ void convert_pixelmap_p5v(void)
 }
 
 /**
- * @brief 更新点阵缓冲区到显存
+ * @brief ?
  *
  */
 void convert_pixelmap(void)

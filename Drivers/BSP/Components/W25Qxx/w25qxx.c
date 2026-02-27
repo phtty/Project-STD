@@ -118,6 +118,13 @@ void BSP_W25Qx_Read_ID(W25QXX_HandleTypeDef *w25qxx)
     w25qxx->device_id = (device_id[0] << 8) | device_id[1];
 
     W25QXX_CS = 1;
+
+    if (device_id[1] >= 0x18) { // 若ID为18或以上，则进入4字节地址模式
+        uint8_t buff = ENTER_4BYTE_MODE_CMD;
+        W25QXX_CS    = 0;
+        HAL_SPI_Transmit(w25qxx->spi_port, &buff, 1, W25Qx_TIMEOUT_VALUE);
+        W25QXX_CS = 1;
+    }
 }
 
 /**
@@ -133,7 +140,7 @@ uint8_t BSP_W25Qx_Read(W25QXX_HandleTypeDef *w25qxx, uint8_t *pData, uint32_t Re
     uint8_t cmd[5]  = {0};
 
     cmd[cmd_cnt++] = READ_CMD;
-    if (w25qxx->device_id >= 0xef18)
+    if (((w25qxx->device_id) & 0xff) >= 0x18)
         cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 24);
     cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 16);
     cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 8);
@@ -165,7 +172,7 @@ uint8_t BSP_W25Qx_ReadDMA(W25QXX_HandleTypeDef *w25qxx, uint8_t *pData, uint32_t
     uint8_t cmd[5]  = {0};
 
     cmd[cmd_cnt++] = READ_CMD;
-    if (w25qxx->device_id >= 0xef18)
+    if (((w25qxx->device_id) & 0xff) >= 0x18)
         cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 24);
     cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 16);
     cmd[cmd_cnt++] = (uint8_t)(ReadAddr >> 8);
@@ -212,11 +219,8 @@ void BSP_W25Qx_WritePage(W25QXX_HandleTypeDef *w25qxx, uint8_t *pBuffer, uint32_
     // 组装指令和地址
     cmd[cmd_len++] = PAGE_PROG_CMD; // 0x02
 
-    // 只有当Flash容量 > 16MB (W25Q128) 且处于3字节模式下才需要特殊处理
-    // 此处假设 W25Q256 (ID: 0xEF19) 使用 4-Byte Address Mode
-    if (w25qxx->device_id >= 0xef19) {
+    if (((w25qxx->device_id) & 0xff) >= 0x18)
         cmd[cmd_len++] = (uint8_t)(WriteAddr >> 24);
-    }
     cmd[cmd_len++] = (uint8_t)((WriteAddr) >> 16);
     cmd[cmd_len++] = (uint8_t)((WriteAddr) >> 8);
     cmd[cmd_len++] = (uint8_t)(WriteAddr);
@@ -360,9 +364,8 @@ uint8_t BSP_W25Qx_EraseSector(W25QXX_HandleTypeDef *w25qxx, uint32_t EraseAddr)
     // 组装指令和地址
     cmd[cmd_len++] = SECTOR_ERASE_CMD;
 
-    if (w25qxx->device_id >= 0xef19) {
+    if (((w25qxx->device_id) & 0xff) >= 0x18)
         cmd[cmd_len++] = (uint8_t)(EraseAddr >> 24);
-    }
     cmd[cmd_len++] = (uint8_t)(EraseAddr >> 16);
     cmd[cmd_len++] = (uint8_t)(EraseAddr >> 8);
     cmd[cmd_len++] = (uint8_t)(EraseAddr);
