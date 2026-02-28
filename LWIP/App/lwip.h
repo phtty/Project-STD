@@ -22,7 +22,7 @@
 #ifndef __mx_lwip_H
 #define __mx_lwip_H
 #ifdef __cplusplus
- extern "C" {
+extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
@@ -41,7 +41,8 @@
 #endif /* WITH_RTOS */
 
 /* USER CODE BEGIN 0 */
-
+extern osSemaphoreId_t netReadySemaphore;
+extern osSemaphoreId_t netBreakSemaphore;
 /* USER CODE END 0 */
 
 /* Global Variables ----------------------------------------------------------*/
@@ -68,9 +69,9 @@ void MX_LWIP_Process(void);
 #endif /*__ mx_lwip_H */
 
 /**
-  * @}
-  */
+ * @}
+ */
 
 /**
-  * @}
-  */
+ * @}
+ */

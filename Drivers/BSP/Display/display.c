@@ -265,7 +265,7 @@ void RefreshTask(void *argument)
     __HAL_DBGMCU_FREEZE_TIM3();
     __HAL_DBGMCU_FREEZE_TIM4();
 
-    light_level = 4;
+    light_level = 1;
     bsp_init_hub75();
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);
