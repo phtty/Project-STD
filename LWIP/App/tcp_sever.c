@@ -23,7 +23,6 @@ const osThreadAttr_t tcpSeverConn_attr = {
 
 __STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn);
 
-RingBuffer xProtocal_RB = {0};
 /**
  * @brief 处理具体通信服务任务
  *

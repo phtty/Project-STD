@@ -1,5 +1,7 @@
 #include "RingBuffer.h"
 
+RingBuffer xProtocal_RB = {0};
+
 /**
  * @brief 检查缓冲区是否为空
  * @param fifo 指向环形缓冲区的指针
