@@ -1,10 +1,9 @@
 #include "render.h"
 #include "cmsis_os2.h"
-#include "timer.h"
 #include "w25qxx.h"
 
 typedef uint32_t (*getFontLibraryAddr)(uint32_t, const uint8_t *, FontType_t, uint16_t);
-bool newData = false;
+extern osThreadId_t Display_TaskHandle;
 
 uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
 uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
@@ -58,66 +57,14 @@ static void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontTy
  * @brief 全屏填充
  *
  * @param color 要填充的颜色
- * @param start_y 起始纵坐标(为0时填充所有行)
  */
-void Disp_Fill(DispColor_t color, uint32_t start_y)
+void Disp_Fill(DispColor_t color)
 {
-    uint32_t row_offset = start_y;
-
-    if (start_y == 0)
-    {
-        for (uint32_t i = 0; i < DISRAM_SIZE; i++)
-        {
-            fixBuf[i] = color;
-        }
+    for (uint32_t k = 0; k < DISRAM_SIZE; k++)
+    { // 清空原始点阵区
+        pixel_map[k] = color;
     }
-    else
-    {
-        switch (fontSize)
-        {
-        case font_14: {
-            for (uint32_t i = row_offset; i < font14 * SCREEN_PIXEL_ROW; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        case font_16: {
-            for (uint32_t i = row_offset; i < font16 * SCREEN_PIXEL_ROW; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        break;
-        case font_20: {
-            for (uint32_t i = row_offset; i < font20 * SCREEN_PIXEL_ROW; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        break;
-        case font_24: {
-            for (uint32_t i = row_offset; i < font24 * SCREEN_PIXEL_ROW; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        break;
-        case font_32: {
-            for (uint32_t i = row_offset; i < font32 * SCREEN_PIXEL_ROW; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        default: {
-            for (uint32_t i = 0; i < DISRAM_SIZE; i++)
-            {
-                fixBuf[i] = color;
-            }
-        }
-        break;
-        }
-    }
-    newData = true;
+    osThreadFlagsSet(Display_TaskHandle, 0x01);
 }
 
 // 检查是否为GBK编码
@@ -146,9 +93,8 @@ static inline bool IsGBK(uint8_t high, uint8_t low)
  * @param color 字体颜色
  * @param font_size 字号选择
  * @param font_type 字型选择
- * @param line_break 是否自动换行
  */
-void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type, bool line_break)
+void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type)
 {
     uint16_t cur_x = start_x;
     uint16_t cur_y = start_y;
@@ -160,10 +106,7 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
         font_size = font_32;
 
     // 清屏
-    if (line_break && (cur_x == 0) && (cur_y == 0))
-        Disp_Fill(black, 0);
-    else
-        Disp_Fill(black, cur_y);
+    Disp_Fill(black);
 
     uint16_t i = 0;
     while (i < text_len)
@@ -182,12 +125,12 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
 
         if (p_text[i] >= 0x20 && p_text[i] <= 0x7F)
         { // 判断是否为ASCII
-            RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, false, line_break, color);
+            RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, false, true, color);
             i += 1;
         }
         else if (IsGBK(p_text[i], p_text[i + 1]))
         { // 判断是否为GBK
-            RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, true, line_break, color);
+            RenderChar(&p_text[i], &cur_x, &cur_y, font_size, font_type, true, true, color);
             i += 2;
         }
         else
@@ -197,7 +140,7 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
     }
 
     // 标记画面已更新，等待底层扫描刷新
-    newData = true;
+    osThreadFlagsSet(Display_TaskHandle, 0x01);
 }
 
 #define CHAR_HEIGHT (Font_Height_Table[font_size])
@@ -231,9 +174,9 @@ void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font
         for (uint8_t j = 0; j < CHAR_WEIGHT; j++)
         { // 列遍历
             if (((font_buff[i * ((CHAR_WEIGHT + 7) / 8) + j / 8] << j % 8) & 0x80) == 0)
-                fixBuf[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = black;
+                pixel_map[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = black;
             else
-                fixBuf[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = color;
+                pixel_map[SCREEN_PIXEL_ROW * (i + *y) + *x + j] = color;
         }
     }
 
@@ -323,8 +266,8 @@ uint8_t auto_font_size(uint16_t len, uint8_t font_size)
 
         if (!font_size)
         { // 若最小字号都会溢出，则使用最小字号
-            font_size = font_14;
-            max_display_len = SCREEN_PIXEL_ROW / ((font_14 + 1) * 4);
+            font_size = font_16;
+            max_display_len = SCREEN_PIXEL_ROW / ((font_16 + 1) * 4);
         }
     }
 

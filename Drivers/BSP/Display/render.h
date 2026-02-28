@@ -2,13 +2,8 @@
 #define DRIVERS_BSP_DISPLAY_RENDER_H
 
 #include "main.h"
-#include "time.h"
+#include "display.h"
 #include "stdbool.h"
-
-// 屏幕数据
-#define SCREEN_PIXEL_ROW (120U)
-#define SCREEN_PIXEL_COL (240U)
-#define DISRAM_SIZE      (SCREEN_PIXEL_ROW * SCREEN_PIXEL_COL)
 
 // 步进值(单个字模的字节数)
 #define ASCII_14_STEP (1344U)
@@ -60,20 +55,11 @@ typedef enum {
     font_ht,
 } FontType_t;
 
-// 颜色定义
-typedef enum {
-    black,
-    red,
-    green,
-    yellow,
-    white,
-} DispColor_t;
-
 extern uint16_t max_display_len;
 
-void Disp_Fill(DispColor_t color, uint32_t start_y);
+void Disp_Fill(DispColor_t color);
 
-void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type, bool line_break);
+void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type);
 
 void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color);
 
