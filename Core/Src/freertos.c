@@ -153,9 +153,9 @@ void InitialTask(void *argument)
     RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    RenderString(0, 0, (uint8_t *)"ab", strlen("ab"), green, font_32, font_ht);
+    RenderString(0, 0, (uint8_t *)"≤‚ ‘", strlen("≤‚ ‘"), green, font_32, font_ht);
 
-    printf("Init Done\n");
+    printf("\nInit task Done\n");
 
     osThreadExit();
     /* Infinite loop */

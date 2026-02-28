@@ -8,7 +8,7 @@ extern osThreadId_t Display_TaskHandle;
 uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
 uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
 
-// 不同大小字体的分发跳转
+// 不同类型字体的分发跳转
 static getFontLibraryAddr calcu_addr[] = {
     getFontLibraryAddr_ASCII,
     getFontLibraryAddr_GBK,
@@ -23,7 +23,7 @@ static uint8_t Font_Height_Table[] = {
     font32,
 };
 
-// 字号决定基地址偏移
+// 字号的基地址偏移表
 static const uint32_t size_table[] = {
     ASCII_14_OFFSET,
     GBK_14_OFFSET,
@@ -37,7 +37,7 @@ static const uint32_t size_table[] = {
     GBK_32_OFFSET,
 };
 
-// 字型决定步进值
+// 字型的步进值表
 static const uint32_t type_table[] = {
     ASCII_14_STEP,
     GBK_14_STEP,
