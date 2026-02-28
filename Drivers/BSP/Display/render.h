@@ -71,7 +71,7 @@ typedef enum {
 
 extern uint16_t max_display_len;
 
-void Disp_Fill(DispColor_t color, uint32_t row);
+void Disp_Fill(DispColor_t color, uint32_t start_y);
 
 void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type, bool line_break);
 
