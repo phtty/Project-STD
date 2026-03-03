@@ -39,6 +39,7 @@ virtualFolder:
             - path: LWIP/Target/ethernetif.c
             - path: LWIP/Target/lwipopts.h
             - path: LWIP/App/tcp_client.c
+            - path: LWIP/App/mqtt_app.c
           folders: []
         - name: RTOS
           files:

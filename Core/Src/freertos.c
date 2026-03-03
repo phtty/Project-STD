@@ -155,9 +155,10 @@ void InitialTask(void *argument)
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
 
-    tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
-    tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+    // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
+    // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
+    // RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
     RenderString(0, 0, (uint8_t *)"测试", strlen("测试"), green, font_32, font_ht);

@@ -29,7 +29,7 @@
 #include <string.h>
 
 /* USER CODE BEGIN 0 */
-
+#include "mqtt_app.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -139,6 +139,8 @@ static void ethernet_link_status_updated(struct netif *netif)
         /* USER CODE BEGIN 6 */
         printf("Network Break!\n");
         osEventFlagsClear(netEventFlagsHandle, FLAG_NET_READY);
+        mqtt_state = no_connect;
+        osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知mqtt连接管理任务
         /* USER CODE END 6 */
     }
 }

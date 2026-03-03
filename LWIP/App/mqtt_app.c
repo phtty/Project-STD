@@ -10,45 +10,44 @@
 
 static mqtt_client_t *mqtt_client;                         // MQTT 客户端控制块
 static struct mqtt_connect_client_info_t mqtt_client_info; // 连接信息
-static uint32_t current_payload_offset = 0;
-static uint8_t mqtt_rcv_buf[1024];
-volatile mqtt_StateMachine mqtt_state = no_connect;
+static uint32_t current_payload_offset = 0;                // mqtt数据接收缓冲区偏移计数
+static uint8_t mqtt_rcv_buf[1024];                         // mqtt数据接收缓冲区
+volatile mqtt_StateMachine mqtt_state = no_connect;        // mqtt连接状态状态机
+osSemaphoreId_t mqttConnSemHandle;                         // 断开连接标志信号量
 
-osThreadId_t MQTTTaskHandle;
-const osThreadAttr_t MQTTTask_attributes = {
-    .name       = "MQTTTask",
+osThreadId_t mqttManageTaskHandle;
+const osThreadAttr_t mqttManageTask_attributes = {
+    .name       = "mqttManageTask",
     .stack_size = 512 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
-void MQTTTask(void *argument)
+void mqttManageTask(void *argument)
 {
-    // 等待网络接口就绪事件标志
-    while (!(netif_is_up(netif_default) && netif_is_link_up(netif_default)))
-        osDelay(100);
-
-    uint16_t mqtt_count = 0;
-
     for (;;) {
+        // 等待网络接口就绪事件标志
+        if (!(netif_is_up(netif_default) && netif_is_link_up(netif_default))) {
+            osDelay(100);
+            continue;
+        }
+
         if (mqtt_state == connected) {
-            char *topic  = "test/topic";
-            char msg[64] = {0};
+            // 连接正常，阻塞等待断开事件
+            osSemaphoreAcquire(mqttConnSemHandle, osWaitForever);
 
-            // 加互斥锁防止tcp ip任务资源竞争
-            LOCK_TCPIP_CORE();
-
-            snprintf(msg, "mqtt publish test %d", mqtt_count);
-            mqtt_send_data(topic, msg);
-            mqtt_count++;
-
-            UNLOCK_TCPIP_CORE(); // 解锁
-            osDelay(2000);
+            // char *topic  = "test/topic";
+            // char msg[64] = {0};
+            // snprintf(msg, sizeof(msg), "mqtt publish test %d", mqtt_count);
+            // mqtt_send_data(topic, msg);
 
         } else {
-            LOCK_TCPIP_CORE();
             mqtt_connection();
-            UNLOCK_TCPIP_CORE(); // 解锁
-            osDelay(100);
+            // 等待连接结果，10s超时
+            osSemaphoreAcquire(mqttConnSemHandle, 10000);
+            if (mqtt_state != connected) {
+                // 连接失败，1s后重连
+                osDelay(1000);
+            }
         }
     }
 }
@@ -121,6 +120,8 @@ static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection
     } else {
         mqtt_state = no_connect;
     }
+
+    osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知连接管理任务
 }
 
 void mqtt_connection(void)
@@ -131,6 +132,9 @@ void mqtt_connection(void)
     if (mqtt_state == connecting)
         return;
 
+    // 加互斥锁防止和lwip的任务资源竞争
+    LOCK_TCPIP_CORE();
+
     if (mqtt_client != NULL) {
         mqtt_disconnect(mqtt_client);
         mqtt_client_free(mqtt_client);
@@ -139,6 +143,7 @@ void mqtt_connection(void)
 
     mqtt_client = mqtt_client_new();
     if (mqtt_client == NULL) {
+        UNLOCK_TCPIP_CORE(); // 解锁
         return;
     }
 
@@ -154,10 +159,17 @@ void mqtt_connection(void)
     mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, NULL);
 
     err = mqtt_client_connect(mqtt_client, &broker_ip, BROKER_PORT, mqtt_connection_cb, NULL, &mqtt_client_info);
-    if (err != ERR_OK)
-        mqtt_state = no_connect;
-    else
+    if (err == ERR_OK) {
+
         mqtt_state = connecting;
+
+    } else { // 连接发起失败，释放资源
+        mqtt_state = no_connect;
+        mqtt_client_free(mqtt_client);
+        mqtt_client = NULL;
+    }
+
+    UNLOCK_TCPIP_CORE(); // 解锁
 }
 
 /**
@@ -172,11 +184,18 @@ static void mqtt_pub_request_cb(void *arg, err_t result)
 
 void mqtt_send_data(const char *topic, const char *message)
 {
-    if (mqtt_client_is_connected(mqtt_client)) {
-        // qos 1, retain 0
-        err_t err = mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_pub_request_cb, NULL);
-        if (err != ERR_OK) {
-            ;
-        }
+    err_t err;
+
+    // 加互斥锁防止和lwip的任务资源竞争
+    LOCK_TCPIP_CORE();
+
+    // qos 1, retain 0
+    if (mqtt_client != NULL && mqtt_client_is_connected(mqtt_client))
+        err = mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_pub_request_cb, NULL);
+
+    UNLOCK_TCPIP_CORE(); // 解锁
+
+    if (err != ERR_OK) {
+        ;
     }
 }
