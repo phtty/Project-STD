@@ -5,3 +5,8 @@
 #include "RingBuffer.h"
 #include <stdio.h>
 #include <stdbool.h>
+
+extern osThreadId_t tcpClientTaskHandle;
+extern const osThreadAttr_t tcpClientTask_attributes;
+
+void tcpClientTask(void *argument);

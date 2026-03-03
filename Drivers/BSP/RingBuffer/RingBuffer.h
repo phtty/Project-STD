@@ -13,6 +13,8 @@ typedef struct RB_Struct {
     volatile uint16_t write_index; // –¥÷∏’Î
 } RingBuffer;
 
+extern RingBuffer xProtocal_RB;
+
 uint8_t BSP_RB_IsEmpty(RingBuffer *fifo);
 uint8_t BSP_RB_IsFull(RingBuffer *fifo);
 uint16_t BSP_RB_GetAvailable(RingBuffer *fifo);
