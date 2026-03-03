@@ -31,7 +31,9 @@
 #include "SEGGER_RTT.h"
 #include "w25qxx.h"
 #include "render.h"
+#include "lwip.h"
 #include "tcp_sever.h"
+#include "tcp_client.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -147,9 +149,13 @@ void InitialTask(void *argument)
     MX_LWIP_Init();
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
-    BSP_W25Qx_Init(&hw25q64, &hspi1);
+    BSP_W25Qx_Init(&hw25q256, &hspi1);
+
+    // 创建事件标志等待网络就绪
+    netEventFlagsHandle = osEventFlagsNew(NULL);
 
     tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
+    tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
     RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 

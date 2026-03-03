@@ -3,7 +3,7 @@
 
 static uint8_t w25qxx_buff[W25Qx_SECTOR_SIZE] = {0};
 
-W25QXX_HandleTypeDef hw25q64 = {0};
+W25QXX_HandleTypeDef hw25q256 = {0};
 
 static void BSP_W25Qx_Reset(W25QXX_HandleTypeDef *w25qxx);
 static uint8_t BSP_W25Qx_GetStatus(W25QXX_HandleTypeDef *w25qxx);
@@ -419,16 +419,16 @@ uint8_t BSP_W25Qx_EraseChip(W25QXX_HandleTypeDef *w25qxx)
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if (hw25q64.spi_port == hspi) {
-        hw25q64.tx_cplt = true;
+    if (hw25q256.spi_port == hspi) {
+        hw25q256.tx_cplt = true;
         // W25QXX_CS       = 1;
     }
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if (hw25q64.spi_port == hspi) {
-        hw25q64.rx_cplt = true;
-        W25QXX_CS       = 1;
+    if (hw25q256.spi_port == hspi) {
+        hw25q256.rx_cplt = true;
+        W25QXX_CS        = 1;
     }
 }

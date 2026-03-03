@@ -88,7 +88,7 @@ typedef struct w25qxx_struct {
     bool rx_cplt;
 } W25QXX_HandleTypeDef;
 
-extern W25QXX_HandleTypeDef hw25q64;
+extern W25QXX_HandleTypeDef hw25q256;
 
 uint8_t BSP_W25Qx_Init(W25QXX_HandleTypeDef *w25qxx, SPI_HandleTypeDef *hspi);
 void BSP_W25Qx_Read_ID(W25QXX_HandleTypeDef *w25qxx);

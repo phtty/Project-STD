@@ -41,8 +41,8 @@ extern "C" {
 #endif /* WITH_RTOS */
 
 /* USER CODE BEGIN 0 */
-extern osSemaphoreId_t netReadySemaphore;
-extern osSemaphoreId_t netBreakSemaphore;
+#define FLAG_NET_READY (0x00000001U)
+extern osEventFlagsId_t netEventFlagsHandle;
 /* USER CODE END 0 */
 
 /* Global Variables ----------------------------------------------------------*/

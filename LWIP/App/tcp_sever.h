@@ -7,10 +7,9 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#define TCP_SERVER_PORT  1145 // 服务器监听端口
-#define RECV_BUFFER_SIZE 1024 // 接收缓冲区大小
+#define TCP_SERVER_PORT 1145 // 服务器监听端口
 
-extern RingBuffer Serial_RingBuff;
+// extern RingBuffer Serial_RingBuff;
 extern osThreadId_t tcpServerTaskHandle;
 extern const osThreadAttr_t tcpServerTask_attributes;
 

@@ -54,8 +54,7 @@ osThreadAttr_t attributes;
 /* USER CODE END OS_THREAD_ATTR_CMSIS_RTOS_V2 */
 
 /* USER CODE BEGIN 2 */
-osSemaphoreId_t netReadySemaphore;
-osSemaphoreId_t netBreakSemaphore;
+osEventFlagsId_t netEventFlagsHandle;
 /* USER CODE END 2 */
 
 /**
@@ -99,6 +98,7 @@ void MX_LWIP_Init(void)
 
     /* Set the link callback function, this function is called on change of link status*/
     netif_set_link_callback(&gnetif, ethernet_link_status_updated);
+    netif_set_status_callback(&gnetif, ethernet_link_status_updated); // 复用同一个回调函数
 
     /* Create the Ethernet link handler thread */
     /* USER CODE BEGIN H7_OS_THREAD_NEW_CMSIS_RTOS_V2 */
@@ -110,7 +110,7 @@ void MX_LWIP_Init(void)
     /* USER CODE END H7_OS_THREAD_NEW_CMSIS_RTOS_V2 */
 
     /* USER CODE BEGIN 3 */
-
+    ethernet_link_status_updated(&gnetif);
     /* USER CODE END 3 */
 }
 
@@ -131,12 +131,14 @@ static void ethernet_link_status_updated(struct netif *netif)
     if (netif_is_up(netif) && netif_is_link_up(netif) && (!ip4_addr_isany_val(*netif_ip4_addr(netif)))) {
         /* USER CODE BEGIN 5 */
         printf("Network Ready! IP: %s\n", ip4addr_ntoa(netif_ip4_addr(netif)));
-        osSemaphoreRelease(netReadySemaphore);
+        // 设置标志位，唤醒所有正在等待的任务
+        osEventFlagsSet(netEventFlagsHandle, FLAG_NET_READY);
         /* USER CODE END 5 */
+
     } else { /* netif is down */
         /* USER CODE BEGIN 6 */
         printf("Network Break!\n");
-        osSemaphoreRelease(netBreakSemaphore);
+        osEventFlagsClear(netEventFlagsHandle, FLAG_NET_READY);
         /* USER CODE END 6 */
     }
 }
