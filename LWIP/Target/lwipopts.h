@@ -115,6 +115,7 @@ extern "C" {
 /*-----------------------------------------------------------------------------*/
 /* USER CODE BEGIN 1 */
 #define LWIP_NETIF_STATUS_CALLBACK 1
+// #define MEMP_NUM_SYS_TIMEOUT       20
 /* USER CODE END 1 */
 
 #ifdef __cplusplus

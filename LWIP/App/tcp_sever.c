@@ -4,7 +4,6 @@
 #include "lwip/tcp.h"
 #include "lwip/api.h"
 #include "lwip/mem.h"
-#include "RingBuffer.h"
 
 // 定义处理tcp_server连接任务句柄
 osThreadId_t tcpServerTaskHandle;
