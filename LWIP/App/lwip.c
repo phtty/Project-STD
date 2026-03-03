@@ -128,7 +128,7 @@ void MX_LWIP_Init(void)
  */
 static void ethernet_link_status_updated(struct netif *netif)
 {
-    if (netif_is_up(netif) && netif_is_link_up(netif) && (!ip4_addr_isany_val(*netif_ip4_addr(netif)))) {
+    if (netif_is_up(netif) && netif_is_link_up(netif)) {
         /* USER CODE BEGIN 5 */
         printf("Network Ready! IP: %s\n", ip4addr_ntoa(netif_ip4_addr(netif)));
         // 设置标志位，唤醒所有正在等待的任务

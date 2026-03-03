@@ -40,7 +40,12 @@ void tcpClientTask(void *argument)
     ip_addr_t server_addr;
 
     // 等待网络接口就绪事件标志
-    osEventFlagsWait(netEventFlagsHandle, FLAG_NET_READY, osFlagsWaitAny | osFlagsNoClear, osWaitForever);
+    while (!(netif_is_up(netif_default) && netif_is_link_up(netif_default)))
+        osDelay(100);
+
+    if (ClientDiscnnSemaphore == NULL) { // 创建信号量以检测断开
+        ClientDiscnnSemaphore = osSemaphoreNew(1, 0, NULL);
+    }
 
     IP4_ADDR(&server_addr, dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
 
@@ -58,12 +63,12 @@ void tcpClientTask(void *argument)
         if (err == ERR_OK) {
             printf("Client: Connected successfully!\n");
 
-            // 这个信号量由tcpClientConnTask在检测到连接断开/recv返回非ERR_OK时释放
-            ClientDiscnnSemaphore = osSemaphoreNew(1, 0, NULL);
+            // 确保信号量是空的
+            while (osSemaphoreAcquire(ClientDiscnnSemaphore, 0) == osOK);
 
             osThreadId_t thread_id = osThreadNew(tcpClientConnTask, (void *)conn, &tcpClientConn_attr);
 
-            if (thread_id != NULL) { // 使用信号量等待连接断开
+            if (thread_id != NULL) { // 阻塞在这里，直到通信任务通知连接断开
                 osSemaphoreAcquire(ClientDiscnnSemaphore, osWaitForever);
             }
 
@@ -108,16 +113,12 @@ void tcpClientConnTask(void *argument)
 
         } while (netbuf_next(buf) >= 0);
 
-        netbuf_delete(buf); // 释放 netbuf 内存
+        netbuf_delete(buf); // 释放netbuf内存
     }
-
-    // 清理并关闭连接
-    netconn_close(conn);
-    netconn_delete(conn);
 
     // 发送信号量通知连接已断开，可以尝试重连
     osSemaphoreRelease(ClientDiscnnSemaphore);
-    printf("Client: Connection lost/closed...\n");
+    printf("Client: Connection lost, reason: %d\n", (int)err);
 
     // 任务自行结束
     osThreadExit();

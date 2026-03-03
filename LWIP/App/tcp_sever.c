@@ -35,7 +35,8 @@ void tcpServerTask(void *argument)
     err_t err;
 
     // 阻塞等待事件标志
-    osEventFlagsWait(netEventFlagsHandle, FLAG_NET_READY, osFlagsWaitAny | osFlagsNoClear, osWaitForever);
+    while (!(netif_is_up(netif_default) && netif_is_link_up(netif_default)))
+        osDelay(100);
 
     // 创建一个TCP netconn句柄
     conn = netconn_new(NETCONN_TCP);
