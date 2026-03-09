@@ -2,7 +2,7 @@
 
 #include "main.h"
 #include "cmsis_os2.h"
-#include "RingBuffer.h"
+#include "RingBuff.h"
 
 typedef enum {
     no_connect,
@@ -14,6 +14,7 @@ extern volatile mqtt_StateMachine mqtt_state;
 extern osThreadId_t mqttManageTaskHandle;
 extern const osThreadAttr_t mqttManageTask_attributes;
 extern osSemaphoreId_t mqttConnSemHandle;
+extern osMessageQueueId_t xMessageLenQueue;
 
 void mqttManageTask(void *argument);
 void mqtt_connection(void);

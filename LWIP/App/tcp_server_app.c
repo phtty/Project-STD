@@ -1,4 +1,4 @@
-#include "tcp_sever.h"
+#include "tcp_server_app.h"
 
 #include "lwip.h"
 #include "lwip/tcp.h"
@@ -33,7 +33,7 @@ void tcpServerTask(void *argument)
     struct netconn *conn, *newconn;
     err_t err;
 
-    // 阻塞等待事件标志
+    // 等待网络接口就绪
     while (!(netif_is_up(netif_default) && netif_is_link_up(netif_default)))
         osDelay(100);
 
@@ -101,7 +101,7 @@ void tcpServerConnTask(void *argument)
 
             // 放入环形缓冲区
             if (len > 0)
-                BSP_RB_PutByte_Bulk(&xProtocal_RB, (uint8_t *)data, len);
+                BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
 
         } while (netbuf_next(buf) >= 0); // 移动到下一个片段
 

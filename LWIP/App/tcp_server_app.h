@@ -2,11 +2,10 @@
 
 #include "main.h"
 #include "cmsis_os2.h"
-#include "RingBuffer.h"
+#include "RingBuff.h"
 
 #define TCP_SERVER_PORT 1145 // ·þÎñÆ÷¼àÌý¶Ë¿Ú
 
-// extern RingBuffer Serial_RingBuff;
 extern osThreadId_t tcpServerTaskHandle;
 extern const osThreadAttr_t tcpServerTask_attributes;
 

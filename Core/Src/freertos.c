@@ -32,8 +32,8 @@
 #include "w25qxx.h"
 #include "render.h"
 #include "lwip.h"
-#include "tcp_sever.h"
-#include "tcp_client.h"
+#include "tcp_server_app.h"
+#include "tcp_client_app.h"
 #include "mqtt_app.h"
 
 /* USER CODE END Includes */
@@ -156,12 +156,13 @@ void InitialTask(void *argument)
     netEventFlagsHandle = osEventFlagsNew(NULL);
 
     mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    // RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    RenderString(0, 0, (uint8_t *)"测试", strlen("测试"), green, font_32, font_ht);
+    RenderString(0, 0, "测", strlen("测"), green, font_16, font_ht);
 
     printf("\nInit task Done\n");
 
@@ -213,5 +214,11 @@ void PointTestTask(void *argument)
         // point_order_test(green, 1, 0);
         // osDelay(500);
     }
+}
+
+// 任务栈溢出钩子函数，用来检测哪个任务有栈溢出
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    while (1);
 }
 /* USER CODE END Application */

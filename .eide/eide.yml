@@ -35,10 +35,9 @@ virtualFolder:
         - name: NetIF
           files:
             - path: LWIP/App/lwip.c
-            - path: LWIP/App/tcp_sever.c
+            - path: LWIP/App/tcp_server_app.c
             - path: LWIP/Target/ethernetif.c
-            - path: LWIP/Target/lwipopts.h
-            - path: LWIP/App/tcp_client.c
+            - path: LWIP/App/tcp_client_app.c
             - path: LWIP/App/mqtt_app.c
           folders: []
         - name: RTOS
@@ -96,6 +95,7 @@ virtualFolder:
               files:
                 - path: Drivers/BSP/Display/display.c
                 - path: Drivers/BSP/Display/render.c
+                - path: Drivers/BSP/Display/text_cvt/text_cvt.c
               folders: []
             - name: Key
               files:
@@ -103,7 +103,12 @@ virtualFolder:
               folders: []
             - name: RingBuff
               files:
-                - path: Drivers/BSP/RingBuffer/Ringbuffer.c
+                - path: Drivers/BSP/RingBuff/RingBuff.c
+              folders: []
+            - name: Protocol
+              files:
+                - path: Drivers/BSP/Protocol/cmd.c
+                - path: Drivers/BSP/Protocol/protocol.c
               folders: []
         - name: RTT
           files:
@@ -275,7 +280,9 @@ targets:
         - Compiler
         - Drivers/BSP/Display
         - Drivers/BSP/Key
-        - Drivers/BSP/RingBuffer
+        - Drivers/BSP/RingBuff
+        - Drivers/BSP/Protocol
+        - Drivers/BSP/Display/text_cvt
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c

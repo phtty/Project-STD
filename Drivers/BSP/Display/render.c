@@ -2,11 +2,11 @@
 #include "cmsis_os2.h"
 #include "w25qxx.h"
 
-typedef uint32_t (*getFontLibraryAddr)(uint32_t, const uint8_t *, FontType_t, uint16_t);
+typedef uint32_t (*getFontLibraryAddr)(uint32_t, const char *, FontType_t, uint16_t);
 extern osThreadId_t RefreshTaskHandle;
 
-uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
-uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char);
+uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const char *p_text, FontType_t type, uint16_t bytes_per_char);
+uint32_t getFontLibraryAddr_GBK(uint32_t offset, const char *p_text, FontType_t type, uint16_t bytes_per_char);
 
 // 不同类型字体的分发跳转
 static getFontLibraryAddr calcu_addr[] = {
@@ -51,7 +51,7 @@ static const uint32_t type_table[] = {
     GBK_32_STEP,
 };
 
-static void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode);
+static void getFontLibraryBuff(const char *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode);
 
 /**
  * @brief 全屏填充
@@ -91,7 +91,7 @@ static inline bool IsGBK(uint8_t high, uint8_t low)
  * @param font_size 字号选择
  * @param font_type 字型选择
  */
-void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type)
+void RenderString(uint32_t start_x, uint32_t start_y, const char *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type)
 {
     uint16_t cur_x = start_x;
     uint16_t cur_y = start_y;
@@ -146,7 +146,7 @@ void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uin
  * @param line_break 是否自动换行
  * @param color 字符颜色
  */
-void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color)
+void RenderChar(const char *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color)
 {
     static uint8_t font_buff[512] = {0};
     getFontLibraryBuff(p_text, font_buff, font_type, font_size, mode);
@@ -183,7 +183,7 @@ void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font
  * @param font_size 字号选择
  * @param mode ASCII码/GBK码选择
  */
-void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode)
+void getFontLibraryBuff(const char *p_text, uint8_t *font_buff, FontType_t font_type, FontSize_t font_size, bool mode)
 {
     // 计算需要从字库芯片中读取的字节数
     uint16_t bytes_per_char = CHAR_HEIGHT * ((CHAR_WEIGHT + 7) / 8);
@@ -197,7 +197,7 @@ void getFontLibraryBuff(const uint8_t *p_text, uint8_t *font_buff, FontType_t fo
     BSP_W25Qx_ReadDMA(&hw25q256, font_buff, buff_addr, bytes_per_char);
 }
 
-uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char)
+uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const char *p_text, FontType_t type, uint16_t bytes_per_char)
 {
     uint32_t buff_addr = 0;
 
@@ -206,7 +206,7 @@ uint32_t getFontLibraryAddr_ASCII(uint32_t offset, const uint8_t *p_text, FontTy
     return buff_addr;
 }
 
-uint32_t getFontLibraryAddr_GBK(uint32_t offset, const uint8_t *p_text, FontType_t type, uint16_t bytes_per_char)
+uint32_t getFontLibraryAddr_GBK(uint32_t offset, const char *p_text, FontType_t type, uint16_t bytes_per_char)
 {
     uint32_t buff_addr = 0, index = 0;
 

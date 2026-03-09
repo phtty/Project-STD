@@ -1,5 +1,4 @@
-#ifndef DRIVERS_BSP_DISPLAY_RENDER_H
-#define DRIVERS_BSP_DISPLAY_RENDER_H
+#pragma once
 
 #include "main.h"
 #include "display.h"
@@ -59,12 +58,10 @@ extern uint16_t max_display_len;
 
 void Disp_Fill(DispColor_t color);
 
-void RenderString(uint32_t start_x, uint32_t start_y, const uint8_t *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type);
+void RenderString(uint32_t start_x, uint32_t start_y, const char *p_text, uint32_t text_len, DispColor_t color, FontSize_t font_size, FontType_t font_type);
 
-void RenderChar(const uint8_t *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color);
+void RenderChar(const char *p_text, uint16_t *x, uint16_t *y, FontSize_t font_size, FontType_t font_type, bool mode, bool line_break, DispColor_t color);
 
 uint8_t auto_font_size(uint16_t len, uint8_t size);
 uint16_t auto_line(uint8_t line, uint8_t font_size);
 uint16_t set_align(uint16_t len, uint8_t font_size, uint8_t align);
-
-#endif // DRIVERS_BSP_DISPLAY_RENDER_H

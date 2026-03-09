@@ -1,4 +1,4 @@
-#include "tcp_client.h"
+#include "tcp_client_app.h"
 
 #include "lwip.h"
 #include "lwip/tcp.h"
@@ -38,7 +38,7 @@ void tcpClientTask(void *argument)
     err_t err;
     ip_addr_t server_addr;
 
-    // 等待网络接口就绪事件标志
+    // 等待网络接口就绪
     while (!(netif_is_up(netif_default) && netif_is_link_up(netif_default)))
         osDelay(100);
 
@@ -56,7 +56,7 @@ void tcpClientTask(void *argument)
             continue;
         }
 
-        printf("Client: Attempting to connect...\n");
+        printf("Client: Attempting to connect IP: %d.%d.%d.%d ...\n", dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
         err = netconn_connect(conn, &server_addr, dst_port);
 
         if (err == ERR_OK) {
@@ -72,7 +72,7 @@ void tcpClientTask(void *argument)
             }
 
         } else {
-            printf("Client: Connect failed, err = %d\n", (int)err);
+            printf("Client: Connect failed, err == %d\n", (int)err);
         }
 
         // 删除旧句柄，准备下一次重连
@@ -107,7 +107,7 @@ void tcpClientConnTask(void *argument)
 
             // 放入环形缓冲区供协议栈/业务逻辑使用
             if (len > 0) {
-                BSP_RB_PutByte_Bulk(&xProtocal_RB, (uint8_t *)data, len);
+                BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
             }
 
         } while (netbuf_next(buf) >= 0);
