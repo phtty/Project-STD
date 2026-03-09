@@ -50,7 +50,8 @@ typedef StaticTask_t osStaticThreadDef_t;
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+osMutexId_t light_mutex;
+osSemaphoreId_t test_semaphore;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -108,10 +109,14 @@ void MX_FREERTOS_Init(void)
 
     /* USER CODE BEGIN RTOS_MUTEX */
     /* add mutexes, ... */
+    light_mutex = osMutexNew(NULL);
+    configASSERT(light_mutex != NULL);
     /* USER CODE END RTOS_MUTEX */
 
     /* USER CODE BEGIN RTOS_SEMAPHORES */
     /* add semaphores, ... */
+    test_semaphore = osSemaphoreNew(1, 1, NULL);
+    configASSERT(test_semaphore != NULL);
     /* USER CODE END RTOS_SEMAPHORES */
 
     /* USER CODE BEGIN RTOS_TIMERS */
