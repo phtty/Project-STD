@@ -237,6 +237,6 @@ void mqtt_send_data(const char *topic, const char *message)
     UNLOCK_TCPIP_CORE(); // ½âËø
 
     if (err != ERR_OK) {
-        ;
+        err = ERR_OK;
     }
 }

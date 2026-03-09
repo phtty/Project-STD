@@ -42,14 +42,14 @@ const osThreadAttr_t ProtocolTask_attributes = {
 osThreadId_t SignUpHandle;
 const osThreadAttr_t SignUpTask_attributes = {
     .name       = "SignUpTask",
-    .stack_size = 128 * 4,
+    .stack_size = 256 * 4,
     .priority   = (osPriority_t)osPriorityLow,
 };
 
 osThreadId_t ReportHandle;
 const osThreadAttr_t ReportTask_attributes = {
     .name       = "ReportTask",
-    .stack_size = 128 * 4,
+    .stack_size = 256 * 4,
     .priority   = (osPriority_t)osPriorityLow,
 };
 
@@ -120,14 +120,14 @@ void ReportTask(void *argument)
 
     for (;;) {
         memcpy(&(report.notify), &xNotifyID, sizeof(report.notify));
-        report.run_sta = light_level ? 1 : 0; // 根据当前亮度判断是否开显示屏
+        report.run_sta = light_level ? '1' : '0'; // 根据当前亮度判断是否开显示屏
         mqtt_send_data(topic, (char *)&report);
         osDelay(10 * 1000); // 10秒签到1次
     }
 }
 
 /**
- * @brief 5分钟签到一次
+ * @brief 5分钟签到任务
  *
  * @param argument
  */
@@ -155,8 +155,8 @@ void SignUpTask(void *argument)
     sign_up.type = '0';
 
     for (;;) {
+        osDelay(5 * 60 * 1000); // 5分钟签到1次
         memcpy(&(sign_up.notify), &xNotifyID, sizeof(sign_up.notify));
         mqtt_send_data(topic, (char *)&sign_up);
-        osDelay(5 * 60 * 1000); // 5分钟签到1次
     }
 }
