@@ -153,18 +153,18 @@ void InitialTask(void *argument)
     BSP_W25Qx_Init(&hw25q256, &hspi1);
 
     // 创建事件标志等待网络就绪
-    netEventFlagsHandle = osEventFlagsNew(NULL);
+    // netEventFlagsHandle = osEventFlagsNew(NULL);
 
-    mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+    // mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
 
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
     RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    RenderString(0, 0, "测", strlen("测"), green, font_16, font_ht);
+    // RenderString(0, 0, "测试", strlen("测试"), green, font_16, font_ht);
 
-    printf("\nInit task Done\n");
+    printf("\nInit Task Done\n");
 
     osThreadExit();
     /* Infinite loop */
@@ -195,11 +195,14 @@ void HalfSecTask(void *argument)
 
 void PointTestTask(void *argument)
 {
+    light_level = 7;
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);
 
     // pixel_map[32] = green;
     // convert_pixelmap();
+    point_order_test(black, SCAN_LINE_PIXEL_NUM, 0);
+    point_order_test(black, SCAN_LINE_PIXEL_NUM, 1);
 
     for (;;) {
         for (int i = 0; i < DISRAM_SIZE; i++) {

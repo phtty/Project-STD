@@ -4,17 +4,10 @@
 #include "hub75.h"
 #include "cmsis_os.h"
 
-// #define MODULE_PER_ROW       1  // 每行的模组数
-// #define MODULE_PER_COL       1  // 每列的模组数
-// #define MODULE_PIXEL_ROW     64 // 模组每行的像素个数
-// #define MODULE_PIXEL_COL     32 // 模组每列的像素个数
-// #define MOUDLE_CHANNEL_NUM   2  // 单块模组的通道个数
-// #define MOUDLE_SCAN_LINE_NUM 8  // 模组的扫描行数
-
-#define MODULE_PER_ROW       1  // 每行的模组数
-#define MODULE_PER_COL       2  // 每列的模组数
+#define MODULE_PER_ROW       2  // 每行的模组数
+#define MODULE_PER_COL       1  // 每列的模组数
 #define MODULE_PIXEL_ROW     16 // 模组每行的像素个数
-#define MODULE_PIXEL_COL     8  // 模组每列的像素个数
+#define MODULE_PIXEL_COL     16 // 模组每列的像素个数
 #define MOUDLE_CHANNEL_NUM   2  // 单块模组的通道个数
 #define MOUDLE_SCAN_LINE_NUM 1  // 模组的扫描行数
 #define GROUP_SIZE           16 // 每组的像素个数

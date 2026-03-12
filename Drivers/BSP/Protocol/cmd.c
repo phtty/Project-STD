@@ -52,7 +52,7 @@ static void cmd_display(char *buff)
     memcpy(&xNotifyID, &(para->nid), sizeof(xNotifyID));
 
     char temp[64] = {0};
-    snprintf(temp, 64, "%s/%s/%s/%s/Reply/board/NULL",
+    snprintf(temp, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -73,7 +73,7 @@ static void cmd_fill(char *buff)
     Disp_Fill(para->color);
 
     char temp[64] = {0};
-    snprintf(temp, 64, "%s/%s/%s/%s/Reply/display/clean",
+    snprintf(temp, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -92,7 +92,7 @@ static void cmd_restart(char *buff)
     // cmd_restart_t *para = (cmd_restart_t *)buff;
 
     char temp[64] = {0};
-    snprintf(temp, 64, "%s/%s/%s/%s/Reply/op/restart",
+    snprintf(temp, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -117,7 +117,7 @@ static void cmd_checktime(char *buff)
         memcpy(&(xNotifyID.date_time), date, sizeof(notify_date_t));
 
     char temp[64] = {0};
-    snprintf(temp, 64, "%s/%s/%s/%s/Reply/op/checktime",
+    snprintf(temp, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/checktime",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,

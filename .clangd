@@ -1,0 +1,11 @@
+CompileFlags:
+  Add:
+    - -IE:\msys64\mingw64\arm-none-eabi\include\c++\13.3.0
+    - -IE:\msys64\mingw64\arm-none-eabi\include\c++\13.3.0\arm-none-eabi\thumb\v7e-m+fp\hard
+    - -IE:\msys64\mingw64\arm-none-eabi\include\c++\13.3.0\backward
+    - -IE:\msys64\mingw64\lib\gcc\arm-none-eabi\13.3.0\include
+    - -IE:\msys64\mingw64\lib\gcc\arm-none-eabi\13.3.0\include-fixed
+    - -IE:\msys64\mingw64\arm-none-eabi\include
+  Remove: []
+  CompilationDatabase: ./build/Debug
+  Compiler: E:\msys64\mingw64\bin\arm-none-eabi-gcc.exe

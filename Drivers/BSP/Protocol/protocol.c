@@ -7,7 +7,7 @@
 static uint8_t ptcl_buff[FRAME_MAX_LEN] = {0};
 
 topic_info_t topic_info = {
-    .station_hex = "11451419",
+    .station_hex = "34012E1A",
     .lane_hex    = "01",
     .device_type = "32",
     .device_id   = "01",
@@ -106,7 +106,7 @@ void handle_topic(const char topic[])
 void ReportTask(void *argument)
 {
     static char topic[64] = {0};
-    snprintf(topic, 64, "%s/%s/%s/%s/Push/monitor/devstatus",
+    snprintf(topic, 64, "%.8s/%.2s/%.2s/%.2s/Push/monitor/devstatus",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -134,7 +134,7 @@ void ReportTask(void *argument)
 void SignUpTask(void *argument)
 {
     static char topic[64] = {0};
-    snprintf(topic, 64, "%s/%s/%s/%s/Push/monitor/sign",
+    snprintf(topic, 64, "%.8s/%.2s/%.2s/%.2s/Push/monitor/sign",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,

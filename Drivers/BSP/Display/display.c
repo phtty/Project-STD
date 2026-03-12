@@ -118,49 +118,39 @@ ColorHandler color_handlers[] = {
     handle_white,  // case white
 };
 
-// void convert_pixelmap(void)
-// {
-//     uint16_t row_cnt = 0, col_cnt = 0, group_cnt = 0;
-
-//     for (uint16_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
-//         row_cnt = map_cnt / SCREEN_PIXEL_ROW; // 屏幕的行标
-//         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
-
-//         group_cnt = row_cnt / 16 * 8 + row_cnt % 8; // 组标
-
-//         if (row_cnt % 16 / 8) // 下半行
-//             hub75_buff[col_cnt * 2 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
-//         else // 上半行
-//             hub75_buff[col_cnt * 2 + 1 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
-//     }
-// }
-
+/**
+ * @brief 2200001630 P16模组向左扩展横向排布扫描
+ *
+ */
 void convert_pixelmap(void)
 {
-    uint16_t ModuelGroup = 0;
-    uint8_t row_cnt = 0, col_cnt = 0;
+    uint16_t group_cnt = 0, group_row = 0, row_cnt = 0, col_cnt = 0;
 
     for (uint16_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
         row_cnt = map_cnt / SCREEN_PIXEL_ROW; // 屏幕的行标
         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
 
-        ModuelGroup = col_cnt / 4 + (row_cnt / 4 * (MODULE_PER_ROW * 4)); // 组标
+        if (row_cnt / 4 % 2)
+            group_row = row_cnt / 4 - 1;
+        else
+            group_row = row_cnt / 4 + 1;
+        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * 12) + (col_cnt / 4 + col_cnt / 4 / 4 * 4);
 
         switch (row_cnt % 4) {
             case 0:
-                hub75_buff[2 * (3 - col_cnt % 4) + ModuelGroup * GROUP_SIZE] = pixel_map[map_cnt];
+                hub75_buff[1 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
                 break;
 
             case 1:
-                hub75_buff[2 * (3 - col_cnt % 4) + 1 + ModuelGroup * GROUP_SIZE] = pixel_map[map_cnt];
+                hub75_buff[0 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
                 break;
 
             case 2:
-                hub75_buff[2 * (col_cnt % 4) + 9 + ModuelGroup * GROUP_SIZE] = pixel_map[map_cnt];
+                hub75_buff[3 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
                 break;
 
             case 3:
-                hub75_buff[2 * (col_cnt % 4) + 8 + ModuelGroup * GROUP_SIZE] = pixel_map[map_cnt];
+                hub75_buff[2 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
                 break;
 
             default:

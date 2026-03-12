@@ -25,66 +25,6 @@ const osThreadAttr_t mqttManageTask_attributes = {
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
-void mqttManageTask(void *argument)
-{
-    // 创建长度队列，用于通知协议处理任务消息长度
-    xMessageLenQueue = osMessageQueueNew(16, sizeof(uint16_t), NULL);
-    // 创建连接状态信号量，通知连接管理任务
-    mqttConnSemHandle = osSemaphoreNew(1, 0, NULL);
-
-    for (;;) {
-        // 等待网络接口就绪
-        if (!(netif_is_up(netif_default) && netif_is_link_up(netif_default))) {
-            osDelay(100);
-            continue;
-        }
-
-        if (mqtt_state == connected) {
-            // 连接正常，阻塞等待断开事件
-            osSemaphoreAcquire(mqttConnSemHandle, osWaitForever);
-
-        } else {
-            mqtt_connection();
-            // 等待连接结果，10s超时
-            osSemaphoreAcquire(mqttConnSemHandle, 10000);
-            if (mqtt_state != connected) {
-                // 连接失败，1s后重连
-                osDelay(1000);
-            }
-        }
-    }
-}
-
-/**
- * @brief 处理Payload数据回调(可能分多次调用)
- *
- * @param arg
- * @param data 数据指针
- * @param len 本次长度
- * @param flags MQTT_DATA_FLAG_LAST表示这是最后一片
- */
-static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, uint8_t flags)
-{
-    // 防止缓冲区溢出
-    if (current_payload_offset + len < sizeof(mqtt_rcv_buf)) {
-        memcpy(&mqtt_rcv_buf[current_payload_offset], data, len);
-        current_payload_offset += len;
-    }
-
-    if (flags & MQTT_DATA_FLAG_LAST) {
-        // 加\0，方便操作字符串
-        if (current_payload_offset < sizeof(mqtt_rcv_buf)) {
-            mqtt_rcv_buf[current_payload_offset] = '\0';
-            len++;
-        }
-        // 将数据放入环形缓冲区
-        BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
-
-        // 在这里使用一个队列来通知协议处理任务参数长度
-        osMessageQueuePut(xMessageLenQueue, &len, 0U, 100);
-    }
-}
-
 /**
  * @brief 收到publish帧的回调
  *
@@ -117,39 +57,6 @@ static void mqtt_sub_request_cb(void *arg, err_t result)
 static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
 {
     if (status == MQTT_CONNECT_ACCEPTED) {
-        // 注册接收回调
-        mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, NULL);
-
-        // 连接成功后，开始订阅所有命令的topic
-        char topic_name[64] = {0};
-
-        snprintf(topic_name, sizeof(topic_name), "%.8s/%.2s/%.2s/%.2s/ASK/board/NULL",
-                 topic_info.station_hex,
-                 topic_info.lane_hex,
-                 topic_info.device_type,
-                 topic_info.device_id);
-        mqtt_subscribe(client, topic_name, 1, mqtt_sub_request_cb, NULL);
-
-        snprintf(topic_name, sizeof(topic_name), "%.8s/%.2s/%.2s/%.2s/ASK/display/clean",
-                 topic_info.station_hex,
-                 topic_info.lane_hex,
-                 topic_info.device_type,
-                 topic_info.device_id);
-        mqtt_subscribe(client, topic_name, 1, mqtt_sub_request_cb, NULL);
-
-        snprintf(topic_name, sizeof(topic_name), "%.8s/%.2s/%.2s/%.2s/ASK/op/restart",
-                 topic_info.station_hex,
-                 topic_info.lane_hex,
-                 topic_info.device_type,
-                 topic_info.device_id);
-        mqtt_subscribe(client, topic_name, 1, mqtt_sub_request_cb, NULL);
-
-        snprintf(topic_name, sizeof(topic_name), "%.8s/%.2s/%.2s/%.2s/ASK/op/checktime",
-                 topic_info.station_hex,
-                 topic_info.lane_hex,
-                 topic_info.device_type,
-                 topic_info.device_id);
-        mqtt_subscribe(client, topic_name, 1, mqtt_sub_request_cb, NULL);
 
         mqtt_state = connected;
 
@@ -157,10 +64,37 @@ static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection
         mqtt_state = no_connect;
     }
 
-    // 连接成功后，创建协议解析任务
-    ProtocolHandle = osThreadNew(ProtocolTask, NULL, &ProtocolTask_attributes);
-
     osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知连接管理任务
+}
+
+/**
+ * @brief 处理Payload数据回调(可能分多次调用)
+ *
+ * @param arg
+ * @param data 数据指针
+ * @param len 本次长度
+ * @param flags MQTT_DATA_FLAG_LAST表示这是最后一片
+ */
+static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, uint8_t flags)
+{
+    // 防止缓冲区溢出
+    if (current_payload_offset + len < sizeof(mqtt_rcv_buf)) {
+        memcpy(&mqtt_rcv_buf[current_payload_offset], data, len);
+        current_payload_offset += len;
+    }
+
+    if (flags & MQTT_DATA_FLAG_LAST) {
+        // 加\0，方便操作字符串
+        if (current_payload_offset < sizeof(mqtt_rcv_buf)) {
+            mqtt_rcv_buf[current_payload_offset] = '\0';
+            len++;
+        }
+        // 将数据放入环形缓冲区
+        BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
+
+        // 在这里使用一个队列来通知协议处理任务参数长度
+        osMessageQueuePut(xMessageLenQueue, &len, 0U, 100);
+    }
 }
 
 void mqtt_connection(void)
@@ -171,18 +105,16 @@ void mqtt_connection(void)
     if (mqtt_state == connecting)
         return;
 
-    // 加互斥锁防止和lwip的任务资源竞争
-    LOCK_TCPIP_CORE();
-
     if (mqtt_client != NULL) {
+        LOCK_TCPIP_CORE();
         mqtt_disconnect(mqtt_client);
+        UNLOCK_TCPIP_CORE(); // 解锁
         mqtt_client_free(mqtt_client);
         mqtt_client = NULL;
     }
 
     mqtt_client = mqtt_client_new();
     if (mqtt_client == NULL) {
-        UNLOCK_TCPIP_CORE(); // 解锁
         return;
     }
 
@@ -194,7 +126,11 @@ void mqtt_connection(void)
     mqtt_client_info.client_user = "pxh"; // 用户名和密码
     mqtt_client_info.client_pass = "123456";
 
+    LOCK_TCPIP_CORE();
     err = mqtt_client_connect(mqtt_client, &broker_ip, BROKER_PORT, mqtt_connection_cb, NULL, &mqtt_client_info);
+    UNLOCK_TCPIP_CORE(); // 解锁
+
+    mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, NULL);
     if (err == ERR_OK) {
         mqtt_state = connecting;
 
@@ -203,8 +139,6 @@ void mqtt_connection(void)
         mqtt_client_free(mqtt_client);
         mqtt_client = NULL;
     }
-
-    UNLOCK_TCPIP_CORE(); // 解锁
 }
 
 /**
@@ -237,6 +171,63 @@ void mqtt_send_data(const char *topic, const char *message)
     UNLOCK_TCPIP_CORE(); // 解锁
 
     if (err != ERR_OK) {
-        err = ERR_OK;
+        // 错误处理
+    }
+}
+
+void mqtt_sub_set(char *topic_cmd)
+{
+    char topic_name[64] = {0};
+
+    // 拼接要订阅的topic字符串
+    snprintf(topic_name, sizeof(topic_name), "%.8s/%.2s/%.2s/%.2s/%s",
+             topic_info.station_hex,
+             topic_info.lane_hex,
+             topic_info.device_type,
+             topic_info.device_id,
+             topic_cmd);
+
+    // 订阅操作加互斥锁
+    LOCK_TCPIP_CORE();
+    mqtt_subscribe(mqtt_client, topic_name, 1, mqtt_sub_request_cb, NULL);
+    UNLOCK_TCPIP_CORE();
+}
+
+void mqttManageTask(void *argument)
+{
+    // 创建长度队列，用于通知协议处理任务消息长度
+    xMessageLenQueue = osMessageQueueNew(16, sizeof(uint16_t), NULL);
+    // 创建连接状态信号量，通知连接管理任务
+    mqttConnSemHandle = osSemaphoreNew(1, 0, NULL);
+
+    for (;;) {
+        // 等待网络接口就绪
+        if (!(netif_is_up(netif_default) && netif_is_link_up(netif_default))) {
+            osDelay(100);
+            continue;
+        }
+
+        if (mqtt_state == connected) {
+            // 连接成功后，开始订阅所有命令的topic
+            mqtt_sub_set("ASK/board/NULL");
+            mqtt_sub_set("ASK/display/clean");
+            mqtt_sub_set("ASK/op/restart");
+            mqtt_sub_set("ASK/op/checktime");
+
+            // 连接成功后，创建协议解析任务
+            ProtocolHandle = osThreadNew(ProtocolTask, NULL, &ProtocolTask_attributes);
+
+            // 连接正常，阻塞等待断开事件
+            osSemaphoreAcquire(mqttConnSemHandle, osWaitForever);
+
+        } else {
+            mqtt_connection();
+            // 等待连接结果，5s超时
+            osSemaphoreAcquire(mqttConnSemHandle, 5000);
+            if (mqtt_state != connected) {
+                // 连接失败，重连
+                mqtt_state = no_connect;
+            }
+        }
     }
 }
