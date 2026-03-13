@@ -10,6 +10,10 @@
 #define BROKER_IP_ADDR "120.46.136.199"
 #define BROKER_PORT    6000
 
+#define CLIENT_NAME    "CD_ZTP"
+#define CLIENT_USER    "pxh"
+#define CLIENT_PASS    "123456"
+
 static mqtt_client_t *mqtt_client;                         // MQTT 客户端控制块
 static struct mqtt_connect_client_info_t mqtt_client_info; // 连接信息
 static uint32_t current_payload_offset = 0;                // mqtt数据接收缓冲区偏移计数
@@ -120,10 +124,10 @@ void mqtt_connection(void)
     ipaddr_aton(BROKER_IP_ADDR, &broker_ip);
 
     memset(&mqtt_client_info, 0, sizeof(mqtt_client_info));
-    mqtt_client_info.client_id   = "CD_ZTP";
-    mqtt_client_info.keep_alive  = 60;    // 60s 心跳
-    mqtt_client_info.client_user = "pxh"; // 用户名和密码
-    mqtt_client_info.client_pass = "123456";
+    mqtt_client_info.client_id   = CLIENT_NAME;
+    mqtt_client_info.keep_alive  = 60;          // 60s 心跳
+    mqtt_client_info.client_user = CLIENT_USER; // 用户名和密码
+    mqtt_client_info.client_pass = CLIENT_PASS;
 
     LOCK_TCPIP_CORE();
     err = mqtt_client_connect(mqtt_client, &broker_ip, BROKER_PORT, mqtt_connection_cb, NULL, &mqtt_client_info);
@@ -148,6 +152,7 @@ void mqtt_connection(void)
  */
 static void mqtt_pub_request_cb(void *arg, err_t result)
 {
+    NULL;
 }
 
 /**
@@ -166,6 +171,8 @@ void mqtt_send_data(const char *topic, const char *message)
     // qos 1, retain 0
     if (mqtt_client != NULL && mqtt_client_is_connected(mqtt_client))
         err = mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_pub_request_cb, NULL);
+    else
+        err = ERR_CLSD;
 
     UNLOCK_TCPIP_CORE(); // 解锁
 

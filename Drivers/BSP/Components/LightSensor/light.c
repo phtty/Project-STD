@@ -39,12 +39,10 @@ void LightSensor_Auto(void)
     static uint8_t old_light = 0;
     uint8_t new_light        = LightSensor_ReadAvg();
 
-    if (new_light != old_light) {
-        old_light = new_light;
-
-    } else {
+    if (new_light == old_light)
         light_level = new_light;
-    }
+
+    old_light = new_light;
 }
 
 void autoAdjLightTask(void *argument)

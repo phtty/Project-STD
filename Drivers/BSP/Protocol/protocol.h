@@ -34,7 +34,6 @@ typedef struct state_report {
     notify_id_t notify;
     char work_sta;
     char run_sta;
-    char time[14];
     char reserved[9];
 } __attribute__((packed)) state_report_t;
 

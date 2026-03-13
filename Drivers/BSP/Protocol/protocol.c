@@ -7,7 +7,7 @@
 static uint8_t ptcl_buff[FRAME_MAX_LEN] = {0};
 
 topic_info_t topic_info = {
-    .station_hex = "34012E1A",
+    .station_hex = "11451419",
     .lane_hex    = "01",
     .device_type = "32",
     .device_id   = "01",
@@ -114,7 +114,6 @@ void ReportTask(void *argument)
 
     static state_report_t report = {
         .work_sta = '0',
-        .time     = "00000000000000",
         .reserved = "00000000",
     };
 
