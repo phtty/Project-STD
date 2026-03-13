@@ -265,7 +265,7 @@ void point_order_test(DispColor_t color, int32_t num_of_point, uint8_t channel)
     HAL_NVIC_EnableIRQ(TIM4_IRQn);
 }
 
-uint8_t light_level = 1; // 亮度等级
+volatile uint8_t light_level = 1; // 亮度等级
 /**
  * @brief 软件pwm调光
  *

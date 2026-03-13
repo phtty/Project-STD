@@ -37,6 +37,7 @@ virtualFolder:
             - path: LWIP/App/lwip.c
             - path: LWIP/App/tcp_server_app.c
             - path: LWIP/Target/ethernetif.c
+            - path: LWIP/Target/lwipopts.h
             - path: LWIP/App/tcp_client_app.c
             - path: LWIP/App/mqtt_app.c
           folders: []
@@ -91,6 +92,10 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Components/HUB75/hub75.c
                   folders: []
+                - name: Light
+                  files:
+                    - path: Drivers/BSP/Components/LightSensor/light.c
+                  folders: []
             - name: Display
               files:
                 - path: Drivers/BSP/Display/display.c
@@ -103,7 +108,7 @@ virtualFolder:
               folders: []
             - name: RingBuff
               files:
-                - path: Drivers/BSP/RingBuff/RingBuff.c
+                - path: Drivers/BSP/RingBuff/Ringbuff.c
               folders: []
             - name: Protocol
               files:
@@ -281,6 +286,7 @@ targets:
         - Drivers/BSP/Display
         - Drivers/BSP/Key
         - Drivers/BSP/RingBuff
+        - Drivers/BSP/Components/LightSensor
         - Drivers/BSP/Protocol
         - Drivers/BSP/Display/text_cvt
       libList: []
@@ -290,47 +296,6 @@ targets:
       - <virtual_root>/Application/CubeMX/crc.c
     toolchain: GCC
     toolchainConfigMap:
-      AC5:
-        archExtensions: ""
-        cpuType: Cortex-M4
-        floatingPointHardware: single
-        options:
-          version: 4
-          afterBuildTasks: []
-          asm-compiler: {}
-          beforeBuildTasks: []
-          c/cpp-compiler:
-            CXX_FLAGS: --diag_suppress=1 --diag_suppress=1295
-            C_FLAGS: --diag_suppress=1 --diag_suppress=1295
-            c99-mode: true
-            one-elf-section-per-function: true
-            optimization: level-0
-          global:
-            output-debug-info: enable
-            use-microLIB: false
-          linker:
-            $outputTaskExcludes:
-              - .bin
-            output-format: elf
-        scatterFilePath: Startup_config/new_scan.sct
-        storageLayout:
-          RAM:
-            - id: 1
-              isChecked: true
-              mem:
-                size: "0x5000"
-                startAddr: "0x20000000"
-              noInit: false
-              tag: IRAM
-          ROM:
-            - id: 1
-              isChecked: true
-              isStartup: true
-              mem:
-                size: "0x10000"
-                startAddr: "0x08000000"
-              tag: IROM
-        useCustomScatterFile: true
       GCC:
         archExtensions: ""
         cpuType: Cortex-M4

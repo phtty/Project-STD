@@ -32,6 +32,7 @@
 #include "w25qxx.h"
 #include "render.h"
 #include "lwip.h"
+#include "light.h"
 #include "tcp_server_app.h"
 #include "tcp_client_app.h"
 #include "mqtt_app.h"
@@ -153,13 +154,13 @@ void InitialTask(void *argument)
     BSP_W25Qx_Init(&hw25q256, &hspi1);
 
     // 创建事件标志等待网络就绪
-    // netEventFlagsHandle = osEventFlagsNew(NULL);
+    netEventFlagsHandle = osEventFlagsNew(NULL);
 
-    // mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+    mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
 
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    // RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
     // RenderString(0, 0, "测试", strlen("测试"), green, font_16, font_ht);

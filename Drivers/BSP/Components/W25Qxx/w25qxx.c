@@ -423,7 +423,7 @@ uint8_t BSP_W25Qx_EraseChip(W25QXX_HandleTypeDef *w25qxx)
         if ((HAL_GetTick() - tickstart) > W25Qx_BULK_ERASE_MAX_TIME) {
             return W25Qx_TIMEOUT;
         }
-        osdelay(1);
+        osDelay(1);
     }
     return W25Qx_OK;
 }

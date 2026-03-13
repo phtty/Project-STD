@@ -43,7 +43,7 @@ typedef void (*ColorHandler)(int16_t);
 
 extern uint8_t pixel_map[];
 extern uint8_t hub75_buff[];
-extern uint8_t light_level;
+extern volatile uint8_t light_level;
 
 extern osThreadId_t RefreshTaskHandle;
 extern const osThreadAttr_t RefreshTask_attributes;
