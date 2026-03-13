@@ -160,10 +160,10 @@ void InitialTask(void *argument)
 
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    // RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    // RenderString(0, 0, "≤‚ ‘", strlen("≤‚ ‘"), green, font_16, font_ht);
+    RenderString(0, 0, "≤‚ ‘", strlen("≤‚ ‘"), green, font_16, font_ht);
 
     printf("\nInit Task Done\n");
 
