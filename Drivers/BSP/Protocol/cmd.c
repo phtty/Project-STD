@@ -70,7 +70,7 @@ static void cmd_fill(char *buff)
     // uint32_t length  = strlen(buff);
     cmd_fill_t *para = (cmd_fill_t *)buff;
 
-    Disp_Fill(para->color);
+    Disp_Fill(disp_color[(uint8_t)(para->color) - 0x30]);
 
     char temp[64] = {0};
     snprintf(temp, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",

@@ -10,3 +10,5 @@ extern osMutexId_t light_mutex;
 
 extern osThreadId_t autoAdjLightTaskHandle;
 extern const osThreadAttr_t autoAdjLightTask_attributes;
+
+void autoAdjLightTask(void *argument);

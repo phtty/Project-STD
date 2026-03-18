@@ -27,6 +27,7 @@
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
+#include "crc.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -75,8 +76,8 @@ int main(void)
 {
 
     /* USER CODE BEGIN 1 */
-    // SCB->VTOR = FLASH_BASE | 0x40000;
-    // __enable_irq();
+    SCB->VTOR = FLASH_BASE | 0x40000;
+    __enable_irq();
     /* USER CODE END 1 */
 
     /* MCU Configuration--------------------------------------------------------*/
@@ -98,6 +99,7 @@ int main(void)
     /* Initialize all configured peripherals */
     MX_GPIO_Init();
     MX_DMA_Init();
+    MX_CRC_Init();
     MX_TIM3_Init();
     MX_ADC1_Init();
     MX_SPI1_Init();

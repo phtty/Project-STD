@@ -49,7 +49,7 @@ void tcpClientTask(void *argument)
     IP4_ADDR(&server_addr, dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
 
     for (;;) {
-        // 创建一个新的 netconn
+        // 创建一个新的tcp连接句柄
         conn = netconn_new(NETCONN_TCP);
         if (conn == NULL) {
             osDelay(1000);

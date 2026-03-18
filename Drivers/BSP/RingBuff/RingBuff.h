@@ -12,17 +12,18 @@ typedef struct RB_Struct {
 } RingBuff_t;
 
 extern RingBuff_t xProtocol_RB;
+extern RingBuff_t xIAP_RB;
 
-uint8_t BSP_RB_IsEmpty(RingBuff_t *fifo);
-uint8_t BSP_RB_IsFull(RingBuff_t *fifo);
-uint16_t BSP_RB_GetAvailable(RingBuff_t *fifo);
-uint16_t BSP_RB_GetFreeSpace(RingBuff_t *fifo);
+uint8_t BSP_RB_IsEmpty(const RingBuff_t *fifo);
+uint8_t BSP_RB_IsFull(const RingBuff_t *fifo);
+uint16_t BSP_RB_GetAvailable(const RingBuff_t *fifo);
+uint16_t BSP_RB_GetFreeSpace(const RingBuff_t *fifo);
 uint8_t BSP_RB_FreeBuff(RingBuff_t *fifo);
 uint8_t BSP_RB_PutByte(RingBuff_t *fifo, uint8_t byte);
 uint16_t BSP_RB_PutByte_Bulk(RingBuff_t *fifo, const uint8_t *data, uint16_t len);
 uint8_t BSP_RB_GetByte(RingBuff_t *fifo, uint8_t *byte);
 uint16_t BSP_RB_GetByte_Bulk(RingBuff_t *fifo, uint8_t *data, uint16_t len);
-uint8_t BSP_RB_PeekByte(RingBuff_t *fifo, uint16_t offset, uint8_t *byte);
-uint16_t BSP_RB_PeekBlock(RingBuff_t *fifo, uint16_t offset, uint8_t *dest, uint16_t len);
-uint16_t BSP_RB_GetContiguousLength(RingBuff_t *fifo, uint16_t offset);
+uint8_t BSP_RB_PeekByte(const RingBuff_t *fifo, uint16_t offset, uint8_t *byte);
+uint16_t BSP_RB_PeekBlock(const RingBuff_t *fifo, uint16_t offset, uint8_t *dest, uint16_t len);
+uint16_t BSP_RB_GetContiguousLength(const RingBuff_t *fifo, uint16_t offset);
 uint16_t BSP_RB_SkipBytes(RingBuff_t *fifo, uint16_t len);
