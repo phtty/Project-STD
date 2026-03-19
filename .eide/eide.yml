@@ -377,3 +377,101 @@ targets:
         interface: stlink
         target: stm32f1x
     uploader: Custom
+  Release:
+    cppPreprocessAttrs:
+      defineList:
+        - USE_HAL_DRIVER
+        - STM32F407xx
+      incList:
+        - Core/Inc
+        - Drivers/CMSIS/Include
+        - Drivers/CMSIS/Device/ST/STM32F4xx/Include
+        - Drivers/STM32F4xx_HAL_Driver/Inc
+        - Drivers/BSP/Components/dp83848
+        - Drivers/BSP/Components/HUB75
+        - Drivers/BSP/Components/W25Qxx
+        - Drivers/RTT/Config
+        - Drivers/RTT/RTT
+        - LWIP/App
+        - LWIP/Target
+        - Middlewares/Third_Party/LwIP/src/include
+        - Middlewares/Third_Party/LwIP/system
+        - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+        - Middlewares/Third_Party/FreeRTOS/Source/include
+        - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+        - Compiler
+        - Drivers/BSP/Display
+        - Drivers/BSP/Key
+        - Drivers/BSP/RingBuffer
+        - Drivers/BSP/IAP
+        - Drivers/BSP/RingBuff
+        - Drivers/BSP/Components/ADC
+        - Drivers/BSP/Components/LightSensor
+        - Drivers/BSP/Protocol
+        - Drivers/BSP/Display/text_cvt
+        - Drivers/BSP/IOCtrl
+      libList: []
+    excludeList:
+      - <virtual_root>/Drivers/BSP/Key/key.c
+      - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
+      - <virtual_root>/Drivers/BSP/Display/scan.c
+    toolchain: GCC
+    toolchainConfigMap:
+      GCC:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 5
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            language-c: c17
+            language-cpp: c++17
+            no-exceptions: true
+            no-rtti: true
+            no-threadsafe-statics: true
+            no-use-cxa-atexit: true
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-size
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            arm-thumb-interwork: true
+            arm-thumb-mode: thumb
+            not-use-syscalls: true
+            output-debug-info: enable
+            use-newlib-nano: true
+          linker:
+            $toolName: auto
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
+            use-float-printf: true
+        scatterFilePath: Compiler/STM32F407XX_FLASH.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
+    uploadConfigMap:
+      Custom:
+        bin: ""
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${fileWorkspaceFolderBasename}.hex verify reset exit"
+        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: "null"
+          vendor: "null"
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+      OpenOCD:
+        baseAddr: "0x08000000"
+        bin: ""
+        interface: stlink
+        target: stm32f1x
+    uploader: Custom
