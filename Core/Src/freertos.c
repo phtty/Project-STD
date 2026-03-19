@@ -28,13 +28,17 @@
 #include "tim.h"
 #include "iwdg.h"
 #include "rtc.h"
+#include "lwip.h"
+#include "msg.h"
 #include "SEGGER_RTT.h"
 #include "w25qxx.h"
 #include "render.h"
-#include "lwip.h"
-#include "tcp_sever.h"
-#include "tcp_client.h"
-#include <stdio.h>
+#include "Light.h"
+#include "tcp_server_app.h"
+#include "tcp_client_app.h"
+#include "mqtt_app.h"
+#include "udp_app.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -155,18 +159,22 @@ void InitialTask(void *argument)
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
     BSP_W25Qx_Init(&hw25q256, &hspi1);
+    communication_init();
 
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
 
-    tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
-    tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    RefreshTaskHandle   = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+    udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
+    // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
+    // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
+    autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
+    RefreshTaskHandle      = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
     // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
-    RenderString(0, 0, (uint8_t *)"测试", strlen("测试"), green, font_32, font_ht);
+    // RenderString(0, 0, "测试", strlen("测试"), green, font_16, font_ht);
 
-    printf("\nInit task Done\n");
+    printf("\nInit Task Done\n");
 
     osThreadExit();
     /* Infinite loop */
@@ -197,11 +205,14 @@ void HalfSecTask(void *argument)
 
 void PointTestTask(void *argument)
 {
+    light_level = 7;
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);
 
     // pixel_map[32] = green;
     // convert_pixelmap();
+    point_order_test(black, SCAN_LINE_PIXEL_NUM, 0);
+    point_order_test(black, SCAN_LINE_PIXEL_NUM, 1);
 
     for (;;) {
         for (int i = 0; i < DISRAM_SIZE; i++) {
@@ -216,5 +227,11 @@ void PointTestTask(void *argument)
         // point_order_test(green, 1, 0);
         // osDelay(500);
     }
+}
+
+// 任务栈溢出钩子函数，用来检测哪个任务有栈溢出
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    while (1);
 }
 /* USER CODE END Application */

@@ -1,6 +1,8 @@
 
 #include "w25qxx.h"
 
+#include "cmsis_os2.h"
+
 static uint8_t w25qxx_buff[W25Qx_SECTOR_SIZE] = {0};
 
 W25QXX_HandleTypeDef hw25q256 = {0};
@@ -90,6 +92,7 @@ uint8_t BSP_W25Qx_WriteEnable(W25QXX_HandleTypeDef *w25qxx)
         if ((HAL_GetTick() - tickstart) > W25Qx_TIMEOUT_VALUE) {
             return W25Qx_TIMEOUT;
         }
+        osDelay(1);
     }
 
     return W25Qx_OK;
@@ -188,11 +191,15 @@ uint8_t BSP_W25Qx_ReadDMA(W25QXX_HandleTypeDef *w25qxx, uint8_t *pData, uint32_t
         return W25Qx_ERROR;
     }
 
-    while (w25qxx->rx_cplt == false);
+    while (w25qxx->rx_cplt == false) {
+        osDelay(1);
+    }
 
     W25QXX_CS = 1;
 
-    while (HAL_SPI_GetState(w25qxx->spi_port) == HAL_SPI_STATE_BUSY_RX);
+    while (HAL_SPI_GetState(w25qxx->spi_port) == HAL_SPI_STATE_BUSY_RX) {
+        osDelay(1);
+    }
 
     return W25Qx_OK;
 }
@@ -250,7 +257,9 @@ void BSP_W25Qx_WritePage(W25QXX_HandleTypeDef *w25qxx, uint8_t *pBuffer, uint32_
     }
 
     // 等待写入结束 (Flash内部编程)
-    while (BSP_W25Qx_GetStatus(w25qxx) == W25Qx_BUSY);
+    while (BSP_W25Qx_GetStatus(w25qxx) == W25Qx_BUSY) {
+        osDelay(1);
+    }
 }
 
 /**
@@ -383,6 +392,7 @@ uint8_t BSP_W25Qx_EraseSector(W25QXX_HandleTypeDef *w25qxx, uint32_t EraseAddr)
         if ((HAL_GetTick() - tickstart) > W25Qx_SECTOR_ERASE_MAX_TIME) {
             return W25Qx_TIMEOUT;
         }
+        osDelay(1);
     }
     return W25Qx_OK;
 }
@@ -413,6 +423,7 @@ uint8_t BSP_W25Qx_EraseChip(W25QXX_HandleTypeDef *w25qxx)
         if ((HAL_GetTick() - tickstart) > W25Qx_BULK_ERASE_MAX_TIME) {
             return W25Qx_TIMEOUT;
         }
+        osDelay(1);
     }
     return W25Qx_OK;
 }

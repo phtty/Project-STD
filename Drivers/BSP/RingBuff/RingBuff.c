@@ -1,6 +1,9 @@
-#include "RingBuffer.h"
+#include "RingBuff.h"
 
-RingBuffer xProtocal_RB = {0};
+RingBuff_t xProtocol_RB = {0};
+RingBuff_t xIAP_RB      = {0};
+
+RingBuff_t xProtocal_RB = {0};
 
 /**
  * @brief 检查缓冲区是否为空
@@ -8,7 +11,7 @@ RingBuffer xProtocal_RB = {0};
  * @retval 1 缓冲区为空
  * @retval 0 缓冲区非空
  */
-__always_inline uint8_t BSP_RB_IsEmpty(RingBuffer *fifo)
+__always_inline uint8_t BSP_RB_IsEmpty(const RingBuff_t *fifo)
 {
     return fifo->read_index == fifo->write_index;
 }
@@ -19,7 +22,7 @@ __always_inline uint8_t BSP_RB_IsEmpty(RingBuffer *fifo)
  * @retval 1 缓冲区已满
  * @retval 0 缓冲区未满
  */
-__always_inline uint8_t BSP_RB_IsFull(RingBuffer *fifo)
+__always_inline uint8_t BSP_RB_IsFull(const RingBuff_t *fifo)
 {
     return ((fifo->write_index + 1) & (BUFFER_SIZE - 1)) == fifo->read_index;
 }
@@ -29,7 +32,7 @@ __always_inline uint8_t BSP_RB_IsFull(RingBuffer *fifo)
  * @param fifo 指向环形缓冲区的指针
  * @return 当前可读取的字节数
  */
-__always_inline uint16_t BSP_RB_GetAvailable(RingBuffer *fifo)
+__always_inline uint16_t BSP_RB_GetAvailable(const RingBuff_t *fifo)
 {
     return (fifo->write_index - fifo->read_index) & (BUFFER_SIZE - 1);
 }
@@ -39,7 +42,7 @@ __always_inline uint16_t BSP_RB_GetAvailable(RingBuffer *fifo)
  * @param fifo 指向环形缓冲区的指针
  * @return 当前可写入的字节数
  */
-uint16_t BSP_RB_GetFreeSpace(RingBuffer *fifo)
+uint16_t BSP_RB_GetFreeSpace(const RingBuff_t *fifo)
 {
     return BUFFER_SIZE - BSP_RB_GetAvailable(fifo) - 1;
 }
@@ -51,7 +54,7 @@ uint16_t BSP_RB_GetFreeSpace(RingBuffer *fifo)
  * @retval 1 写入成功
  * @retval 0 缓冲区已满，写入失败
  */
-uint8_t BSP_RB_FreeBuff(RingBuffer *fifo)
+uint8_t BSP_RB_FreeBuff(RingBuff_t *fifo)
 {
     fifo->read_index = fifo->write_index;
     return 1;
@@ -64,7 +67,7 @@ uint8_t BSP_RB_FreeBuff(RingBuffer *fifo)
  * @retval 1 写入成功
  * @retval 0 缓冲区已满，写入失败
  */
-__always_inline uint8_t BSP_RB_PutByte(RingBuffer *fifo, uint8_t byte)
+__always_inline uint8_t BSP_RB_PutByte(RingBuff_t *fifo, uint8_t byte)
 {
     if (BSP_RB_IsFull(fifo)) {
         return 0; // 缓冲区满，写入失败
@@ -82,7 +85,7 @@ __always_inline uint8_t BSP_RB_PutByte(RingBuffer *fifo, uint8_t byte)
  * @param len 要写入的字节数
  * @return 实际写入的字节数
  */
-uint16_t BSP_RB_PutByte_Bulk(RingBuffer *fifo, const uint8_t *data, uint16_t len)
+uint16_t BSP_RB_PutByte_Bulk(RingBuff_t *fifo, const uint8_t *data, uint16_t len)
 {
     uint16_t i;
 
@@ -102,7 +105,7 @@ uint16_t BSP_RB_PutByte_Bulk(RingBuffer *fifo, const uint8_t *data, uint16_t len
  * @retval 1 读取成功
  * @retval 0 缓冲区为空，读取失败
  */
-__always_inline uint8_t BSP_RB_GetByte(RingBuffer *fifo, uint8_t *byte)
+__always_inline uint8_t BSP_RB_GetByte(RingBuff_t *fifo, uint8_t *byte)
 {
     if (BSP_RB_IsEmpty(fifo)) {
         return 0; // 缓冲区空，读取失败
@@ -120,7 +123,7 @@ __always_inline uint8_t BSP_RB_GetByte(RingBuffer *fifo, uint8_t *byte)
  * @param len 要读取的字节数
  * @return 实际读取的字节数
  */
-uint16_t BSP_RB_GetByte_Bulk(RingBuffer *fifo, uint8_t *data, uint16_t len)
+uint16_t BSP_RB_GetByte_Bulk(RingBuff_t *fifo, uint8_t *data, uint16_t len)
 {
     uint16_t i;
     for (i = 0; i < len; i++) {
@@ -139,7 +142,7 @@ uint16_t BSP_RB_GetByte_Bulk(RingBuffer *fifo, uint8_t *data, uint16_t len)
  * @retval 1 读取成功
  * @retval 0 偏移超出有效范围
  */
-uint8_t BSP_RB_PeekByte(RingBuffer *fifo, uint16_t offset, uint8_t *byte)
+uint8_t BSP_RB_PeekByte(const RingBuff_t *fifo, uint16_t offset, uint8_t *byte)
 {
     uint16_t avail = BSP_RB_GetAvailable(fifo);
 
@@ -159,7 +162,7 @@ uint8_t BSP_RB_PeekByte(RingBuffer *fifo, uint16_t offset, uint8_t *byte)
  * @param len 要读取的字节数
  * @return 实际读取的字节数
  */
-uint16_t BSP_RB_PeekBlock(RingBuffer *fifo, uint16_t offset, uint8_t *dest, uint16_t len)
+uint16_t BSP_RB_PeekBlock(const RingBuff_t *fifo, uint16_t offset, uint8_t *dest, uint16_t len)
 {
     int16_t avail = BSP_RB_GetAvailable(fifo) - offset;
     if (avail <= 0)
@@ -188,7 +191,7 @@ uint16_t BSP_RB_PeekBlock(RingBuffer *fifo, uint16_t offset, uint8_t *dest, uint
  * @param offset 从当前读指针开始的偏移量
  * @return 从偏移位置开始的连续字节数
  */
-uint16_t BSP_RB_GetContiguousLength(RingBuffer *fifo, uint16_t offset)
+uint16_t BSP_RB_GetContiguousLength(const RingBuff_t *fifo, const uint16_t offset)
 {
     uint16_t avail = BSP_RB_GetAvailable(fifo);
 
@@ -207,7 +210,7 @@ uint16_t BSP_RB_GetContiguousLength(RingBuffer *fifo, uint16_t offset)
  * @param len 要跳过的字节数
  * @return 实际跳过的字节数
  */
-uint16_t BSP_RB_SkipBytes(RingBuffer *fifo, uint16_t len)
+uint16_t BSP_RB_SkipBytes(RingBuff_t *fifo, uint16_t len)
 {
     uint16_t avail = BSP_RB_GetAvailable(fifo);
     len            = (len > avail) ? avail : len; // 限制长度

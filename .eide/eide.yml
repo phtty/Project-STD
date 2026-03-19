@@ -31,14 +31,19 @@ virtualFolder:
             - path: Core/Src/system_stm32f4xx.c
             - path: Core/Src/tim.c
             - path: Core/Src/usart.c
+            - path: Core/Src/crc.c
           folders: []
         - name: NetIF
           files:
             - path: LWIP/App/lwip.c
-            - path: LWIP/App/tcp_sever.c
             - path: LWIP/Target/ethernetif.c
             - path: LWIP/Target/lwipopts.h
-            - path: LWIP/App/tcp_client.c
+            - path: LWIP/App/mqtt_app.c
+            - path: LWIP/App/msg.c
+            - path: LWIP/App/tcp_client_app.c
+            - path: LWIP/App/tcp_server_app.c
+            - path: LWIP/App/udp_app.c
+            - path: LWIP/App/udp_interface.c
           folders: []
         - name: RTOS
           files:
@@ -72,6 +77,7 @@ virtualFolder:
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c
+            - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_crc.c
           folders: []
         - name: BSP
           files: []
@@ -91,18 +97,38 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Components/HUB75/hub75.c
                   folders: []
+                - name: LightSensor
+                  files:
+                    - path: Drivers/BSP/Components/LightSensor/light.c
+                  folders: []
+                - name: Protocol
+                  files:
+                    - path: Drivers/BSP/Protocol/cmd.c
+                    - path: Drivers/BSP/Protocol/protocol.c
+                  folders: []
             - name: Display
               files:
                 - path: Drivers/BSP/Display/display.c
                 - path: Drivers/BSP/Display/render.c
-              folders: []
+                - path: Drivers/BSP/Display/scan.c
+              folders:
+                - name: text_cvt
+                  files:
+                    - path: Drivers/BSP/Display/text_cvt/text_cvt.c
+                  folders: []
             - name: Key
               files:
                 - path: Drivers/BSP/Key/key.c
               folders: []
             - name: RingBuff
               files:
-                - path: Drivers/BSP/RingBuffer/Ringbuffer.c
+                - path: Drivers/BSP/RingBuff/RingBuff.c
+              folders: []
+            - name: IAP
+              files:
+                - path: Drivers/BSP/IAP/config_info.c
+                - path: Drivers/BSP/IAP/iap.c
+                - path: Drivers/BSP/IAP/iap_cmd.c
               folders: []
         - name: RTT
           files:
@@ -275,11 +301,17 @@ targets:
         - Drivers/BSP/Display
         - Drivers/BSP/Key
         - Drivers/BSP/RingBuffer
+        - Drivers/BSP/IAP
+        - Drivers/BSP/RingBuff
+        - Drivers/BSP/Components/ADC
+        - Drivers/BSP/Components/LightSensor
+        - Drivers/BSP/Protocol
+        - Drivers/BSP/Display/text_cvt
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
-      - <virtual_root>/Drivers/HAL_Drivers/stm32f4xx_hal_crc.c
-      - <virtual_root>/Application/CubeMX/crc.c
+      - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
+      - <virtual_root>/Drivers/BSP/Display/scan.c
     toolchain: GCC
     toolchainConfigMap:
       GCC:

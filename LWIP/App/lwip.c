@@ -29,7 +29,9 @@
 #include <string.h>
 
 /* USER CODE BEGIN 0 */
-
+#include "config_info.h"
+#include "msg.h"
+#include "mqtt_app.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -65,18 +67,31 @@ void MX_LWIP_Init(void)
     /* IP addresses initialization */
     IP_ADDRESS[0]      = 192;
     IP_ADDRESS[1]      = 168;
-    IP_ADDRESS[2]      = 114;
-    IP_ADDRESS[3]      = 200;
+    IP_ADDRESS[2]      = 2;
+    IP_ADDRESS[3]      = 251;
     NETMASK_ADDRESS[0] = 255;
     NETMASK_ADDRESS[1] = 255;
     NETMASK_ADDRESS[2] = 255;
     NETMASK_ADDRESS[3] = 0;
     GATEWAY_ADDRESS[0] = 192;
     GATEWAY_ADDRESS[1] = 168;
-    GATEWAY_ADDRESS[2] = 0;
+    GATEWAY_ADDRESS[2] = 2;
     GATEWAY_ADDRESS[3] = 1;
 
     /* USER CODE BEGIN IP_ADDRESSES */
+    SysInfo_t *pConfig = (SysInfo_t *)ADDR_CONFIG_SECTOR;
+    IP_ADDRESS[0]      = pConfig->net_cfg.ip[0];
+    IP_ADDRESS[1]      = pConfig->net_cfg.ip[1];
+    IP_ADDRESS[2]      = pConfig->net_cfg.ip[2];
+    IP_ADDRESS[3]      = pConfig->net_cfg.ip[3];
+    NETMASK_ADDRESS[0] = pConfig->net_cfg.mask[0];
+    NETMASK_ADDRESS[1] = pConfig->net_cfg.mask[1];
+    NETMASK_ADDRESS[2] = pConfig->net_cfg.mask[2];
+    NETMASK_ADDRESS[3] = pConfig->net_cfg.mask[3];
+    GATEWAY_ADDRESS[0] = pConfig->net_cfg.gw[0];
+    GATEWAY_ADDRESS[1] = pConfig->net_cfg.gw[1];
+    GATEWAY_ADDRESS[2] = pConfig->net_cfg.gw[2];
+    GATEWAY_ADDRESS[3] = pConfig->net_cfg.gw[3];
     /* USER CODE END IP_ADDRESSES */
 
     /* Initialize the LwIP stack with RTOS */
@@ -139,6 +154,11 @@ static void ethernet_link_status_updated(struct netif *netif)
         /* USER CODE BEGIN 6 */
         printf("Network Break!\n");
         osEventFlagsClear(netEventFlagsHandle, FLAG_NET_READY);
+        mqtt_state = no_connect;
+        osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知mqtt连接管理任务
+
+        Channel_FreeNet(); // 关闭所有网络信道
+
         /* USER CODE END 6 */
     }
 }

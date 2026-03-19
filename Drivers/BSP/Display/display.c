@@ -118,20 +118,41 @@ ColorHandler color_handlers[] = {
     handle_white,  // case white
 };
 
+/**
+ * @brief P20模组
+ *
+ */
 void convert_pixelmap(void)
 {
-    uint16_t row_cnt = 0, col_cnt = 0, group_cnt = 0;
+    uint16_t group_cnt = 0;
+    uint8_t row_cnt = 0, col_cnt = 0;
 
     for (uint16_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
         row_cnt = map_cnt / SCREEN_PIXEL_ROW; // 屏幕的行标
         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
 
-        group_cnt = row_cnt / 16 * 8 + row_cnt % 8; // 组标
+        group_cnt = col_cnt / 4 + (row_cnt / 4 * (MODULE_PER_ROW * 4)); // 组标
 
-        if (row_cnt % 16 / 8) // 下半行
-            hub75_buff[col_cnt * 2 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
-        else // 上半行
-            hub75_buff[col_cnt * 2 + 1 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
+        switch (row_cnt % 4) {
+            case 0:
+                hub75_buff[2 * (3 - col_cnt % 4) + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
+                break;
+
+            case 1:
+                hub75_buff[2 * (3 - col_cnt % 4) + 1 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
+                break;
+
+            case 2:
+                hub75_buff[2 * (col_cnt % 4) + 9 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
+                break;
+
+            case 3:
+                hub75_buff[2 * (col_cnt % 4) + 8 + group_cnt * GROUP_SIZE] = pixel_map[map_cnt];
+                break;
+
+            default:
+                break;
+        }
     }
 }
 
@@ -204,7 +225,7 @@ void send_hub75_buff(void)
 
     // 行扫描计数自增
     scan_line += 1;
-    if (scan_line >= 8)
+    if (scan_line >= MOUDLE_SCAN_LINE_NUM)
         scan_line = 0;
 }
 
@@ -241,7 +262,7 @@ void point_order_test(DispColor_t color, int32_t num_of_point, uint8_t channel)
     HAL_NVIC_EnableIRQ(TIM4_IRQn);
 }
 
-uint8_t light_level = 1; // 亮度等级
+volatile uint8_t light_level = 1; // 亮度等级
 /**
  * @brief 软件pwm调光
  *
