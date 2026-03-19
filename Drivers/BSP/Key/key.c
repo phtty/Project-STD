@@ -53,7 +53,7 @@ void test_Task(void *argument)
                 Disp_Fill(yellow);
                 break;
             case 4:
-                goto LCD_Test;
+                goto LCD_Test
                 break;
             default:
                 break;

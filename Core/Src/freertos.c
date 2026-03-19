@@ -115,7 +115,7 @@ void MX_FREERTOS_Init(void)
 
     /* USER CODE BEGIN RTOS_SEMAPHORES */
     /* add semaphores, ... */
-    test_semaphore = osSemaphoreNew(1, 1, NULL);
+    test_semaphore = osSemaphoreNew(1, 0, NULL);
     configASSERT(test_semaphore != NULL);
     /* USER CODE END RTOS_SEMAPHORES */
 
