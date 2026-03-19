@@ -56,6 +56,7 @@ typedef StaticTask_t osStaticThreadDef_t;
 /* USER CODE BEGIN PM */
 osMutexId_t light_mutex;
 osSemaphoreId_t test_semaphore;
+osEventFlagsId_t SW123_Event;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/

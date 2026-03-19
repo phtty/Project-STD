@@ -22,6 +22,8 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "cmsis_os2.h"
+#include "IOCtrl.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,7 +38,8 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+extern osSemaphoreId_t test_semaphore;
+extern osEventFlagsId_t SW123_Event;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -423,5 +426,19 @@ void USART6_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == KEY_TST_Pin) {
+        osSemaphoreRelease(test_semaphore);
+    }
+    if (GPIO_Pin == SW1_Pin) {
+        osEventFlagsSet(SW123_Event, SW1_EVENT);
+    }
+    if (GPIO_Pin == SW2_Pin) {
+        osEventFlagsSet(SW123_Event, SW2_EVENT);
+    }
+    if (GPIO_Pin == SW3_Pin) {
+        osEventFlagsSet(SW123_Event, SW3_EVENT);
+    }
+}
 /* USER CODE END 1 */
