@@ -121,7 +121,7 @@ void MX_GPIO_Init(void)
 
     /*Configure GPIO pins : SW3_Pin SW2_Pin SW1_Pin */
     GPIO_InitStruct.Pin  = SW3_Pin | SW2_Pin | SW1_Pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
