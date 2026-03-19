@@ -128,7 +128,7 @@ void MX_GPIO_Init(void)
     /*Configure GPIO pin : KEY_TST_Pin */
     GPIO_InitStruct.Pin  = KEY_TST_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(KEY_TST_GPIO_Port, &GPIO_InitStruct);
 
     /*Configure GPIO pins : LED_Pin Lane_Light_Pin Flash_Light_Pin */
