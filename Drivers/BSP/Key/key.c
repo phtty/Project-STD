@@ -20,13 +20,6 @@ static const uint8_t testDisBuf[][120] = {
     "                                                                                                                        ",
 };
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == KEY_TST_Pin) {
-        osSemaphoreRelease(test_semaphore);
-    }
-}
-
 void test_Task(void *argument)
 {
     uint32_t test_cnt       = 0;
@@ -36,7 +29,7 @@ void test_Task(void *argument)
     FontType_t tempType     = font_fs;
 
     for (;;) {
-        osSemaphoreWait(test_semaphore, osWaitForever);
+        osSemaphoreAcquire(test_semaphore, osWaitForever);
 
         test_cnt++;
 
@@ -51,7 +44,7 @@ void test_Task(void *argument)
     }
 
     for (;;) {
-        if (osSemaphoreWait(test_semaphore, 0) == osOK)
+        if (osSemaphoreAcquire(test_semaphore, 0) == osOK)
             NVIC_SystemReset();
 
         RenderString(0, 0, (uint8_t *)testDisBuf[testDisPlayCnt], 120, tempColor, tempSize, tempType);

@@ -130,6 +130,10 @@ virtualFolder:
                 - path: Drivers/BSP/IAP/iap.c
                 - path: Drivers/BSP/IAP/iap_cmd.c
               folders: []
+            - name: IOCtrl
+              files:
+                - path: Drivers/BSP/IOCtrl/IOCtrl.c
+              folders: []
         - name: RTT
           files:
             - path: Drivers/RTT/RTT/SEGGER_RTT.c
@@ -307,6 +311,7 @@ targets:
         - Drivers/BSP/Components/LightSensor
         - Drivers/BSP/Protocol
         - Drivers/BSP/Display/text_cvt
+        - Drivers/BSP/IOCtrl
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
