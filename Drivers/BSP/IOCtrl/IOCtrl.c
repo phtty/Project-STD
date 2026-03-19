@@ -16,7 +16,7 @@ void BSP_HSCtrl(bool HSEnable)
 
 /*
  * @brief  BSP_LILCtrl  (车道灯控制)
- * @param  LILEnable: true: 打开, false: 关闭
+ * @param  LILEnable: true: 绿灯, false: 红灯
  */
 void BSP_LILCtrl(bool LILEnable)
 {

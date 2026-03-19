@@ -29,7 +29,8 @@
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
         },
-        "cortex-debug.variableUseNaturalFormat": true
+        "cortex-debug.variableUseNaturalFormat": true,
+        "commentTranslate.source": "Bing"
     },
     "extensions": {
         "recommendations": [
