@@ -314,7 +314,6 @@ targets:
         - Drivers/BSP/IOCtrl
       libList: []
     excludeList:
-      - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
     toolchain: GCC
@@ -374,6 +373,6 @@ targets:
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
-        interface: stlink
-        target: stm32f1x
-    uploader: Custom
+        interface: cmsis-dap
+        target: stm32f4x
+    uploader: OpenOCD

@@ -6,7 +6,7 @@
 
 extern osSemaphoreId_t test_semaphore;
 
-static const uint8_t testDisBuf[][120] = {
+static const char testDisBuf[][120] = {
     "重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重重",
     "庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆庆",
     "创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创创",
@@ -20,7 +20,7 @@ static const uint8_t testDisBuf[][120] = {
     "                                                                                                                        ",
 };
 
-void test_Task(void *argument)
+void TestKey_Task(void *argument)
 {
     uint32_t test_cnt       = 0;
     uint32_t testDisPlayCnt = 0;
@@ -47,7 +47,7 @@ void test_Task(void *argument)
         if (osSemaphoreAcquire(test_semaphore, 0) == osOK)
             NVIC_SystemReset();
 
-        RenderString(0, 0, (uint8_t *)testDisBuf[testDisPlayCnt], 120, tempColor, tempSize, tempType);
+        RenderString(0, 0, testDisBuf[testDisPlayCnt], 120, tempColor, tempSize, tempType);
         testDisPlayCnt++;
         if (testDisPlayCnt >= 11) {
             tempColor++;

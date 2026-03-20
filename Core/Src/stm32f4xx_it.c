@@ -428,6 +428,7 @@ void USART6_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+    osDelay(10);
     if (GPIO_Pin == KEY_TST_Pin) {
         osSemaphoreRelease(test_semaphore);
     }

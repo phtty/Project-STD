@@ -38,7 +38,8 @@
 #include "tcp_client_app.h"
 #include "mqtt_app.h"
 #include "udp_app.h"
-
+#include "IOCtrl.h"
+#include "key.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -73,6 +74,20 @@ const osThreadAttr_t PointTestTask_attributes = {
     .name       = "PointTestTask",
     .stack_size = 1024 * 4,
     .priority   = (osPriority_t)osPriorityAboveNormal,
+};
+
+osThreadId_t IOCtrlTaskHandle;
+const osThreadAttr_t IOCtrlTask_attributes = {
+    .name       = "IOCtrlTask",
+    .stack_size = 128 * 4,
+    .priority   = (osPriority_t)osPriorityLow1,
+};
+
+osThreadId_t TestKeyTaskHandle;
+const osThreadAttr_t TestKeyTask_attributes = {
+    .name       = "TestKeyTask",
+    .stack_size = 128 * 4,
+    .priority   = (osPriority_t)osPriorityLow2,
 };
 
 /* USER CODE END Variables */
@@ -139,6 +154,8 @@ void MX_FREERTOS_Init(void)
 
     /* USER CODE BEGIN RTOS_THREADS */
     /* add threads, ... */
+    IOCtrlTaskHandle  = osThreadNew(BSP_Sw123_Task, NULL, &IOCtrlTask_attributes);
+    TestKeyTaskHandle = osThreadNew(TestKey_Task, NULL, &TestKeyTask_attributes);
     /* USER CODE END RTOS_THREADS */
 
     /* USER CODE BEGIN RTOS_EVENTS */

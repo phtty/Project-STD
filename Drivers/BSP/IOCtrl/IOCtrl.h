@@ -4,9 +4,9 @@
 #include "main.h"
 
 enum {
-    SW1_EVENT = 0,
-    SW2_EVENT,
-    SW3_EVENT,
+    SW1_EVENT = 1,
+    SW2_EVENT = 2,
+    SW3_EVENT = 4,
 };
 
 void BSP_HSCtrl(bool HSEnable);
