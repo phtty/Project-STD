@@ -129,8 +129,6 @@ void MX_FREERTOS_Init(void)
 
     /* USER CODE BEGIN RTOS_MUTEX */
     /* add mutexes, ... */
-    light_mutex = osMutexNew(NULL);
-    configASSERT(light_mutex != NULL);
     /* USER CODE END RTOS_MUTEX */
 
     /* USER CODE BEGIN RTOS_SEMAPHORES */

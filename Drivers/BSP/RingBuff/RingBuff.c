@@ -3,8 +3,6 @@
 RingBuff_t xProtocol_RB = {0};
 RingBuff_t xIAP_RB      = {0};
 
-RingBuff_t xProtocal_RB = {0};
-
 /**
  * @brief 检查缓冲区是否为空
  * @param fifo 指向环形缓冲区的指针

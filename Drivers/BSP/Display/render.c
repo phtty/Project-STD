@@ -107,6 +107,10 @@ void RenderString(uint32_t start_x, uint32_t start_y, const char *p_text, uint32
 
     uint16_t i = 0;
     while (i < text_len) {
+        // 全屏边界检测
+        if (SCREEN_PIXEL_COL - cur_y < Font_Height_Table[font_size]) {
+            break;
+        }
         // "_" 和 "\n" 换行
         if (i + 1 < text_len) {
             if ((p_text[i] == '\n') || (p_text[i] == '_')) {
@@ -156,6 +160,9 @@ void RenderChar(const char *p_text, uint16_t *x, uint16_t *y, FontSize_t font_si
         *y += CHAR_HEIGHT;
         *x = 0;
     }
+
+    if (*y > SCREEN_PIXEL_COL - CHAR_HEIGHT)
+        return;
 
     for (uint8_t i = 0; i < CHAR_HEIGHT; i++) {     // 行遍历
         for (uint8_t j = 0; j < CHAR_WEIGHT; j++) { // 列遍历
