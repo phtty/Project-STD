@@ -4,8 +4,8 @@
 extern osEventFlagsId_t SW123_Event;
 
 /*
- * @brief  BSP_HSCtrl  (é»„é—ªæ§åˆ¶)
- * @param  HSEnable: true: æ‰“å¼€, false: å…³é—­
+ * @brief  BSP_HSCtrl  (»ÆÉÁ¿ØÖÆ)
+ * @param  HSEnable: true: ´ò¿ª, false: ¹Ø±Õ
  */
 void BSP_HSCtrl(bool HSEnable)
 {
@@ -15,8 +15,8 @@ void BSP_HSCtrl(bool HSEnable)
 }
 
 /*
- * @brief  BSP_LILCtrl  (è½¦é“ç¯æ§åˆ¶)
- * @param  LILEnable: true: æ‰“å¼€, false: å…³é—­
+ * @brief  BSP_LILCtrl  (³µµÀµÆ¿ØÖÆ)
+ * @param  LILEnable: true: ´ò¿ª, false: ¹Ø±Õ
  */
 void BSP_LILCtrl(bool LILEnable)
 {

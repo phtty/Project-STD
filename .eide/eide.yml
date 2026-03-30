@@ -317,6 +317,8 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+    settings:
+      debugger: cortex-debug
     toolchain: GCC
     toolchainConfigMap:
       GCC:
@@ -415,6 +417,8 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+    settings:
+      debugger: cortex-debug
     toolchain: GCC
     toolchainConfigMap:
       GCC:

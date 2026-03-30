@@ -54,7 +54,6 @@ typedef StaticTask_t osStaticThreadDef_t;
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-osMutexId_t light_mutex;
 osSemaphoreId_t test_semaphore;
 osEventFlagsId_t SW123_Event;
 /* USER CODE END PM */
@@ -114,8 +113,6 @@ void MX_FREERTOS_Init(void)
 
     /* USER CODE BEGIN RTOS_MUTEX */
     /* add mutexes, ... */
-    light_mutex = osMutexNew(NULL);
-    configASSERT(light_mutex != NULL);
     /* USER CODE END RTOS_MUTEX */
 
     /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -177,7 +174,8 @@ void InitialTask(void *argument)
 
     printf("\nInit Task Done\n");
 
-    osThreadExit();
+    // osThreadExit();
+    osThreadSuspend(InitTaskHandle);
     /* Infinite loop */
     for (;;) {
         osDelay(1);
