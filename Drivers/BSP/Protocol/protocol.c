@@ -3,8 +3,10 @@
 #include "mqtt_app.h"
 #include "cmd.h"
 #include "display.h"
+#include "msg.h"
 
-static uint8_t ptcl_buff[FRAME_MAX_LEN] = {0};
+osMessageQueueId_t gx_AH_MQTT_Queue;
+static uint8_t ptcl_buff[MQTT_FRAME_MAX_LEN] = {0};
 
 topic_info_t topic_info = {
     .station_hex = "11451419",
@@ -55,6 +57,7 @@ const osThreadAttr_t ReportTask_attributes = {
 
 static void SignUpTask(void *argument);
 static void ReportTask(void *argument);
+static uint16_t handle_topic(const char topic[]);
 
 /**
  * @brief 协议解析任务
@@ -62,17 +65,28 @@ static void ReportTask(void *argument);
  */
 void ProtocolTask(void *argument)
 {
-    uint16_t length = 0;
+    ch_metadata_t mdata;
+    const osMessageQueueAttr_t AH_MQTT_Queue_Attr = {
+        .name = "gx_AH_MQTT_Queue",
+    };
+    gx_AH_MQTT_Queue              = osMessageQueueNew(8, sizeof(ch_metadata_t), &AH_MQTT_Queue_Attr);
+    ParserQueue[ParserQueueCnt++] = gx_AH_MQTT_Queue;
 
+    while (mqtt_state != connected) { // 等待连接建立
+        osDelay(100);
+    }
     // 创建两个任务，用于定时上报状态和签到
     SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
     ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
-        osMessageQueueGet(xMessageLenQueue, &length, NULL, osWaitForever);
+        osMessageQueueGet(gx_AH_MQTT_Queue, &mdata, NULL, osWaitForever);
 
-        BSP_RB_GetByte_Bulk(&xProtocol_RB, ptcl_buff, length);
-        pfCmdFunc[ucCmdCmdIndex]((char *)ptcl_buff);
+        // 通过topic得知是哪个命令
+        uint16_t cmd = handle_topic(mdata.handle.mqtt.topic);
+
+        BSP_RB_GetByte_Bulk(&xProtocol_RB, ptcl_buff, mdata.handle.mqtt.payload_len);
+        pfCmdFunc[cmd](&mdata, (char *)ptcl_buff); // 这里要修改每个具体的CMD函数，让元数据作为参数传入
     }
 }
 
@@ -80,22 +94,22 @@ void ProtocolTask(void *argument)
  * @brief 解析topic确认是哪个命令
  *
  */
-void handle_topic(const char topic[])
+uint16_t handle_topic(const char topic[])
 {
     if (NULL != strstr(topic, "/ASK/board/NULL"))
-        ucCmdCmdIndex = 1;
+        return 1;
 
     else if (NULL != strstr(topic, "/ASK/display/clean"))
-        ucCmdCmdIndex = 2;
+        return 2;
 
     else if (NULL != strstr(topic, "/ASK/op/restart"))
-        ucCmdCmdIndex = 3;
+        return 3;
 
     else if (NULL != strstr(topic, "/ASK/op/checktime"))
-        ucCmdCmdIndex = 4;
+        return 4;
 
     else
-        ucCmdCmdIndex = 0;
+        return 0;
 }
 
 /**

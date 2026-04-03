@@ -1,5 +1,4 @@
-#ifndef DRIVERS_BSP_HUB75_HUB75_H
-#define DRIVERS_BSP_HUB75_HUB75_H
+#pragma once
 
 #include "main.h"
 
@@ -68,5 +67,3 @@ OE      GND
 #define HUB75_B10 BITBAND_PERIPH(&(HUB75_B10_GPIO_Port->ODR), 0)
 
 void bsp_init_hub75(void);
-
-#endif // !DRIVERS_BSP_HUB75_HUB75_H

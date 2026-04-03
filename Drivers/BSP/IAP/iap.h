@@ -28,6 +28,7 @@ typedef struct iap_frame {
     uint32_t data_crc[];
 } IAP_Frame_t;
 
+extern osMessageQueueId_t gx_IapQueue;
 extern osThreadId_t IapHandle;
 extern const osThreadAttr_t IapTask_attributes;
 

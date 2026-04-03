@@ -5,8 +5,8 @@
 #include "cmsis_os2.h"
 #include "RingBuff.h"
 
-#define FRAME_MIN_LEN (21U)
-#define FRAME_MAX_LEN (21U + 512U)
+#define MQTT_FRAME_MIN_LEN (21U)
+#define MQTT_FRAME_MAX_LEN (21U + 512U)
 
 typedef struct topic_baseinfo {
     char station_hex[8];
@@ -54,8 +54,8 @@ extern topic_info_t topic_info;
 extern notify_date_t notify_date;
 extern notify_id_t xNotifyID;
 
+extern osMessageQueueId_t gx_AH_MQTT_Queue;
 extern osThreadId_t ProtocolHandle;
 extern const osThreadAttr_t ProtocolTask_attributes;
 
 void ProtocolTask(void *argument);
-void handle_topic(const char topic[]);

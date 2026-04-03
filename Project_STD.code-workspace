@@ -30,7 +30,9 @@
             "editor.autoIndent": "advanced"
         },
         "cortex-debug.variableUseNaturalFormat": true,
-        "Codegeex.RepoIndex": true
+        "Codegeex.RepoIndex": true,
+        "Codegeex.CommitMessageStyle": "ConventionalCommits",
+        "Codegeex.Chat.fontSize": 14
     },
     "extensions": {
         "recommendations": [

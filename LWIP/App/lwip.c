@@ -156,9 +156,6 @@ static void ethernet_link_status_updated(struct netif *netif)
         osEventFlagsClear(netEventFlagsHandle, FLAG_NET_READY);
         mqtt_state = no_connect;
         osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知mqtt连接管理任务
-
-        Channel_FreeNet(); // 关闭所有网络信道
-
         /* USER CODE END 6 */
     }
 }

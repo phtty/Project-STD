@@ -157,7 +157,7 @@ void InitialTask(void *argument)
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
     BSP_W25Qx_Init(&hw25q256, &hspi1);
-    communication_init();
+    CH_Initialize();
 
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
@@ -166,10 +166,11 @@ void InitialTask(void *argument)
     udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
-    RefreshTaskHandle      = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
-    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
 
+    // autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
+
+    // RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
     // RenderString(0, 0, "测试", strlen("测试"), green, font_16, font_ht);
 
     printf("\nInit Task Done\n");
@@ -187,7 +188,8 @@ void InitialTask(void *argument)
 /* USER CODE BEGIN Application */
 void HalfSecTask(void *argument)
 {
-    uint8_t run_time = 0;
+    uint32_t run_time = 0;
+
     for (;;) {
         HAL_IWDG_Refresh(&hiwdg);
 
@@ -208,17 +210,12 @@ void PointTestTask(void *argument)
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);
 
-    // pixel_map[32] = green;
-    // convert_pixelmap();
-    point_order_test(black, SCAN_LINE_PIXEL_NUM, 0);
-    point_order_test(black, SCAN_LINE_PIXEL_NUM, 1);
-
     for (;;) {
-        for (int i = 0; i < DISRAM_SIZE; i++) {
+        for (int i = SCAN_LINE_PIXEL_NUM - 50; i < DISRAM_SIZE; i++) {
             pixel_map[i] = green;
 
             convert_pixelmap();
-            osDelay(250);
+            osDelay(50);
 
             pixel_map[i] = black;
         }

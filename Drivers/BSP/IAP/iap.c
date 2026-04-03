@@ -10,6 +10,7 @@ uint8_t ptcl_buff[FRAME_MAX_LEN * 4] = {0};
 
 const uint8_t frame_len[] = {0, 0, 4, 0, 1, 0, 0, 0};
 
+osMessageQueueId_t gx_IapQueue;
 osThreadId_t IapHandle;
 const osThreadAttr_t IapTask_attributes = {
     .name       = "IapTask",
@@ -23,13 +24,18 @@ const osThreadAttr_t IapTask_attributes = {
  */
 void IapTask(void *argument)
 {
-    MsgQueueItem_t q_item;
+    ch_metadata_t mdata;
+    const osMessageQueueAttr_t IapQueue_Attr = {
+        .name = "gx_IapQueue",
+    };
+    gx_IapQueue                   = osMessageQueueNew(8, sizeof(ch_metadata_t), &IapQueue_Attr);
+    ParserQueue[ParserQueueCnt++] = gx_IapQueue;
 
     for (;;) {
         // 等待数据接收任务发送队列
-        osMessageQueueGet(gx_PacketMsg, &q_item, NULL, osWaitForever);
+        osMessageQueueGet(gx_IapQueue, &mdata, NULL, osWaitForever);
 
-        // 解析缓冲区的数据直到缓冲区有效内容长度小于1字节
+        // 解析缓冲区的数据直到缓冲区有效内容长度小于帧头
         while (BSP_RB_GetAvailable(&xIAP_RB) >= 4) {
             uint32_t frame_len = 0;
             uint8_t cmd_num    = 0;
@@ -38,7 +44,7 @@ void IapTask(void *argument)
 
             if (status == iap_frame_rdy) {
                 BSP_RB_GetByte_Bulk(&xIAP_RB, ptcl_buff, frame_len);
-                pfIAP_CMD[cmd_num](&q_item, (IAP_Frame_t *)ptcl_buff);
+                pfIAP_CMD[cmd_num](&mdata, (IAP_Frame_t *)ptcl_buff);
 
             } else if (status == iap_frame_wait) { // 数据包不完整
                 break;

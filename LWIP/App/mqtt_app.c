@@ -4,6 +4,7 @@
 #include "lwip/sys.h"
 #include "lwip/apps/mqtt.h"
 
+#include "msg.h"
 #include "protocol.h"
 
 // Broker 服务器 IP
@@ -41,8 +42,9 @@ static void mqtt_incoming_publish_cb(void *arg, const char *topic, uint32_t tot_
     // 重置偏移量，准备接收新包
     current_payload_offset = 0;
 
-    // 检查该message属于哪个命令
-    handle_topic(topic);
+    // 将topic放入元数据
+    ch_metadata_t *mdata = (ch_metadata_t *)arg;
+    strcpy(mdata->handle.mqtt.topic, topic);
 }
 
 // 订阅成功的回调
@@ -92,11 +94,19 @@ static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, 
             mqtt_rcv_buf[current_payload_offset] = '\0';
             len++;
         }
-        // 将数据放入环形缓冲区
-        BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
 
-        // 在这里使用一个队列来通知协议处理任务参数长度
-        osMessageQueuePut(xMessageLenQueue, &len, 0U, 100);
+        // 临界保护区，防止多个信道同时写ringbuff
+        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+
+        // 将数据放入环形缓冲区
+        BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)mqtt_rcv_buf, len);
+
+        // 元数据入队
+        ch_metadata_t *mdata           = (ch_metadata_t *)arg;
+        mdata->handle.mqtt.payload_len = len;
+        osMessageQueuePut(gx_MDataQueue, mdata, 0, 100);
+
+        osMutexRelease(gx_RingBufMutex);
     }
 }
 
@@ -133,7 +143,12 @@ void mqtt_connection(void)
     err = mqtt_client_connect(mqtt_client, &broker_ip, BROKER_PORT, mqtt_connection_cb, NULL, &mqtt_client_info);
     UNLOCK_TCPIP_CORE(); // 解锁
 
-    mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, NULL);
+    // 创建数据接收回调
+    ch_metadata_t mdata = {
+        .type     = CH_TYPE_MQTT,
+        .protocol = ptcl_AH_MQTT,
+    };
+    mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&mdata);
     if (err == ERR_OK) {
         mqtt_state = connecting;
 
@@ -219,9 +234,6 @@ void mqttManageTask(void *argument)
             mqtt_sub_set("ASK/display/clean");
             mqtt_sub_set("ASK/op/restart");
             mqtt_sub_set("ASK/op/checktime");
-
-            // 连接成功后，创建协议解析任务
-            ProtocolHandle = osThreadNew(ProtocolTask, NULL, &ProtocolTask_attributes);
 
             // 连接正常，阻塞等待断开事件
             osSemaphoreAcquire(mqttConnSemHandle, osWaitForever);

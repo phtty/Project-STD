@@ -7,9 +7,10 @@
 
 #include "RingBuff.h"
 
-#define MAX_CHANNELS (8U)
+#define MAX_CHANNELS (32U)
+#define PROTOCOL_CNT (2U)
 
-typedef enum {
+typedef enum channel_type {
     CH_TYPE_NONE,
     CH_TYPE_MQTT,
     CH_TYPE_TCP,
@@ -17,47 +18,46 @@ typedef enum {
     CH_TYPE_UART,
 } ChannelType_t;
 
-typedef enum {
+typedef enum channel_index {
     CH_RS485 = 0,
     CH_RS232_0,
     CH_RS232_1,
 } ChannelIndex_t;
 
-typedef struct {
+typedef enum protocol_type_mask {
+    ptcl_NONE    = (uint32_t)0x00000000,
+    ptcl_IAP     = (uint32_t)0x00000001,
+    ptcl_AH_MQTT = (uint32_t)0x00000002,
+    ptcl_ALL     = (uint32_t)0xffffffff,
+} ProtocolTypeMask_t;
+
+typedef struct channel_metadata {
     ChannelType_t type;
-    uint32_t session_id;
-    union {
-        struct {
+    ProtocolTypeMask_t protocol;
+    union discription {
+        struct mqtt_topic {
             char topic[64];
+            uint16_t payload_len;
         } mqtt;
-        struct {
+        struct tcp_netconn {
             struct netconn *conn;
         } tcp;
-        struct {
+        struct udp_handle {
             struct netconn *conn;
+            ip_addr_t src_ip;
+            uint16_t src_port;
         } udp;
-        struct {
+        struct uart_handle {
             UART_HandleTypeDef *huart;
         } uart;
     } handle;
-} ChannelContext_t;
+} ch_metadata_t;
 
-// 数据收发任务传递给协议解析的结构体
-typedef struct {
-    uint8_t channel_index; // 对应gx_Channels的索引
-    uint32_t session_id;
-    ip_addr_t udp_src_ip;
-    uint16_t udp_src_port;
-} MsgQueueItem_t;
-
-extern ChannelContext_t gx_Channels[MAX_CHANNELS];
 extern osMutexId_t gx_RingBufMutex;
-extern osMutexId_t gx_ChannelMutex;
-extern osMessageQueueId_t gx_PacketMsg;
+extern osMessageQueueId_t gx_MDataQueue;
+extern osMessageQueueId_t ParserQueue[32];
+extern uint8_t ParserQueueCnt;
 
-void communication_init(void);
-int16_t sMsgFindEmptySlot(void);
-int16_t Channel_Alloc(ChannelType_t type);
-void Channel_Free(int index);
-void Channel_FreeNet(void);
-void Universal_Send(MsgQueueItem_t *msg, uint8_t *data, uint16_t len);
+void CH_Initialize(void);
+void MDataRouterTask(void *argument);
+void CH_UniversalSend(ch_metadata_t *mdata, uint8_t *data, uint16_t len);

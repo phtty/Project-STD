@@ -55,7 +55,6 @@ void MX_USART1_UART_Init(void)
         Error_Handler();
     }
     /* USER CODE BEGIN USART1_Init 2 */
-    gx_Channels[CH_RS485].handle.uart.huart = &huart1;
 
     /* USER CODE END USART1_Init 2 */
 }
@@ -83,7 +82,6 @@ void MX_USART3_UART_Init(void)
         Error_Handler();
     }
     /* USER CODE BEGIN USART3_Init 2 */
-    gx_Channels[CH_RS232_0].handle.uart.huart = &huart3;
 
     /* USER CODE END USART3_Init 2 */
 }
@@ -111,7 +109,6 @@ void MX_USART6_UART_Init(void)
         Error_Handler();
     }
     /* USER CODE BEGIN USART6_Init 2 */
-    gx_Channels[CH_RS232_1].handle.uart.huart = &huart6;
     /* USER CODE END USART6_Init 2 */
 }
 

@@ -2,9 +2,8 @@
 
 #include "main.h"
 
+#include "msg.h"
 #include "protocol.h"
-
-extern uint8_t ucCmdCmdIndex;
 
 // œ‘ æøÿ÷∆÷∏¡Ó
 typedef struct cmd_disp {
@@ -37,5 +36,5 @@ typedef struct cmd_checktime {
     char time[14];
 } __packed cmd_checktime_t;
 
-typedef void (*CmdFunc_t)(char *);
+typedef void (*CmdFunc_t)(ch_metadata_t *, char *);
 extern const CmdFunc_t pfCmdFunc[];

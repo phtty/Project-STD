@@ -43,7 +43,6 @@ virtualFolder:
             - path: LWIP/App/tcp_client_app.c
             - path: LWIP/App/tcp_server_app.c
             - path: LWIP/App/udp_app.c
-            - path: LWIP/App/udp_interface.c
           folders: []
         - name: RTOS
           files:
@@ -101,11 +100,6 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Components/LightSensor/light.c
                   folders: []
-                - name: Protocol
-                  files:
-                    - path: Drivers/BSP/Protocol/cmd.c
-                    - path: Drivers/BSP/Protocol/protocol.c
-                  folders: []
             - name: Display
               files:
                 - path: Drivers/BSP/Display/display.c
@@ -133,6 +127,11 @@ virtualFolder:
             - name: IOCtrl
               files:
                 - path: Drivers/BSP/IOCtrl/IOCtrl.c
+              folders: []
+            - name: Protocol
+              files:
+                - path: Drivers/BSP/Protocol/cmd.c
+                - path: Drivers/BSP/Protocol/protocol.c
               folders: []
         - name: RTT
           files:
@@ -417,6 +416,7 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+      - <virtual_root>/Application/NetIF/udp_interface.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

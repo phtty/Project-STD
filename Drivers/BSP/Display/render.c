@@ -226,6 +226,7 @@ uint16_t max_display_len = 0;
  *
  * @param len 字符串长度
  * @param font_size 设置的字号码
+ *
  * @return uint8_t 处理完成后的字号大小
  */
 uint8_t auto_font_size(uint16_t len, uint8_t font_size)
@@ -258,6 +259,7 @@ uint8_t auto_font_size(uint16_t len, uint8_t font_size)
  *
  * @param line 设定的行数
  * @param font_size 字体大小
+ *
  * @return uint8_t y轴起始值
  */
 uint16_t auto_line(uint8_t line, uint8_t font_size)
@@ -279,6 +281,7 @@ uint16_t auto_line(uint8_t line, uint8_t font_size)
  * @param len 字符串长度
  * @param font_size 字体大小
  * @param align 对其模式
+ *
  * @return uint16_t x轴起始值
  */
 uint16_t set_align(uint16_t len, uint8_t font_size, uint8_t align)

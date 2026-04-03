@@ -32,5 +32,5 @@ typedef struct iap_ipconfig {
     uint16_t port;
 } iap_ipconfig_t;
 
-typedef void (*pfcmd_Functions)(MsgQueueItem_t *, IAP_Frame_t *);
+typedef void (*pfcmd_Functions)(ch_metadata_t *, IAP_Frame_t *);
 extern const pfcmd_Functions pfIAP_CMD[];
