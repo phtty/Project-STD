@@ -5,7 +5,7 @@
 #include "lwip/api.h"
 #include "lwip/mem.h"
 
-#include "msg.h"
+#include "protocol.h"
 #include "iap.h"
 
 // 定义处理udp连接的任务句柄
@@ -61,14 +61,14 @@ void udpManageTask(void *argument)
 
             // 确保信号量已被释放
             while (osSemaphoreAcquire(udpDiscnnSemaphore, 0) == osOK);
-            ch_metadata_t mdata = {
+            ch_meta_t meta = {
                 .type            = CH_TYPE_UDP,
-                .protocol        = ptcl_IAP,
+                .protocol        = PROTO_MASK_IAP,
                 .handle.udp.conn = conn,
             };
 
             // 创建数据接收任务
-            osThreadId_t thread_id = osThreadNew(udpConnectTask, (void *)&mdata, &udpConnect_attr);
+            osThreadId_t thread_id = osThreadNew(udpConnectTask, (void *)&meta, &udpConnect_attr);
 
             if (thread_id != NULL) { // 阻塞等待断开连接信号量
                 osSemaphoreAcquire(udpDiscnnSemaphore, osWaitForever);
@@ -89,14 +89,14 @@ void udpManageTask(void *argument)
  */
 void udpConnectTask(void *argument)
 {
-    ch_metadata_t *mdata = (ch_metadata_t *)argument;
-    struct netconn *conn = mdata->handle.udp.conn;
+    ch_meta_t *meta      = (ch_meta_t *)argument;
+    struct netconn *conn = meta->handle.udp.conn;
     struct netbuf *buf;
     err_t err;
 
     while ((err = netconn_recv(conn, &buf)) == ERR_OK) {
         // 临界保护区，防止多个信道同时写ringbuff
-        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+        osMutexAcquire(g_ringbuf_mutex, osWaitForever);
 
         void *data;
         uint16_t len;
@@ -105,16 +105,16 @@ void udpConnectTask(void *argument)
 
             if (len > 0) {
                 // BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
-                BSP_RB_PutByte_Bulk(&xIAP_RB, (uint8_t *)data, len);
+                BSP_RB_PutByte_Bulk(&g_iap_ringbuf, (uint8_t *)data, len);
             }
         } while (netbuf_next(buf) >= 0);
 
         // 元数据入队
-        mdata->handle.udp.src_ip   = *netbuf_fromaddr(buf);
-        mdata->handle.udp.src_port = netbuf_fromport(buf);
-        osMessageQueuePut(gx_MDataQueue, mdata, 0, 100);
+        meta->handle.udp.src_ip   = *netbuf_fromaddr(buf);
+        meta->handle.udp.src_port = netbuf_fromport(buf);
+        osMessageQueuePut(g_meta_queue, meta, 0, 100);
 
-        osMutexRelease(gx_RingBufMutex);
+        osMutexRelease(g_ringbuf_mutex);
 
         netbuf_delete(buf);
     }

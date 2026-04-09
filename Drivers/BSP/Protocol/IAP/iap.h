@@ -2,7 +2,7 @@
 
 #include "main.h"
 
-#include "msg.h"
+#include "protocol.h"
 #include "RingBuff.h"
 
 #define FRAME_MIN_LEN     (5U)
@@ -14,23 +14,17 @@
 #define FRAME_CMD_OFFSET  (2U)
 #define FRAME_LEN_OFFSET  (3U)
 
-typedef enum {
-    iap_frame_rdy = 0, // 完美帧，可以解析
-    iap_frame_wait,    // 拆包帧，帧头匹配，但数据没收齐，且后面没有新帧头
-    iap_frame_fake,    // 伪造帧，帧头匹配，但CRC或长度不匹配
-} IAP_FrameSta_t;
-
-typedef struct iap_frame {
+typedef struct {
     uint32_t head;
     uint32_t seq;
     uint32_t cmd;
     uint32_t len;
     uint32_t data_crc[];
-} IAP_Frame_t;
+} iap_frame_t;
 
 extern osMessageQueueId_t gx_IapQueue;
-extern osThreadId_t IapHandle;
+extern osThreadId_t g_iap_task_handle;
 extern const osThreadAttr_t IapTask_attributes;
 
-void IapTask(void *argument);
-IAP_FrameSta_t check_frame_validity(const RingBuff_t *buff, uint32_t *total_len, uint8_t *cmd_num);
+void iap_handle_task(void *argument);
+proto_probe_sta_t iap_probe_frame(const ch_meta_t *meta, const RingBuff_t *buff, uint32_t *total_len, uint8_t *cmd_num);

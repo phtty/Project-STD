@@ -39,7 +39,6 @@ virtualFolder:
             - path: LWIP/Target/ethernetif.c
             - path: LWIP/Target/lwipopts.h
             - path: LWIP/App/mqtt_app.c
-            - path: LWIP/App/msg.c
             - path: LWIP/App/tcp_client_app.c
             - path: LWIP/App/tcp_server_app.c
             - path: LWIP/App/udp_app.c
@@ -100,6 +99,19 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Components/LightSensor/light.c
                   folders: []
+                - name: IOCtrl
+                  files:
+                    - path: Drivers/BSP/Components/IOCtrl/IOCtrl.c
+                  folders: []
+                - name: Key
+                  files:
+                    - path: Drivers/BSP/Components/Key/key.c
+                  folders: []
+                - name: RS485_232
+                  files:
+                    - path: Drivers/BSP/Components/RS232_485/RS232.c
+                    - path: Drivers/BSP/Components/RS232_485/RS485.c
+                  folders: []
             - name: Display
               files:
                 - path: Drivers/BSP/Display/display.c
@@ -110,29 +122,25 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Display/text_cvt/text_cvt.c
                   folders: []
-            - name: Key
-              files:
-                - path: Drivers/BSP/Key/key.c
-              folders: []
             - name: RingBuff
               files:
                 - path: Drivers/BSP/RingBuff/RingBuff.c
               folders: []
-            - name: IAP
-              files:
-                - path: Drivers/BSP/IAP/config_info.c
-                - path: Drivers/BSP/IAP/iap.c
-                - path: Drivers/BSP/IAP/iap_cmd.c
-              folders: []
-            - name: IOCtrl
-              files:
-                - path: Drivers/BSP/IOCtrl/IOCtrl.c
-              folders: []
             - name: Protocol
               files:
-                - path: Drivers/BSP/Protocol/cmd.c
                 - path: Drivers/BSP/Protocol/protocol.c
-              folders: []
+              folders:
+                - name: IAP
+                  files:
+                    - path: Drivers/BSP/Protocol/IAP/config_info.c
+                    - path: Drivers/BSP/Protocol/IAP/iap.c
+                    - path: Drivers/BSP/Protocol/IAP/iap_cmd.c
+                  folders: []
+                - name: AH_MQTT
+                  files:
+                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c
+                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c
+                  folders: []
         - name: RTT
           files:
             - path: Drivers/RTT/RTT/SEGGER_RTT.c
@@ -302,15 +310,16 @@ targets:
         - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
         - Compiler
         - Drivers/BSP/Display
-        - Drivers/BSP/Key
+        - Drivers/BSP/Components/Key
         - Drivers/BSP/RingBuffer
-        - Drivers/BSP/IAP
+        - Drivers/BSP/Protocol/IAP
         - Drivers/BSP/RingBuff
-        - Drivers/BSP/Components/ADC
         - Drivers/BSP/Components/LightSensor
         - Drivers/BSP/Protocol
         - Drivers/BSP/Display/text_cvt
-        - Drivers/BSP/IOCtrl
+        - Drivers/BSP/Components/IOCtrl
+        - Drivers/BSP/Components/RS232_485
+        - Drivers/BSP/Protocol/AH_MQTT
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -330,8 +339,8 @@ targets:
           asm-compiler: {}
           beforeBuildTasks: []
           c/cpp-compiler:
-            language-c: c17
-            language-cpp: c++17
+            language-c: c23
+            language-cpp: c++23
             no-exceptions: true
             no-rtti: true
             no-threadsafe-statics: true

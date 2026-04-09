@@ -5,7 +5,7 @@
 #include "lwip/api.h"
 #include "lwip/mem.h"
 
-#include "msg.h"
+#include "protocol.h"
 
 // 定义处理tcp_server连接任务句柄
 osThreadId_t tcpServerTaskHandle;
@@ -65,12 +65,12 @@ void tcpServerTask(void *argument)
 
         if (err == ERR_OK) {
             // 创建新任务处理该连接
-            ch_metadata_t mdata = {
-                .type = CH_TYPE_TCP,
-                // .protocol        = ,
+            ch_meta_t meta = {
+                .type            = CH_TYPE_TCP,
+                .protocol        = PROTO_MASK_NONE,
                 .handle.tcp.conn = newconn,
             };
-            osThreadId_t thread_id = osThreadNew(tcpServerConnTask, (void *)&mdata, &tcpSeverConn_attr);
+            osThreadId_t thread_id = osThreadNew(tcpServerConnTask, (void *)&meta, &tcpSeverConn_attr);
             if (thread_id == NULL) {
                 netconn_close(newconn);
                 netconn_delete(newconn);
@@ -91,8 +91,8 @@ void tcpServerTask(void *argument)
  */
 void tcpServerConnTask(void *argument)
 {
-    ch_metadata_t *mdata    = (ch_metadata_t *)argument;
-    struct netconn *newconn = mdata->handle.tcp.conn;
+    ch_meta_t *meta         = (ch_meta_t *)argument;
+    struct netconn *newconn = meta->handle.tcp.conn;
     struct netbuf *buf;
     err_t err;
     void *data;
@@ -104,7 +104,7 @@ void tcpServerConnTask(void *argument)
     // 循环接收数据
     while ((err = netconn_recv(newconn, &buf)) == ERR_OK) { // netconn_recv会阻塞，直到收到数据或连接断开
         // 临界保护区，防止多个信道同时写ringbuff
-        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+        osMutexAcquire(g_ringbuf_mutex, osWaitForever);
 
         do {
             netbuf_data(buf, &data, &len); // 获取当前片段的数据指针和长度
@@ -116,9 +116,9 @@ void tcpServerConnTask(void *argument)
         } while (netbuf_next(buf) >= 0); // 移动到下一个片段
 
         // 元数据入队
-        osMessageQueuePut(gx_MDataQueue, mdata, 0, 100);
+        osMessageQueuePut(g_meta_queue, meta, 0, 100);
 
-        osMutexRelease(gx_RingBufMutex);
+        osMutexRelease(g_ringbuf_mutex);
 
         netbuf_delete(buf); // 释放netbuf
     }

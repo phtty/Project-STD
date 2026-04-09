@@ -4,8 +4,8 @@
 #include "lwip/sys.h"
 #include "lwip/apps/mqtt.h"
 
-#include "msg.h"
 #include "protocol.h"
+#include "ah_mqtt.h"
 
 // Broker 服务器 IP
 #define BROKER_IP_ADDR "120.46.136.199"
@@ -43,8 +43,8 @@ static void mqtt_incoming_publish_cb(void *arg, const char *topic, uint32_t tot_
     current_payload_offset = 0;
 
     // 将topic放入元数据
-    ch_metadata_t *mdata = (ch_metadata_t *)arg;
-    strcpy(mdata->handle.mqtt.topic, topic);
+    ch_meta_t *meta = (ch_meta_t *)arg;
+    strcpy(meta->handle.mqtt.topic, topic);
 }
 
 // 订阅成功的回调
@@ -96,17 +96,17 @@ static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, 
         }
 
         // 临界保护区，防止多个信道同时写ringbuff
-        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+        osMutexAcquire(g_ringbuf_mutex, osWaitForever);
 
         // 将数据放入环形缓冲区
         BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)mqtt_rcv_buf, len);
 
         // 元数据入队
-        ch_metadata_t *mdata           = (ch_metadata_t *)arg;
-        mdata->handle.mqtt.payload_len = len;
-        osMessageQueuePut(gx_MDataQueue, mdata, 0, 100);
+        ch_meta_t *meta               = (ch_meta_t *)arg;
+        meta->handle.mqtt.payload_len = len;
+        osMessageQueuePut(g_meta_queue, meta, 0, 100);
 
-        osMutexRelease(gx_RingBufMutex);
+        osMutexRelease(g_ringbuf_mutex);
     }
 }
 
@@ -144,11 +144,11 @@ void mqtt_connection(void)
     UNLOCK_TCPIP_CORE(); // 解锁
 
     // 创建数据接收回调
-    ch_metadata_t mdata = {
+    ch_meta_t meta = {
         .type     = CH_TYPE_MQTT,
-        .protocol = ptcl_AH_MQTT,
+        .protocol = PROTO_MASK_AH_MQTT,
     };
-    mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&mdata);
+    mqtt_set_inpub_callback(mqtt_client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&meta);
     if (err == ERR_OK) {
         mqtt_state = connecting;
 

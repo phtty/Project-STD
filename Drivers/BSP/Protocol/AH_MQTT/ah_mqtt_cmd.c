@@ -1,18 +1,18 @@
-#include "cmd.h"
+#include "ah_mqtt_cmd.h"
 
 #include "mqtt_app.h"
-#include "protocol.h"
+#include "ah_mqtt.h"
 #include "text_cvt.h"
 #include "render.h"
 
-static void cmd_SendData(ch_metadata_t *mdata, uint32_t ReturnLen, char *ReturnData);
-static void cmd_default(ch_metadata_t *mdata, char *buff);
-static void cmd_display(ch_metadata_t *mdata, char *buff);
-static void cmd_fill(ch_metadata_t *mdata, char *buff);
-static void cmd_restart(ch_metadata_t *mdata, char *buff);
-static void cmd_checktime(ch_metadata_t *mdata, char *buff);
+static void cmd_SendData(ch_meta_t *meta, uint32_t ReturnLen, char *ReturnData);
+static void cmd_default(ch_meta_t *meta, char *buff);
+static void cmd_display(ch_meta_t *meta, char *buff);
+static void cmd_fill(ch_meta_t *meta, char *buff);
+static void cmd_restart(ch_meta_t *meta, char *buff);
+static void cmd_checktime(ch_meta_t *meta, char *buff);
 
-const CmdFunc_t pfCmdFunc[] = {
+const ah_mqtt_cmd_handler_fn_t g_ah_mqtt_cmd_table[] = {
     cmd_default,
     cmd_display,
     cmd_fill,
@@ -23,10 +23,10 @@ const CmdFunc_t pfCmdFunc[] = {
 /**
  * @brief 测试用命令
  *
- * @param mdata mqtt信道元数据
+ * @param meta mqtt信道元数据
  * @param buff 命令参数
  */
-static void cmd_default(ch_metadata_t *mdata, char *buff)
+static void cmd_default(ch_meta_t *meta, char *buff)
 {
 }
 
@@ -35,10 +35,10 @@ const static FontSize_t disp_size[]   = {0, 0, font_16, font_24, font_32, 0, 0, 
 /**
  * @brief 显示文字
  *
- * @param mdata mqtt信道元数据
+ * @param meta mqtt信道元数据
  * @param buff 命令参数
  */
-static void cmd_display(ch_metadata_t *mdata, char *buff)
+static void cmd_display(ch_meta_t *meta, char *buff)
 {
     uint32_t length     = strlen(buff), gbk_len;
     cmd_display_t *para = (cmd_display_t *)buff;
@@ -50,52 +50,52 @@ static void cmd_display(ch_metadata_t *mdata, char *buff)
     // 更新本地的notify id
     memcpy(&xNotifyID, &(para->nid), sizeof(xNotifyID));
 
-    snprintf(mdata->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
+    snprintf(meta->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
              topic_info.device_id);
-    cmd_SendData(mdata, sizeof("0"), "0");
+    cmd_SendData(meta, sizeof("0"), "0");
 }
 
 /**
  * @brief 全屏填充
  *
- * @param mdata mqtt信道元数据
+ * @param meta mqtt信道元数据
  * @param buff 命令参数
  */
-static void cmd_fill(ch_metadata_t *mdata, char *buff)
+static void cmd_fill(ch_meta_t *meta, char *buff)
 {
     // uint32_t length  = strlen(buff);
     cmd_fill_t *para = (cmd_fill_t *)buff;
 
     Disp_Fill(disp_color[(uint8_t)(para->color) - 0x30]);
 
-    snprintf(mdata->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
+    snprintf(meta->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
              topic_info.device_id);
-    cmd_SendData(mdata, sizeof("0"), "0");
+    cmd_SendData(meta, sizeof("0"), "0");
 }
 
 /**
  * @brief 重启
  *
- * @param mdata mqtt信道元数据
+ * @param meta mqtt信道元数据
  * @param buff 命令参数
  */
-static void cmd_restart(ch_metadata_t *mdata, char *buff)
+static void cmd_restart(ch_meta_t *meta, char *buff)
 {
     // uint32_t length     = strlen(buff);
     // cmd_restart_t *para = (cmd_restart_t *)buff;
 
-    snprintf(mdata->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
+    snprintf(meta->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
              topic_info.device_id);
-    cmd_SendData(mdata, sizeof("0"), "0");
+    cmd_SendData(meta, sizeof("0"), "0");
 
     NVIC_SystemReset(); // 重启
 }
@@ -103,10 +103,10 @@ static void cmd_restart(ch_metadata_t *mdata, char *buff)
 /**
  * @brief 对时
  *
- * @param mdata mqtt信道元数据
+ * @param meta mqtt信道元数据
  * @param buff 命令参数
  */
-static void cmd_checktime(ch_metadata_t *mdata, char *buff)
+static void cmd_checktime(ch_meta_t *meta, char *buff)
 {
     // uint32_t length     = strlen(buff);
     cmd_checktime_t *para = (cmd_checktime_t *)buff;
@@ -115,27 +115,27 @@ static void cmd_checktime(ch_metadata_t *mdata, char *buff)
     if (para->type == '1')
         memcpy(&(xNotifyID.date_time), date, sizeof(notify_date_t));
 
-    snprintf(mdata->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/checktime",
+    snprintf(meta->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/checktime",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
              topic_info.device_id);
-    cmd_SendData(mdata, sizeof("0"), "0");
+    cmd_SendData(meta, sizeof("0"), "0");
 }
 
 /**
  * @brief  内部函数，封装了按协议格式发送消息
  *
- * @param  mdata mqtt信道元数据，有topic信息
+ * @param  meta mqtt信道元数据，有topic信息
  * @param  ReturnLen 消息长度
  * @param  ReturnData 发布的消息
  */
-static void cmd_SendData(ch_metadata_t *mdata, uint32_t ReturnLen, char *ReturnData)
+static void cmd_SendData(ch_meta_t *meta, uint32_t ReturnLen, char *ReturnData)
 {
     char ReturnBuff[128] = {0};
 
     memcpy(ReturnBuff, &xNotifyID, sizeof(xNotifyID));
     memcpy(&ReturnBuff[sizeof(xNotifyID)], ReturnData, ReturnLen);
 
-    CH_UniversalSend(mdata, (uint8_t *)ReturnBuff, strlen(ReturnBuff));
+    channel_send(meta, (uint8_t *)ReturnBuff, strlen(ReturnBuff));
 }

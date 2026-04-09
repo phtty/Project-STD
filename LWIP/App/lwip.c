@@ -30,7 +30,7 @@
 
 /* USER CODE BEGIN 0 */
 #include "config_info.h"
-#include "msg.h"
+#include "protocol.h"
 #include "mqtt_app.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/

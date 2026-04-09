@@ -5,7 +5,7 @@
 #include "lwip/api.h"
 #include "lwip/mem.h"
 
-#include "msg.h"
+#include "protocol.h"
 
 // 定义处理tcp_client连接任务句柄
 osThreadId_t tcpClientTaskHandle;
@@ -67,12 +67,12 @@ void tcpClientTask(void *argument)
             // 确保信号量是空的
             while (osSemaphoreAcquire(ClientDiscnnSemaphore, 0) == osOK);
 
-            ch_metadata_t mdata = {
-                .type = CH_TYPE_TCP,
-                // .protocol        = ,
+            ch_meta_t meta = {
+                .type            = CH_TYPE_TCP,
+                .protocol        = PROTO_MASK_NONE,
                 .handle.tcp.conn = conn,
             };
-            osThreadId_t thread_id = osThreadNew(tcpClientConnTask, (void *)&mdata, &tcpClientConn_attr);
+            osThreadId_t thread_id = osThreadNew(tcpClientConnTask, (void *)&meta, &tcpClientConn_attr);
 
             if (thread_id != NULL) { // 阻塞在这里，直到通信任务通知连接断开
                 osSemaphoreAcquire(ClientDiscnnSemaphore, osWaitForever);
@@ -97,8 +97,8 @@ void tcpClientTask(void *argument)
  */
 void tcpClientConnTask(void *argument)
 {
-    ch_metadata_t *mdata = (ch_metadata_t *)argument;
-    struct netconn *conn = mdata->handle.tcp.conn;
+    ch_meta_t *meta      = (ch_meta_t *)argument;
+    struct netconn *conn = meta->handle.tcp.conn;
     struct netbuf *buf;
     err_t err;
     void *data;
@@ -110,7 +110,7 @@ void tcpClientConnTask(void *argument)
     // 循环接收数据
     while ((err = netconn_recv(conn, &buf)) == ERR_OK) {
         // 临界保护区，防止多个信道同时写ringbuff
-        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+        osMutexAcquire(g_ringbuf_mutex, osWaitForever);
 
         do {
             netbuf_data(buf, &data, &len);
@@ -123,9 +123,9 @@ void tcpClientConnTask(void *argument)
         } while (netbuf_next(buf) >= 0);
 
         // 元数据入队
-        osMessageQueuePut(gx_MDataQueue, mdata, 0, 100);
+        osMessageQueuePut(g_meta_queue, meta, 0, 100);
 
-        osMutexRelease(gx_RingBufMutex);
+        osMutexRelease(g_ringbuf_mutex);
 
         netbuf_delete(buf); // 释放netbuf内存
     }

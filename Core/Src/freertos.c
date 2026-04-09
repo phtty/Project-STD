@@ -29,7 +29,7 @@
 #include "iwdg.h"
 #include "rtc.h"
 #include "lwip.h"
-#include "msg.h"
+#include "protocol.h"
 #include "SEGGER_RTT.h"
 #include "w25qxx.h"
 #include "render.h"
@@ -38,6 +38,8 @@
 #include "tcp_client_app.h"
 #include "mqtt_app.h"
 #include "udp_app.h"
+#include "RS232.h"
+#include "RS485.h"
 
 /* USER CODE END Includes */
 
@@ -157,7 +159,7 @@ void InitialTask(void *argument)
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
     BSP_W25Qx_Init(&hw25q256, &hspi1);
-    CH_Initialize();
+    channel_init();
 
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
@@ -166,6 +168,9 @@ void InitialTask(void *argument)
     udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
+    rs2321ManageTaskHandle = osThreadNew(rs2321ManageTask, NULL, &rs2321ManageTask_attributes);
+    rs2322ManageTaskHandle = osThreadNew(rs2322ManageTask, NULL, &rs2322ManageTask_attributes);
+    rs485ManageTaskHandle  = osThreadNew(rs485ManageTask, NULL, &rs485ManageTask_attributes);
 
     // autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
 
