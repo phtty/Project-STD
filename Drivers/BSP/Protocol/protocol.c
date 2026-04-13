@@ -55,10 +55,14 @@ void channel_init(void)
     };
     g_dispatch_task_handle = osThreadNew(frame_dispatch_task, NULL, &frame_dispatch_task_attr);
 
-    g_iap_task_handle                                 = osThreadNew(iap_handle_task, NULL, &IapTask_attributes);
-    g_proto_to_group[proto_index(PROTO_MASK_IAP)]     = RB_GROUP_IAP;
-    g_proto_probers[proto_index(PROTO_MASK_IAP)]      = iap_probe_frame;
-    g_ah_mqtt_task_handle                             = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
+    // 注册IAP协议任务
+    g_iap_task_handle = osThreadNew(iap_handle_task, NULL, &IapTask_attributes);
+    // 注册IAP协议相关资源
+    g_proto_to_group[proto_index(PROTO_MASK_IAP)] = RB_GROUP_IAP;
+    g_proto_probers[proto_index(PROTO_MASK_IAP)]  = iap_probe_frame;
+    // 注册安徽mqtt协议任务
+    g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
+    // 注册安徽mqtt协议相关资源
     g_proto_to_group[proto_index(PROTO_MASK_AH_MQTT)] = RB_GROUP_PROTO;
     g_proto_probers[proto_index(PROTO_MASK_AH_MQTT)]  = ah_mqtt_probe_frame;
 }

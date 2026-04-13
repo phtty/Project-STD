@@ -35,7 +35,7 @@ notify_id_t xNotifyID = {
 osThreadId_t g_ah_mqtt_task_handle;
 const osThreadAttr_t ProtocolTask_attributes = {
     .name       = "ah_mqtt_handle_task",
-    .stack_size = 256 * 4,
+    .stack_size = 512 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 

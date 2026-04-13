@@ -26,7 +26,7 @@ void iap_handle_task(void *argument)
     const osMessageQueueAttr_t proto_iap_queue_attr = {
         .name = "g_proto_iap_queue",
     };
-    gx_IapQueue                                = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_iap_queue_attr);
+    gx_IapQueue                                = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_iap_queue_attr);
     g_frame_queue[proto_index(PROTO_MASK_IAP)] = gx_IapQueue;
 
     for (;;) {
@@ -36,8 +36,9 @@ void iap_handle_task(void *argument)
         }
 
         iap_frame_t *frame_data = (iap_frame_t *)msg.data;
+        uint8_t cmd             = (uint8_t)((frame_data->cmd) & 0xff);
 
-        g_iap_cmd_table[frame_data->cmd](&(msg.meta), frame_data);
+        g_iap_cmd_table[cmd](&(msg.meta), frame_data);
     }
 }
 

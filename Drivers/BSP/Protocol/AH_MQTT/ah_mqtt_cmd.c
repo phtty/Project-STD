@@ -87,9 +87,6 @@ static void cmd_fill(ch_meta_t *meta, char *buff)
  */
 static void cmd_restart(ch_meta_t *meta, char *buff)
 {
-    // uint32_t length     = strlen(buff);
-    // cmd_restart_t *para = (cmd_restart_t *)buff;
-
     snprintf(meta->handle.mqtt.topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
              topic_info.station_hex,
              topic_info.lane_hex,
@@ -108,7 +105,6 @@ static void cmd_restart(ch_meta_t *meta, char *buff)
  */
 static void cmd_checktime(ch_meta_t *meta, char *buff)
 {
-    // uint32_t length     = strlen(buff);
     cmd_checktime_t *para = (cmd_checktime_t *)buff;
     notify_date_t *date   = (notify_date_t *)(para->time);
 

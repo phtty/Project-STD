@@ -144,7 +144,7 @@ void mqtt_connection(void)
     UNLOCK_TCPIP_CORE(); // 解锁
 
     // 创建数据接收回调
-    ch_meta_t meta = {
+    static ch_meta_t meta = {
         .type     = CH_TYPE_MQTT,
         .protocol = PROTO_MASK_AH_MQTT,
     };

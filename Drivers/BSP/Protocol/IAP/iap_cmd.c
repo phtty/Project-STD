@@ -37,7 +37,7 @@ const iap_cmd_handler_fn_t g_iap_cmd_table[] = {
  */
 static void cmd_SendReData(ch_meta_t *meta, uint32_t ReSeq, uint32_t ReCmd, uint32_t ReLen, uint32_t *ReData)
 {
-    uint32_t ReBuff[FRAME_MAX_LEN] = {0};
+    static uint32_t ReBuff[FRAME_MAX_LEN] = {0};
 
     iap_frame_t *pIAP_ReTmp = (iap_frame_t *)&(ReBuff);
     pIAP_ReTmp->head        = 0x5A5A5A5A;
@@ -86,9 +86,7 @@ static void cmd_Test_00(ch_meta_t *meta, iap_frame_t *IAP_Data)
  */
 static void cmd_ReportIp_01(ch_meta_t *meta, iap_frame_t *IAP_Data)
 {
-    SysInfo_t *pConfig    = (SysInfo_t *)ADDR_CONFIG_SECTOR;
-    SysInfo_t config_info = {0};
-    memcpy(&config_info, pConfig, sizeof(SysInfo_t));
+    SysInfo_t config_info = *((SysInfo_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t ReData[4] = {0};
     ReData[0]          = config_info.net_cfg.ip[0] << 24 | config_info.net_cfg.ip[1] << 16 | config_info.net_cfg.ip[2] << 8 | config_info.net_cfg.ip[3];
@@ -107,9 +105,7 @@ iap_ipconfig_t ipconfig = {0};
  */
 static void cmd_ForceModifyIP_02(ch_meta_t *meta, iap_frame_t *IAP_Data)
 {
-    SysInfo_t *pConfig    = (SysInfo_t *)ADDR_CONFIG_SECTOR;
-    SysInfo_t config_info = {0};
-    memcpy(&config_info, pConfig, sizeof(SysInfo_t));
+    SysInfo_t config_info = *((SysInfo_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t TmpData[4] = {0};
     memcpy(TmpData, IAP_Data->data_crc, sizeof(TmpData));
@@ -149,9 +145,7 @@ static void cmd_ForceModifyIP_02(ch_meta_t *meta, iap_frame_t *IAP_Data)
  */
 static void cmd_ReportFirmwareStatus_03(ch_meta_t *meta, iap_frame_t *IAP_Data)
 {
-    SysInfo_t *pConfig    = (SysInfo_t *)ADDR_CONFIG_SECTOR;
-    SysInfo_t config_info = {0};
-    memcpy(&config_info, pConfig, sizeof(SysInfo_t));
+    SysInfo_t config_info = *((SysInfo_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t ReData[11] = {0};
     ReData[0]           = config_info.app_info.size;                                        // นฬผþด๓ะก

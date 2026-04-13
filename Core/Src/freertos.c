@@ -168,9 +168,9 @@ void InitialTask(void *argument)
     udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    rs2321ManageTaskHandle = osThreadNew(rs2321ManageTask, NULL, &rs2321ManageTask_attributes);
-    rs2322ManageTaskHandle = osThreadNew(rs2322ManageTask, NULL, &rs2322ManageTask_attributes);
-    rs485ManageTaskHandle  = osThreadNew(rs485ManageTask, NULL, &rs485ManageTask_attributes);
+    // rs2321ManageTaskHandle = osThreadNew(rs2321ManageTask, NULL, &rs2321ManageTask_attributes);
+    // rs2322ManageTaskHandle = osThreadNew(rs2322ManageTask, NULL, &rs2322ManageTask_attributes);
+    rs485ManageTaskHandle = osThreadNew(rs485ManageTask, NULL, &rs485ManageTask_attributes);
 
     // autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
 
@@ -234,5 +234,22 @@ void PointTestTask(void *argument)
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
     while (1);
+}
+
+/* 初始化 DWT */
+void vConfigureTimerForRunTimeStats(void)
+{
+    /* 使能 DWT 模块 */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    /* 清零计数器 */
+    DWT->CYCCNT = 0;
+    /* 使能计数器 */
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+/* 读取当前计数值（CPU 周期数） */
+uint32_t ulGetRunTimeCounterValue(void)
+{
+    return DWT->CYCCNT;
 }
 /* USER CODE END Application */
