@@ -12,7 +12,7 @@ typedef struct RB_Struct {
 } RingBuff_t;
 
 extern RingBuff_t xProtocol_RB;
-extern RingBuff_t xIAP_RB;
+extern RingBuff_t g_iap_ringbuf;
 
 uint8_t BSP_RB_IsEmpty(const RingBuff_t *fifo);
 uint8_t BSP_RB_IsFull(const RingBuff_t *fifo);

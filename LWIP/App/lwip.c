@@ -30,7 +30,7 @@
 
 /* USER CODE BEGIN 0 */
 #include "config_info.h"
-#include "msg.h"
+#include "protocol.h"
 #include "mqtt_app.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
@@ -156,9 +156,6 @@ static void ethernet_link_status_updated(struct netif *netif)
         osEventFlagsClear(netEventFlagsHandle, FLAG_NET_READY);
         mqtt_state = no_connect;
         osSemaphoreRelease(mqttConnSemHandle); // 释放信号量通知mqtt连接管理任务
-
-        Channel_FreeNet(); // 关闭所有网络信道
-
         /* USER CODE END 6 */
     }
 }

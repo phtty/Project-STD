@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "cmsis_os2.h"
 #include "IOCtrl.h"
+#include "RS232.h"
+#include "RS485.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -279,7 +281,11 @@ void USART1_IRQHandler(void)
     /* USER CODE END USART1_IRQn 0 */
     HAL_UART_IRQHandler(&huart1);
     /* USER CODE BEGIN USART1_IRQn 1 */
+    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE) != RESET) {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
 
+        RS485_IdleHandle();
+    }
     /* USER CODE END USART1_IRQn 1 */
 }
 
@@ -293,7 +299,11 @@ void USART3_IRQHandler(void)
     /* USER CODE END USART3_IRQn 0 */
     HAL_UART_IRQHandler(&huart3);
     /* USER CODE BEGIN USART3_IRQn 1 */
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_IDLE) != RESET) {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart3);
 
+        RS232_1_IdleHandle();
+    }
     /* USER CODE END USART3_IRQn 1 */
 }
 
@@ -421,7 +431,11 @@ void USART6_IRQHandler(void)
     /* USER CODE END USART6_IRQn 0 */
     HAL_UART_IRQHandler(&huart6);
     /* USER CODE BEGIN USART6_IRQn 1 */
+    if (__HAL_UART_GET_FLAG(&huart6, UART_FLAG_IDLE) != RESET) {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart6);
 
+        RS232_2_IdleHandle();
+    }
     /* USER CODE END USART6_IRQn 1 */
 }
 

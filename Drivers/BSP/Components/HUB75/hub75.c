@@ -1,4 +1,5 @@
 #include "hub75.h"
+
 #include "main.h"
 
 void bsp_init_hub75(void)

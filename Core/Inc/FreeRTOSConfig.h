@@ -171,6 +171,15 @@ standard names. */
 
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
+#define configUSE_TRACE_FACILITY                 1 // 必须为 1，启用跟踪功能
+#define configUSE_STATS_FORMATTING_FUNCTIONS     1 // 可选，若要用 vTaskList()
+#define configRECORD_STACK_HIGH_ADDRESS          1 // 必须为 1，记录栈高水位
+
+#define configGENERATE_RUN_TIME_STATS            1
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() vConfigureTimerForRunTimeStats()
+#define portGET_RUN_TIME_COUNTER_VALUE()         ulGetRunTimeCounterValue()
+void vConfigureTimerForRunTimeStats(void);
+uint32_t ulGetRunTimeCounterValue(void);
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

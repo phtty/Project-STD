@@ -29,8 +29,10 @@
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
         },
-        "cortex-debug.variableUseNaturalFormat": false,
-        "commentTranslate.source": "Bing"
+        "cortex-debug.variableUseNaturalFormat": true,
+        "Codegeex.RepoIndex": true,
+        "Codegeex.CommitMessageStyle": "ConventionalCommits",
+        "Codegeex.Chat.fontSize": 14
     },
     "extensions": {
         "recommendations": [

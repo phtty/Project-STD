@@ -4,7 +4,7 @@
 #include "lwip.h"
 
 #include "iap.h"
-#include "msg.h"
+#include "protocol.h"
 #include "udp_app.h"
 #include "config_info.h"
 
@@ -25,12 +25,12 @@ typedef enum {
     rtn_cmd07 = (uint32_t)0x0000b407U,
 } rtn_cmd_t;
 
-typedef struct iap_ipconfig {
+typedef struct {
     ip4_addr_t ip;
     ip4_addr_t mask;
     ip4_addr_t gw;
     uint16_t port;
 } iap_ipconfig_t;
 
-typedef void (*pfcmd_Functions)(MsgQueueItem_t *, IAP_Frame_t *);
-extern const pfcmd_Functions pfIAP_CMD[];
+typedef void (*iap_cmd_handler_fn_t)(ch_meta_t *, iap_frame_t *);
+extern const iap_cmd_handler_fn_t g_iap_cmd_table[];

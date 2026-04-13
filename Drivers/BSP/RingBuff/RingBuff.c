@@ -1,7 +1,7 @@
 #include "RingBuff.h"
 
-RingBuff_t xProtocol_RB = {0};
-RingBuff_t xIAP_RB      = {0};
+RingBuff_t xProtocol_RB  = {0};
+RingBuff_t g_iap_ringbuf = {0};
 
 /**
  * @brief 检查缓冲区是否为空

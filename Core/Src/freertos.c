@@ -29,7 +29,7 @@
 #include "iwdg.h"
 #include "rtc.h"
 #include "lwip.h"
-#include "msg.h"
+#include "protocol.h"
 #include "SEGGER_RTT.h"
 #include "w25qxx.h"
 #include "render.h"
@@ -38,8 +38,11 @@
 #include "tcp_client_app.h"
 #include "mqtt_app.h"
 #include "udp_app.h"
-#include "IOCtrl.h"
+#include "RS232.h"
+#include "RS485.h"
 #include "key.h"
+#include "IOCtrl.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,7 +58,6 @@ typedef StaticTask_t osStaticThreadDef_t;
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-osMutexId_t light_mutex;
 osSemaphoreId_t test_semaphore;
 osEventFlagsId_t SW123_Event;
 /* USER CODE END PM */
@@ -175,7 +177,7 @@ void InitialTask(void *argument)
     /* USER CODE BEGIN InitialTask */
     SEGGER_RTT_Init();
     BSP_W25Qx_Init(&hw25q256, &hspi1);
-    communication_init();
+    channel_init();
 
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
@@ -184,15 +186,20 @@ void InitialTask(void *argument)
     udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
-    RefreshTaskHandle      = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
-    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
+    // rs2321ManageTaskHandle = osThreadNew(rs2321ManageTask, NULL, &rs2321ManageTask_attributes);
+    // rs2322ManageTaskHandle = osThreadNew(rs2322ManageTask, NULL, &rs2322ManageTask_attributes);
+    rs485ManageTaskHandle = osThreadNew(rs485ManageTask, NULL, &rs485ManageTask_attributes);
 
+    // autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
+
+    // RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
+    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
     // RenderString(0, 0, "测试", strlen("测试"), green, font_16, font_ht);
 
     printf("\nInit Task Done\n");
 
-    osThreadExit();
+    // osThreadExit();
+    osThreadSuspend(InitTaskHandle);
     /* Infinite loop */
     for (;;) {
         osDelay(1);
@@ -204,7 +211,8 @@ void InitialTask(void *argument)
 /* USER CODE BEGIN Application */
 void HalfSecTask(void *argument)
 {
-    uint8_t run_time = 0;
+    uint32_t run_time = 0;
+
     for (;;) {
         HAL_IWDG_Refresh(&hiwdg);
 
@@ -225,17 +233,12 @@ void PointTestTask(void *argument)
     HAL_TIM_Base_Start_IT(&htim3);
     HAL_TIM_Base_Start_IT(&htim4);
 
-    // pixel_map[32] = green;
-    // convert_pixelmap();
-    point_order_test(black, SCAN_LINE_PIXEL_NUM, 0);
-    point_order_test(black, SCAN_LINE_PIXEL_NUM, 1);
-
     for (;;) {
-        for (int i = 0; i < DISRAM_SIZE; i++) {
+        for (int i = SCAN_LINE_PIXEL_NUM - 50; i < DISRAM_SIZE; i++) {
             pixel_map[i] = green;
 
             convert_pixelmap();
-            osDelay(250);
+            osDelay(50);
 
             pixel_map[i] = black;
         }
@@ -249,5 +252,22 @@ void PointTestTask(void *argument)
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
     while (1);
+}
+
+/* 初始化 DWT */
+void vConfigureTimerForRunTimeStats(void)
+{
+    /* 使能 DWT 模块 */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    /* 清零计数器 */
+    DWT->CYCCNT = 0;
+    /* 使能计数器 */
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+/* 读取当前计数值（CPU 周期数） */
+uint32_t ulGetRunTimeCounterValue(void)
+{
+    return DWT->CYCCNT;
 }
 /* USER CODE END Application */

@@ -4,8 +4,8 @@
 extern osEventFlagsId_t SW123_Event;
 
 /*
- * @brief  BSP_HSCtrl  (黄闪控制)
- * @param  HSEnable: true: 打开, false: 关闭
+ * @brief  BSP_HSCtrl  (????)
+ * @param  HSEnable: true: ??, false: ??
  */
 void BSP_HSCtrl(bool HSEnable)
 {
@@ -15,8 +15,8 @@ void BSP_HSCtrl(bool HSEnable)
 }
 
 /*
- * @brief  BSP_LILCtrl  (车道灯控制)
- * @param  LILEnable: true: 绿灯, false: 红灯
+ * @brief  BSP_LILCtrl  (?????)
+ * @param  LILEnable: true: ??, false: ??
  */
 void BSP_LILCtrl(bool LILEnable)
 {

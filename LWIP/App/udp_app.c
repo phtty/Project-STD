@@ -5,7 +5,7 @@
 #include "lwip/api.h"
 #include "lwip/mem.h"
 
-#include "msg.h"
+#include "protocol.h"
 #include "iap.h"
 
 // 定义处理udp连接的任务句柄
@@ -59,21 +59,19 @@ void udpManageTask(void *argument)
         if (err == ERR_OK) {
             printf("UDP Receiver: Listening on port %d (Broadcast enabled)\n", (int)UDP_PORT);
 
-            // 确保信号量已被释放，同时申请一个空闲的信道
+            // 确保信号量已被释放
             while (osSemaphoreAcquire(udpDiscnnSemaphore, 0) == osOK);
-            int16_t channel_index                      = Channel_Alloc(CH_TYPE_UDP);
-            gx_Channels[channel_index].handle.udp.conn = conn;
+            ch_meta_t meta = {
+                .type            = CH_TYPE_UDP,
+                .protocol        = PROTO_MASK_IAP,
+                .handle.udp.conn = conn,
+            };
 
             // 创建数据接收任务
-            udp_conn_arg_t arg = {
-                .conn          = conn,
-                .channel_index = channel_index,
-            };
-            osThreadId_t thread_id = osThreadNew(udpConnectTask, (void *)&arg, &udpConnect_attr);
+            osThreadId_t thread_id = osThreadNew(udpConnectTask, (void *)&meta, &udpConnect_attr);
 
             if (thread_id != NULL) { // 阻塞等待断开连接信号量
                 osSemaphoreAcquire(udpDiscnnSemaphore, osWaitForever);
-                Channel_Free(channel_index); // 断开连接同时释放信道
             }
         } else {
             printf("UDP Receiver: Bind failed, err == %d\n", (int)err);
@@ -91,21 +89,14 @@ void udpManageTask(void *argument)
  */
 void udpConnectTask(void *argument)
 {
-    struct netconn *conn = ((udp_conn_arg_t *)argument)->conn;
+    ch_meta_t *meta      = (ch_meta_t *)argument;
+    struct netconn *conn = meta->handle.udp.conn;
     struct netbuf *buf;
     err_t err;
 
-    IapHandle = osThreadNew(IapTask, NULL, &IapTask_attributes);
-
     while ((err = netconn_recv(conn, &buf)) == ERR_OK) {
-        MsgQueueItem_t q_item;
-        q_item.channel_index = ((udp_conn_arg_t *)argument)->channel_index;
-        q_item.session_id    = gx_Channels[((udp_conn_arg_t *)argument)->channel_index].session_id;
-        q_item.udp_src_ip    = *netbuf_fromaddr(buf); // 存入队列，不存全局
-        q_item.udp_src_port  = netbuf_fromport(buf);
-
         // 临界保护区，防止多个信道同时写ringbuff
-        osMutexAcquire(gx_RingBufMutex, osWaitForever);
+        osMutexAcquire(g_ringbuf_mutex, osWaitForever);
 
         void *data;
         uint16_t len;
@@ -114,13 +105,16 @@ void udpConnectTask(void *argument)
 
             if (len > 0) {
                 // BSP_RB_PutByte_Bulk(&xProtocol_RB, (uint8_t *)data, len);
-                BSP_RB_PutByte_Bulk(&xIAP_RB, (uint8_t *)data, len);
+                BSP_RB_PutByte_Bulk(&g_iap_ringbuf, (uint8_t *)data, len);
             }
         } while (netbuf_next(buf) >= 0);
 
-        osMessageQueuePut(gx_PacketMsg, &q_item, 0, 100);
+        // 元数据入队
+        meta->handle.udp.src_ip   = *netbuf_fromaddr(buf);
+        meta->handle.udp.src_port = netbuf_fromport(buf);
+        osMessageQueuePut(g_meta_queue, meta, 0, 100);
 
-        osMutexRelease(gx_RingBufMutex);
+        osMutexRelease(g_ringbuf_mutex);
 
         netbuf_delete(buf);
     }

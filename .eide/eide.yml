@@ -39,11 +39,9 @@ virtualFolder:
             - path: LWIP/Target/ethernetif.c
             - path: LWIP/Target/lwipopts.h
             - path: LWIP/App/mqtt_app.c
-            - path: LWIP/App/msg.c
             - path: LWIP/App/tcp_client_app.c
             - path: LWIP/App/tcp_server_app.c
             - path: LWIP/App/udp_app.c
-            - path: LWIP/App/udp_interface.c
           folders: []
         - name: RTOS
           files:
@@ -101,10 +99,18 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Components/LightSensor/light.c
                   folders: []
-                - name: Protocol
+                - name: IOCtrl
                   files:
-                    - path: Drivers/BSP/Protocol/cmd.c
-                    - path: Drivers/BSP/Protocol/protocol.c
+                    - path: Drivers/BSP/Components/IOCtrl/IOCtrl.c
+                  folders: []
+                - name: Key
+                  files:
+                    - path: Drivers/BSP/Components/Key/key.c
+                  folders: []
+                - name: RS485_232
+                  files:
+                    - path: Drivers/BSP/Components/RS232_485/RS232.c
+                    - path: Drivers/BSP/Components/RS232_485/RS485.c
                   folders: []
             - name: Display
               files:
@@ -116,24 +122,25 @@ virtualFolder:
                   files:
                     - path: Drivers/BSP/Display/text_cvt/text_cvt.c
                   folders: []
-            - name: Key
-              files:
-                - path: Drivers/BSP/Key/key.c
-              folders: []
             - name: RingBuff
               files:
                 - path: Drivers/BSP/RingBuff/RingBuff.c
               folders: []
-            - name: IAP
+            - name: Protocol
               files:
-                - path: Drivers/BSP/IAP/config_info.c
-                - path: Drivers/BSP/IAP/iap.c
-                - path: Drivers/BSP/IAP/iap_cmd.c
-              folders: []
-            - name: IOCtrl
-              files:
-                - path: Drivers/BSP/IOCtrl/IOCtrl.c
-              folders: []
+                - path: Drivers/BSP/Protocol/protocol.c
+              folders:
+                - name: IAP
+                  files:
+                    - path: Drivers/BSP/Protocol/IAP/config_info.c
+                    - path: Drivers/BSP/Protocol/IAP/iap.c
+                    - path: Drivers/BSP/Protocol/IAP/iap_cmd.c
+                  folders: []
+                - name: AH_MQTT
+                  files:
+                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c
+                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c
+                  folders: []
         - name: RTT
           files:
             - path: Drivers/RTT/RTT/SEGGER_RTT.c
@@ -303,19 +310,23 @@ targets:
         - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
         - Compiler
         - Drivers/BSP/Display
-        - Drivers/BSP/Key
+        - Drivers/BSP/Components/Key
         - Drivers/BSP/RingBuffer
-        - Drivers/BSP/IAP
+        - Drivers/BSP/Protocol/IAP
         - Drivers/BSP/RingBuff
-        - Drivers/BSP/Components/ADC
         - Drivers/BSP/Components/LightSensor
         - Drivers/BSP/Protocol
         - Drivers/BSP/Display/text_cvt
-        - Drivers/BSP/IOCtrl
+        - Drivers/BSP/Components/IOCtrl
+        - Drivers/BSP/Components/RS232_485
+        - Drivers/BSP/Protocol/AH_MQTT
       libList: []
     excludeList:
+      - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+    settings:
+      debugger: cortex-debug
     toolchain: GCC
     toolchainConfigMap:
       GCC:
@@ -328,8 +339,8 @@ targets:
           asm-compiler: {}
           beforeBuildTasks: []
           c/cpp-compiler:
-            language-c: c17
-            language-cpp: c++17
+            language-c: c23
+            language-cpp: c++23
             no-exceptions: true
             no-rtti: true
             no-threadsafe-statics: true
@@ -373,6 +384,107 @@ targets:
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
-        interface: cmsis-dap
-        target: stm32f4x
-    uploader: OpenOCD
+        interface: stlink
+        target: stm32f1x
+    uploader: Custom
+  Release:
+    cppPreprocessAttrs:
+      defineList:
+        - USE_HAL_DRIVER
+        - STM32F407xx
+      incList:
+        - Core/Inc
+        - Drivers/CMSIS/Include
+        - Drivers/CMSIS/Device/ST/STM32F4xx/Include
+        - Drivers/STM32F4xx_HAL_Driver/Inc
+        - Drivers/BSP/Components/dp83848
+        - Drivers/BSP/Components/HUB75
+        - Drivers/BSP/Components/W25Qxx
+        - Drivers/RTT/Config
+        - Drivers/RTT/RTT
+        - LWIP/App
+        - LWIP/Target
+        - Middlewares/Third_Party/LwIP/src/include
+        - Middlewares/Third_Party/LwIP/system
+        - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+        - Middlewares/Third_Party/FreeRTOS/Source/include
+        - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+        - Compiler
+        - Drivers/BSP/Display
+        - Drivers/BSP/Key
+        - Drivers/BSP/RingBuffer
+        - Drivers/BSP/IAP
+        - Drivers/BSP/RingBuff
+        - Drivers/BSP/Components/ADC
+        - Drivers/BSP/Components/LightSensor
+        - Drivers/BSP/Protocol
+        - Drivers/BSP/Display/text_cvt
+        - Drivers/BSP/IOCtrl
+      libList: []
+    excludeList:
+      - <virtual_root>/Drivers/BSP/Key/key.c
+      - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
+      - <virtual_root>/Drivers/BSP/Display/scan.c
+      - <virtual_root>/Application/NetIF/udp_interface.c
+    settings:
+      debugger: cortex-debug
+    toolchain: GCC
+    toolchainConfigMap:
+      GCC:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 5
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            language-c: c17
+            language-cpp: c++17
+            no-exceptions: true
+            no-rtti: true
+            no-threadsafe-statics: true
+            no-use-cxa-atexit: true
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-size
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            arm-thumb-interwork: true
+            arm-thumb-mode: thumb
+            not-use-syscalls: true
+            output-debug-info: enable
+            use-newlib-nano: true
+          linker:
+            $toolName: auto
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
+            use-float-printf: true
+        scatterFilePath: Compiler/STM32F407XX_FLASH.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
+    uploadConfigMap:
+      Custom:
+        bin: ""
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${fileWorkspaceFolderBasename}.hex verify reset exit"
+        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: "null"
+          vendor: "null"
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+      OpenOCD:
+        baseAddr: "0x08000000"
+        bin: ""
+        interface: stlink
+        target: stm32f1x
+    uploader: Custom

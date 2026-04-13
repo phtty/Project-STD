@@ -249,17 +249,16 @@ void convert_pixelmap_p20(void)
  */
 void convert_pixelmap_p16(void)
 {
-    uint16_t group_cnt = 0, group_row = 0, row_cnt = 0, col_cnt = 0;
+    uint16_t group_cnt = 0, group_row = 0, group_col = 0, row_cnt = 0, col_cnt = 0;
 
     for (uint16_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
         row_cnt = map_cnt / SCREEN_PIXEL_ROW; // ÆÁÄ»µÄÐÐ±ê
         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
 
-        if (row_cnt / 4 % 2)
-            group_row = row_cnt / 4 - 1;
-        else
-            group_row = row_cnt / 4 + 1;
-        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * 12) + (col_cnt / 4 + col_cnt / 4 / 4 * 4);
+        group_row = (row_cnt / 4) ^ 1;
+        group_col = col_cnt / 4;
+
+        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * (CHANNEL_PIXEL_NUM / 16 - 4)) + (group_col + group_col / 4 * 4);
 
         switch (row_cnt % 4) {
             case 0:
