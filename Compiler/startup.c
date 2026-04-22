@@ -16,13 +16,6 @@
         *pDest++ = 0;
     }
 
-    // 初始化ccmram，从flash中搬数据到ccmram
-    pSrc  = &_siccmram;
-    pDest = &_sccmram;
-    while (pDest < &_eccmram) {
-        *pDest++ = *pSrc++;
-    }
-
     // 初始化系统时钟
     SystemInit();
 

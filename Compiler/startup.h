@@ -3,15 +3,18 @@
 
 #include <stdint.h>
 
-extern uint32_t _estack;   // 栈顶地址
-extern uint32_t _sidata;   // .data 在Flash中的起始地址
-extern uint32_t _sdata;    // .data 在RAM中的起始地址
-extern uint32_t _edata;    // .data 在RAM中的结束地址
-extern uint32_t _sbss;     // .bss 在RAM中的起始地址
-extern uint32_t _ebss;     // .bss 在RAM中的结束地址
-extern uint32_t _siccmram; // .ccmram在Flash中的起始地址
-extern uint32_t _sccmram;  // .ccmram在RAM中的起始地址
-extern uint32_t _eccmram;  // .ccmram在RAM中的结束地址
+extern uint32_t _estack;    // 栈顶地址
+extern uint32_t _sidata;    // .data 在Flash中的起始地址
+extern uint32_t _sdata;     // .data 在RAM中的起始地址
+extern uint32_t _edata;     // .data 在RAM中的结束地址
+extern uint32_t _sbss;      // .bss 在RAM中的起始地址
+extern uint32_t _ebss;      // .bss 在RAM中的结束地址
+extern uint32_t _siitcmram; // .itcmram在Flash中的起始地址
+extern uint32_t _sitcmram;  // .itcmram在RAM中的起始地址
+extern uint32_t _eitcmram;  // .itcmram在RAM中的结束地址
+extern uint32_t _siram;     // .ram在Flash中的起始地址
+extern uint32_t _sram;      // .ram在RAM中的起始地址
+extern uint32_t _eram;      // .ram在RAM中的结束地址
 
 // 定义中断处理函数的类型
 typedef void (*ISR_VCT)(void);

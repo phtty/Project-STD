@@ -164,8 +164,8 @@ void InitialTask(void *argument)
     // 创建事件标志等待网络就绪
     netEventFlagsHandle = osEventFlagsNew(NULL);
 
-    mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
-    udpManageTaskHandle  = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
+    // mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
+    udpManageTaskHandle = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
     // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
     // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
     // rs2321ManageTaskHandle = osThreadNew(rs2321ManageTask, NULL, &rs2321ManageTask_attributes);

@@ -9,8 +9,8 @@ const osThreadAttr_t RefreshTask_attributes = {
     .priority   = (osPriority_t)osPriorityAboveNormal,
 };
 
-__attribute__((section(".ccmram"))) uint8_t pixel_map[DISRAM_SIZE]  = {0};
-__attribute__((section(".ccmram"))) uint8_t hub75_buff[DISRAM_SIZE] = {0};
+[[gnu::section(".ccmram")]] uint8_t pixel_map[DISRAM_SIZE]  = {0};
+[[gnu::section(".ccmram")]] uint8_t hub75_buff[DISRAM_SIZE] = {0};
 
 const ChannelStruct_TypeDef channel_red[] = {
     {HUB75_R1_GPIO_Port, HUB75_R1_Pin},

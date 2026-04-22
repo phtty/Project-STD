@@ -127,6 +127,7 @@ void frame_dispatch_task(void *argument)
 
                         if (avail >= frame_len) { // 检查缓冲区内可用数据长度是否匹配帧探测的长度
                             uint16_t actual = BSP_RB_GetByte_Bulk(rb, msg.data, frame_len);
+                            avail           = BSP_RB_GetAvailable(rb); // 更新缓冲区内可读数据量
                             osMutexRelease(g_ringbuf_mutex);
 
                             if (actual == frame_len) { // 检查实际读取的数据长度是否匹配帧探测的长度
@@ -137,6 +138,7 @@ void frame_dispatch_task(void *argument)
                             } else { // 异常情况，跳过已读字节，避免死锁
                                 osMutexAcquire(g_ringbuf_mutex, osWaitForever);
                                 BSP_RB_SkipBytes(rb, actual);
+                                avail = BSP_RB_GetAvailable(rb); // 更新缓冲区内可读数据量
                                 osMutexRelease(g_ringbuf_mutex);
                             }
 
@@ -164,6 +166,7 @@ void frame_dispatch_task(void *argument)
                     } else {
                         osMutexAcquire(g_ringbuf_mutex, osWaitForever);
                         BSP_RB_SkipBytes(rb, 1);
+                        avail--; // 更新缓冲区内可读数据量
                         osMutexRelease(g_ringbuf_mutex);
                     }
                 }
