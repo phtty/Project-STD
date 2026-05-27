@@ -33,7 +33,7 @@
 #include "SEGGER_RTT.h"
 #include "w25qxx.h"
 #include "render.h"
-#include "Light.h"
+#include "light.h"
 #include "tcp_server_app.h"
 #include "tcp_client_app.h"
 #include "mqtt_app.h"
