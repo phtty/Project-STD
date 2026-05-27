@@ -16,6 +16,7 @@
 #include "lwip.h"
 #include "SEGGER_RTT.h"
 #include "dev_flash_font.h"
+#include "initcall.h"
 #include "protocol.h"
 #include "udp_app.h"
 
@@ -52,7 +53,7 @@ static void init_task(void *argument)
     /* W25Qxx 字库 Flash */
     dev_font_flash_init(&g_font_flash);
 
-    /* 协议分发（过渡期仍用旧 protocol.c） */
+    /* 协议分发（待完整迁移至 app_dispatch） */
     channel_init();
 
     /* 网络事件标志 */

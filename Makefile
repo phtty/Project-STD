@@ -28,8 +28,9 @@ INC_DIRS = \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
 	-I Drivers/BSP/Protocol \
-	-I Drivers/BSP/Protocol/IAP \
 	-I Drivers/BSP/Protocol/AH_MQTT \
+	-I Drivers/BSP/Protocol \
+	-I Drivers/BSP/Protocol/IAP \
 	-I Middlewares/Third_Party/SEGGER_RTT \
 	-I LWIP/App \
 	-I LWIP/Target \
@@ -124,12 +125,6 @@ SRC_BSP = \
 
 # BSP Protocol
 SRC_PROTOCOL = \
-	Drivers/BSP/Protocol/protocol.c \
-	Drivers/BSP/Protocol/IAP/config_info.c \
-	Drivers/BSP/Protocol/IAP/iap.c \
-	Drivers/BSP/Protocol/IAP/iap_cmd.c \
-	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c \
-	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c
 
 # BSP RingBuff
 # RingBuff 已迁移至 Kernel/Src/ring_buffer.c
@@ -279,7 +274,7 @@ SRC_DEVICE = \
 SRC_APPLICATION = \
 	Application/Src/app_boot.c \
 	Application/Src/app_render.c \
-	Application/Src/app_light_sensor.c
+	Application/Src/app_light_sensor.c \
 
 # ---- All Sources ----
 SRC_ALL = \
@@ -290,8 +285,12 @@ SRC_ALL = \
 	$(SRC_CORE) \
 	$(SRC_LWIP) \
 	$(SRC_HAL) \
-	$(SRC_BSP) \
-	$(SRC_PROTOCOL) \
+	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c \
+	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c \
+	Drivers/BSP/Protocol/protocol.c \
+	Drivers/BSP/Protocol/IAP/iap.c \
+	Drivers/BSP/Protocol/IAP/iap_cmd.c \
+	Drivers/BSP/Protocol/IAP/config_info.c \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \
 	$(SRC_FREERTOS) \
