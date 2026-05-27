@@ -16,7 +16,7 @@
 **
 **  Target      : STMicroelectronics STM32
 **
-**  Distribution: The file is distributed “as is,�? without any warranty
+**  Distribution: The file is distributed “as is,�? without any warranty
 **                of any kind.
 **
 *****************************************************************************
@@ -101,6 +101,34 @@ SECTIONS
     . = ALIGN(4);
     *(.rodata)         /* .rodata sections (constants, strings, etc.) */
     *(.rodata*)        /* .rodata* sections (constants, strings, etc.) */
+    . = ALIGN(4);
+  } >FLASH
+
+  .hw_initcall :
+  {
+    . = ALIGN(4);
+    PROVIDE(__hw_initcall_start = .);
+    KEEP(*(SORT(.hw_initcall.0)))
+    KEEP(*(SORT(.hw_initcall.1)))
+    KEEP(*(SORT(.hw_initcall.2)))
+    KEEP(*(SORT(.hw_initcall.3)))
+    KEEP(*(SORT(.hw_initcall.4)))
+    KEEP(*(SORT(.hw_initcall.5)))
+    PROVIDE(__hw_initcall_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  .sw_initcall :
+  {
+    . = ALIGN(4);
+    PROVIDE(__sw_initcall_start = .);
+    KEEP(*(SORT(.sw_initcall.0)))
+    KEEP(*(SORT(.sw_initcall.1)))
+    KEEP(*(SORT(.sw_initcall.2)))
+    KEEP(*(SORT(.sw_initcall.3)))
+    KEEP(*(SORT(.sw_initcall.4)))
+    KEEP(*(SORT(.sw_initcall.5)))
+    PROVIDE(__sw_initcall_end = .);
     . = ALIGN(4);
   } >FLASH
 

@@ -1,0 +1,16 @@
+/**
+ * @file    dev_flash_font.h
+ * @brief   W25Qxx SPI Flash 字库存储设备
+ */
+
+#pragma once
+
+#include <stdint.h>
+
+typedef struct {
+    void *spi;
+    uint32_t capacity;
+} font_flash_dev_t;
+
+void dev_font_flash_init(font_flash_dev_t *dev);
+int32_t dev_font_flash_read(font_flash_dev_t *dev, uint32_t addr, uint8_t *buf, uint16_t len);

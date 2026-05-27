@@ -1,0 +1,40 @@
+/**
+ * @file        pl_rtc.c
+ * @brief       RTC 抽象（hw_device_initcall 优先级 3）
+ */
+
+#include "pl_rtc.h"
+#include "rtc.h"
+#include "initcall.h"
+
+void pl_rtc_init(void)
+{
+    MX_RTC_Init();
+}
+hw_device_initcall(pl_rtc_init);
+
+pl_rtc_handle_t pl_rtc_get_handle(void)
+{
+    return (pl_rtc_handle_t)&hrtc;
+}
+
+bool pl_rtc_bkup_write(pl_rtc_handle_t h, uint32_t reg, uint32_t value)
+{
+    HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef *)h, reg, value);
+    return true;
+}
+
+uint32_t pl_rtc_bkup_read(pl_rtc_handle_t h, uint32_t reg)
+{
+    return HAL_RTCEx_BKUPRead((RTC_HandleTypeDef *)h, reg);
+}
+
+uint32_t pl_rtc_get_timestamp(pl_rtc_handle_t h)
+{
+    return (uint32_t)RTC_GetUnixTimestamp();
+}
+
+bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
+{
+    return RTC_Set_UnixTimeStamp((time_t)ts) == HAL_OK;
+}
