@@ -28,7 +28,6 @@ INC_DIRS = \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
 	-I Drivers/BSP/Components/dp83848 \
-	-I Drivers/BSP/Components/HUB75 \
 	-I Drivers/BSP/Components/W25Qxx \
 	-I Drivers/BSP/Protocol \
 	-I Drivers/BSP/Protocol/IAP \
