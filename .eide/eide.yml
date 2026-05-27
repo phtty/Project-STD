@@ -16,6 +16,11 @@ virtualFolder:
         - name: channel
           files:
             - path: Application/Src/app_mqtt.c
+            - path: Application/Src/app_rs232.c
+            - path: Application/Src/app_rs485.c
+            - path: Application/Src/app_tcp_client.c
+            - path: Application/Src/app_tcp_server.c
+            - path: Application/Src/app_udp.c
           folders: []
         - name: protocol
           files:
