@@ -3,7 +3,7 @@
 #include "main.h"
 
 #include "protocol.h"
-#include "RingBuff.h"
+#include "ring_buffer.h"
 
 #define FRAME_MIN_LEN     (5U)
 #define FRAME_MAX_LEN     (5U + 256U)
@@ -27,4 +27,4 @@ extern osThreadId_t g_iap_task_handle;
 extern const osThreadAttr_t IapTask_attributes;
 
 void iap_handle_task(void *argument);
-proto_probe_sta_t iap_probe_frame(const ch_meta_t *meta, const RingBuff_t *buff, uint32_t *total_len, uint8_t *cmd_num);
+proto_probe_sta_t iap_probe_frame(const ch_meta_t *meta, const ring_buffer_t *buff, uint32_t *total_len, uint8_t *cmd_num);

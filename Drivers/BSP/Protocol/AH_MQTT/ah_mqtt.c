@@ -66,20 +66,20 @@ void ah_mqtt_handle_task(void *argument)
     g_proto_ah_matt_queue                          = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
     g_frame_queue[proto_index(PROTO_MASK_AH_MQTT)] = g_proto_ah_matt_queue;
 
-    while (mqtt_state != connected) { // µÈ´ýÁ¬½Ó½¨Á¢
+    while (mqtt_state != connected) { // ï¿½È´ï¿½ï¿½ï¿½ï¿½Ó½ï¿½ï¿½ï¿½
         osDelay(100);
     }
-    // ´´½¨Á½¸öÈÎÎñ£¬ÓÃÓÚ¶¨Ê±ÉÏ±¨×´Ì¬ºÍÇ©µ½
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¶ï¿½Ê±ï¿½Ï±ï¿½×´Ì¬ï¿½ï¿½Ç©ï¿½ï¿½
     SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
     ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
-        // µÈ´ýÊý¾Ý½ÓÊÕÈÎÎñ·¢ËÍ¶ÓÁÐ
+        // ï¿½È´ï¿½ï¿½ï¿½ï¿½Ý½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¶ï¿½ï¿½ï¿½
         if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, &msg, NULL, osWaitForever)) {
             continue;
         }
 
-        // Í¨¹ýtopicµÃÖªÊÇÄÄ¸öÃüÁî
+        // Í¨ï¿½ï¿½topicï¿½ï¿½Öªï¿½ï¿½ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½ï¿½
         uint16_t cmd = handle_topic(msg.meta.handle.mqtt.topic);
 
         g_ah_mqtt_cmd_table[cmd](&(msg.meta), (char *)(msg.data));
@@ -87,7 +87,7 @@ void ah_mqtt_handle_task(void *argument)
 }
 
 /**
- * @brief ½âÎötopicÈ·ÈÏÊÇÄÄ¸öÃüÁî
+ * @brief ï¿½ï¿½ï¿½ï¿½topicÈ·ï¿½ï¿½ï¿½ï¿½ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½ï¿½
  *
  */
 uint8_t handle_topic(const char topic[])
@@ -108,7 +108,7 @@ uint8_t handle_topic(const char topic[])
         return 0;
 }
 
-proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const RingBuff_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
+proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
 {
     (void)buff;
     *payload_len = meta->handle.mqtt.payload_len;
@@ -133,9 +133,9 @@ void ReportTask(void *argument)
 
     for (;;) {
         memcpy(&(report.notify), &xNotifyID, sizeof(report.notify));
-        report.run_sta = light_level ? '1' : '0'; // ¸ù¾Ýµ±Ç°ÁÁ¶ÈÅÐ¶ÏÊÇ·ñ¿ªÏÔÊ¾ÆÁ
+        report.run_sta = light_level ? '1' : '0'; // ï¿½ï¿½ï¿½Ýµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½Ç·ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½
         mqtt_send_data(topic, (char *)&report);
-        osDelay(10 * 1000); // 10ÃëÇ©µ½1´Î
+        osDelay(10 * 1000); // 10ï¿½ï¿½Ç©ï¿½ï¿½1ï¿½ï¿½
     }
 }
 
@@ -163,7 +163,7 @@ void SignUpTask(void *argument)
     sign_up.type = '0';
 
     for (;;) {
-        osDelay(5 * 60 * 1000); // 5·ÖÖÓÇ©µ½1´Î
+        osDelay(5 * 60 * 1000); // 5ï¿½ï¿½ï¿½ï¿½Ç©ï¿½ï¿½1ï¿½ï¿½
         memcpy(&(sign_up.notify), &xNotifyID, sizeof(sign_up.notify));
         mqtt_send_data(topic, (char *)&sign_up);
     }

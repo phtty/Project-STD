@@ -3,7 +3,7 @@
 #include "main.h"
 
 #include "cmsis_os2.h"
-#include "RingBuff.h"
+#include "ring_buffer.h"
 
 #include "protocol.h"
 
@@ -31,7 +31,7 @@ typedef struct [[gnu::packed]] notify_id {
     char send_count[6];
 } notify_id_t;
 
-// �豸״̬
+// 设备状态
 typedef struct [[gnu::packed]] state_report {
     notify_id_t notify;
     char work_sta;
@@ -39,7 +39,7 @@ typedef struct [[gnu::packed]] state_report {
     char reserved[9];
 } state_report_t;
 
-// �豸ǩ��
+// 设备签到
 typedef struct [[gnu::packed]] sign_up {
     notify_id_t notify;
     char type;
@@ -61,4 +61,4 @@ extern osThreadId_t g_ah_mqtt_task_handle;
 extern const osThreadAttr_t ProtocolTask_attributes;
 
 void ah_mqtt_handle_task(void *argument);
-proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const RingBuff_t *buff, uint32_t *payload_len, uint8_t *cmd_num);
+proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num);

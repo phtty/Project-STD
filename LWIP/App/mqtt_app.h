@@ -2,7 +2,7 @@
 
 #include "main.h"
 #include "cmsis_os2.h"
-#include "RingBuff.h"
+#include "ring_buffer.h"
 
 typedef enum {
     no_connect,

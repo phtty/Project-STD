@@ -35,7 +35,6 @@ INC_DIRS = \
 	-I Drivers/BSP/Protocol \
 	-I Drivers/BSP/Protocol/IAP \
 	-I Drivers/BSP/Protocol/AH_MQTT \
-	-I Drivers/BSP/RingBuff \
 	-I Middlewares/Third_Party/SEGGER_RTT \
 	-I LWIP/App \
 	-I LWIP/Target \
@@ -143,8 +142,7 @@ SRC_PROTOCOL = \
 	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c
 
 # BSP RingBuff
-SRC_RINGBUF = \
-	Drivers/BSP/RingBuff/RingBuff.c
+# RingBuff 已迁移至 Kernel/Src/ring_buffer.c
 
 # RTT
 SRC_RTT = \
@@ -303,7 +301,6 @@ SRC_ALL = \
 	$(SRC_BSP) \
 	$(SRC_PROTOCOL) \
 	$(SRC_DISPLAY_OLD) \
-	$(SRC_RINGBUF) \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \
 	$(SRC_FREERTOS) \
