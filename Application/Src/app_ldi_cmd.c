@@ -788,19 +788,6 @@ static void cmd_init(channel_t *ch, void *data)
         g_ldi.state = LDI_ST_READY;
 }
 
-/* ---- VMS 控制 → Onbon LED 屏 ---- */
-
-/**
- * @brief 将 LDI 情报板控制命令映射到 Onbon 协议并发送
- *
- * LDI 颜色/对齐/字体 → Onbon ctx，文本中 '_' (LDI 行分隔符) → '\n' (Onbon 换行符)。
- * GBK 编码保持一致，直接透传。
- */
-static void onbon_vms_ctrl(const ldi_ctrl_vms_t *ctrl, uint16_t mod_len)
-{
-    (void)ctrl; (void)mod_len; /* Project_STD 用自己的显示系统, Onbon 协议不适用 */
-}
-
 /**
  * 处理 1BH 控制/查询请求
  *
@@ -869,8 +856,9 @@ static void cmd_ctrl(channel_t *ch, void *data)
                 (void)ctrl; // TODO: dev_alarm_ctrl(ctrl)
                 break;
             }
-            case LDI_DEV_TYPE_VMS: { // E9H → Onbon LED
-                onbon_vms_ctrl((ldi_ctrl_vms_t *)payload, mod_len);
+            case LDI_DEV_TYPE_VMS: { // E9H → VMS (01H)
+                ldi_ctrl_vms_t *ctrl = (ldi_ctrl_vms_t *)payload;
+                (void)ctrl;
                 break;
             }
             case LDI_DEV_TYPE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)
@@ -917,6 +905,7 @@ static void cmd_rep_func(channel_t *ch, void *data)
  */
 static void cmd_search(channel_t *ch, void *data)
 {
-    (void)ch; (void)data;
+    (void)ch;
+    (void)data;
     /* TODO: UDP broadcast search — 需 app_udp_broadcast + app_tcp_client_set_remote */
 }

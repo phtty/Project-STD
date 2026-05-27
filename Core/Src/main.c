@@ -45,7 +45,6 @@ void MX_FREERTOS_Init(void);
  */
 int main(void)
 {
-    SCB->VTOR = FLASH_BASE | 0x40000;
     __enable_irq();
 
     /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
