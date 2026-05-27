@@ -33,6 +33,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "display.h"
+#include "dev_display.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -192,10 +193,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     /* USER CODE BEGIN Callback 0 */
     if (htim->Instance == TIM3) {
-        send_hub75_buff();
-
+        dev_display_tim3_isr(dev_display_get());
     } else if (htim->Instance == TIM4) {
-        pwm_light_handle();
+        dev_display_tim4_isr(dev_display_get());
     }
     /* USER CODE END Callback 0 */
     if (htim->Instance == TIM7) {

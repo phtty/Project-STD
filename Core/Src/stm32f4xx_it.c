@@ -24,8 +24,6 @@
 /* USER CODE BEGIN Includes */
 #include "cmsis_os2.h"
 #include "IOCtrl.h"
-#include "RS232.h"
-#include "RS485.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,12 +66,6 @@ extern SPI_HandleTypeDef hspi1;
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim4;
-extern DMA_HandleTypeDef hdma_usart1_rx;
-extern DMA_HandleTypeDef hdma_usart3_rx;
-extern DMA_HandleTypeDef hdma_usart6_rx;
-extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart3;
-extern UART_HandleTypeDef huart6;
 extern TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN EV */
@@ -173,19 +165,7 @@ void DebugMon_Handler(void)
 /* please refer to the startup file (startup_stm32f4xx.s).                    */
 /******************************************************************************/
 
-/**
- * @brief This function handles DMA1 stream1 global interrupt.
- */
-void DMA1_Stream1_IRQHandler(void)
-{
-    /* USER CODE BEGIN DMA1_Stream1_IRQn 0 */
-
-    /* USER CODE END DMA1_Stream1_IRQn 0 */
-    HAL_DMA_IRQHandler(&hdma_usart3_rx);
-    /* USER CODE BEGIN DMA1_Stream1_IRQn 1 */
-
-    /* USER CODE END DMA1_Stream1_IRQn 1 */
-}
+/* DMA1_Stream1 — 由 pl_uart.c 提供 */
 
 /**
  * @brief This function handles ADC1, ADC2 and ADC3 global interrupts.
@@ -271,41 +251,7 @@ void SPI1_IRQHandler(void)
     /* USER CODE END SPI1_IRQn 1 */
 }
 
-/**
- * @brief This function handles USART1 global interrupt.
- */
-void USART1_IRQHandler(void)
-{
-    /* USER CODE BEGIN USART1_IRQn 0 */
-
-    /* USER CODE END USART1_IRQn 0 */
-    HAL_UART_IRQHandler(&huart1);
-    /* USER CODE BEGIN USART1_IRQn 1 */
-    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE) != RESET) {
-        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
-
-        RS485_IdleHandle();
-    }
-    /* USER CODE END USART1_IRQn 1 */
-}
-
-/**
- * @brief This function handles USART3 global interrupt.
- */
-void USART3_IRQHandler(void)
-{
-    /* USER CODE BEGIN USART3_IRQn 0 */
-
-    /* USER CODE END USART3_IRQn 0 */
-    HAL_UART_IRQHandler(&huart3);
-    /* USER CODE BEGIN USART3_IRQn 1 */
-    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_IDLE) != RESET) {
-        __HAL_UART_CLEAR_IDLEFLAG(&huart3);
-
-        RS232_1_IdleHandle();
-    }
-    /* USER CODE END USART3_IRQn 1 */
-}
+/* USART1/USART3 — 由 pl_uart.c 提供 */
 
 /**
  * @brief This function handles EXTI line[15:10] interrupts.
@@ -351,33 +297,7 @@ void DMA2_Stream0_IRQHandler(void)
     /* USER CODE END DMA2_Stream0_IRQn 1 */
 }
 
-/**
- * @brief This function handles DMA2 stream1 global interrupt.
- */
-void DMA2_Stream1_IRQHandler(void)
-{
-    /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */
-
-    /* USER CODE END DMA2_Stream1_IRQn 0 */
-    HAL_DMA_IRQHandler(&hdma_usart6_rx);
-    /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
-
-    /* USER CODE END DMA2_Stream1_IRQn 1 */
-}
-
-/**
- * @brief This function handles DMA2 stream2 global interrupt.
- */
-void DMA2_Stream2_IRQHandler(void)
-{
-    /* USER CODE BEGIN DMA2_Stream2_IRQn 0 */
-
-    /* USER CODE END DMA2_Stream2_IRQn 0 */
-    HAL_DMA_IRQHandler(&hdma_usart1_rx);
-    /* USER CODE BEGIN DMA2_Stream2_IRQn 1 */
-
-    /* USER CODE END DMA2_Stream2_IRQn 1 */
-}
+/* DMA2_Stream1/DMA2_Stream2 — 由 pl_uart.c 提供 */
 
 /**
  * @brief This function handles DMA2 stream3 global interrupt.
@@ -421,23 +341,7 @@ void ETH_WKUP_IRQHandler(void)
     /* USER CODE END ETH_WKUP_IRQn 1 */
 }
 
-/**
- * @brief This function handles USART6 global interrupt.
- */
-void USART6_IRQHandler(void)
-{
-    /* USER CODE BEGIN USART6_IRQn 0 */
-
-    /* USER CODE END USART6_IRQn 0 */
-    HAL_UART_IRQHandler(&huart6);
-    /* USER CODE BEGIN USART6_IRQn 1 */
-    if (__HAL_UART_GET_FLAG(&huart6, UART_FLAG_IDLE) != RESET) {
-        __HAL_UART_CLEAR_IDLEFLAG(&huart6);
-
-        RS232_2_IdleHandle();
-    }
-    /* USER CODE END USART6_IRQn 1 */
-}
+/* USART6 — 由 pl_uart.c 提供 */
 
 /* USER CODE BEGIN 1 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)

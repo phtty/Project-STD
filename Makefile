@@ -33,7 +33,6 @@ INC_DIRS = \
 	-I Drivers/BSP/Components/Key \
 	-I Drivers/BSP/Components/LightSensor \
 	-I Drivers/BSP/Components/IOCtrl \
-	-I Drivers/BSP/Components/RS232_485 \
 	-I Drivers/BSP/Display \
 	-I Drivers/BSP/Display/text_cvt \
 	-I Drivers/BSP/Protocol \
@@ -132,12 +131,8 @@ SRC_HAL = \
 SRC_BSP = \
 	Drivers/BSP/Components/dp83848/dp83848.c \
 	Drivers/BSP/Components/W25Qxx/w25qxx.c \
-	Drivers/BSP/Components/HUB75/hub75.c \
 	Drivers/BSP/Components/LightSensor/light.c \
 	Drivers/BSP/Components/IOCtrl/IOCtrl.c \
-	Drivers/BSP/Components/RS232_485/RS232.c \
-	Drivers/BSP/Components/RS232_485/RS485.c
-
 # BSP Display
 SRC_DISPLAY = \
 	Drivers/BSP/Display/display.c \
@@ -280,7 +275,8 @@ SRC_PLATFORM = \
 	Platform/Src/pl_dwt.c \
 	Platform/Src/pl_hub75.c \
 	Platform/Src/pl_adc.c \
-	Platform/Src/pl_spi.c
+	Platform/Src/pl_spi.c \
+	Platform/Src/pl_uart.c
 
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \
@@ -288,7 +284,10 @@ SRC_DEVICE = \
 	Device/Src/dev_key.c \
 	Device/Src/dev_display.c \
 	Device/Src/dev_light_sensor.c \
-	Device/Src/dev_flash_font.c
+	Device/Src/dev_flash_font.c \
+	Device/Src/dev_uart_channel.c \
+	Device/Src/dev_rs485.c \
+	Device/Src/dev_rs232.c
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
