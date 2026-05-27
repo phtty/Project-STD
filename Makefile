@@ -27,8 +27,6 @@ INC_DIRS = \
 	-I Drivers/CMSIS/Include \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
-	-I Drivers/BSP/Components/dp83848 \
-	-I Drivers/BSP/Components/W25Qxx \
 	-I Drivers/BSP/Protocol \
 	-I Drivers/BSP/Protocol/IAP \
 	-I Drivers/BSP/Protocol/AH_MQTT \
@@ -121,8 +119,6 @@ SRC_HAL = \
 
 # BSP (旧协议层依赖 display/render/text_cvt，等协议迁移完成后移除)
 SRC_BSP = \
-	Drivers/BSP/Components/dp83848/dp83848.c \
-	Drivers/BSP/Components/W25Qxx/w25qxx.c \
 
 # display/render 已迁移至 dev_display + app_render; text_cvt 已移至 Kernel
 
@@ -275,6 +271,7 @@ SRC_DEVICE = \
 	Device/Src/dev_light_sensor.c \
 	Device/Src/dev_flash_font.c \
 	Device/Src/dev_uart_channel.c \
+	Device/Src/dev_dp83848.c \
 	Device/Src/dev_rs485.c \
 	Device/Src/dev_rs232.c
 

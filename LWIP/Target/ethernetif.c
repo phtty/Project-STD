@@ -26,7 +26,7 @@
 #include "netif/etharp.h"
 #include "lwip/ethip6.h"
 #include "ethernetif.h"
-#include "dp83848.h"
+#include "dev_dp83848.h"
 #include <string.h>
 #include "cmsis_os.h"
 #include "lwip/tcpip.h"
@@ -120,8 +120,8 @@ int32_t ETH_PHY_IO_ReadReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t *pRegVal
 int32_t ETH_PHY_IO_WriteReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t RegVal);
 int32_t ETH_PHY_IO_GetTick(void);
 
-dp83848_Object_t DP83848;
-dp83848_IOCtx_t DP83848_IOCtx = {ETH_PHY_IO_Init,
+dev_dp83848_obj_t DP83848;
+dev_dp83848_io_ctx_t DP83848_IOCtx = {ETH_PHY_IO_Init,
                                  ETH_PHY_IO_DeInit,
                                  ETH_PHY_IO_WriteReg,
                                  ETH_PHY_IO_ReadReg,
@@ -271,17 +271,17 @@ static void low_level_init(struct netif *netif)
 
     /* USER CODE END PHY_PRE_CONFIG */
     /* Set PHY IO functions */
-    DP83848_RegisterBusIO(&DP83848, &DP83848_IOCtx);
+    dev_dp83848_register_bus_io(&DP83848, &DP83848_IOCtx);
 
     /* Initialize the DP83848 ETH PHY */
-    if (DP83848_Init(&DP83848) != DP83848_STATUS_OK) {
+    if (dev_dp83848_init(&DP83848) != DP83848_STATUS_OK) {
         netif_set_link_down(netif);
         netif_set_down(netif);
         return;
     }
 
     if (hal_eth_init_status == HAL_OK) {
-        PHYLinkState = DP83848_GetLinkState(&DP83848);
+        PHYLinkState = dev_dp83848_link_state_get(&DP83848);
 
         /* Get link state */
         if (PHYLinkState <= DP83848_STATUS_LINK_DOWN) {
@@ -750,7 +750,7 @@ void ethernet_link_thread(void *argument)
     /* USER CODE END ETH link init */
 
     for (;;) {
-        PHYLinkState = DP83848_GetLinkState(&DP83848);
+        PHYLinkState = dev_dp83848_link_state_get(&DP83848);
 
         if (netif_is_link_up(netif) && (PHYLinkState <= DP83848_STATUS_LINK_DOWN)) {
             HAL_ETH_Stop_IT(&heth);

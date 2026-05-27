@@ -15,9 +15,11 @@
 #include "pl_dwt.h"
 #include "lwip.h"
 #include "SEGGER_RTT.h"
-#include "w25qxx.h"
+#include "dev_flash_font.h"
 #include "protocol.h"
 #include "udp_app.h"
+
+static font_flash_dev_t g_font_flash;
 
 /* ---- 外部：freertos.c 的 HalfSecTask ---- */
 extern void MX_FREERTOS_Init(void);
@@ -48,7 +50,7 @@ static void init_task(void *argument)
     SEGGER_RTT_Init();
 
     /* W25Qxx 字库 Flash */
-    BSP_W25Qx_Init(&hw25q256, &hspi1);
+    dev_font_flash_init(&g_font_flash);
 
     /* 协议分发（过渡期仍用旧 protocol.c） */
     channel_init();
