@@ -45,28 +45,20 @@ void MX_FREERTOS_Init(void);
  */
 int main(void)
 {
-
     SCB->VTOR = FLASH_BASE | 0x40000;
     __enable_irq();
-
-    /* MCU Configuration--------------------------------------------------------*/
 
     /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
     HAL_Init();
 
-    /* Configure the system clock */
-    /* SystemClock_Config() 已由 pl_sys_init 通过 initcall 自动调用 */
-
     initcall_run(__hw_initcall_start, __hw_initcall_end);
 
-    /* 鍚鍔 RTOS锛堢敱 app_boot 鎺ョ″垵濮嬪寲娴佺▼锛 */
     app_boot();
 
     /* We should never get here as control is now taken by the scheduler */
 
     /* Infinite loop */
     for (;;) {
-
     }
 }
 
@@ -94,7 +86,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     if (htim->Instance == TIM7) {
         HAL_IncTick();
     }
-
 }
 
 /**

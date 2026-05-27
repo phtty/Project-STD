@@ -12,11 +12,25 @@ virtualFolder:
       files:
         - path: Application/Src/app_boot.c
         - path: Application/Src/app_render.c
-        - path: Application/Src/app_dispatch.c
-        - path: Application/Src/app_iap.c
-        - path: Application/Src/app_iap_cmd.c
-        - path: Application/Src/app_mqtt.c
-      folders: []
+      folders:
+        - name: channel
+          files:
+            - path: Application/Src/app_mqtt.c
+          folders: []
+        - name: protocol
+          files:
+            - path: Application/Src/app_dispatch.c
+          folders:
+            - name: ah
+              files:
+                - path: Application/Src/ah_mqtt_cmd.c
+                - path: Application/Src/ah_mqtt.c
+              folders: []
+            - name: iap
+              files:
+                - path: Application/Src/app_iap_cmd.c
+                - path: Application/Src/app_iap.c
+              folders: []
     - name: Drivers
       files: []
       folders:
@@ -278,8 +292,6 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Application/ah_mqtt_cmd.c
-      - <virtual_root>/Application/ah_mqtt.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

@@ -117,7 +117,7 @@ SRC_RTT = \
 
 # LwIP Middleware
 # LwIP Middleware
-SRC_LWIP_MW = \
+SRC_LWIP = \
 	Middlewares/Third_Party/LwIP/system/OS/sys_arch.c \
 	Middlewares/Third_Party/LwIP/src/api/api_lib.c \
 	Middlewares/Third_Party/LwIP/src/api/api_msg.c \
@@ -279,7 +279,7 @@ SRC_ALL = \
 	$(SRC_CORE) \
 	$(SRC_HAL) \
 	$(SRC_RTT) \
-	$(SRC_LWIP_MW) \
+	$(SRC_LWIP) \
 	$(SRC_FREERTOS) \
 	$(SRC_STARTUP)
 

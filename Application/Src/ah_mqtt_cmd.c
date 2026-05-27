@@ -1,6 +1,5 @@
 #include "ah_mqtt_cmd.h"
 
-#include "mqtt_app.h"
 #include "app_mqtt.h"
 #include "ah_mqtt.h"
 #include "text_cvt.h"
@@ -33,7 +32,7 @@ static void cmd_default(channel_t *ch, char *buff)
 }
 
 const static hub75_color_t disp_color[] = {HUB75_COLOR_BLACK, HUB75_COLOR_GREEN, HUB75_COLOR_RED, HUB75_COLOR_YELLOW};
-const static font_size_t   disp_size[]   = {0, 0, FONT_SIZE_16, FONT_SIZE_24, FONT_SIZE_32, 0, 0, 0, FONT_SIZE_32};
+const static font_size_t disp_size[]    = {0, 0, FONT_SIZE_16, FONT_SIZE_24, FONT_SIZE_32, 0, 0, 0, FONT_SIZE_32};
 /**
  * @brief 锟斤拷示锟斤拷锟斤拷
  *
