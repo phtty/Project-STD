@@ -28,8 +28,6 @@ INC_DIRS = \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
 	-I Middlewares/Third_Party/SEGGER_RTT \
-	-I LWIP/App \
-	-I LWIP/Target \
 	-I Middlewares/Third_Party/LwIP/src/include \
 	-I Middlewares/Third_Party/LwIP/system \
 	-I Middlewares/Third_Party/FreeRTOS/Source/include \
@@ -78,10 +76,6 @@ SRC_CORE = \
 	Core/Src/crc.c \
 
 # LWIP
-SRC_LWIP = \
-	LWIP/App/lwip.c \
-	LWIP/Target/ethernetif.c \
-
 # STM32 HAL Driver
 SRC_HAL = \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c \
@@ -115,13 +109,13 @@ SRC_HAL = \
 
 # BSP Protocol
 
-
 # RTT
 SRC_RTT = \
 	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT.c \
 	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_printf.c \
 	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_Syscalls_GCC.c
 
+# LwIP Middleware
 # LwIP Middleware
 SRC_LWIP_MW = \
 	Middlewares/Third_Party/LwIP/system/OS/sys_arch.c \
@@ -206,6 +200,7 @@ SRC_LWIP_MW = \
 	Middlewares/Third_Party/LwIP/src/netif/ppp/utils.c \
 	Middlewares/Third_Party/LwIP/src/netif/ppp/vj.c
 
+
 # FreeRTOS
 SRC_FREERTOS = \
 	Middlewares/Third_Party/FreeRTOS/Source/croutine.c \
@@ -235,6 +230,8 @@ SRC_KERNEL = \
 SRC_PLATFORM = \
 	Platform/Src/pl_gpio.c \
 	Platform/Src/pl_rtt.c \
+	Platform/Src/pl_net.c \
+	Platform/Src/pl_ethif.c \
 	Platform/Src/pl_crc.c \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \
@@ -276,7 +273,6 @@ SRC_ALL = \
 	$(SRC_DEVICE) \
 	$(SRC_APPLICATION) \
 	$(SRC_CORE) \
-	$(SRC_LWIP) \
 	$(SRC_HAL) \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \

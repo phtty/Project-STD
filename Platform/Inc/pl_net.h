@@ -17,7 +17,7 @@
 /** @brief 链路状态监听器，link_up=true 链路恢复，false 链路断开 */
 typedef void (*pl_net_link_listener_t)(bool link_up);
 
-void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gateway[4]);
+void pl_net_init(void);
 void pl_net_register_link_listener(pl_net_link_listener_t listener);
 
 /** @brief 运行时修改 IP 地址、子网掩码、默认网关 */
