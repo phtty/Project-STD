@@ -12,5 +12,7 @@ typedef struct {
     uint32_t capacity;
 } font_flash_dev_t;
 
+extern font_flash_dev_t g_font_flash;
+
 void dev_font_flash_init(font_flash_dev_t *dev);
 int32_t dev_font_flash_read(font_flash_dev_t *dev, uint32_t addr, uint8_t *buf, uint16_t len);

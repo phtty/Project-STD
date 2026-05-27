@@ -14,12 +14,7 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
-#include "dev_flash_font.h"
 
-static font_flash_dev_t g_font_flash;
-
-/* EXTI 回调使用的 RTOS 对象（原 freertos.c 中定义） */
-osSemaphoreId_t test_semaphore;
 osEventFlagsId_t SW123_Event;
 
 static void init_task(void *argument);
@@ -64,8 +59,6 @@ static void init_task(void *argument)
     (void)argument;
 
     dev_eth_start();
-    dev_font_flash_init(&g_font_flash);
-    test_semaphore = osSemaphoreNew(1, 0, NULL);
     sw_board_init(); /* sw_initcall 自注册：协议 + 通道任务 */
 
     /* 半秒周期任务 */

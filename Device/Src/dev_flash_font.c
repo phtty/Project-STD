@@ -4,17 +4,27 @@
  */
 
 #include "dev_flash_font.h"
+
+#include <stdint.h>
+#include <string.h>
+#include "initcall.h"
+#include "cmsis_os2.h"
 #include "pl_spi.h"
 #include "pl_gpio.h"
-#include <stdint.h>
-#include "cmsis_os2.h"
-#include <string.h>
+
+font_flash_dev_t g_font_flash;
+
+static void dev_font_flash_initcall(void)
+{
+    dev_font_flash_init(&g_font_flash);
+}
+sw_device_initcall(dev_font_flash_initcall);
 
 /* W25Qxx 命令 */
-#define W25Q_READ_CMD        0x03
-#define W25Q_RESET_ENABLE    0x66
-#define W25Q_RESET_DEVICE    0x99
-#define W25Q_READ_JEDEC_ID   0x9F
+#define W25Q_READ_CMD      0x03
+#define W25Q_RESET_ENABLE  0x66
+#define W25Q_RESET_DEVICE  0x99
+#define W25Q_READ_JEDEC_ID 0x9F
 
 static osEventFlagsId_t s_dma_done;
 static volatile bool s_dma_ok;
@@ -41,11 +51,11 @@ void dev_font_flash_init(font_flash_dev_t *dev)
     pl_spi_transmit_receive_dma(dev->spi, tx, NULL, 2);
     osEventFlagsWait(s_dma_done, 0x01, osFlagsWaitAny, 100);
     pl_gpio_write(PL_PORT_B, 1, true); /* CS high */
-    osDelay(10); /* wait for reset */
+    osDelay(10);                       /* wait for reset */
 
     /* 读 JEDEC ID */
     uint8_t id_tx[4] = {W25Q_READ_JEDEC_ID, 0, 0, 0};
-    uint8_t id_rx[4]  = {0};
+    uint8_t id_rx[4] = {0};
     pl_gpio_write(PL_PORT_B, 1, false);
     s_dma_ok = false;
     pl_spi_transmit_receive_dma(dev->spi, id_tx, id_rx, 4);
@@ -61,8 +71,8 @@ int32_t dev_font_flash_read(font_flash_dev_t *dev, uint32_t addr, uint8_t *buf, 
 {
     if (!dev || !buf || len == 0) return -1;
 
-    uint16_t total = 4 + len; /* cmd(1) + addr(3) + data(len) */
-    uint8_t tx_buf[4 + 2048] = {0}; /* max page read */
+    uint16_t total           = 4 + len; /* cmd(1) + addr(3) + data(len) */
+    uint8_t tx_buf[4 + 2048] = {0};     /* max page read */
     uint8_t rx_buf[4 + 2048] = {0};
 
     uint16_t size = (total > sizeof(tx_buf)) ? sizeof(tx_buf) : total;

@@ -8,6 +8,9 @@
 #include "pl_exti.h"
 #include "main.h"
 #include "initcall.h"
+#include "cmsis_os2.h"
+
+osSemaphoreId_t test_semaphore;
 
 #define PL_EXTI_CB_MAX 16
 
@@ -56,4 +59,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t pin)
     for (int i = 0; i < PL_EXTI_CB_MAX; i++)
         if (s_cb[i].cb && s_cb[i].pin == pin)
             s_cb[i].cb(pin, s_cb[i].ctx);
+
+    if (pin == KEY_TST_Pin)
+        osSemaphoreRelease(test_semaphore);
 }
+
+/* ---- sw_initcall: RTOS 对象创建（需要 RTOS 已启动） ---- */
+static void pl_exti_sw_init(void)
+{
+    test_semaphore = osSemaphoreNew(1, 0, NULL);
+}
+sw_device_initcall(pl_exti_sw_init);
