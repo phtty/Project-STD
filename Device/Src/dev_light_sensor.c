@@ -4,8 +4,9 @@
  */
 
 #include "dev_light_sensor.h"
-#include "pl_adc.h"
+
 #include "initcall.h"
+#include "pl_adc.h"
 
 #define MEAN_PARAMETER 8
 
@@ -35,7 +36,7 @@ uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
 void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
 {
     static uint8_t old_light = 0;
-    uint8_t new_light = dev_light_sensor_read(dev);
+    uint8_t new_light        = dev_light_sensor_read(dev);
 
     if (new_light != old_light)
         dev->display->light_level = new_light;

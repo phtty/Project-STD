@@ -5,8 +5,8 @@
  */
 
 #include "dev_key.h"
+
 #include "pl_exti.h"
-#include <stddef.h>
 
 static dev_key_cb_t s_key_cb[8];
 
@@ -14,10 +14,14 @@ static void key_exti_cb(uint16_t pin, void *ctx)
 {
     (void)ctx;
     uint8_t id = 0;
-    if (pin == SW1_Pin)      id = 0;
-    else if (pin == SW2_Pin) id = 1;
-    else if (pin == SW3_Pin) id = 2;
-    else return;
+    if (pin == SW1_Pin)
+        id = 0;
+    else if (pin == SW2_Pin)
+        id = 1;
+    else if (pin == SW3_Pin)
+        id = 2;
+    else
+        return;
     if (s_key_cb[id]) s_key_cb[id](id);
 }
 

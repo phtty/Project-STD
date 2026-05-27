@@ -7,9 +7,10 @@
  */
 
 #include "dev_display.h"
-#include "pl_tim.h"
-#include "initcall.h"
+
 #include <string.h>
+#include "initcall.h"
+#include "pl_tim.h"
 
 /* ---- CCMRAM 缓冲区 ---- */
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[DISRAM_SIZE];
@@ -22,7 +23,8 @@ static display_dev_t g_display = {
     .light_level = 1,
 };
 
-display_dev_t *dev_display_get(void) { return &g_display; }
+display_dev_t *dev_display_get(void)
+{ return &g_display; }
 
 /* ---- 初始化 ---- */
 void dev_display_init(display_dev_t *dev)
@@ -61,14 +63,21 @@ void dev_display_convert(display_dev_t *dev)
         group_row = (row_cnt / 4) ^ 1;
         group_col = col_cnt / 4;
 
-        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * (CHANNEL_PIXEL_NUM / 16 - 4))
-                  + (group_col + group_col / 4 * 4);
+        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * (CHANNEL_PIXEL_NUM / 16 - 4)) + (group_col + group_col / 4 * 4);
 
         switch (row_cnt % 4) {
-            case 0: dev->hub75_buff[1 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt]; break;
-            case 1: dev->hub75_buff[0 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt]; break;
-            case 2: dev->hub75_buff[3 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt]; break;
-            case 3: dev->hub75_buff[2 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt]; break;
+            case 0:
+                dev->hub75_buff[1 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                break;
+            case 1:
+                dev->hub75_buff[0 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                break;
+            case 2:
+                dev->hub75_buff[3 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                break;
+            case 3:
+                dev->hub75_buff[2 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                break;
         }
     }
 }

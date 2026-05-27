@@ -78,5 +78,7 @@ typedef struct channel {
 
 /* ---- 调度 API（Kernel 声明，Application 实现） ---- */
 void app_channel_dispatch(const channel_t *ch, const uint8_t *data, uint16_t len);
+void app_channel_register(channel_id_t ch_id, channel_t *ch);
+channel_t *app_channel_get(channel_id_t ch_id);
 void channel_send(channel_t *ch, uint8_t *data, uint16_t len);
 void app_dispatch_init(void);

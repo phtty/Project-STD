@@ -7,10 +7,11 @@
  */
 
 #include "dev_rs485.h"
-#include "dev_uart_channel.h"
+
+#include "initcall.h"
 #include "pl_uart.h"
 #include "pl_gpio.h"
-#include "initcall.h"
+#include "dev_uart_channel.h"
 
 #define RS485_BUF_SIZE (2048U)
 

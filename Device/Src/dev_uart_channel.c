@@ -4,7 +4,6 @@
  */
 
 #include "dev_uart_channel.h"
-#include "app_dispatch.h"
 
 /* ---- 统一 send：方向控制由 pl_uart_send 内部回调完成 ---- */
 static int32_t uart_channel_send(channel_t *ch, const uint8_t *data, uint16_t len)
@@ -13,7 +12,7 @@ static int32_t uart_channel_send(channel_t *ch, const uint8_t *data, uint16_t le
     return pl_uart_send(self->uart, data, len, 100);
 }
 
-const ch_ops_t uart_ch_ops = { .send = uart_channel_send };
+const ch_ops_t uart_ch_ops = {.send = uart_channel_send};
 
 /* ---- 通道生命周期（hw_initcall 阶段：仅设硬件参数，不调 RTOS API） ---- */
 void uart_channel_init(uart_channel_t *self, pl_uart_handle_t uart,
