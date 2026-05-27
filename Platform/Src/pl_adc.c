@@ -11,6 +11,7 @@ void pl_adc_init(void)
 {
     MX_ADC1_Init();
 }
+hw_device_initcall(pl_adc_init);
 
 pl_adc_handle_t pl_adc_get_handle(void)
 {

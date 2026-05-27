@@ -273,6 +273,8 @@ SRC_PLATFORM = \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \
 	Platform/Src/pl_dwt.c \
+	Platform/Src/pl_tim.c \
+	Platform/Src/pl_rtc.c \
 	Platform/Src/pl_hub75.c \
 	Platform/Src/pl_adc.c \
 	Platform/Src/pl_spi.c \
@@ -291,6 +293,7 @@ SRC_DEVICE = \
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
+	Application/Src/app_boot.c \
 	Application/Src/app_render.c \
 	Application/Src/app_light_sensor.c
 

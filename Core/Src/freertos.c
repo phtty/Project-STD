@@ -226,26 +226,6 @@ void PointTestTask(void *argument)
     }
 }
 
-// ����ջ������Ӻ�������������ĸ�������ջ���
-void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
-{
-    while (1);
-}
-
-/* ��ʼ�� DWT */
-void vConfigureTimerForRunTimeStats(void)
-{
-    /* ʹ�� DWT ģ�� */
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    /* ��������� */
-    DWT->CYCCNT = 0;
-    /* ʹ�ܼ����� */
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
-
-/* ��ȡ��ǰ����ֵ��CPU �������� */
-uint32_t ulGetRunTimeCounterValue(void)
-{
-    return DWT->CYCCNT;
-}
+/* vApplicationStackOverflowHook / vConfigureTimerForRunTimeStats / ulGetRunTimeCounterValue
+   已迁移至 Application/Src/app_boot.c */
 /* USER CODE END Application */

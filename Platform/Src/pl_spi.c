@@ -19,6 +19,7 @@ void pl_spi_init(void)
 {
     MX_SPI1_Init();
 }
+hw_device_initcall(pl_spi_init);
 
 pl_spi_handle_t pl_spi_get_handle(void)
 {

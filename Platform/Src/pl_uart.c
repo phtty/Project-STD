@@ -57,6 +57,7 @@ void pl_uart_init(void)
     g_uart_ctx[PL_UART3].huart = &huart3;
     g_uart_ctx[PL_UART6].huart = &huart6;
 }
+hw_subsys_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
 
 /* ---- 公开 API ---- */
 pl_uart_handle_t pl_uart_get_handle(uint8_t id)

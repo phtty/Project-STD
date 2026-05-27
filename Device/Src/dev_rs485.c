@@ -34,7 +34,6 @@ static void rs485_dir_cb(bool tx)
 /* ---- 板级硬件初始化（hw_initcall，RTOS 前） ---- */
 void dev_rs485_init(void)
 {
-    pl_uart_init();
     uart_channel_init(&g_rs485, pl_uart_get_handle(PL_UART1), CH_ID_RS485, true, s_rs485_buf, RS485_BUF_SIZE);
     pl_uart_set_dir_cb(pl_uart_get_handle(PL_UART1), rs485_dir_cb);
     rs485_dir_cb(false); /* 默认接收态 */

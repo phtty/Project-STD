@@ -29,7 +29,6 @@ uart_channel_t *dev_rs232_get_channel(uint8_t index)
 /* ---- 板级硬件初始化（hw_initcall，RTOS 前） ---- */
 void dev_rs232_init(void)
 {
-    pl_uart_init();
     uart_channel_init(&g_rs232_0, pl_uart_get_handle(PL_UART3), CH_ID_RS232,    false, s_rs232_0_buf, RS232_BUF_SIZE);
     uart_channel_init(&g_rs232_1, pl_uart_get_handle(PL_UART6), CH_ID_RS232_1, false, s_rs232_1_buf, RS232_BUF_SIZE);
 }

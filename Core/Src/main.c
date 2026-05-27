@@ -19,21 +19,15 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "adc.h"
-#include "dma.h"
-#include "iwdg.h"
 #include "lwip.h"
-#include "rtc.h"
-#include "spi.h"
-#include "tim.h"
-#include "usart.h"
-#include "crc.h"
-#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "display.h"
+#include "initcall.h"
 #include "dev_display.h"
+
+/* Phase 11 会移到 app_boot.h */
+void app_boot(void);
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -97,30 +91,12 @@ int main(void)
 
     /* USER CODE END SysInit */
 
-    /* Initialize all configured peripherals */
-    MX_GPIO_Init();
-    MX_DMA_Init();
-    MX_CRC_Init();
-    MX_TIM3_Init();
-    MX_ADC1_Init();
-    MX_SPI1_Init();
-    MX_TIM2_Init();
-    MX_TIM4_Init();
-    MX_USART1_UART_Init();
-    MX_USART3_UART_Init();
-    MX_USART6_UART_Init();
-    MX_IWDG_Init();
-    MX_RTC_Init();
     /* USER CODE BEGIN 2 */
-
+    initcall_run(__hw_initcall_start, __hw_initcall_end);
     /* USER CODE END 2 */
 
-    /* Init scheduler */
-    osKernelInitialize(); /* Call init function for freertos objects (in cmsis_os2.c) */
-    MX_FREERTOS_Init();
-
-    /* Start scheduler */
-    osKernelStart();
+    /* 启动 RTOS（由 app_boot 接管初始化流程） */
+    app_boot();
 
     /* We should never get here as control is now taken by the scheduler */
 
