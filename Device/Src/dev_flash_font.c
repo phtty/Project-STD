@@ -6,7 +6,7 @@
 #include "dev_flash_font.h"
 #include "pl_spi.h"
 #include "pl_gpio.h"
-#include "main.h"
+#include <stdint.h>
 #include "cmsis_os2.h"
 #include <string.h>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "main.h"
+#include <stdint.h>
 
 // Flash Sector 11: 0x080E0000 ~ 0x080FFFFF, 128KB
 // 存放 LDI 车道设备接口协议配置信息

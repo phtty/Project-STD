@@ -1,6 +1,7 @@
 #pragma once
 
-#include "main.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 #include "app_iap.h"
 #include "app_dispatch.h"

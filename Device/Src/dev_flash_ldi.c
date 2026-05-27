@@ -1,3 +1,4 @@
+#include <string.h>
 #include "dev_flash_ldi.h"
 
 #include "pl_crc.h"

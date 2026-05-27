@@ -251,6 +251,7 @@ SRC_DEVICE = \
 	Device/Src/dev_key.c \
 	Device/Src/dev_display.c \
 	Device/Src/dev_flash_iap.c \
+	Device/Src/dev_flash_ldi.c \
 	Device/Src/dev_light_sensor.c \
 	Device/Src/dev_flash_font.c \
 	Device/Src/dev_uart_channel.c \

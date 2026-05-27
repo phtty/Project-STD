@@ -1,6 +1,6 @@
 #pragma once
 
-#include "main.h"
+#include <stdint.h>
 
 // 地址与常量定义
 #define ADDR_CONFIG_SECTOR 0x08004000

@@ -9,7 +9,8 @@
 
 #pragma once
 
-#include "main.h"
+#include <stdint.h>
+#include <stdbool.h>
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 

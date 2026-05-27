@@ -1,6 +1,7 @@
 #pragma once
 
-#include "main.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 #include "ah_mqtt.h"
 
