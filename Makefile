@@ -27,10 +27,6 @@ INC_DIRS = \
 	-I Drivers/CMSIS/Include \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
-	-I Drivers/BSP/Protocol \
-	-I Drivers/BSP/Protocol/AH_MQTT \
-	-I Drivers/BSP/Protocol \
-	-I Drivers/BSP/Protocol/IAP \
 	-I Middlewares/Third_Party/SEGGER_RTT \
 	-I LWIP/App \
 	-I LWIP/Target \
@@ -80,16 +76,11 @@ SRC_CORE = \
 	Core/Src/tim.c \
 	Core/Src/usart.c \
 	Core/Src/crc.c \
-	Core/Src/freertos.c
 
 # LWIP
 SRC_LWIP = \
 	LWIP/App/lwip.c \
 	LWIP/Target/ethernetif.c \
-	LWIP/App/mqtt_app.c \
-	LWIP/App/tcp_client_app.c \
-	LWIP/App/tcp_server_app.c \
-	LWIP/App/udp_app.c
 
 # STM32 HAL Driver
 SRC_HAL = \
@@ -119,15 +110,11 @@ SRC_HAL = \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_crc.c
 
 # BSP (旧协议层依赖 display/render/text_cvt，等协议迁移完成后移除)
-SRC_BSP = \
 
 # display/render 已迁移至 dev_display + app_render; text_cvt 已移至 Kernel
 
 # BSP Protocol
-SRC_PROTOCOL = \
 
-# BSP RingBuff
-# RingBuff 已迁移至 Kernel/Src/ring_buffer.c
 
 # RTT
 SRC_RTT = \
@@ -277,7 +264,6 @@ SRC_DEVICE = \
 SRC_APPLICATION = \
 	Application/Src/app_boot.c \
 	Application/Src/app_render.c \
-	Application/Src/app_light_sensor.c \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_iap.c \
 	Application/Src/app_iap_cmd.c \
@@ -291,9 +277,6 @@ SRC_ALL = \
 	$(SRC_CORE) \
 	$(SRC_LWIP) \
 	$(SRC_HAL) \
-	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c \
-	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c \
-	Drivers/BSP/Protocol/IAP/config_info.c \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \
 	$(SRC_FREERTOS) \

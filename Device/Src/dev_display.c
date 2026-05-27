@@ -97,7 +97,7 @@ void dev_display_tim3_isr(display_dev_t *dev)
     NVIC_EnableIRQ(TIM4_IRQn);
 
     scan_line += 1;
-    if (scan_line >= MOUDLE_SCAN_LINE_NUM)
+    if (scan_line >= MODULE_SCAN_LINE_NUM)
         scan_line = 0;
 }
 
