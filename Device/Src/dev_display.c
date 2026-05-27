@@ -7,7 +7,7 @@
  */
 
 #include "dev_display.h"
-#include "tim.h"
+#include "pl_tim.h"
 #include "initcall.h"
 #include <string.h>
 
@@ -27,13 +27,13 @@ display_dev_t *dev_display_get(void) { return &g_display; }
 /* ---- 初始化 ---- */
 void dev_display_init(display_dev_t *dev)
 {
-    __HAL_DBGMCU_FREEZE_TIM3();
-    __HAL_DBGMCU_FREEZE_TIM4();
+    pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM3));
+    pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM4));
 
     pl_hub75_init();
     dev_display_fill(dev, HUB75_COLOR_BLACK);
-    HAL_TIM_Base_Start_IT(&htim3);
-    HAL_TIM_Base_Start_IT(&htim4);
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM3));
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM4));
 }
 hw_device_initcall(dev_display_init);
 
@@ -90,11 +90,11 @@ void dev_display_tim3_isr(display_dev_t *dev)
         pl_hub75_clock_pulse();
     }
 
-    NVIC_DisableIRQ(TIM4_IRQn);
+    pl_tim_irq_disable(TIM4_IRQn);
     pl_hub75_oe_set(true);
     pl_hub75_set_row(scan_line);
     pl_hub75_latch_pulse();
-    NVIC_EnableIRQ(TIM4_IRQn);
+    pl_tim_irq_enable(TIM4_IRQn);
 
     scan_line += 1;
     if (scan_line >= MODULE_SCAN_LINE_NUM)

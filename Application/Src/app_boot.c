@@ -5,9 +5,9 @@
  * 职责：RTOS 生命周期 + 硬件无关的模块初始化 + HalfSecTask
  */
 
-#include "main.h"
+#include <stdint.h>
+#include <stdio.h>
 #include "cmsis_os.h"
-#include "task.h"
 #include "initcall.h"
 #include "pl_iwdg.h"
 #include "pl_rtc.h"
@@ -34,7 +34,7 @@ static void half_sec_task(void *argument)
         pl_iwdg_refresh(pl_iwdg_get_handle());
 
         if (run_time >= 60)
-            pl_rtc_bkup_write(pl_rtc_get_handle(), RTC_BKP_DR1, 0);
+            pl_rtc_bkup_write(pl_rtc_get_handle(), 1, 0);
         else
             run_time++;
 
