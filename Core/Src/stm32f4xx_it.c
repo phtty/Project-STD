@@ -35,7 +35,6 @@ extern osEventFlagsId_t SW123_Event;
 /* Private user code ---------------------------------------------------------*/
 
 /* External variables --------------------------------------------------------*/
-extern ETH_HandleTypeDef heth;
 extern ADC_HandleTypeDef hadc1;
 extern DMA_HandleTypeDef hdma_spi1_tx;
 extern DMA_HandleTypeDef hdma_spi1_rx;
@@ -221,25 +220,7 @@ void DMA2_Stream3_IRQHandler(void)
 
 }
 
-/**
- * @brief This function handles Ethernet global interrupt.
- */
-void ETH_IRQHandler(void)
-{
-
-    HAL_ETH_IRQHandler(&heth);
-
-}
-
-/**
- * @brief This function handles Ethernet wake-up interrupt through EXTI line 19.
- */
-void ETH_WKUP_IRQHandler(void)
-{
-
-    HAL_ETH_IRQHandler(&heth);
-
-}
+/* ETH_IRQHandler / ETH_WKUP_IRQHandler — 由 Platform/Src/pl_eth.c 提供 */
 
 /* USART6 — 由 pl_uart.c 提供 */
 

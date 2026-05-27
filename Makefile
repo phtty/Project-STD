@@ -231,7 +231,7 @@ SRC_PLATFORM = \
 	Platform/Src/pl_gpio.c \
 	Platform/Src/pl_rtt.c \
 	Platform/Src/pl_net.c \
-	Platform/Src/pl_ethif.c \
+	Platform/Src/pl_eth.c \
 	Platform/Src/pl_crc.c \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \
@@ -255,6 +255,7 @@ SRC_DEVICE = \
 	Device/Src/dev_flash_font.c \
 	Device/Src/dev_uart_channel.c \
 	Device/Src/dev_dp83848.c \
+	Device/Src/dev_eth.c \
 	Device/Src/dev_rs485.c \
 	Device/Src/dev_rs232.c
 

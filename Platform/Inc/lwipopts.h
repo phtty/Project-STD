@@ -30,10 +30,11 @@
 
 /* Within 'USER CODE' section, code will be kept by default at each generation */
 /* USER CODE BEGIN 0 */
+
 /* USER CODE END 0 */
 
 #ifdef __cplusplus
-extern "C" {
+ extern "C" {
 #endif
 
 /* STM32CubeMX Specific Parameters (not defined in opt.h) ---------------------*/
@@ -49,7 +50,9 @@ extern "C" {
 /*----- Value in opt.h for MEM_ALIGNMENT: 1 -----*/
 #define MEM_ALIGNMENT 4
 /*----- Default Value for MEM_SIZE: 1600 ---*/
-#define MEM_SIZE 1024 * 20
+#define MEM_SIZE 20*1024
+/*----- Default Value for MEMP_NUM_SYS_TIMEOUT: 3 ---*/
+#define MEMP_NUM_SYS_TIMEOUT 20
 /*----- Value in opt.h for LWIP_ETHERNET: LWIP_ARP || PPPOE_SUPPORT -*/
 #define LWIP_ETHERNET 1
 /*----- Value in opt.h for LWIP_DNS_SECURE: (LWIP_DNS_SECURE_RAND_XID | LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING | LWIP_DNS_SECURE_RAND_SRC_PORT) -*/
@@ -62,6 +65,8 @@ extern "C" {
 #define TCP_SNDQUEUELOWAT 5
 /*----- Value in opt.h for TCP_WND_UPDATE_THRESHOLD: LWIP_MIN(TCP_WND/4, TCP_MSS*4) -----*/
 #define TCP_WND_UPDATE_THRESHOLD 536
+/*----- Default Value for LWIP_NETIF_STATUS_CALLBACK: 0 ---*/
+#define LWIP_NETIF_STATUS_CALLBACK 1
 /*----- Value in opt.h for LWIP_NETIF_LINK_CALLBACK: 0 -----*/
 #define LWIP_NETIF_LINK_CALLBACK 1
 /*----- Value in opt.h for TCPIP_THREAD_STACKSIZE: 0 -----*/
@@ -84,8 +89,6 @@ extern "C" {
 #define DEFAULT_TCP_RECVMBOX_SIZE 6
 /*----- Value in opt.h for DEFAULT_ACCEPTMBOX_SIZE: 0 -----*/
 #define DEFAULT_ACCEPTMBOX_SIZE 6
-/*----- Default Value for LWIP_TCPIP_TIMEOUT: 0 ---*/
-#define LWIP_TCPIP_TIMEOUT 1
 /*----- Default Value for LWIP_TCP_KEEPALIVE: 0 ---*/
 #define LWIP_TCP_KEEPALIVE 1
 /*----- Value in opt.h for RECV_BUFSIZE_DEFAULT: INT_MAX -----*/
@@ -114,10 +117,9 @@ extern "C" {
 #define CHECKSUM_CHECK_ICMP6 0
 /*-----------------------------------------------------------------------------*/
 /* USER CODE BEGIN 1 */
-#define LWIP_NETIF_STATUS_CALLBACK 1
-#define MEMP_NUM_SYS_TIMEOUT       20
-// …Ë÷√MQTT«Î«Û≤€Œª
+
 #define MQTT_REQ_MAX_IN_FLIGHT 16
+#define LWIP_SO_RCVTIMEO      1 /* UDP recv_timeoutÔºåÁî®‰∫éÊé¢ÊµãÈÄöÈÅìÂèØÁî®ÊÄß */
 /* USER CODE END 1 */
 
 #ifdef __cplusplus

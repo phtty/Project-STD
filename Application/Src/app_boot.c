@@ -14,7 +14,7 @@
 #include "pl_rtc.h"
 #include "pl_gpio.h"
 #include "pl_dwt.h"
-#include "pl_net.h"
+#include "dev_eth.h"
 #include "dev_flash_font.h"
 #include <stdbool.h>
 
@@ -65,7 +65,7 @@ static void init_task(void *argument)
 {
     (void)argument;
 
-    pl_net_init();
+    dev_eth_start();
     dev_font_flash_init(&g_font_flash);
     test_semaphore = osSemaphoreNew(1, 0, NULL);
     sw_board_init();              /* sw_initcall 自注册：协议 + 通道任务 */
