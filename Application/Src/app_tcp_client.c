@@ -51,7 +51,7 @@ void tcp_client_channel_init(tcp_client_channel_t *self, void *conn, channel_t *
 }
 
 /* ---- 配置接口 ---- */
-void app_tcp_client_set_remote(const uint8_t ip[4], uint16_t port)
+__attribute__((used)) void app_tcp_client_set_remote(const uint8_t ip[4], uint16_t port)
 {
     memcpy(g_tcp_client.host_ip, ip, 4);
     g_tcp_client.host_port = port;

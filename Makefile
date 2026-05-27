@@ -267,8 +267,18 @@ SRC_APPLICATION = \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_iap.c \
 	Application/Src/app_iap_cmd.c \
+	Application/Src/app_ldi.c \
+	Application/Src/app_ldi_cmd.c \
 	Application/Src/app_render.c \
-	Application/Src/app_light_sensor.c
+	Application/Src/app_light_sensor.c \
+	Application/Src/app_udp.c \
+	Application/Src/app_tcp_server.c \
+	Application/Src/app_tcp_client.c \
+	Application/Src/app_mqtt.c \
+	Application/Src/app_rs232.c \
+	Application/Src/app_rs485.c \
+	Application/Src/ah_mqtt.c \
+	Application/Src/ah_mqtt_cmd.c
 
 # ---- All Sources ----
 SRC_ALL = \

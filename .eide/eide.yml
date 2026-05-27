@@ -36,6 +36,11 @@ virtualFolder:
                 - path: Application/Src/app_iap_cmd.c
                 - path: Application/Src/app_iap.c
               folders: []
+            - name: ldi
+              files:
+                - path: Application/Src/app_ldi.c
+                - path: Application/Src/app_ldi_cmd.c
+              folders: []
     - name: Drivers
       files: []
       folders:
@@ -219,6 +224,7 @@ virtualFolder:
         - path: Device/Src/dev_eth.c
         - path: Device/Src/dev_rs485.c
         - path: Device/Src/dev_rs232.c
+        - path: Device/Src/dev_flash_ldi.c
       folders: []
     - name: Platform
       files:
