@@ -2,7 +2,7 @@
 
 #include "mqtt_app.h"
 #include "ah_mqtt_cmd.h"
-#include "display.h"
+#include "dev_display.h"
 
 osMessageQueueId_t g_proto_ah_matt_queue;
 
@@ -133,7 +133,7 @@ void ReportTask(void *argument)
 
     for (;;) {
         memcpy(&(report.notify), &xNotifyID, sizeof(report.notify));
-        report.run_sta = light_level ? '1' : '0'; // ���ݵ�ǰ�����ж��Ƿ���ʾ��
+        report.run_sta = dev_display_get()->light_level ? '1' : '0'; // ���ݵ�ǰ�����ж��Ƿ���ʾ��
         mqtt_send_data(topic, (char *)&report);
         osDelay(10 * 1000); // 10��ǩ��1��
     }

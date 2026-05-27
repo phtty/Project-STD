@@ -30,8 +30,6 @@ INC_DIRS = \
 	-I Drivers/BSP/Components/dp83848 \
 	-I Drivers/BSP/Components/HUB75 \
 	-I Drivers/BSP/Components/W25Qxx \
-	-I Drivers/BSP/Display \
-	-I Drivers/BSP/Display/text_cvt \
 	-I Drivers/BSP/Protocol \
 	-I Drivers/BSP/Protocol/IAP \
 	-I Drivers/BSP/Protocol/AH_MQTT \
@@ -127,10 +125,7 @@ SRC_BSP = \
 	Drivers/BSP/Components/dp83848/dp83848.c \
 	Drivers/BSP/Components/W25Qxx/w25qxx.c \
 
-SRC_DISPLAY_OLD = \
-	Drivers/BSP/Display/display.c \
-	Drivers/BSP/Display/render.c \
-	Drivers/BSP/Display/text_cvt/text_cvt.c
+# display/render 已迁移至 dev_display + app_render; text_cvt 已移至 Kernel
 
 # BSP Protocol
 SRC_PROTOCOL = \
@@ -256,7 +251,8 @@ SRC_KERNEL = \
 	Kernel/Src/initcall.c \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/bit_utils.c \
-	Kernel/Src/crc_utils.c
+	Kernel/Src/crc_utils.c \
+	Kernel/Src/text_cvt.c
 
 # Platform（仅含无冲突的文件，其他在 Phase 3 逐步加入）
 SRC_PLATFORM = \
@@ -300,7 +296,6 @@ SRC_ALL = \
 	$(SRC_HAL) \
 	$(SRC_BSP) \
 	$(SRC_PROTOCOL) \
-	$(SRC_DISPLAY_OLD) \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \
 	$(SRC_FREERTOS) \
