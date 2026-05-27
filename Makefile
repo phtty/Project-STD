@@ -234,6 +234,7 @@ SRC_KERNEL = \
 # Platform（仅含无冲突的文件，其他在 Phase 3 逐步加入）
 SRC_PLATFORM = \
 	Platform/Src/pl_gpio.c \
+	Platform/Src/pl_rtt.c \
 	Platform/Src/pl_crc.c \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \

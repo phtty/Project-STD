@@ -15,7 +15,6 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "lwip.h"
-#include "SEGGER_RTT.h"
 #include "dev_flash_font.h"
 #include <stdbool.h>
 
@@ -66,8 +65,7 @@ static void init_task(void *argument)
 {
     (void)argument;
 
-    MX_LWIP_Init();               /* TODO: 迁移至 pl_net_init() */
-    SEGGER_RTT_Init();            /* TODO: 迁移至 initcall */
+    MX_LWIP_Init();               /* 网络栈初始化（需 RTOS，保留在 app_boot 中） */
     dev_font_flash_init(&g_font_flash);
     test_semaphore = osSemaphoreNew(1, 0, NULL);
     sw_board_init();              /* sw_initcall 自注册：协议 + 通道任务 */
