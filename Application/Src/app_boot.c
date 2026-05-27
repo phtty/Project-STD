@@ -5,10 +5,9 @@
  * 职责：RTOS 生命周期 + 硬件无关的模块初始化 + HalfSecTask
  */
 
-#include "FreeRTOS.h"
-#include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
+#include "task.h"
 #include "initcall.h"
 #include "pl_iwdg.h"
 #include "pl_rtc.h"
@@ -16,12 +15,11 @@
 #include "pl_dwt.h"
 #include "dev_eth.h"
 #include "dev_flash_font.h"
-#include <stdbool.h>
 
 static font_flash_dev_t g_font_flash;
 
 /* EXTI 回调使用的 RTOS 对象（原 freertos.c 中定义） */
-osSemaphoreId_t  test_semaphore;
+osSemaphoreId_t test_semaphore;
 osEventFlagsId_t SW123_Event;
 
 static void init_task(void *argument);
@@ -30,7 +28,7 @@ static void init_task(void *argument);
 static void half_sec_task(void *argument)
 {
     uint32_t run_time = 0;
-    bool led_state     = false;
+    bool led_state    = false;
 
     for (;;) {
         pl_iwdg_refresh(pl_iwdg_get_handle());
@@ -68,7 +66,7 @@ static void init_task(void *argument)
     dev_eth_start();
     dev_font_flash_init(&g_font_flash);
     test_semaphore = osSemaphoreNew(1, 0, NULL);
-    sw_board_init();              /* sw_initcall 自注册：协议 + 通道任务 */
+    sw_board_init(); /* sw_initcall 自注册：协议 + 通道任务 */
 
     /* 半秒周期任务 */
     const osThreadAttr_t hst_attr = {
@@ -85,7 +83,8 @@ static void init_task(void *argument)
 /* ---- FreeRTOS 钩子 ---- */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
-    (void)xTask; (void)pcTaskName;
+    (void)xTask;
+    (void)pcTaskName;
     for (;;);
 }
 

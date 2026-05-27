@@ -9,16 +9,16 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
+
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 
 /** @brief UDP 通道子类（每 bind 实例） */
 typedef struct {
     channel_t ch;
-    void    *conn;          /**< 不透明句柄（中间件 netconn），在 .c 中 cast 回具体类型 */
+    void *conn; /**< 不透明句柄（中间件 netconn），在 .c 中 cast 回具体类型 */
     uint16_t listen_port;
-    uint8_t  src_ip[4];     /**< 源 IP 地址（IPv4 字节数组） */
+    uint8_t src_ip[4]; /**< 源 IP 地址（IPv4 字节数组） */
     uint16_t src_port;
 } udp_channel_t;
 

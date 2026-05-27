@@ -10,7 +10,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
+
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 #include "pl_uart.h"
@@ -20,9 +20,9 @@ typedef struct {
     channel_t ch;
     pl_uart_handle_t uart;
     osMessageQueueId_t rx_queue;
-    bool rs485_mode;        /**< true=RS485 半双工（发送时自动 RE 控制） */
-    uint8_t *rx_buf;        /**< DMA 空闲中断接收缓冲区 */
-    uint16_t rx_buf_size;   /**< 缓冲区大小 */
+    bool rs485_mode;      /**< true=RS485 半双工（发送时自动 RE 控制） */
+    uint8_t *rx_buf;      /**< DMA 空闲中断接收缓冲区 */
+    uint16_t rx_buf_size; /**< 缓冲区大小 */
 } uart_channel_t;
 
 extern const ch_ops_t uart_ch_ops;

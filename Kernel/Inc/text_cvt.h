@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 
 /*  是否启用UTF8、GBK、UNICODE编码之间的转换
     注意：unicode编码表占用大，若资源受限，建议优化ff_convert函数，将编码表放到SD卡或者FLASH中

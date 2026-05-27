@@ -10,7 +10,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 
@@ -22,7 +21,7 @@
 
 /** @brief 协议掩码 */
 typedef enum {
-    PROTO_MASK_NONE = (uint32_t)0b0000,
+    PROTO_MASK_NONE    = (uint32_t)0b0000,
     PROTO_MASK_IAP     = (uint32_t)0b0001,
     PROTO_MASK_LDI     = (uint32_t)0b0010,
     PROTO_MASK_AH_MQTT = (uint32_t)0b0100,

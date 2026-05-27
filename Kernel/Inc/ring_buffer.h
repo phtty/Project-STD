@@ -15,16 +15,15 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <stdbool.h>
 
 /**
  * @brief 编译期静态声明一个环形缓冲区实例
  * @param name  实例名
  * @param sz    容量（字节），应为 2 的幂以优化取模
  */
-#define RB_DEFINE(name, sz) \
+#define RB_DEFINE(name, sz)        \
     static uint8_t name##_buf[sz]; \
-    ring_buffer_t name = { .data = name##_buf, .size = sz, .mutex = nullptr }
+    ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
 
 /** @brief 环形缓冲区结构体 */
 typedef struct {
@@ -47,24 +46,24 @@ void rb_unlock(const ring_buffer_t *rb);
 /* ---- 环形缓冲区 API（mutex 参数控制是否加锁）---- */
 
 /* 状态查询 */
-bool      rb_empty(const ring_buffer_t *rb, void *mutex);
-bool      rb_full(const ring_buffer_t *rb, void *mutex);
-uint16_t  rb_avail(const ring_buffer_t *rb, void *mutex);
-uint16_t  rb_space(const ring_buffer_t *rb, void *mutex);
-void      rb_flush(ring_buffer_t *rb, void *mutex);
+bool rb_empty(const ring_buffer_t *rb, void *mutex);
+bool rb_full(const ring_buffer_t *rb, void *mutex);
+uint16_t rb_avail(const ring_buffer_t *rb, void *mutex);
+uint16_t rb_space(const ring_buffer_t *rb, void *mutex);
+void rb_flush(ring_buffer_t *rb, void *mutex);
 
 /* 写入 */
-bool      rb_putc(ring_buffer_t *rb, uint8_t byte, void *mutex);
-uint16_t  rb_write(ring_buffer_t *rb, const uint8_t *data, uint16_t len, void *mutex);
+bool rb_putc(ring_buffer_t *rb, uint8_t byte, void *mutex);
+uint16_t rb_write(ring_buffer_t *rb, const uint8_t *data, uint16_t len, void *mutex);
 
 /* 读取 */
-bool      rb_getc(ring_buffer_t *rb, uint8_t *byte, void *mutex);
-uint16_t  rb_read(ring_buffer_t *rb, uint8_t *data, uint16_t len, void *mutex);
+bool rb_getc(ring_buffer_t *rb, uint8_t *byte, void *mutex);
+uint16_t rb_read(ring_buffer_t *rb, uint8_t *data, uint16_t len, void *mutex);
 
 /* 窥视（不移动读指针） */
-bool      rb_peekc(const ring_buffer_t *rb, uint16_t offset, uint8_t *byte, void *mutex);
-uint16_t  rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex);
+bool rb_peekc(const ring_buffer_t *rb, uint16_t offset, uint8_t *byte, void *mutex);
+uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex);
 
 /* 工具 */
-uint16_t  rb_contig(const ring_buffer_t *rb, uint16_t offset, void *mutex);
-uint16_t  rb_skip(ring_buffer_t *rb, uint16_t len, void *mutex);
+uint16_t rb_contig(const ring_buffer_t *rb, uint16_t offset, void *mutex);
+uint16_t rb_skip(ring_buffer_t *rb, uint16_t len, void *mutex);

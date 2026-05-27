@@ -1,47 +1,35 @@
 #include "main.h"
-#include "cmsis_os2.h"
 /**
  * @file    dev_key.c
- * @brief   按键/拨码开关设备实现
+ * @brief   按键/拨码开关设备实现（依赖 pl_exti 平台抽象）
  */
 
 #include "dev_key.h"
+#include "pl_exti.h"
 #include <stddef.h>
 
 static dev_key_cb_t s_key_cb[8];
 
+static void key_exti_cb(uint16_t pin, void *ctx)
+{
+    (void)ctx;
+    uint8_t id = 0;
+    if (pin == SW1_Pin)      id = 0;
+    else if (pin == SW2_Pin) id = 1;
+    else if (pin == SW3_Pin) id = 2;
+    else return;
+    if (s_key_cb[id]) s_key_cb[id](id);
+}
+
 void dev_key_init(void)
 {
     for (int i = 0; i < 8; i++) s_key_cb[i] = NULL;
+    pl_exti_register_cb(SW1_Pin, key_exti_cb, NULL);
+    pl_exti_register_cb(SW2_Pin, key_exti_cb, NULL);
+    pl_exti_register_cb(SW3_Pin, key_exti_cb, NULL);
 }
 
 void dev_key_register_cb(uint8_t key_id, dev_key_cb_t cb)
 {
     if (key_id < 8) s_key_cb[key_id] = cb;
-}
-
-/* ---- EXTI ISR (从 stm32f4xx_it.c 迁移) ---- */
-extern osSemaphoreId_t  test_semaphore;
-extern osEventFlagsId_t SW123_Event;
-
-void EXTI9_5_IRQHandler(void)
-{
-    HAL_GPIO_EXTI_IRQHandler(KEY_TST_Pin);
-}
-void EXTI15_10_IRQHandler(void)
-{
-    HAL_GPIO_EXTI_IRQHandler(SW3_Pin);
-    HAL_GPIO_EXTI_IRQHandler(SW2_Pin);
-    HAL_GPIO_EXTI_IRQHandler(SW1_Pin);
-}
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == KEY_TST_Pin)
-        osSemaphoreRelease(test_semaphore);
-    if (GPIO_Pin == SW1_Pin)
-        osEventFlagsSet(SW123_Event, SW1_EVENT);
-    if (GPIO_Pin == SW2_Pin)
-        osEventFlagsSet(SW123_Event, SW2_EVENT);
-    if (GPIO_Pin == SW3_Pin)
-        osEventFlagsSet(SW123_Event, SW3_EVENT);
 }

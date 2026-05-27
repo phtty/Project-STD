@@ -9,7 +9,6 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
 
 #define PL_NET_LINK_LISTENER_MAX 8

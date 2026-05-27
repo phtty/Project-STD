@@ -6,7 +6,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 
 /** @brief 端口标识（不与芯片 GPIO 基地址耦合） */
 typedef enum {
@@ -23,4 +22,4 @@ typedef enum {
 
 void pl_gpio_init(void);
 void pl_gpio_write(pl_port_t port, uint8_t pin, bool high);
-bool pl_gpio_read (pl_port_t port, uint8_t pin);
+bool pl_gpio_read(pl_port_t port, uint8_t pin);

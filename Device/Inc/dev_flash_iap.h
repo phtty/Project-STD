@@ -1,11 +1,12 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 // 地址与常量定义
-#define ADDR_CONFIG_SECTOR 0x08004000
-#define ADDR_RECOVERY_APP  0x08008000
-#define ADDR_MAIN_APP      0x08040000
+#define ADDR_CONFIG_SECTOR  0x08004000
+#define ADDR_RECOVERY_APP   0x08008000
+#define ADDR_MAIN_APP       0x08040000
 
 #define DEV_FLASH_IAP_MAGIC 0x0d000721
 
@@ -33,11 +34,11 @@ typedef enum {
 
 // 存储在 0x08004000
 __attribute__((aligned(4))) typedef struct {
-    uint32_t magic;                       // 魔数，判断配置区是否有效
-    uint32_t update_sta;                  // 升级状态机
-    dev_flash_iap_fw_info_t app_info;     // main_app 状态
-    dev_flash_iap_net_cfg_t net_cfg;      // 网络配置
-    uint32_t config_crc;                  // 本结构体自身的 CRC32 校验
+    uint32_t magic;                   // 魔数，判断配置区是否有效
+    uint32_t update_sta;              // 升级状态机
+    dev_flash_iap_fw_info_t app_info; // main_app 状态
+    dev_flash_iap_net_cfg_t net_cfg;  // 网络配置
+    uint32_t config_crc;              // 本结构体自身的 CRC32 校验
 } dev_flash_iap_sys_info_t;
 
 bool dev_flash_iap_is_config_empty(volatile const dev_flash_iap_sys_info_t *info);

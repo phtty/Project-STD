@@ -10,7 +10,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 
@@ -24,22 +23,22 @@ typedef enum {
 
 /** @brief MQTT 运行上下文 — 散落全局资源的聚合 */
 typedef struct {
-    void *client;                  /**< 不透明句柄（中间件 mqtt_client），在 .c 中 cast 回具体类型 */
-    uint8_t broker_ip[4];          /**< Broker IP 地址 */
-    uint16_t broker_port;          /**< Broker 端口 */
-    char client_id[32];            /**< MQTT Client ID */
-    char client_user[32];          /**< MQTT 用户名 */
-    char client_pass[32];          /**< MQTT 密码 */
-    osSemaphoreId_t connect_sem;   /**< CONNACK 同步信号量 */
-    uint8_t rcv_buf[1044];         /**< 接收缓冲区 */
-    uint32_t payload_offset;       /**< rcv_buf 写入偏移 */
+    void *client;                /**< 不透明句柄（中间件 mqtt_client），在 .c 中 cast 回具体类型 */
+    uint8_t broker_ip[4];        /**< Broker IP 地址 */
+    uint16_t broker_port;        /**< Broker 端口 */
+    char client_id[32];          /**< MQTT Client ID */
+    char client_user[32];        /**< MQTT 用户名 */
+    char client_pass[32];        /**< MQTT 密码 */
+    osSemaphoreId_t connect_sem; /**< CONNACK 同步信号量 */
+    uint8_t rcv_buf[1044];       /**< 接收缓冲区 */
+    uint32_t payload_offset;     /**< rcv_buf 写入偏移 */
 } mqtt_ctx_t;
 
 /** @brief MQTT 通道子类（单例，channel_t 为第一个成员） */
 typedef struct {
     channel_t ch;
-    mqtt_state_t state;   /**< MQTT 连接状态机 */
-    mqtt_ctx_t ctx;       /**< 运行时上下文 */
+    mqtt_state_t state; /**< MQTT 连接状态机 */
+    mqtt_ctx_t ctx;     /**< 运行时上下文 */
     char topic[64];
     uint16_t payload_len; /**< 当前帧 payload 长度（probe 函数使用） */
 } mqtt_channel_t;
@@ -68,4 +67,3 @@ void mqtt_send_data(const char *topic, const char *message);
  */
 void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port);
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass);
-

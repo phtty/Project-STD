@@ -9,7 +9,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
+
 #include "cmsis_os2.h"
 #include "dispatch_types.h"
 
@@ -19,8 +19,8 @@
 /** @brief TCP Client 通道子类（单例，自带远端配置） */
 typedef struct {
     channel_t ch;
-    void    *conn;        /**< 不透明句柄（中间件 netconn），在 .c 中 cast 回具体类型 */
-    uint8_t  host_ip[4];
+    void *conn; /**< 不透明句柄（中间件 netconn），在 .c 中 cast 回具体类型 */
+    uint8_t host_ip[4];
     uint16_t host_port;
 } tcp_client_channel_t;
 

@@ -5,12 +5,10 @@
 
 #pragma once
 
-#include <stdbool.h>
-
 /** @brief IWDG 不透明句柄 */
 typedef void *pl_iwdg_handle_t;
 
-void            pl_iwdg_init(void);
+void pl_iwdg_init(void);
 pl_iwdg_handle_t pl_iwdg_get_handle(void);
 
 /** @brief 刷新看门狗计数器，防止系统复位 */

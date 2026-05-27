@@ -10,7 +10,6 @@
 
 #include "main.h"
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ---- HUB75 通道数 ---- */
 #define HUB75_CHANNEL_MAX 10
@@ -57,26 +56,40 @@ __STATIC_INLINE void pl_hub75_set_rgb(uint8_t ch, hub75_color_t color)
     GPIO_TypeDef *rp = g_hub75_pin_r[ch].port;
     GPIO_TypeDef *gp = g_hub75_pin_g[ch].port;
     GPIO_TypeDef *bp = g_hub75_pin_b[ch].port;
-    uint16_t rm = g_hub75_pin_r[ch].pin;
-    uint16_t gm = g_hub75_pin_g[ch].pin;
-    uint16_t bm = g_hub75_pin_b[ch].pin;
+    uint16_t rm      = g_hub75_pin_r[ch].pin;
+    uint16_t gm      = g_hub75_pin_g[ch].pin;
+    uint16_t bm      = g_hub75_pin_b[ch].pin;
 
-    if (color & 1) { rp->BSRR = rm; } else { rp->BSRR = rm << 0x10; }
-    if (color & 2) { gp->BSRR = gm; } else { gp->BSRR = gm << 0x10; }
-    if (color & 4) { bp->BSRR = bm; } else { bp->BSRR = bm << 0x10; }
+    if (color & 1) {
+        rp->BSRR = rm;
+    } else {
+        rp->BSRR = rm << 0x10;
+    }
+    if (color & 2) {
+        gp->BSRR = gm;
+    } else {
+        gp->BSRR = gm << 0x10;
+    }
+    if (color & 4) {
+        bp->BSRR = bm;
+    } else {
+        bp->BSRR = bm << 0x10;
+    }
 }
 
 __STATIC_INLINE void pl_hub75_clock_pulse(void)
 {
     HUB75_CLK = 1;
-    __NOP(); __NOP();
+    __NOP();
+    __NOP();
     HUB75_CLK = 0;
 }
 
 __STATIC_INLINE void pl_hub75_latch_pulse(void)
 {
     HUB75_LAT = 1;
-    __NOP(); __NOP();
+    __NOP();
+    __NOP();
     HUB75_LAT = 0;
 }
 

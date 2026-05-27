@@ -230,6 +230,7 @@ SRC_KERNEL = \
 SRC_PLATFORM = \
 	Platform/Src/pl_gpio.c \
 	Platform/Src/pl_rtt.c \
+	Platform/Src/pl_exti.c \
 	Platform/Src/pl_net.c \
 	Platform/Src/pl_eth.c \
 	Platform/Src/pl_crc.c \
@@ -263,10 +264,11 @@ SRC_DEVICE = \
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
 	Application/Src/app_boot.c \
-	Application/Src/app_render.c \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_iap.c \
 	Application/Src/app_iap_cmd.c \
+	Application/Src/app_render.c \
+	Application/Src/app_light_sensor.c
 
 # ---- All Sources ----
 SRC_ALL = \

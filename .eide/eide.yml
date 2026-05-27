@@ -10,13 +10,12 @@ virtualFolder:
   folders:
     - name: Application
       files:
-        - path: Application/Src/ah_mqtt_cmd.c
-        - path: Application/Src/ah_mqtt.c
         - path: Application/Src/app_boot.c
         - path: Application/Src/app_render.c
         - path: Application/Src/app_dispatch.c
         - path: Application/Src/app_iap.c
         - path: Application/Src/app_iap_cmd.c
+        - path: Application/Src/app_mqtt.c
       folders: []
     - name: Drivers
       files: []
