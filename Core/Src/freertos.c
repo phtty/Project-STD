@@ -4,16 +4,6 @@
  * File Name          : freertos.c
  * Description        : Code for freertos applications
  ******************************************************************************
- * @attention
- *
- * Copyright (c) 2025 STMicroelectronics.
- * All rights reserved.
- *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
- *
- ******************************************************************************
  */
 /* USER CODE END Header */
 
@@ -25,19 +15,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "tim.h"
-#include "iwdg.h"
-#include "rtc.h"
-#include "lwip.h"
-#include "protocol.h"
-#include "SEGGER_RTT.h"
-#include "w25qxx.h"
-#include "render.h"
-#include "light.h"
-#include "tcp_server_app.h"
-#include "tcp_client_app.h"
-#include "mqtt_app.h"
-#include "udp_app.h"
+#include "pl_iwdg.h"
+#include "pl_rtc.h"
 
 /* USER CODE END Includes */
 
@@ -66,38 +45,15 @@ const osThreadAttr_t HalfSecTask_attributes = {
     .stack_size = 128 * 4,
     .priority   = (osPriority_t)osPriorityLow,
 };
-
-osThreadId_t PointTestTaskHandle;
-const osThreadAttr_t PointTestTask_attributes = {
-    .name       = "PointTestTask",
-    .stack_size = 1024 * 4,
-    .priority   = (osPriority_t)osPriorityAboveNormal,
-};
-
 /* USER CODE END Variables */
-/* Definitions for InitTask */
-osThreadId_t InitTaskHandle;
-uint32_t InitTaskBuffer[256 * 4];
-osStaticThreadDef_t InitTaskControlBlock;
-const osThreadAttr_t InitTask_attributes = {
-    .name       = "InitTask",
-    .cb_mem     = &InitTaskControlBlock,
-    .cb_size    = sizeof(InitTaskControlBlock),
-    .stack_mem  = &InitTaskBuffer[0],
-    .stack_size = sizeof(InitTaskBuffer),
-    .priority   = (osPriority_t)osPriorityNormal,
-};
+
+/* InitialTask / InitTask 已迁移至 Application/Src/app_boot.c */
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 void HalfSecTask(void *argument);
-void PointTestTask(void *argument);
-void RefreshTask(void *argument);
 /* USER CODE END FunctionPrototypes */
 
-void InitialTask(void *argument);
-
-extern void MX_LWIP_Init(void);
 void MX_FREERTOS_Init(void);
 
 /**
@@ -112,77 +68,27 @@ void MX_FREERTOS_Init(void)
     /* USER CODE END Init */
 
     /* USER CODE BEGIN RTOS_MUTEX */
-    /* add mutexes, ... */
     /* USER CODE END RTOS_MUTEX */
 
     /* USER CODE BEGIN RTOS_SEMAPHORES */
-    /* add semaphores, ... */
     test_semaphore = osSemaphoreNew(1, 0, NULL);
     configASSERT(test_semaphore != NULL);
     /* USER CODE END RTOS_SEMAPHORES */
 
     /* USER CODE BEGIN RTOS_TIMERS */
-    /* start timers, add new ones, ... */
     /* USER CODE END RTOS_TIMERS */
 
     /* USER CODE BEGIN RTOS_QUEUES */
-    /* add queues, ... */
     /* USER CODE END RTOS_QUEUES */
 
-    /* Create the thread(s) */
-    /* creation of InitTask */
+    /* InitTask 已迁移至 Application/Src/app_boot.c */
     HalfSecTaskHandle = osThreadNew(HalfSecTask, NULL, &HalfSecTask_attributes);
-    InitTaskHandle    = osThreadNew(InitialTask, NULL, &InitTask_attributes);
 
     /* USER CODE BEGIN RTOS_THREADS */
-    /* add threads, ... */
     /* USER CODE END RTOS_THREADS */
 
     /* USER CODE BEGIN RTOS_EVENTS */
-    /* add events, ... */
     /* USER CODE END RTOS_EVENTS */
-}
-
-/* USER CODE BEGIN Header_InitialTask */
-/**
- * @brief  Function implementing the InitTask thread.
- * @param  argument: Not used
- * @retval None
- */
-/* USER CODE END Header_InitialTask */
-void InitialTask(void *argument)
-{
-    /* init code for LWIP */
-    MX_LWIP_Init();
-    /* USER CODE BEGIN InitialTask */
-    SEGGER_RTT_Init();
-    BSP_W25Qx_Init(&hw25q256, &hspi1);
-    channel_init();
-
-    // �����¼���־�ȴ��������
-    netEventFlagsHandle = osEventFlagsNew(NULL);
-
-    // mqttManageTaskHandle = osThreadNew(mqttManageTask, NULL, &mqttManageTask_attributes);
-    udpManageTaskHandle = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
-    // tcpServerTaskHandle = osThreadNew(tcpServerTask, NULL, &tcpServerTask_attributes);
-    // tcpClientTaskHandle = osThreadNew(tcpClientTask, NULL, &tcpClientTask_attributes);
-    // RS232/RS485 通道任务已迁移至 dev_uart_channel（Platform 层 ISR + Device 层 initcall）
-
-    // autoAdjLightTaskHandle = osThreadNew(autoAdjLightTask, NULL, &autoAdjLightTask_attributes);
-
-    // RefreshTaskHandle = osThreadNew(RefreshTask, NULL, &RefreshTask_attributes);
-    // PointTestTaskHandle = osThreadNew(PointTestTask, NULL, &PointTestTask_attributes);
-    // RenderString(0, 0, "����", strlen("����"), green, font_16, font_ht);
-
-    printf("\nInit Task Done\n");
-
-    // osThreadExit();
-    osThreadSuspend(InitTaskHandle);
-    /* Infinite loop */
-    for (;;) {
-        osDelay(1);
-    }
-    /* USER CODE END InitialTask */
 }
 
 /* Private application code --------------------------------------------------*/
@@ -192,37 +98,16 @@ void HalfSecTask(void *argument)
     uint32_t run_time = 0;
 
     for (;;) {
-        HAL_IWDG_Refresh(&hiwdg);
+        pl_iwdg_refresh(pl_iwdg_get_handle());
 
         if (run_time >= 60)
-            HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, 0);
+            pl_rtc_bkup_write(pl_rtc_get_handle(), RTC_BKP_DR1, 0);
         else
             run_time++;
 
         HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 
         osDelay(500);
-    }
-}
-
-void PointTestTask(void *argument)
-{
-    light_level = 7;
-    HAL_TIM_Base_Start_IT(&htim3);
-    HAL_TIM_Base_Start_IT(&htim4);
-
-    for (;;) {
-        for (int i = SCAN_LINE_PIXEL_NUM - 50; i < DISRAM_SIZE; i++) {
-            pixel_map[i] = green;
-
-            convert_pixelmap();
-            osDelay(50);
-
-            pixel_map[i] = black;
-        }
-
-        // point_order_test(green, 1, 0);
-        // osDelay(500);
     }
 }
 
