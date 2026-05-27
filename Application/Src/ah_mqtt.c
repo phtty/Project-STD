@@ -1,6 +1,5 @@
 #include "ah_mqtt.h"
 
-#include "mqtt_app.h"
 #include "ah_mqtt_cmd.h"
 #include "dev_display.h"
 #include "app_mqtt.h"
@@ -68,7 +67,7 @@ void ah_mqtt_handle_task(void *argument)
     g_proto_ah_matt_queue                          = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
     app_proto_set_frame_queue(PROTO_MASK_AH_MQTT, g_proto_ah_matt_queue);
 
-    while (mqtt_state != connected) { // 锟饺达拷锟斤拷锟接斤拷锟斤拷
+    while (g_mqtt.state != MQTT_ST_READY) { // 锟饺达拷锟斤拷锟接斤拷锟斤拷
         osDelay(100);
     }
     // 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟节讹拷时锟较憋拷状态锟斤拷签锟斤拷
