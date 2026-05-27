@@ -49,3 +49,6 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
     if (hspi == &hspi1 && g_spi_ctx.rx_cplt_cb)
         g_spi_ctx.rx_cplt_cb(g_spi_ctx.rx_cplt_ctx);
 }
+
+/* ---- SPI ISR (从 stm32f4xx_it.c 迁移) ---- */
+void SPI1_IRQHandler(void) { HAL_SPI_IRQHandler(&hspi1); }

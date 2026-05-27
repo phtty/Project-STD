@@ -8,6 +8,8 @@
 
 #include "pl_tim.h"
 #include "tim.h"
+
+extern TIM_HandleTypeDef htim7;
 #include "initcall.h"
 
 void pl_tim_init(void)
@@ -17,3 +19,9 @@ void pl_tim_init(void)
     MX_TIM4_Init();
 }
 hw_device_initcall(pl_tim_init);
+
+/* ---- TIM ISR (从 stm32f4xx_it.c 迁移) ---- */
+void TIM2_IRQHandler(void) { HAL_TIM_IRQHandler(&htim2); }
+void TIM3_IRQHandler(void) { HAL_TIM_IRQHandler(&htim3); }
+void TIM4_IRQHandler(void) { HAL_TIM_IRQHandler(&htim4); }
+void TIM7_IRQHandler(void) { HAL_TIM_IRQHandler(&htim7); }

@@ -32,3 +32,6 @@ int32_t pl_adc_read(pl_adc_handle_t h, uint32_t *value, uint32_t timeout_ms)
     HAL_ADC_Stop(hadc);
     return 0;
 }
+
+/* ---- ADC ISR (从 stm32f4xx_it.c 迁移) ---- */
+void ADC_IRQHandler(void) { HAL_ADC_IRQHandler(&hadc1); }

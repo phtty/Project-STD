@@ -17,13 +17,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "lwip.h"
 
 /* Private includes ----------------------------------------------------------*/
 #include "initcall.h"
 #include "dev_display.h"
 
-/* Phase 11 会移到 app_boot.h */
+/* Phase 11 浼氱Щ鍒 app_boot.h */
 void app_boot(void);
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,11 +55,11 @@ int main(void)
     HAL_Init();
 
     /* Configure the system clock */
-    SystemClock_Config();
+    /* SystemClock_Config() 已由 pl_sys_init 通过 initcall 自动调用 */
 
     initcall_run(__hw_initcall_start, __hw_initcall_end);
 
-    /* 启动 RTOS（由 app_boot 接管初始化流程） */
+    /* 鍚鍔 RTOS锛堢敱 app_boot 鎺ョ″垵濮嬪寲娴佺▼锛 */
     app_boot();
 
     /* We should never get here as control is now taken by the scheduler */
@@ -75,44 +74,7 @@ int main(void)
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void)
-{
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-    /** Configure the main internal regulator output voltage
-     */
-    __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-
-    /** Initializes the RCC Oscillators according to the specified parameters
-     * in the RCC_OscInitTypeDef structure.
-     */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_HSE;
-    RCC_OscInitStruct.HSEState       = RCC_HSE_ON;
-    RCC_OscInitStruct.LSIState       = RCC_LSI_ON;
-    RCC_OscInitStruct.PLL.PLLState   = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
-    RCC_OscInitStruct.PLL.PLLM       = 4;
-    RCC_OscInitStruct.PLL.PLLN       = 168;
-    RCC_OscInitStruct.PLL.PLLP       = RCC_PLLP_DIV2;
-    RCC_OscInitStruct.PLL.PLLQ       = 4;
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /** Initializes the CPU, AHB and APB buses clocks
-     */
-    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-    RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
-
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
-        Error_Handler();
-    }
-}
+/* SystemClock_Config → pl_sys.c */
 
 /**
  * @brief  Period elapsed callback in non blocking mode

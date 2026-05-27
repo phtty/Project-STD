@@ -9,44 +9,15 @@ virtualFolder:
   files: []
   folders:
     - name: Application
-      files: []
-      folders:
-        - name: Users
-          files:
-            - path: Core/Src/main.c
-            - path: Core/Src/stm32f4xx_it.c
-            - path: Core/Src/syscalls.c
-            - path: Core/Src/sysmem.c
-          folders: []
-        - name: CubeMX
-          files:
-            - path: Core/Src/adc.c
-            - path: Core/Src/dma.c
-            - path: Core/Src/gpio.c
-            - path: Core/Src/iwdg.c
-            - path: Core/Src/rtc.c
-            - path: Core/Src/spi.c
-            - path: Core/Src/stm32f4xx_hal_msp.c
-            - path: Core/Src/stm32f4xx_hal_timebase_tim.c
-            - path: Core/Src/system_stm32f4xx.c
-            - path: Core/Src/tim.c
-            - path: Core/Src/usart.c
-            - path: Core/Src/crc.c
-          folders: []
-        - name: NetIF
-          files:
-            - path: LWIP/App/lwip.c
-            - path: LWIP/Target/ethernetif.c
-            - path: LWIP/Target/lwipopts.h
-            - path: LWIP/App/mqtt_app.c
-            - path: LWIP/App/tcp_client_app.c
-            - path: LWIP/App/tcp_server_app.c
-            - path: LWIP/App/udp_app.c
-          folders: []
-        - name: RTOS
-          files:
-            - path: Core/Src/freertos.c
-          folders: []
+      files:
+        - path: Application/Src/ah_mqtt_cmd.c
+        - path: Application/Src/ah_mqtt.c
+        - path: Application/Src/app_boot.c
+        - path: Application/Src/app_render.c
+        - path: Application/Src/app_dispatch.c
+        - path: Application/Src/app_iap.c
+        - path: Application/Src/app_iap_cmd.c
+      folders: []
     - name: Drivers
       files: []
       folders:
@@ -76,76 +47,6 @@ virtualFolder:
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c
             - path: Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_crc.c
-          folders: []
-        - name: BSP
-          files: []
-          folders:
-            - name: Components
-              files: []
-              folders:
-                - name: DP83848
-                  files:
-                    - path: Drivers/BSP/Components/dp83848/dp83848.c
-                  folders: []
-                - name: W25Qxx
-                  files:
-                    - path: Drivers/BSP/Components/W25Qxx/w25qxx.c
-                  folders: []
-                - name: HUB75
-                  files:
-                    - path: Drivers/BSP/Components/HUB75/hub75.c
-                  folders: []
-                - name: LightSensor
-                  files:
-                    - path: Drivers/BSP/Components/LightSensor/light.c
-                  folders: []
-                - name: IOCtrl
-                  files:
-                    - path: Drivers/BSP/Components/IOCtrl/IOCtrl.c
-                  folders: []
-                - name: Key
-                  files:
-                    - path: Drivers/BSP/Components/Key/key.c
-                  folders: []
-                - name: RS485_232
-                  files:
-                    - path: Drivers/BSP/Components/RS232_485/RS232.c
-                    - path: Drivers/BSP/Components/RS232_485/RS485.c
-                  folders: []
-            - name: Display
-              files:
-                - path: Drivers/BSP/Display/display.c
-                - path: Drivers/BSP/Display/render.c
-                - path: Drivers/BSP/Display/scan.c
-              folders:
-                - name: text_cvt
-                  files:
-                    - path: Drivers/BSP/Display/text_cvt/text_cvt.c
-                  folders: []
-            - name: RingBuff
-              files:
-                - path: Drivers/BSP/RingBuff/RingBuff.c
-              folders: []
-            - name: Protocol
-              files:
-                - path: Drivers/BSP/Protocol/protocol.c
-              folders:
-                - name: IAP
-                  files:
-                    - path: Drivers/BSP/Protocol/IAP/config_info.c
-                    - path: Drivers/BSP/Protocol/IAP/iap.c
-                    - path: Drivers/BSP/Protocol/IAP/iap_cmd.c
-                  folders: []
-                - name: AH_MQTT
-                  files:
-                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c
-                    - path: Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c
-                  folders: []
-        - name: RTT
-          files:
-            - path: Drivers/RTT/RTT/SEGGER_RTT.c
-            - path: Drivers/RTT/RTT/SEGGER_RTT_printf.c
-            - path: Drivers/RTT/RTT/SEGGER_RTT_Syscalls_GCC.c
           folders: []
     - name: Middlewares
       files: []
@@ -277,9 +178,75 @@ virtualFolder:
                 - path: Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c
                 - path: Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
               folders: []
+        - name: RTT
+          files:
+            - path: Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT.c
+            - path: Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_printf.c
+            - path: Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_Syscalls_GCC.c
+          folders: []
     - name: Compiler
       files:
         - path: Compiler/startup.c
+      folders: []
+    - name: Device
+      files:
+        - path: Device/Src/dev_io_ctrl.c
+        - path: Device/Src/dev_key.c
+        - path: Device/Src/dev_display.c
+        - path: Device/Src/dev_flash_iap.c
+        - path: Device/Src/dev_light_sensor.c
+        - path: Device/Src/dev_flash_font.c
+        - path: Device/Src/dev_uart_channel.c
+        - path: Device/Src/dev_dp83848.c
+        - path: Device/Src/dev_eth.c
+        - path: Device/Src/dev_rs485.c
+        - path: Device/Src/dev_rs232.c
+      folders: []
+    - name: Platform
+      files:
+        - path: Platform/Src/pl_gpio.c
+        - path: Platform/Src/pl_rtt.c
+        - path: Platform/Src/pl_net.c
+        - path: Platform/Src/pl_eth.c
+        - path: Platform/Src/pl_crc.c
+        - path: Platform/Src/pl_iwdg.c
+        - path: Platform/Src/pl_dma.c
+        - path: Platform/Src/pl_dwt.c
+        - path: Platform/Src/pl_tim.c
+        - path: Platform/Src/pl_rtc.c
+        - path: Platform/Src/pl_sys.c
+        - path: Platform/Src/pl_flash.c
+        - path: Platform/Src/pl_hub75.c
+        - path: Platform/Src/pl_adc.c
+        - path: Platform/Src/pl_spi.c
+        - path: Platform/Src/pl_uart.c
+      folders: []
+    - name: Kernel
+      files:
+        - path: Kernel/Src/initcall.c
+        - path: Kernel/Src/ring_buffer.c
+        - path: Kernel/Src/bit_utils.c
+        - path: Kernel/Src/crc_utils.c
+        - path: Kernel/Src/text_cvt.c
+      folders: []
+    - name: Core
+      files:
+        - path: Core/Src/main.c
+        - path: Core/Src/stm32f4xx_it.c
+        - path: Core/Src/syscalls.c
+        - path: Core/Src/sysmem.c
+        - path: Core/Src/adc.c
+        - path: Core/Src/dma.c
+        - path: Core/Src/gpio.c
+        - path: Core/Src/iwdg.c
+        - path: Core/Src/rtc.c
+        - path: Core/Src/spi.c
+        - path: Core/Src/stm32f4xx_hal_msp.c
+        - path: Core/Src/stm32f4xx_hal_timebase_tim.c
+        - path: Core/Src/system_stm32f4xx.c
+        - path: Core/Src/tim.c
+        - path: Core/Src/usart.c
+        - path: Core/Src/crc.c
       folders: []
 dependenceList: []
 outDir: build
@@ -296,35 +263,24 @@ targets:
         - Drivers/CMSIS/Include
         - Drivers/CMSIS/Device/ST/STM32F4xx/Include
         - Drivers/STM32F4xx_HAL_Driver/Inc
-        - Drivers/BSP/Components/dp83848
-        - Drivers/BSP/Components/HUB75
-        - Drivers/BSP/Components/W25Qxx
-        - Drivers/RTT/Config
-        - Drivers/RTT/RTT
-        - LWIP/App
-        - LWIP/Target
         - Middlewares/Third_Party/LwIP/src/include
         - Middlewares/Third_Party/LwIP/system
         - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
         - Middlewares/Third_Party/FreeRTOS/Source/include
         - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
         - Compiler
-        - Drivers/BSP/Display
-        - Drivers/BSP/Components/Key
-        - Drivers/BSP/RingBuffer
-        - Drivers/BSP/Protocol/IAP
-        - Drivers/BSP/RingBuff
-        - Drivers/BSP/Components/LightSensor
-        - Drivers/BSP/Protocol
-        - Drivers/BSP/Display/text_cvt
-        - Drivers/BSP/Components/IOCtrl
-        - Drivers/BSP/Components/RS232_485
-        - Drivers/BSP/Protocol/AH_MQTT
+        - Application/Inc
+        - Device/Inc
+        - Kernel/Inc
+        - Platform/Inc
+        - Middlewares/Third_Party/SEGGER_RTT
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+      - <virtual_root>/Application/ah_mqtt_cmd.c
+      - <virtual_root>/Application/ah_mqtt.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
