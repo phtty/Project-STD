@@ -8,7 +8,6 @@
 #include "usart.h"
 
 #include "iap.h"
-#include "ah_mqtt.h"
 #include "mqtt_app.h"
 
 osMessageQueueId_t g_meta_queue;
@@ -60,11 +59,7 @@ void channel_init(void)
     // 注册IAP协议相关资源
     g_proto_to_group[proto_index(PROTO_MASK_IAP)] = RB_GROUP_IAP;
     g_proto_probers[proto_index(PROTO_MASK_IAP)]  = iap_probe_frame;
-    // 注册安徽mqtt协议任务
-    g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
-    // 注册安徽mqtt协议相关资源
-    g_proto_to_group[proto_index(PROTO_MASK_AH_MQTT)] = RB_GROUP_PROTO;
-    g_proto_probers[proto_index(PROTO_MASK_AH_MQTT)]  = ah_mqtt_probe_frame;
+    // AH_MQTT 协议已迁移至 sw_device_initcall 自注册
 }
 
 // 协议探测函数注册表（在各协议模块中填充）

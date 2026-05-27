@@ -253,6 +253,8 @@ SRC_PLATFORM = \
 	Platform/Src/pl_dwt.c \
 	Platform/Src/pl_tim.c \
 	Platform/Src/pl_rtc.c \
+	Platform/Src/pl_sys.c \
+	Platform/Src/pl_flash.c \
 	Platform/Src/pl_hub75.c \
 	Platform/Src/pl_adc.c \
 	Platform/Src/pl_spi.c \
@@ -263,6 +265,7 @@ SRC_DEVICE = \
 	Device/Src/dev_io_ctrl.c \
 	Device/Src/dev_key.c \
 	Device/Src/dev_display.c \
+	Device/Src/dev_flash_iap.c \
 	Device/Src/dev_light_sensor.c \
 	Device/Src/dev_flash_font.c \
 	Device/Src/dev_uart_channel.c \
@@ -275,6 +278,9 @@ SRC_APPLICATION = \
 	Application/Src/app_boot.c \
 	Application/Src/app_render.c \
 	Application/Src/app_light_sensor.c \
+	Application/Src/app_dispatch.c \
+	Application/Src/app_iap.c \
+	Application/Src/app_iap_cmd.c \
 
 # ---- All Sources ----
 SRC_ALL = \
@@ -287,9 +293,6 @@ SRC_ALL = \
 	$(SRC_HAL) \
 	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt.c \
 	Drivers/BSP/Protocol/AH_MQTT/ah_mqtt_cmd.c \
-	Drivers/BSP/Protocol/protocol.c \
-	Drivers/BSP/Protocol/IAP/iap.c \
-	Drivers/BSP/Protocol/IAP/iap_cmd.c \
 	Drivers/BSP/Protocol/IAP/config_info.c \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \

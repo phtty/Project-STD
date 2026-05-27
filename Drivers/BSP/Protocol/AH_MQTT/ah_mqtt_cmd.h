@@ -4,7 +4,7 @@
 
 #include "ah_mqtt.h"
 
-// ÏÔÊ¾¿ØÖÆÖ¸Áî
+// ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
 typedef struct [[gnu::packed]] cmd_disp {
     notify_id_t nid;
     char scrn_sw;
@@ -13,13 +13,13 @@ typedef struct [[gnu::packed]] cmd_disp {
     char text[];
 } cmd_display_t;
 
-// ÆÁÄ»Ìî³ä
+// ï¿½ï¿½Ä»ï¿½ï¿½ï¿½
 typedef struct [[gnu::packed]] cmd_fill {
     notify_id_t nid;
     char color;
 } cmd_fill_t;
 
-// ÖØÆô
+// ï¿½ï¿½ï¿½ï¿½
 typedef struct [[gnu::packed]] cmd_restart {
     notify_id_t nid;
     char type;
@@ -28,12 +28,12 @@ typedef struct [[gnu::packed]] cmd_restart {
     char reserve;
 } cmd_restart_t;
 
-// ¶ÔÊ±
+// ï¿½ï¿½Ê±
 typedef struct [[gnu::packed]] cmd_checktime {
     notify_id_t nid;
     char type;
     char time[14];
 } cmd_checktime_t;
 
-typedef void (*ah_mqtt_cmd_handler_fn_t)(ch_meta_t *, char *);
+typedef void (*ah_mqtt_cmd_handler_fn_t)(channel_t *, char *);
 extern const ah_mqtt_cmd_handler_fn_t g_ah_mqtt_cmd_table[];

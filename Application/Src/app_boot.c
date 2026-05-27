@@ -16,9 +16,7 @@
 #include "lwip.h"
 #include "SEGGER_RTT.h"
 #include "dev_flash_font.h"
-#include "initcall.h"
-#include "protocol.h"
-#include "udp_app.h"
+
 
 static font_flash_dev_t g_font_flash;
 
@@ -53,17 +51,8 @@ static void init_task(void *argument)
     /* W25Qxx 字库 Flash */
     dev_font_flash_init(&g_font_flash);
 
-    /* 协议分发（待完整迁移至 app_dispatch） */
-    channel_init();
-
-    /* 网络事件标志 */
-    extern osEventFlagsId_t netEventFlagsHandle;
-    netEventFlagsHandle = osEventFlagsNew(NULL);
-
-    /* 网络任务 */
-    extern osThreadId_t udpManageTaskHandle;
-    extern const osThreadAttr_t udpManageTask_attributes;
-    udpManageTaskHandle = osThreadNew(udpManageTask, NULL, &udpManageTask_attributes);
+    /* 协议分发 + 通道任务（sw_initcall 自注册） */
+    sw_board_init();
 
     /* 半秒任务（喂狗 + RTC 备份），从 freertos.c 继承 */
     MX_FREERTOS_Init();

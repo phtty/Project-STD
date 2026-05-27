@@ -22,9 +22,10 @@
 /** @brief 协议掩码 */
 typedef enum {
     PROTO_MASK_NONE = (uint32_t)0b0000,
-    PROTO_MASK_IAP  = (uint32_t)0b0001,
-    PROTO_MASK_LDI  = (uint32_t)0b0010,
-    PROTO_MASK_ALL  = (uint32_t)0xffffffff,
+    PROTO_MASK_IAP     = (uint32_t)0b0001,
+    PROTO_MASK_LDI     = (uint32_t)0b0010,
+    PROTO_MASK_AH_MQTT = (uint32_t)0b0100,
+    PROTO_MASK_ALL     = (uint32_t)0xffffffff,
 } proto_mask_t;
 
 /** @brief 协议探测函数类型 */

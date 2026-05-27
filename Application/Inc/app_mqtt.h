@@ -40,6 +40,7 @@ typedef struct {
     mqtt_state_t state;   /**< MQTT 连接状态机 */
     mqtt_ctx_t ctx;       /**< 运行时上下文 */
     char topic[64];
+    uint16_t payload_len; /**< 当前帧 payload 长度（probe 函数使用） */
 } mqtt_channel_t;
 
 extern const ch_ops_t mqtt_ch_ops;

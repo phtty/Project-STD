@@ -5,7 +5,7 @@
 #include "cmsis_os2.h"
 #include "ring_buffer.h"
 
-#include "protocol.h"
+#include "app_dispatch.h"
 
 #define MQTT_FRAME_MIN_LEN (21U)
 #define MQTT_FRAME_MAX_LEN (21U + 512U)
@@ -61,4 +61,4 @@ extern osThreadId_t g_ah_mqtt_task_handle;
 extern const osThreadAttr_t ProtocolTask_attributes;
 
 void ah_mqtt_handle_task(void *argument);
-proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num);
+proto_probe_sta_t ah_mqtt_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num);

@@ -3,6 +3,8 @@
 #include "mqtt_app.h"
 #include "ah_mqtt_cmd.h"
 #include "dev_display.h"
+#include "app_mqtt.h"
+#include "initcall.h"
 
 osMessageQueueId_t g_proto_ah_matt_queue;
 
@@ -64,30 +66,30 @@ void ah_mqtt_handle_task(void *argument)
         .name = "g_proto_ah_matt_queue",
     };
     g_proto_ah_matt_queue                          = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
-    g_frame_queue[proto_index(PROTO_MASK_AH_MQTT)] = g_proto_ah_matt_queue;
+    app_proto_set_frame_queue(PROTO_MASK_AH_MQTT, g_proto_ah_matt_queue);
 
-    while (mqtt_state != connected) { // �ȴ����ӽ���
+    while (mqtt_state != connected) { // 锟饺达拷锟斤拷锟接斤拷锟斤拷
         osDelay(100);
     }
-    // ���������������ڶ�ʱ�ϱ�״̬��ǩ��
+    // 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟节讹拷时锟较憋拷状态锟斤拷签锟斤拷
     SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
     ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
-        // �ȴ����ݽ��������Ͷ���
+        // 锟饺达拷锟斤拷锟捷斤拷锟斤拷锟斤拷锟斤拷锟酵讹拷锟斤拷
         if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, &msg, NULL, osWaitForever)) {
             continue;
         }
 
-        // ͨ��topic��֪���ĸ�����
-        uint16_t cmd = handle_topic(msg.meta.handle.mqtt.topic);
+        // 通锟斤拷topic锟斤拷知锟斤拷锟侥革拷锟斤拷锟斤拷
+        uint16_t cmd = handle_topic(container_of(msg.ch, mqtt_channel_t, ch)->topic);
 
-        g_ah_mqtt_cmd_table[cmd](&(msg.meta), (char *)(msg.data));
+        g_ah_mqtt_cmd_table[cmd](msg.ch, (char *)(msg.data));
     }
 }
 
 /**
- * @brief ����topicȷ�����ĸ�����
+ * @brief 锟斤拷锟斤拷topic确锟斤拷锟斤拷锟侥革拷锟斤拷锟斤拷
  *
  */
 uint8_t handle_topic(const char topic[])
@@ -108,11 +110,11 @@ uint8_t handle_topic(const char topic[])
         return 0;
 }
 
-proto_probe_sta_t ah_mqtt_probe_frame(const ch_meta_t *meta, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
+proto_probe_sta_t ah_mqtt_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
 {
     (void)buff;
-    *payload_len = meta->handle.mqtt.payload_len;
-    *cmd_num     = handle_topic(meta->handle.mqtt.topic);
+    *payload_len = container_of(ch, mqtt_channel_t, ch)->payload_len;
+    *cmd_num     = handle_topic(container_of(ch, mqtt_channel_t, ch)->topic);
 
     return PROTO_PROBE_READY;
 }
@@ -133,9 +135,9 @@ void ReportTask(void *argument)
 
     for (;;) {
         memcpy(&(report.notify), &xNotifyID, sizeof(report.notify));
-        report.run_sta = dev_display_get()->light_level ? '1' : '0'; // ���ݵ�ǰ�����ж��Ƿ���ʾ��
+        report.run_sta = dev_display_get()->light_level ? '1' : '0'; // 锟斤拷锟捷碉拷前锟斤拷锟斤拷锟叫讹拷锟角凤拷锟斤拷示锟斤拷
         mqtt_send_data(topic, (char *)&report);
-        osDelay(10 * 1000); // 10��ǩ��1��
+        osDelay(10 * 1000); // 10锟斤拷签锟斤拷1锟斤拷
     }
 }
 
@@ -163,8 +165,18 @@ void SignUpTask(void *argument)
     sign_up.type = '0';
 
     for (;;) {
-        osDelay(5 * 60 * 1000); // 5����ǩ��1��
+        osDelay(5 * 60 * 1000); // 5锟斤拷锟斤拷签锟斤拷1锟斤拷
         memcpy(&(sign_up.notify), &xNotifyID, sizeof(sign_up.notify));
         mqtt_send_data(topic, (char *)&sign_up);
     }
 }
+
+/* ---- 自注册到 app_dispatch ---- */
+static void ah_mqtt_module_init(void)
+{
+    ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
+    app_proto_register(PROTO_MASK_AH_MQTT, ah_mqtt_probe_frame, rb);
+    app_proto_bind_channel(PROTO_MASK_AH_MQTT, CH_ID_MQTT);
+    g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
+}
+sw_device_initcall(ah_mqtt_module_init);
