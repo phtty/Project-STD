@@ -30,17 +30,13 @@ INC_DIRS = \
 	-I Drivers/BSP/Components/dp83848 \
 	-I Drivers/BSP/Components/HUB75 \
 	-I Drivers/BSP/Components/W25Qxx \
-	-I Drivers/BSP/Components/Key \
-	-I Drivers/BSP/Components/LightSensor \
-	-I Drivers/BSP/Components/IOCtrl \
 	-I Drivers/BSP/Display \
 	-I Drivers/BSP/Display/text_cvt \
 	-I Drivers/BSP/Protocol \
 	-I Drivers/BSP/Protocol/IAP \
 	-I Drivers/BSP/Protocol/AH_MQTT \
 	-I Drivers/BSP/RingBuff \
-	-I Drivers/RTT/Config \
-	-I Drivers/RTT/RTT \
+	-I Middlewares/Third_Party/SEGGER_RTT \
 	-I LWIP/App \
 	-I LWIP/Target \
 	-I Middlewares/Third_Party/LwIP/src/include \
@@ -127,14 +123,12 @@ SRC_HAL = \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c \
 	Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_crc.c
 
-# BSP Components
+# BSP (旧协议层依赖 display/render/text_cvt，等协议迁移完成后移除)
 SRC_BSP = \
 	Drivers/BSP/Components/dp83848/dp83848.c \
 	Drivers/BSP/Components/W25Qxx/w25qxx.c \
-	Drivers/BSP/Components/LightSensor/light.c \
-	Drivers/BSP/Components/IOCtrl/IOCtrl.c \
-# BSP Display
-SRC_DISPLAY = \
+
+SRC_DISPLAY_OLD = \
 	Drivers/BSP/Display/display.c \
 	Drivers/BSP/Display/render.c \
 	Drivers/BSP/Display/text_cvt/text_cvt.c
@@ -154,9 +148,9 @@ SRC_RINGBUF = \
 
 # RTT
 SRC_RTT = \
-	Drivers/RTT/RTT/SEGGER_RTT.c \
-	Drivers/RTT/RTT/SEGGER_RTT_printf.c \
-	Drivers/RTT/RTT/SEGGER_RTT_Syscalls_GCC.c
+	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT.c \
+	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_printf.c \
+	Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_Syscalls_GCC.c
 
 # LwIP Middleware
 SRC_LWIP_MW = \
@@ -307,8 +301,8 @@ SRC_ALL = \
 	$(SRC_LWIP) \
 	$(SRC_HAL) \
 	$(SRC_BSP) \
-	$(SRC_DISPLAY) \
 	$(SRC_PROTOCOL) \
+	$(SRC_DISPLAY_OLD) \
 	$(SRC_RINGBUF) \
 	$(SRC_RTT) \
 	$(SRC_LWIP_MW) \

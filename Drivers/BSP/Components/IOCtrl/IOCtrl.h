@@ -3,12 +3,6 @@
 
 #include "main.h"
 
-enum {
-    SW1_EVENT = 0,
-    SW2_EVENT,
-    SW3_EVENT,
-};
-
 void BSP_HSCtrl(bool HSEnable);
 void BSP_LILCtrl(bool LILEnable);
 
