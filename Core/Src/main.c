@@ -50,6 +50,9 @@ int main(void)
     /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
     HAL_Init();
 
+    /* 时钟必须在所有外设 initcall 之前配置 */
+    SystemClock_Config();
+
     initcall_run(__hw_initcall_start, __hw_initcall_end);
 
     app_boot();

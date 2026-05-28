@@ -35,14 +35,6 @@ void SystemClock_Config(void)
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
 }
 
-/* ---- 初始化入口 ---- */
-void pl_sys_init(void)
-{
-    /* HAL_Init() 在 main.c 中 SystemClock_Config 之前调用 */
-    SystemClock_Config();
-}
-hw_arch_initcall(pl_sys_init);
-
 /* ---- 系统复位 ---- */
 void pl_system_reset(void)
 {

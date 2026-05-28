@@ -24,7 +24,7 @@ void hard_fault_handler_c(uint32_t *stack_frame)
     for (;;);
 }
 
-__attribute__((naked)) void HardFault_Handler(void)
+[[gnu::naked]] void HardFault_Handler(void)
 {
     __asm volatile(
         "TST    LR, #4          \n"
@@ -36,22 +36,22 @@ __attribute__((naked)) void HardFault_Handler(void)
 
 void NMI_Handler(void)
 {
-    while (1) {}
+    for (;;);
 }
 
 void MemManage_Handler(void)
 {
-    while (1) {}
+    for (;;);
 }
 
 void BusFault_Handler(void)
 {
-    while (1) {}
+    for (;;);
 }
 
 void UsageFault_Handler(void)
 {
-    while (1) {}
+    for (;;);
 }
 
 void DebugMon_Handler(void)
