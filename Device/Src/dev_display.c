@@ -82,6 +82,19 @@ void dev_display_convert(display_dev_t *dev)
     }
 }
 
+/* ---- HAL 周期回调（__weak 覆盖）---- */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM3) {
+        dev_display_tim3_isr(&g_display);
+    } else if (htim->Instance == TIM4) {
+        dev_display_tim4_isr(&g_display);
+    }
+    if (htim->Instance == TIM7) {
+        HAL_IncTick(); /* 系统时基 */
+    }
+}
+
 /* ---- TIM3 ISR: HUB75 扫描行输出 ---- */
 #define LINE_OFFSET    (scan_line * SCAN_LINE_PIXEL_NUM)
 #define CHANNEL_OFFSET (channel_cnt * CHANNEL_PIXEL_NUM)
