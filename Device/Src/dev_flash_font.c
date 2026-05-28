@@ -21,18 +21,20 @@ static void dev_font_flash_initcall(void)
 sw_device_initcall(dev_font_flash_initcall);
 
 /* W25Qxx 命令 */
-#define W25Q_READ_CMD       0x03
-#define W25Q_RESET_ENABLE   0x66
-#define W25Q_RESET_DEVICE   0x99
-#define W25Q_READ_JEDEC_ID  0x9F
-#define W25Q_WRITE_ENABLE   0x06
-#define W25Q_PAGE_PROGRAM   0x02
-#define W25Q_SECTOR_ERASE   0x20
-#define W25Q_CHIP_ERASE     0xC7
-#define W25Q_READ_STATUS1   0x05
+#define W25Q_READ_CMD      0x03
+#define W25Q_RESET_ENABLE  0x66
+#define W25Q_RESET_DEVICE  0x99
+#define W25Q_READ_JEDEC_ID 0x9F
+#define W25Q_WRITE_ENABLE  0x06
+#define W25Q_PAGE_PROGRAM  0x02
+#define W25Q_SECTOR_ERASE  0x20
+#define W25Q_CHIP_ERASE    0xC7
+#define W25Q_READ_STATUS1  0x05
 
-static void _cs_low(void)  { pl_gpio_write(PL_PORT_B, 1, false); }
-static void _cs_high(void) { pl_gpio_write(PL_PORT_B, 1, true);  }
+static void _cs_low(void)
+{ pl_gpio_write(PL_PORT_B, 1, false); }
+static void _cs_high(void)
+{ pl_gpio_write(PL_PORT_B, 1, true); }
 
 static osEventFlagsId_t s_dma_done;
 static volatile bool s_dma_ok;
@@ -52,9 +54,9 @@ void dev_font_flash_init(font_flash_dev_t *dev)
     pl_spi_set_rx_cplt_cb(dev->spi, dma_cplt_cb, NULL);
 
     /* 复位设备 */
-    uint8_t tx[2];
-    tx[0] = W25Q_RESET_ENABLE;
-    tx[1] = W25Q_RESET_DEVICE;
+    uint8_t tx[2] = {0};
+    tx[0]         = W25Q_RESET_ENABLE;
+    tx[1]         = W25Q_RESET_DEVICE;
     pl_gpio_write(PL_PORT_B, 1, false); /* CS low */
     pl_spi_transmit_receive_dma(dev->spi, tx, NULL, 2);
     osEventFlagsWait(s_dma_done, 0x01, osFlagsWaitAny, 100);
@@ -137,10 +139,13 @@ int32_t dev_font_flash_write_page(font_flash_dev_t *dev, uint32_t addr, const ui
 
     dev_font_flash_write_enable(dev);
 
-    uint8_t cmd[4] = { W25Q_PAGE_PROGRAM,
-                       (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr };
+    uint8_t cmd[4] = {W25Q_PAGE_PROGRAM,
+                      (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
     _cs_low();
-    if (pl_spi_transmit(dev->spi, cmd, 4) != 0) { _cs_high(); return -1; }
+    if (pl_spi_transmit(dev->spi, cmd, 4) != 0) {
+        _cs_high();
+        return -1;
+    }
     int32_t r = pl_spi_transmit(dev->spi, buf, len);
     _cs_high();
 
@@ -152,8 +157,8 @@ int32_t dev_font_flash_erase_sector(font_flash_dev_t *dev, uint32_t addr)
 {
     dev_font_flash_write_enable(dev);
 
-    uint8_t cmd[4] = { W25Q_SECTOR_ERASE,
-                       (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr };
+    uint8_t cmd[4] = {W25Q_SECTOR_ERASE,
+                      (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
     _cs_low();
     int32_t r = pl_spi_transmit(dev->spi, cmd, 4);
     _cs_high();
@@ -187,7 +192,7 @@ static int32_t _write_no_check(font_flash_dev_t *dev, uint32_t addr, const uint8
             return -1;
 
         written += chunk;
-        addr    += chunk;
+        addr += chunk;
     }
     return 0;
 }
@@ -212,7 +217,10 @@ int32_t dev_font_flash_write(font_flash_dev_t *dev, uint32_t addr, const uint8_t
 
         bool need_erase = false;
         for (uint16_t i = sector_offset; i < sector_offset + chunk; i++)
-            if (sector_buf[i] != 0xFF) { need_erase = true; break; }
+            if (sector_buf[i] != 0xFF) {
+                need_erase = true;
+                break;
+            }
 
         if (need_erase) {
             dev_font_flash_erase_sector(dev, sector_addr);
@@ -225,7 +233,7 @@ int32_t dev_font_flash_write(font_flash_dev_t *dev, uint32_t addr, const uint8_t
             return -1;
 
         written += chunk;
-        addr    += chunk;
+        addr += chunk;
     }
     return 0;
 }

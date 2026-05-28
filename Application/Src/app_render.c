@@ -5,14 +5,14 @@
 
 #include "app_render.h"
 
-void app_render_init(display_dev_t *display, font_flash_dev_t *font)
+void app_render_init(display_dev_t *display, dev_storage_t *font)
 {
     (void)display;
     (void)font;
     /* 初始化渲染上下文（后续从 render.c 迁移逻辑） */
 }
 
-void app_render_string(display_dev_t *display, font_flash_dev_t *font,
+void app_render_string(display_dev_t *display, dev_storage_t *font,
                        uint16_t x, uint16_t y,
                        const char *text, uint16_t len,
                        hub75_color_t color, font_size_t size)

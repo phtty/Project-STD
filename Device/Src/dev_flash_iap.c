@@ -11,8 +11,8 @@
  */
 
 #include "dev_flash_iap.h"
+#include "dev_flash_int.h"
 #include "pl_crc.h"
-#include "pl_flash.h"
 
 dev_flash_iap_sys_info_t *g_config = (dev_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR; /* 直接映射到 Flash 地址 */
 
@@ -73,26 +73,11 @@ void dev_flash_iap_edit_config(dev_flash_iap_sys_info_t *info)
 /** @brief 擦除 Sector 1（0x08004000，16KB） */
 int32_t dev_flash_iap_erase_config(void)
 {
-    pl_flash_unlock();
-    pl_flash_clear_errors(); /* 清除之前操作可能遗留的错误标志 */
-    int32_t ret = pl_flash_erase_sector(PL_FLASH_SECTOR_1, PL_FLASH_VOLTAGE_3);
-    pl_flash_lock();
-    return ret;
+    return dev_storage_erase(dev_flash_int_get(DEV_FLASH_INT_IAP), 0, 0);
 }
 
-/** @brief 按 word（4 字节）将 dev_flash_iap_sys_info_t 逐单元写入 Flash */
+/** @brief 写入 dev_flash_iap_sys_info_t 到 Flash */
 int32_t dev_flash_iap_write_config(dev_flash_iap_sys_info_t *info)
 {
-    pl_flash_unlock();
-    pl_flash_clear_errors();
-
-    int32_t ret         = 0;
-    uint32_t word_count = sizeof(dev_flash_iap_sys_info_t) / 4;
-    for (uint32_t i = 0; i < word_count; i++) {
-        ret = pl_flash_program_word(ADDR_CONFIG_SECTOR + i * 4, ((uint32_t *)info)[i]);
-        if (ret != 0) break; /* 写入失败立即停止 */
-    }
-
-    pl_flash_lock();
-    return ret;
+    return dev_storage_write(dev_flash_int_get(DEV_FLASH_INT_IAP), 0, (uint8_t *)info, sizeof(*info));
 }

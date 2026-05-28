@@ -254,7 +254,8 @@ SRC_DEVICE = \
 	Device/Src/dev_flash_iap.c \
 	Device/Src/dev_flash_ldi.c \
 	Device/Src/dev_light_sensor.c \
-	Device/Src/dev_flash_font.c \
+	Device/Src/dev_w25qxx.c \
+	Device/Src/dev_flash_int.c \
 	Device/Src/dev_uart_channel.c \
 	Device/Src/dev_dp83848.c \
 	Device/Src/dev_eth.c \

@@ -225,6 +225,7 @@ virtualFolder:
         - path: Device/Src/dev_rs485.c
         - path: Device/Src/dev_rs232.c
         - path: Device/Src/dev_flash_ldi.c
+        - path: Device/Src/dev_w25qxx.c
       folders: []
     - name: Platform
       files:

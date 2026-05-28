@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include "dev_display.h"
-#include "dev_flash_font.h"
+#include "dev_storage.h"
 
 typedef enum {
     FONT_SIZE_16 = 16,
@@ -21,9 +21,9 @@ typedef enum {
     ALIGN_RIGHT  = 2,
 } text_align_t;
 
-void app_render_init(display_dev_t *display, font_flash_dev_t *font);
+void app_render_init(display_dev_t *display, dev_storage_t *storage);
 
-void app_render_string(display_dev_t *display, font_flash_dev_t *font,
+void app_render_string(display_dev_t *display, dev_storage_t *storage,
                        uint16_t x, uint16_t y,
                        const char *text, uint16_t len,
                        hub75_color_t color, font_size_t size);
