@@ -43,6 +43,20 @@ void pl_spi_set_rx_cplt_cb(pl_spi_handle_t h, pl_spi_rx_cplt_cb_t cb, void *ctx_
     }
 }
 
+int32_t pl_spi_transmit(pl_spi_handle_t h, const uint8_t *data, uint16_t size)
+{
+    spi_ctx_t *ctx = (spi_ctx_t *)h;
+    if (!ctx || !ctx->hspi) return -1;
+    return (HAL_SPI_Transmit(ctx->hspi, (uint8_t *)data, size, 100) == HAL_OK) ? 0 : -1;
+}
+
+int32_t pl_spi_receive(pl_spi_handle_t h, uint8_t *data, uint16_t size)
+{
+    spi_ctx_t *ctx = (spi_ctx_t *)h;
+    if (!ctx || !ctx->hspi) return -1;
+    return (HAL_SPI_Receive(ctx->hspi, data, size, 100) == HAL_OK) ? 0 : -1;
+}
+
 /* SPI DMA 完成回调 → 转发到 Device 层 */
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {

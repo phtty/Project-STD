@@ -24,7 +24,9 @@ static display_dev_t g_display = {
 };
 
 display_dev_t *dev_display_get(void)
-{ return &g_display; }
+{
+    return &g_display;
+}
 
 /* ---- 初始化 ---- */
 void dev_display_init(void)
@@ -82,33 +84,33 @@ void dev_display_convert(display_dev_t *dev)
     }
 }
 
+/* ---- 前向声明（热路径，编译期内联） ---- */
+static inline void tim3_scan_isr(void);
+static inline void tim4_pwm_isr(void);
+
 /* ---- HAL 周期回调（__weak 覆盖）---- */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM3) {
-        dev_display_tim3_isr(&g_display);
+        tim3_scan_isr();
+
     } else if (htim->Instance == TIM4) {
-        dev_display_tim4_isr(&g_display);
-    }
-    if (htim->Instance == TIM7) {
-        HAL_IncTick(); /* 系统时基 */
+        tim4_pwm_isr();
+
+    } else if (htim->Instance == TIM7) {
+        HAL_IncTick();
     }
 }
 
 /* ---- TIM3 ISR: HUB75 扫描行输出 ---- */
-#define LINE_OFFSET    (scan_line * SCAN_LINE_PIXEL_NUM)
-#define CHANNEL_OFFSET (channel_cnt * CHANNEL_PIXEL_NUM)
-
-void dev_display_tim3_isr(display_dev_t *dev)
+static inline void tim3_scan_isr(void)
 {
-    static uint8_t scan_line = 0;
+    static uint8_t scan_line;
 
-    for (int16_t line_cnt = 0; line_cnt < SCAN_LINE_PIXEL_NUM; line_cnt++) {
-        for (int16_t channel_cnt = 0; channel_cnt < CHANNEL_NUM; channel_cnt++) {
-            uint8_t color = dev->hub75_buff[line_cnt + LINE_OFFSET + CHANNEL_OFFSET];
-            pl_hub75_set_rgb(channel_cnt, (hub75_color_t)color);
-        }
-
+    for (int16_t l = 0; l < SCAN_LINE_PIXEL_NUM; l++) {
+        uint16_t base = (uint16_t)scan_line * SCAN_LINE_PIXEL_NUM + l;
+        for (int16_t ch = 0; ch < CHANNEL_NUM; ch++)
+            pl_hub75_set_rgb(ch, (hub75_color_t)s_hub75_buff[base + ch * CHANNEL_PIXEL_NUM]);
         pl_hub75_clock_pulse();
     }
 
@@ -124,16 +126,11 @@ void dev_display_tim3_isr(display_dev_t *dev)
 }
 
 /* ---- TIM4 ISR: PWM 亮度控制 ---- */
-void dev_display_tim4_isr(display_dev_t *dev)
+static inline void tim4_pwm_isr(void)
 {
-    static uint8_t pwm_cnt = 0;
+    static uint8_t pwm_cnt;
 
-    if (pwm_cnt < dev->light_level)
-        pl_hub75_oe_set(false);
-    else
-        pl_hub75_oe_set(true);
+    pl_hub75_oe_set(pwm_cnt >= g_display.light_level);
 
-    pwm_cnt++;
-    if (pwm_cnt >= 8)
-        pwm_cnt = 0;
+    pwm_cnt = (pwm_cnt + 1) & 7; /* mod 8 */
 }

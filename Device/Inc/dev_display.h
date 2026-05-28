@@ -46,11 +46,5 @@ void dev_display_fill(display_dev_t *dev, hub75_color_t color);
 /** @brief 像素图转换（pixel_map → hub75_buff） */
 void dev_display_convert(display_dev_t *dev);
 
-/** @brief TIM3 ISR：输出 HUB75 扫描行 */
-void dev_display_tim3_isr(display_dev_t *dev);
-
-/** @brief TIM4 ISR：PWM 亮度控制 */
-void dev_display_tim4_isr(display_dev_t *dev);
-
 /** @brief 获取全局显示设备实例 */
 display_dev_t *dev_display_get(void);
