@@ -35,7 +35,7 @@ typedef struct {
 } display_dev_t;
 
 /** @brief 初始化显示设备（分配 CCMRAM 缓冲区、启动 TIM3/TIM4） */
-void dev_display_init(display_dev_t *dev);
+void dev_display_init(void);
 
 /** @brief 设置单个像素颜色 */
 void dev_display_set_pixel(display_dev_t *dev, uint16_t x, uint16_t y, hub75_color_t color);

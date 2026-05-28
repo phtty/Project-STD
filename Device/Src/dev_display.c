@@ -27,13 +27,13 @@ display_dev_t *dev_display_get(void)
 { return &g_display; }
 
 /* ---- 初始化 ---- */
-void dev_display_init(display_dev_t *dev)
+void dev_display_init(void)
 {
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM3));
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM4));
 
     pl_hub75_init();
-    dev_display_fill(dev, HUB75_COLOR_BLACK);
+    dev_display_fill(&g_display, HUB75_COLOR_BLACK);
     pl_tim_start_it(pl_tim_get_handle(PL_TIM3));
     pl_tim_start_it(pl_tim_get_handle(PL_TIM4));
 }
