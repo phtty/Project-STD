@@ -14,6 +14,7 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
+#include "dev_display.h"
 
 osEventFlagsId_t SW123_Event;
 
@@ -70,6 +71,20 @@ static void init_task(void *argument)
     osThreadNew(half_sec_task, NULL, &hst_attr);
 
     printf("\nInit Task Done\n");
+
+    display_dev_t *dsp = dev_display_get();
+
+    for (;;) {
+        for (int i = 0; i < DISRAM_SIZE; i++) {
+            dsp->pixel_map[i] = HUB75_COLOR_GREEN;
+
+            dev_display_convert(dsp);
+            osDelay(50);
+
+            dsp->pixel_map[i] = HUB75_COLOR_BLACK;
+        }
+    }
+
     osThreadExit();
 }
 
