@@ -248,19 +248,19 @@ SRC_PLATFORM = \
 
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \
-	Device/Src/dev_io_ctrl.c \
-	Device/Src/dev_key.c \
-	Device/Src/dev_display.c \
-	Device/Src/dev_flash_iap.c \
-	Device/Src/dev_flash_ldi.c \
-	Device/Src/dev_light_sensor.c \
-	Device/Src/dev_w25qxx.c \
-	Device/Src/dev_flash_int.c \
-	Device/Src/dev_uart_channel.c \
-	Device/Src/dev_dp83848.c \
-	Device/Src/dev_eth.c \
-	Device/Src/dev_rs485.c \
-	Device/Src/dev_rs232.c
+	Device/IO/dev_io_ctrl.c \
+	Device/IO/dev_key.c \
+	Device/Display/dev_display.c \
+	Device/Config/dev_flash_iap.c \
+	Device/Config/dev_flash_ldi.c \
+	Device/IO/dev_light_sensor.c \
+	Device/Storage/dev_w25qxx.c \
+	Device/Storage/dev_flash_int.c \
+	Device/Comm/dev_uart_channel.c \
+	Device/Network/dev_dp83848.c \
+	Device/Network/dev_eth.c \
+	Device/Comm/dev_rs485.c \
+	Device/Comm/dev_rs232.c
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
