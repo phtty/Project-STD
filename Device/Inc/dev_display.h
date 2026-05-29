@@ -12,8 +12,8 @@
 #include "pl_hub75.h"
 
 /* ---- 显示参数 ---- */
-#define MODULE_PER_ROW       8
-#define MODULE_PER_COL       4
+#define MODULE_PER_ROW       1
+#define MODULE_PER_COL       1
 #define MODULE_PIXEL_ROW     16
 #define MODULE_PIXEL_COL     8
 #define MODULE_CHANNEL_NUM   2
@@ -22,6 +22,7 @@
 
 #define SCREEN_PIXEL_ROW     (MODULE_PER_ROW * MODULE_PIXEL_ROW)
 #define SCREEN_PIXEL_COL     (MODULE_PER_COL * MODULE_PIXEL_COL)
+
 #define DISRAM_SIZE          (SCREEN_PIXEL_ROW * SCREEN_PIXEL_COL)
 #define CHANNEL_NUM          (MODULE_PER_COL * MODULE_CHANNEL_NUM)
 #define CHANNEL_PIXEL_NUM    (MODULE_PIXEL_ROW * MODULE_PIXEL_COL * MODULE_PER_ROW / MODULE_CHANNEL_NUM)
@@ -34,8 +35,11 @@ typedef struct {
     volatile uint8_t light_level; /* 亮度等级 0-7 */
 } display_dev_t;
 
-/** @brief 初始化显示设备（分配 CCMRAM 缓冲区、启动 TIM3/TIM4） */
+/** @brief 硬件初始化（CCMRAM 缓冲区、BSRR 查表、HUB75 引脚） */
 void dev_display_init(void);
+
+/** @brief 软件初始化（创建扫描任务、启动 TIM3/TIM4） */
+void dev_display_start(void);
 
 /** @brief 设置单个像素颜色 */
 void dev_display_set_pixel(display_dev_t *dev, uint16_t x, uint16_t y, hub75_color_t color);

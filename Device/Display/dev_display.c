@@ -3,12 +3,15 @@
  * @brief   HUB75 LED 点阵显示设备实现
  *
  * 像素缓冲区在 CCMRAM 中静态分配。
- * 扫描引擎在 TIM3 ISR 中运行，亮度 PWM 在 TIM4 ISR 中运行。
+ * TIM3 ISR 只发事件通知，扫描在 scan_task（唯一最高优先级）中执行，
+ * 可被任何 ISR 抢断，OE/LAT 临界区原子保护防止抖动。
+ * 亮度 PWM 在 TIM4 ISR 中运行。
  */
 
 #include "dev_display.h"
 
 #include <string.h>
+#include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_tim.h"
 
@@ -24,19 +27,22 @@ typedef struct {
 
 [[gnu::section(".ccmram")]] static hub75_bsrr_t g_bsrr[CHANNEL_NUM][8]; /* 8通道 × 8颜色 */
 
-/* ---- 全局显示设备实例 ---- */
+/* ---- 全局实例 ---- */
 static display_dev_t g_display = {
     .pixel_map   = s_pixel_map,
     .hub75_buff  = s_hub75_buff,
-    .light_level = 1,
+    .light_level = 7,
 };
+
+/* ---- TIM3→任务 事件通知 ---- */
+static osEventFlagsId_t s_scan_evt;
 
 display_dev_t *dev_display_get(void)
 {
     return &g_display;
 }
 
-/* ---- 初始化 ---- */
+/* ---- 硬件初始化（RTOS 前，不启动定时器）---- */
 void dev_display_init(void)
 {
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM3));
@@ -44,7 +50,7 @@ void dev_display_init(void)
 
     pl_hub75_init();
 
-    /* 预计算 BSRR 查表：消除 ISR 热路径的 if/else 分支和 Flash 读取 */
+    /* 预计算 BSRR 查表 */
     for (uint8_t ch = 0; ch < CHANNEL_NUM; ch++) {
         for (uint8_t c = 0; c < 8; c++) {
             g_bsrr[ch][c].r_port = g_hub75_pin_r[ch].port;
@@ -60,10 +66,61 @@ void dev_display_init(void)
     }
 
     dev_display_fill(&g_display, HUB75_COLOR_BLACK);
-    pl_tim_start_it(pl_tim_get_handle(PL_TIM3));
-    pl_tim_start_it(pl_tim_get_handle(PL_TIM4));
 }
 hw_dev_initcall(dev_display_init);
+
+/* ---- 扫描任务（唯一 osPriorityRealtime，不能被任何任务抢占）---- */
+static void scan_task(void *arg)
+{
+    (void)arg;
+    static uint8_t scan_line;
+
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM3));
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM4));
+
+    for (;;) {
+        osEventFlagsWait(s_scan_evt, 0x01, osFlagsWaitAny, osWaitForever);
+
+        /* 时钟移位输出像素（可被 ISR 抢断，不影响 HUB75 时序） */
+        for (uint16_t l = 0; l < SCAN_LINE_PIXEL_NUM; l++) {
+            uint16_t base = (uint16_t)scan_line * SCAN_LINE_PIXEL_NUM + l;
+            for (uint8_t ch = 0; ch < CHANNEL_NUM; ch++) {
+                hub75_bsrr_t *b = &g_bsrr[ch][s_hub75_buff[base + ch * CHANNEL_PIXEL_NUM]];
+                b->r_port->BSRR = b->r_val;
+                b->g_port->BSRR = b->g_val;
+                b->b_port->BSRR = b->b_val;
+            }
+            pl_hub75_clock_pulse();
+        }
+
+        /* OE/LAT 原子窗口：锁内核防止任务切换导致时序抖动 */
+        osKernelLock();
+        pl_tim_irq_disable(TIM4_IRQn);
+        pl_hub75_oe_set(true);
+        pl_hub75_set_row(scan_line);
+        pl_hub75_latch_pulse();
+        pl_tim_irq_enable(TIM4_IRQn);
+        osKernelUnlock();
+
+        scan_line += 1;
+        if (scan_line >= MODULE_SCAN_LINE_NUM)
+            scan_line = 0;
+    }
+}
+
+/* ---- 软件初始化（RTOS 后，创建事件 + 扫描任务）---- */
+void dev_display_start(void)
+{
+    s_scan_evt = osEventFlagsNew(NULL);
+
+    const osThreadAttr_t attr = {
+        .name       = "scan_task",
+        .stack_size = 512,
+        .priority   = osPriorityRealtime,
+    };
+    osThreadNew(scan_task, NULL, &attr);
+}
+sw_dev_initcall(dev_display_start);
 
 /* ---- 像素操作 ---- */
 void dev_display_set_pixel(display_dev_t *dev, uint16_t x, uint16_t y, hub75_color_t color)
@@ -80,85 +137,51 @@ void dev_display_fill(display_dev_t *dev, hub75_color_t color)
 /* ---- 像素图转换（pixel_map → hub75_buff） ---- */
 void dev_display_convert(display_dev_t *dev)
 {
-    uint16_t group_cnt = 0, group_row = 0, group_col = 0, row_cnt = 0, col_cnt = 0;
+    int32_t group_cnt = 0, row_cnt = 0, col_cnt = 0;
 
-    for (uint16_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
+    for (int32_t map_cnt = 0; map_cnt < DISRAM_SIZE; map_cnt++) {
         row_cnt = map_cnt / SCREEN_PIXEL_ROW;
         col_cnt = map_cnt % SCREEN_PIXEL_ROW;
 
-        group_row = (row_cnt / 4) ^ 1;
-        group_col = col_cnt / 4;
-
-        group_cnt = (4 * ((group_row + 1) / 2) + group_row / 2 * (CHANNEL_PIXEL_NUM / 16 - 4)) + (group_col + group_col / 4 * 4);
+        group_cnt = col_cnt / 4 + (row_cnt / 4 * (MODULE_PER_ROW * 4)); // 组标
 
         switch (row_cnt % 4) {
             case 0:
-                dev->hub75_buff[1 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                dev->hub75_buff[2 * (3 - col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
                 break;
+
             case 1:
-                dev->hub75_buff[0 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                dev->hub75_buff[2 * (3 - col_cnt % 4) + 1 + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
                 break;
+
             case 2:
-                dev->hub75_buff[3 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                dev->hub75_buff[2 * (col_cnt % 4) + 9 + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
                 break;
+
             case 3:
-                dev->hub75_buff[2 * 4 + (col_cnt % 4) + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                dev->hub75_buff[2 * (col_cnt % 4) + 8 + group_cnt * GROUP_SIZE] = dev->pixel_map[map_cnt];
+                break;
+
+            default:
                 break;
         }
     }
 }
-
-/* ---- 前向声明（热路径，编译期内联） ---- */
-static inline void tim3_scan_isr(void);
-static inline void tim4_pwm_isr(void);
 
 /* ---- HAL 周期回调（__weak 覆盖）---- */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM3) {
-        tim3_scan_isr();
+    if (htim->Instance == TIM4) {
+        static uint8_t pwm_cnt;
 
-    } else if (htim->Instance == TIM4) {
-        tim4_pwm_isr();
+        pl_hub75_oe_set(pwm_cnt >= g_display.light_level);
+
+        pwm_cnt = (pwm_cnt + 1) & 7;
+
+    } else if (htim->Instance == TIM3) {
+        osEventFlagsSet(s_scan_evt, 0x01);
 
     } else if (htim->Instance == TIM7) {
         HAL_IncTick();
     }
-}
-
-/* ---- TIM3 ISR: HUB75 扫描行输出 ---- */
-static inline void tim3_scan_isr(void)
-{
-    static uint8_t scan_line;
-
-    for (uint16_t l = 0; l < SCAN_LINE_PIXEL_NUM; l++) {
-        uint16_t base = (uint16_t)scan_line * SCAN_LINE_PIXEL_NUM + l;
-        for (uint8_t ch = 0; ch < CHANNEL_NUM; ch++) {
-            hub75_bsrr_t *b = &g_bsrr[ch][s_hub75_buff[base + ch * CHANNEL_PIXEL_NUM]];
-            b->r_port->BSRR = b->r_val;
-            b->g_port->BSRR = b->g_val;
-            b->b_port->BSRR = b->b_val;
-        }
-        pl_hub75_clock_pulse();
-    }
-
-    pl_tim_irq_disable(TIM4_IRQn);
-    pl_hub75_oe_set(true);
-    pl_hub75_set_row(scan_line);
-    pl_hub75_latch_pulse();
-    pl_tim_irq_enable(TIM4_IRQn);
-
-    scan_line += 1;
-    if (scan_line >= MODULE_SCAN_LINE_NUM)
-        scan_line = 0;
-}
-
-/* ---- TIM4 ISR: PWM 亮度控制 ---- */
-static inline void tim4_pwm_isr(void)
-{
-    static uint8_t pwm_cnt;
-
-    pl_hub75_oe_set(pwm_cnt >= g_display.light_level);
-
-    pwm_cnt = (pwm_cnt + 1) & 7; /* mod 8 */
 }
