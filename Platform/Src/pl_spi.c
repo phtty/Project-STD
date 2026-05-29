@@ -19,12 +19,19 @@ void pl_spi_init(void)
 {
     MX_SPI1_Init();
 }
-hw_device_initcall(pl_spi_init);
+hw_pl_initcall(pl_spi_init);
 
 pl_spi_handle_t pl_spi_get_handle(void)
 {
     g_spi_ctx.hspi = &hspi1;
     return &g_spi_ctx;
+}
+
+int32_t pl_spi_transmit_receive(pl_spi_handle_t h, const uint8_t *tx_data, uint8_t *rx_data, uint16_t size)
+{
+    spi_ctx_t *ctx = (spi_ctx_t *)h;
+    if (!ctx || !ctx->hspi) return -1;
+    return (HAL_SPI_TransmitReceive(ctx->hspi, (uint8_t *)tx_data, (uint8_t *)rx_data, size, 100) == HAL_OK) ? 0 : -1;
 }
 
 int32_t pl_spi_transmit_receive_dma(pl_spi_handle_t h, const uint8_t *tx_data, uint8_t *rx_data, uint16_t size)

@@ -8,8 +8,13 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /* ---- 系统时钟：HSE → PLL → 168MHz SYSCLK (APB1=42MHz, APB2=84MHz) ---- */
 void SystemClock_Config(void);
+
+/* ---- 阻塞延时（毫秒） ---- */
+void pl_delay_ms(uint32_t ms);
 
 /* ---- 系统复位：软件复位 MCU ---- */
 void pl_system_reset(void);

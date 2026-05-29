@@ -178,4 +178,4 @@ static void ah_mqtt_module_init(void)
     app_proto_bind_channel(PROTO_MASK_AH_MQTT, CH_ID_MQTT);
     g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
 }
-sw_device_initcall(ah_mqtt_module_init);
+sw_app_initcall(ah_mqtt_module_init);

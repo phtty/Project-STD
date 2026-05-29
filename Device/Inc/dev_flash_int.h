@@ -9,12 +9,6 @@
 
 #include "dev_storage.h"
 
-typedef struct {
-    dev_storage_t dev;
-    uint32_t base_addr;
-    uint32_t sector;
-} dev_flash_int_t;
-
 #define DEV_FLASH_INT_IAP 0
 #define DEV_FLASH_INT_LDI 1
 

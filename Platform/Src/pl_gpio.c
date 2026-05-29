@@ -24,7 +24,7 @@ void pl_gpio_init(void)
 {
     MX_GPIO_Init();
 }
-hw_arch_initcall(pl_gpio_init);
+hw_pl_initcall(pl_gpio_init);
 
 void pl_gpio_write(pl_port_t port, uint8_t pin, bool high)
 {

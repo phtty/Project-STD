@@ -16,6 +16,12 @@
         *pDest++ = 0;
     }
 
+    // CCM-RAM 整体清零（NOLOAD 段，行为等同 .bss）
+    pDest = &_sccmram;
+    while (pDest < &_eccmram) {
+        *pDest++ = 0;
+    }
+
     // 初始化系统时钟
     SystemInit();
 

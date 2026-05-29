@@ -56,4 +56,4 @@ void pl_hub75_init(void)
     HUB75_CLK = 0;
     HUB75_A = HUB75_B = HUB75_C = HUB75_D = 0;
 }
-hw_device_initcall(pl_hub75_init);
+hw_pl_initcall(pl_hub75_init);

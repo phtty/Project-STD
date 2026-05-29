@@ -18,6 +18,9 @@ pl_spi_handle_t pl_spi_get_handle(void);
 /** @brief 阻塞发送（用于命令/寄存器操作） */
 int32_t  pl_spi_transmit(pl_spi_handle_t h, const uint8_t *data, uint16_t size);
 
+/** @brief 阻塞全双工收发（命令+响应一步完成，无残留字节问题） */
+int32_t  pl_spi_transmit_receive(pl_spi_handle_t h, const uint8_t *tx_data, uint8_t *rx_data, uint16_t size);
+
 /** @brief DMA 全双工收发 */
 int32_t  pl_spi_transmit_receive_dma(pl_spi_handle_t h, const uint8_t *tx_data, uint8_t *rx_data, uint16_t size);
 

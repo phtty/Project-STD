@@ -10,4 +10,4 @@ void pl_rtt_init(void)
 {
     SEGGER_RTT_Init();
 }
-hw_device_initcall(pl_rtt_init);
+hw_pl_initcall(pl_rtt_init);

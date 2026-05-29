@@ -1,9 +1,12 @@
 /**
  * @file    initcall.h
- * @brief   Linux 风格 initcall 自动初始化框架——硬件/软件双段分离
+ * @brief   自动初始化框架 — hw (RTOS前) / sw (RTOS后) 双段，按分层排列
  *
- * .hw_initcall（board_init 调用，RTOS 前）：GPIO、DMA、UART、ETH 等纯硬件初始化
- * .sw_initcall（sw_board_init 调用，RTOS 后）：调度框架、协议注册、通道 RTOS 资源
+ * 执行顺序由层级序号保证：
+ *   hw: pre(0) → pl(1) → dev(2) → post(3)
+ *   sw: pre(0) → pl(1) → dev(2) → app(3) → post(4)
+ *   pl = Platform 层, dev = Device 层, app = Application 层
+ *   同层内按符号名字母序排列
  */
 
 #pragma once
@@ -17,27 +20,26 @@ typedef struct {
     const char *name;
 } initcall_entry_t;
 
-/* ---- 硬件 initcall（RTOS 前） ---- */
+/* ---- 硬件 initcall（main.c 中 initcall_run 调用，RTOS 前） ---- */
 #define OS_HWINITCALL(lvl, fn) \
     static const initcall_entry_t __attribute__((used, section(".hw_initcall." #lvl))) \
     __hw_initcall_##lvl##_##fn = { (initcall_fn)(fn), #fn }
 
-#define hw_arch_initcall(fn)     OS_HWINITCALL(1, fn)
-#define hw_subsys_initcall(fn)   OS_HWINITCALL(2, fn)
-#define hw_device_initcall(fn)   OS_HWINITCALL(3, fn)
-#define hw_driver_initcall(fn)   OS_HWINITCALL(4, fn)
-#define hw_late_initcall(fn)     OS_HWINITCALL(5, fn)
+#define hw_pre_initcall(fn)    OS_HWINITCALL(0, fn)
+#define hw_pl_initcall(fn)     OS_HWINITCALL(1, fn)
+#define hw_dev_initcall(fn)    OS_HWINITCALL(2, fn)
+#define hw_post_initcall(fn)   OS_HWINITCALL(3, fn)
 
-/* ---- 软件 initcall（RTOS 后，init_task 中 sw_board_init 调用） ---- */
+/* ---- 软件 initcall（init_task 中 sw_board_init 调用，RTOS 后） ---- */
 #define OS_SWINITCALL(lvl, fn) \
     static const initcall_entry_t __attribute__((used, section(".sw_initcall." #lvl))) \
     __sw_initcall_##lvl##_##fn = { (initcall_fn)(fn), #fn }
 
-#define sw_arch_initcall(fn)     OS_SWINITCALL(1, fn)
-#define sw_subsys_initcall(fn)   OS_SWINITCALL(2, fn)
-#define sw_device_initcall(fn)   OS_SWINITCALL(3, fn)
-#define sw_driver_initcall(fn)   OS_SWINITCALL(4, fn)
-#define sw_late_initcall(fn)     OS_SWINITCALL(5, fn)
+#define sw_pre_initcall(fn)    OS_SWINITCALL(0, fn)
+#define sw_pl_initcall(fn)     OS_SWINITCALL(1, fn)
+#define sw_dev_initcall(fn)    OS_SWINITCALL(2, fn)
+#define sw_app_initcall(fn)    OS_SWINITCALL(3, fn)
+#define sw_post_initcall(fn)   OS_SWINITCALL(4, fn)
 
 /* ---- 边界符号 ---- */
 extern const initcall_entry_t __hw_initcall_start[];

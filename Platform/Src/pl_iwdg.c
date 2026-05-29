@@ -1,6 +1,6 @@
 /**
  * @file        pl_iwdg.c
- * @brief       独立看门狗抽象（hw_device_initcall 优先级 3）
+ * @brief       独立看门狗抽象（hw_pl_initcall 优先级 3）
  */
 
 #include "pl_iwdg.h"
@@ -11,7 +11,7 @@ void pl_iwdg_init(void)
 {
     MX_IWDG_Init();
 }
-hw_device_initcall(pl_iwdg_init);
+hw_pl_initcall(pl_iwdg_init);
 
 pl_iwdg_handle_t pl_iwdg_get_handle(void)
 {

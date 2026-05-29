@@ -58,7 +58,7 @@ uint8_t proto_index(uint32_t mask)
 }
 
 /* ================================================================
- *  协议注册 — 协议模块通过 sw_device_initcall 自注册
+ *  协议注册 — 协议模块通过 sw_app_initcall 自注册
  *
  *  各协议模块的 init 函数中调用以下函数完成注册：
  *    1. app_proto_acquire_buf() — 获取环形缓冲区
@@ -148,10 +148,10 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
 }
 
 /* ================================================================
- *  调度系统初始化 — sw_subsys_initcall(2)，RTOS 后自动调用
+ *  调度系统初始化 — sw_app_initcall(2)，RTOS 后自动调用
  *
  *  创建 ch_queue → 创建 frame_dispatch_task → 返回。
- *  协议模块的注册由 sw_device_initcall(3) 在之后执行。
+ *  协议模块的注册由 sw_app_initcall(3) 在之后执行。
  * ================================================================ */
 
 void app_dispatch_init(void)
@@ -168,7 +168,7 @@ void app_dispatch_init(void)
     };
     g_dispatch_task_handle = osThreadNew(frame_dispatch_task, nullptr, &frame_dispatch_task_attr);
 }
-sw_subsys_initcall(app_dispatch_init);
+sw_app_initcall(app_dispatch_init);
 
 /* ================================================================
  *  frame_dispatch_task — 帧分发引擎（核心调度循环）

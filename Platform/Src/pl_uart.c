@@ -1,6 +1,6 @@
 /**
  * @file        pl_uart.c
- * @brief       UART 平台层抽象（hw_device_initcall 优先级 3）
+ * @brief       UART 平台层抽象（hw_pl_initcall 优先级 3）
  *
  * 封装 USART1 (RS485)、USART3 (RS232-0)、USART6 (RS232-1)，
  * 提供不透明句柄、阻塞发送和 DMA 空闲中断接收。
@@ -57,7 +57,7 @@ void pl_uart_init(void)
     g_uart_ctx[PL_UART3].huart = &huart3;
     g_uart_ctx[PL_UART6].huart = &huart6;
 }
-hw_subsys_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
+hw_pl_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
 
 /* ---- 公开 API ---- */
 pl_uart_handle_t pl_uart_get_handle(uint8_t id)

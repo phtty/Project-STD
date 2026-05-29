@@ -1,6 +1,6 @@
 /**
  * @file        pl_dma.c
- * @brief       DMA 初始化（hw_subsys_initcall 优先级 2）
+ * @brief       DMA 初始化（hw_pl_initcall 优先级 2）
  */
 
 #include "pl_dma.h"
@@ -11,7 +11,7 @@ void pl_dma_init(void)
 {
     MX_DMA_Init();
 }
-hw_subsys_initcall(pl_dma_init);
+hw_pl_initcall(pl_dma_init);
 
 /* ---- DMA SPI ISR (从 stm32f4xx_it.c 迁移) ---- */
 extern DMA_HandleTypeDef hdma_spi1_rx;

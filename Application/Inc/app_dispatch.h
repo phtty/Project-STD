@@ -39,7 +39,7 @@ typedef struct {
     uint8_t data[FRAME_DATA_MAX_LEN];
 } frame_msg_t;
 
-/** @brief 协议模块自注册条目（存放于 .sw_initcall linker 段，通过 sw_device_initcall 宏使用） */
+/** @brief 协议模块自注册条目（存放于 .sw_initcall linker 段，通过 sw_app_initcall 宏使用） */
 typedef struct {
     void (*init)(void); /**< 协议模块初始化函数（创建任务 + 注册协议 + 绑定通道） */
 } proto_module_entry_t;

@@ -27,7 +27,7 @@ void pl_exti_init(void)
     for (int i = 0; i < PL_EXTI_CB_MAX; i++)
         s_cb[i].pin = 0, s_cb[i].cb = NULL;
 }
-hw_device_initcall(pl_exti_init);
+hw_pl_initcall(pl_exti_init);
 
 void pl_exti_register_cb(uint16_t pin, pl_exti_cb_t cb, void *ctx)
 {
@@ -69,4 +69,4 @@ static void pl_exti_sw_init(void)
 {
     test_semaphore = osSemaphoreNew(1, 0, NULL);
 }
-sw_device_initcall(pl_exti_sw_init);
+sw_pl_initcall(pl_exti_sw_init);

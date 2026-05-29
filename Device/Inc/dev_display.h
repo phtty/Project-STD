@@ -15,7 +15,7 @@
 #define MODULE_PER_ROW       8
 #define MODULE_PER_COL       4
 #define MODULE_PIXEL_ROW     16
-#define MODULE_PIXEL_COL     16
+#define MODULE_PIXEL_COL     8
 #define MODULE_CHANNEL_NUM   2
 #define MODULE_SCAN_LINE_NUM 1
 #define GROUP_SIZE           16
@@ -29,8 +29,8 @@
 
 /* ---- 显示设备 ---- */
 typedef struct {
-    uint8_t *pixel_map;     /* 像素帧缓冲（CCMRAM） */
-    uint8_t *hub75_buff;    /* HUB75 扫描缓冲（CCMRAM） */
+    uint8_t *pixel_map;           /* 像素帧缓冲（CCMRAM） */
+    uint8_t *hub75_buff;          /* HUB75 扫描缓冲（CCMRAM） */
     volatile uint8_t light_level; /* 亮度等级 0-7 */
 } display_dev_t;
 

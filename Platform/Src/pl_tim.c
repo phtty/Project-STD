@@ -25,7 +25,7 @@ void pl_tim_init(void)
     g_tim_handle[PL_TIM4] = &htim4;
     g_tim_handle[PL_TIM7] = &htim7;
 }
-hw_device_initcall(pl_tim_init);
+hw_pl_initcall(pl_tim_init);
 
 /* ---- 公开 API ---- */
 pl_tim_handle_t pl_tim_get_handle(uint8_t id)
@@ -50,10 +50,18 @@ void pl_tim_dbg_freeze(pl_tim_handle_t h)
 
 /* ---- ISR ---- */
 void TIM2_IRQHandler(void)
-{ HAL_TIM_IRQHandler(&htim2); }
+{
+    HAL_TIM_IRQHandler(&htim2);
+}
 void TIM3_IRQHandler(void)
-{ HAL_TIM_IRQHandler(&htim3); }
+{
+    HAL_TIM_IRQHandler(&htim3);
+}
 void TIM4_IRQHandler(void)
-{ HAL_TIM_IRQHandler(&htim4); }
+{
+    HAL_TIM_IRQHandler(&htim4);
+}
 void TIM7_IRQHandler(void)
-{ HAL_TIM_IRQHandler(&htim7); }
+{
+    HAL_TIM_IRQHandler(&htim7);
+}

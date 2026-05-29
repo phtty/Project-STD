@@ -1,6 +1,6 @@
 /**
  * @file        pl_rtc.c
- * @brief       RTC 抽象（hw_device_initcall 优先级 3）
+ * @brief       RTC 抽象（hw_pl_initcall 优先级 3）
  */
 
 #include "pl_rtc.h"
@@ -11,7 +11,7 @@ void pl_rtc_init(void)
 {
     MX_RTC_Init();
 }
-hw_device_initcall(pl_rtc_init);
+hw_pl_initcall(pl_rtc_init);
 
 pl_rtc_handle_t pl_rtc_get_handle(void)
 {

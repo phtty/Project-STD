@@ -111,8 +111,6 @@ SECTIONS
     KEEP(*(SORT(.hw_initcall.1)))
     KEEP(*(SORT(.hw_initcall.2)))
     KEEP(*(SORT(.hw_initcall.3)))
-    KEEP(*(SORT(.hw_initcall.4)))
-    KEEP(*(SORT(.hw_initcall.5)))
     PROVIDE(__hw_initcall_end = .);
     . = ALIGN(4);
   } >FLASH
@@ -126,7 +124,6 @@ SECTIONS
     KEEP(*(SORT(.sw_initcall.2)))
     KEEP(*(SORT(.sw_initcall.3)))
     KEEP(*(SORT(.sw_initcall.4)))
-    KEEP(*(SORT(.sw_initcall.5)))
     PROVIDE(__sw_initcall_end = .);
     . = ALIGN(4);
   } >FLASH
@@ -193,24 +190,17 @@ SECTIONS
     _edata = .;        /* define a global symbol at data end */
   } >RAM AT> FLASH
 
-  _siccmram = LOADADDR(.ccmram);
-
-  /* CCM-RAM section
-  *
-  * IMPORTANT NOTE!
-  * If initialized variables will be placed in this section,
-  * the startup code needs to be modified to copy the init-values.
-  */
-  .ccmram :
+  /* CCM-RAM（NOLOAD，启动时整体清零，行为等同 SRAM .bss） */
+  .ccmram (NOLOAD) :
   {
     . = ALIGN(4);
-    _sccmram = .;       /* create a global symbol at ccmram start */
+    _sccmram = .;
     *(.ccmram)
     *(.ccmram*)
 
     . = ALIGN(4);
-    _eccmram = .;       /* create a global symbol at ccmram end */
-  } >CCMRAM AT> FLASH
+    _eccmram = .;
+  } >CCMRAM
 
 
   /* Uninitialized data section */

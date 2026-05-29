@@ -1,6 +1,6 @@
 /**
  * @file        pl_crc.c
- * @brief       CRC 硬件抽象（hw_device_initcall 优先级 3）
+ * @brief       CRC 硬件抽象（hw_pl_initcall 优先级 3）
  *
  * 封装 STM32F4 硬件 CRC32 单元（多项式 0x4C11DB7）。
  */
@@ -14,7 +14,7 @@ void pl_crc_init(void)
 {
     MX_CRC_Init();
 }
-hw_device_initcall(pl_crc_init);
+hw_pl_initcall(pl_crc_init);
 
 pl_crc_handle_t pl_crc_get_handle(void)
 {

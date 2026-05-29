@@ -9,6 +9,8 @@ extern uint32_t _sdata;     // .data 在RAM中的起始地址
 extern uint32_t _edata;     // .data 在RAM中的结束地址
 extern uint32_t _sbss;      // .bss 在RAM中的起始地址
 extern uint32_t _ebss;      // .bss 在RAM中的结束地址
+extern uint32_t _sccmram;   // .ccmram 在CCMRAM中的起始地址
+extern uint32_t _eccmram;   // .ccmram 在CCMRAM中的结束地址
 extern uint32_t _siitcmram; // .itcmram在Flash中的起始地址
 extern uint32_t _sitcmram;  // .itcmram在RAM中的起始地址
 extern uint32_t _eitcmram;  // .itcmram在RAM中的结束地址
