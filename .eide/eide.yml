@@ -212,21 +212,39 @@ virtualFolder:
         - path: Compiler/startup.c
       folders: []
     - name: Device
-      files:
-        - path: Device/Src/dev_io_ctrl.c
-        - path: Device/Src/dev_key.c
-        - path: Device/Src/dev_display.c
-        - path: Device/Src/dev_flash_iap.c
-        - path: Device/Src/dev_light_sensor.c
-        - path: Device/Src/dev_flash_font.c
-        - path: Device/Src/dev_uart_channel.c
-        - path: Device/Src/dev_dp83848.c
-        - path: Device/Src/dev_eth.c
-        - path: Device/Src/dev_rs485.c
-        - path: Device/Src/dev_rs232.c
-        - path: Device/Src/dev_flash_ldi.c
-        - path: Device/Src/dev_w25qxx.c
-      folders: []
+      files: []
+      folders:
+        - name: Comm
+          files:
+            - path: Device/Comm/dev_rs232.c
+            - path: Device/Comm/dev_rs485.c
+            - path: Device/Comm/dev_uart_channel.c
+          folders: []
+        - name: Network
+          files:
+            - path: Device/Network/dev_dp83848.c
+            - path: Device/Network/dev_eth.c
+          folders: []
+        - name: Storage
+          files:
+            - path: Device/Storage/dev_flash_int.c
+            - path: Device/Storage/dev_w25qxx.c
+          folders: []
+        - name: IO
+          files:
+            - path: Device/IO/dev_io_ctrl.c
+            - path: Device/IO/dev_key.c
+            - path: Device/IO/dev_light_sensor.c
+          folders: []
+        - name: Config
+          files:
+            - path: Device/Config/dev_flash_iap.c
+            - path: Device/Config/dev_flash_ldi.c
+          folders: []
+        - name: Display
+          files:
+            - path: Device/Display/dev_display.c
+          folders: []
     - name: Platform
       files:
         - path: Platform/Src/pl_gpio.c
