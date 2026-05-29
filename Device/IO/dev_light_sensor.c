@@ -10,7 +10,7 @@
 
 #define MEAN_PARAMETER 8
 
-void dev_light_sensor_init(light_sensor_dev_t *dev, display_dev_t *display)
+void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display)
 {
     dev->adc     = pl_adc_get_handle();
     dev->display = display;

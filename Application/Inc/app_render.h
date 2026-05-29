@@ -21,14 +21,14 @@ typedef enum {
     ALIGN_RIGHT  = 2,
 } text_align_t;
 
-void app_render_init(display_dev_t *display, dev_storage_t *storage);
+void app_render_init(dev_display_t *display, dev_storage_t *storage);
 
-void app_render_string(display_dev_t *display, dev_storage_t *storage,
+void app_render_string(dev_display_t *display, dev_storage_t *storage,
                        uint16_t x, uint16_t y,
                        const char *text, uint16_t len,
                        hub75_color_t color, font_size_t size);
 
-void app_render_fill(display_dev_t *display, hub75_color_t color);
+void app_render_fill(dev_display_t *display, hub75_color_t color);
 
 uint16_t app_render_auto_x(uint16_t len, font_size_t size, text_align_t align);
 

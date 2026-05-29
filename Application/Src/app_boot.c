@@ -72,16 +72,13 @@ static void init_task(void *argument)
 
     printf("\nInit Task Done\n");
 
-    display_dev_t *dsp = dev_display_get();
+    dev_display_t *dsp = dev_display_p16_get();
 
     for (;;) {
-        for (int i = 0; i < DISRAM_SIZE; i++) {
-            dsp->pixel_map[i] = HUB75_COLOR_GREEN;
-
-            dev_display_convert(dsp);
+        for (int i = 0; i < (int)dsp->buffer_size; i++) {
+            dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, HUB75_COLOR_GREEN);
             osDelay(50);
-
-            dsp->pixel_map[i] = HUB75_COLOR_BLACK;
+            dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, HUB75_COLOR_BLACK);
         }
     }
 

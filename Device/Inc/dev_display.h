@@ -1,54 +1,72 @@
 /**
  * @file    dev_display.h
- * @brief   HUB75 LED 点阵显示设备
+ * @brief   HUB75 LED 点阵显示设备 — OCP 虚表基类
  *
- * 封装像素缓冲区、扫描引擎和亮度控制。
- * pixel_map/hub75_buff 在 CCMRAM 中静态分配。
+ * 基类提供通用参数和 scan_task 调度骨架。
+ * 派生类通过 ops 虚表注入模组差异：像素映射、行地址编码、扫描策略。
  */
 
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "pl_hub75.h"
 
-/* ---- 显示参数 ---- */
-#define MODULE_PER_ROW       1
-#define MODULE_PER_COL       1
-#define MODULE_PIXEL_ROW     16
-#define MODULE_PIXEL_COL     8
-#define MODULE_CHANNEL_NUM   2
-#define MODULE_SCAN_LINE_NUM 1
-#define GROUP_SIZE           16
+typedef struct dev_display dev_display_t;
 
-#define SCREEN_PIXEL_ROW     (MODULE_PER_ROW * MODULE_PIXEL_ROW)
-#define SCREEN_PIXEL_COL     (MODULE_PER_COL * MODULE_PIXEL_COL)
+/* ---- 操作虚表 ---- */
+typedef struct dev_display_ops {
+    void (*prepare)(dev_display_t *dev);           /* 像素→发送缓存 (dirty 时调用) */
+    void (*scan)(dev_display_t *dev, uint8_t line); /* 输出一个扫描行 */
+    void (*set_row)(uint8_t row);                  /* ABCD 行地址编码 */
+    uint8_t scan_lines;                            /* 扫描行数 */
+} dev_display_ops_t;
 
-#define DISRAM_SIZE          (SCREEN_PIXEL_ROW * SCREEN_PIXEL_COL)
-#define CHANNEL_NUM          (MODULE_PER_COL * MODULE_CHANNEL_NUM)
-#define CHANNEL_PIXEL_NUM    (MODULE_PIXEL_ROW * MODULE_PIXEL_COL * MODULE_PER_ROW / MODULE_CHANNEL_NUM)
-#define SCAN_LINE_PIXEL_NUM  (CHANNEL_PIXEL_NUM / MODULE_SCAN_LINE_NUM)
+/* ---- 基类 (派生类必须将其放在第一个成员位置) ---- */
+struct dev_display {
+    const dev_display_ops_t *ops;  /* 第一个成员 */
 
-/* ---- 显示设备 ---- */
-typedef struct {
-    uint8_t *pixel_map;           /* 像素帧缓冲（CCMRAM） */
-    uint8_t *hub75_buff;          /* HUB75 扫描缓冲（CCMRAM） */
-    volatile uint8_t light_level; /* 亮度等级 0-7 */
-} display_dev_t;
+    /* 通用参数 */
+    uint8_t  module_rows;         /* 单模块像素行数 */
+    uint8_t  module_cols;         /* 单模块像素列数 */
+    uint8_t  channels_per_module; /* 每模块通道数 */
+    uint8_t  modules_per_row;     /* 每行模块数 */
+    uint8_t  modules_per_col;     /* 每列模块数 */
 
-/** @brief 硬件初始化（CCMRAM 缓冲区、BSRR 查表、HUB75 引脚） */
+    /* 派生参数 */
+    uint16_t screen_rows;         /* = modules_per_row * module_rows */
+    uint16_t screen_cols;         /* = modules_per_col * module_cols */
+    uint8_t  total_channels;      /* = modules_per_col * channels_per_module */
+    uint16_t channel_pixels;      /* = module_rows * module_cols * modules_per_row / total_channels */
+    uint16_t scan_line_pixels;    /* = channel_pixels / ops->scan_lines */
+    uint16_t buffer_size;         /* = screen_rows * screen_cols */
+
+    /* 缓冲区 (CCMRAM，派生实例静态分配) */
+    uint8_t *pixel_map;
+    uint8_t *hub75_buff;
+
+    /* 运行时 */
+    volatile uint8_t light_level;
+    volatile bool    dirty;
+};
+
+/* ---- 通用 API ---- */
+
+/** @brief 硬件初始化 (hw_dev_initcall): HUB75 引脚 + DBG 冻结 */
 void dev_display_init(void);
 
-/** @brief 软件初始化（创建扫描任务、启动 TIM3/TIM4） */
+/** @brief 软件初始化 (sw_dev_initcall): 创建 scan_task + 启动 TIM3/4 */
 void dev_display_start(void);
 
-/** @brief 设置单个像素颜色 */
-void dev_display_set_pixel(display_dev_t *dev, uint16_t x, uint16_t y, hub75_color_t color);
+/** @brief 设置单个像素颜色，置脏标记 */
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, hub75_color_t color);
 
-/** @brief 填充全屏 */
-void dev_display_fill(display_dev_t *dev, hub75_color_t color);
+/** @brief 填充全屏，置脏标记 */
+void dev_display_fill(dev_display_t *dev, hub75_color_t color);
 
-/** @brief 像素图转换（pixel_map → hub75_buff） */
-void dev_display_convert(display_dev_t *dev);
+/** @brief 获取 P16 模组显示实例 */
+dev_display_t *dev_display_p16_get(void);
 
-/** @brief 获取全局显示设备实例 */
-display_dev_t *dev_display_get(void);
+/** @brief 获取当前显示实例（向后兼容，等同 dev_display_p16_get） */
+static inline dev_display_t *dev_display_get(void)
+    { return dev_display_p16_get(); }

@@ -10,9 +10,9 @@
 
 typedef struct {
     void *adc;
-    display_dev_t *display;
+    dev_display_t *display;
 } light_sensor_dev_t;
 
-void dev_light_sensor_init(light_sensor_dev_t *dev, display_dev_t *display);
+void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display);
 uint8_t dev_light_sensor_read(light_sensor_dev_t *dev);
 void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev);
