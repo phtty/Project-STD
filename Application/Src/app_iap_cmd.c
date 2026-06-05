@@ -58,7 +58,7 @@ static void cmd_SendReData(channel_t *ch, uint32_t ReSeq, uint32_t ReCmd, uint32
 
     /* cmd01/cmd02 reply via broadcast */
     if (ReCmd == rtn_cmd01 || ReCmd == rtn_cmd02) {
-        udp_channel_t *udp = container_of(ch, udp_channel_t, ch);
+        udp_channel_t *udp = container_of(ch, udp_channel_t, me);
         memset(udp->src_ip, 0xFF, 4); /* 255.255.255.255 广播 */
     }
 

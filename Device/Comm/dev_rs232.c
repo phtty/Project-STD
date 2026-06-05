@@ -19,8 +19,8 @@ static uint8_t s_rs232_0_buf[RS232_BUF_SIZE];
 static uint8_t s_rs232_1_buf[RS232_BUF_SIZE];
 
 /* ---- 通道实例 ---- */
-uart_channel_t g_rs232_0 = {.ch = {.ch_id = CH_ID_RS232}};
-uart_channel_t g_rs232_1 = {.ch = {.ch_id = CH_ID_RS232_1}};
+uart_channel_t g_rs232_0 = {.me = {.ch_id = CH_ID_RS232}};
+uart_channel_t g_rs232_1 = {.me = {.ch_id = CH_ID_RS232_1}};
 
 uart_channel_t *dev_rs232_get_channel(uint8_t index)
 {

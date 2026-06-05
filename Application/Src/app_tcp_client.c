@@ -43,11 +43,11 @@ tcp_client_channel_t g_tcp_client = {
 /* ---- 构造 ---- */
 void tcp_client_channel_init(tcp_client_channel_t *self, void *conn, channel_t *tmpl)
 {
-    self->ch       = *tmpl;
-    self->ch.state = CH_STATE_UP;
+    self->me       = *tmpl;
+    self->me.state = CH_STATE_UP;
     self->conn     = conn;
     tcp_keepaliveinit(conn);
-    app_channel_register(CH_ID_TCP_CLIENT, &self->ch);
+    app_channel_register(CH_ID_TCP_CLIENT, &self->me);
 }
 
 /* ---- 配置接口 ---- */
@@ -135,7 +135,7 @@ void tcp_client_conn_task(void *argument)
     tcp_client_channel_t tcp;
     tcp_client_channel_init(&tcp, conn, &g_tcp_client_channel_tmpl);
 
-    channel_t *ch = &tcp.ch;
+    channel_t *ch = &tcp.me;
     struct netbuf *buf;
     err_t err;
     void *data;
@@ -150,8 +150,8 @@ void tcp_client_conn_task(void *argument)
         netbuf_delete(buf);
     }
 
-    tcp.ch.ops   = nullptr; /* 防止 send 路径访问即将释放的 netconn */
-    tcp.ch.state = CH_STATE_DOWN;
+    tcp.me.ops   = nullptr; /* 防止 send 路径访问即将释放的 netconn */
+    tcp.me.state = CH_STATE_DOWN;
     app_channel_register(CH_ID_TCP_CLIENT, nullptr);
     osSemaphoreRelease(client_disconnect_sem);
     osThreadExit();

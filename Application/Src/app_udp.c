@@ -55,7 +55,7 @@ const osThreadAttr_t udp_connect_attr = {
 /* ---- UDP 通道 ops （注意：不能命名为 udp_send，与 LwIP 内部符号冲突）---- */
 static int32_t udp_ch_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
-    udp_channel_t *udp = container_of(ch, udp_channel_t, ch);
+    udp_channel_t *udp = container_of(ch, udp_channel_t, me);
     struct netbuf *nb  = netbuf_new();
     if (!nb) return -1;
     netbuf_ref(nb, data, len);
@@ -120,17 +120,17 @@ void udp_task(void *argument)
 /* ---- 构造 / 析构 ---- */
 static void udp_channel_init(udp_channel_t *self, struct netconn *conn, channel_t *tmpl)
 {
-    self->ch         = *tmpl;
-    self->ch.state   = CH_STATE_UP;
+    self->me = *tmpl;
+    self->me.state   = CH_STATE_UP;
     self->conn       = conn;
     self->listen_port = g_udp_port;
-    app_channel_register(CH_ID_UDP, &self->ch);
+    app_channel_register(CH_ID_UDP, &self->me);
 }
 
 static void udp_channel_deinit(udp_channel_t *self)
 {
-    self->ch.ops   = nullptr;
-    self->ch.state = CH_STATE_DOWN;
+    self->me.ops   = nullptr;
+    self->me.state = CH_STATE_DOWN;
     app_channel_register(CH_ID_UDP, nullptr);
 }
 
@@ -141,7 +141,7 @@ void udp_connect_task(void *argument)
     udp_channel_t udp;
     udp_channel_init(&udp, conn, &g_udp_channel_tmpl);
 
-    channel_t *ch = &udp.ch;
+    channel_t *ch = &udp.me;
     struct netbuf *buf;
     err_t err;
 

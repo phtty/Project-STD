@@ -15,7 +15,7 @@
 /* ---- MQTT 通道 ops ---- */
 static int32_t mqtt_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
-    mqtt_channel_t *mqtt = container_of(ch, mqtt_channel_t, ch);
+    mqtt_channel_t *mqtt = container_of(ch, mqtt_channel_t, me);
     mqtt_send_data(mqtt->topic, (char *)data);
     return len;
 }
@@ -29,7 +29,7 @@ channel_t g_mqtt_channel_tmpl = {
 };
 
 mqtt_channel_t g_mqtt = {
-    .ch                = { .ch_id = CH_ID_MQTT },
+    .me = { .ch_id = CH_ID_MQTT },
     .ctx.broker_ip     = {120, 46, 136, 199},
     .ctx.broker_port   = 6000,
     .ctx.client_id     = "CD_ZTP",
@@ -48,14 +48,14 @@ const osThreadAttr_t mqtt_task_attr = {
 
 static void mqtt_channel_init(void)
 {
-    g_mqtt.ch       = g_mqtt_channel_tmpl;
-    g_mqtt.ch.state = CH_STATE_UP;
-    app_channel_register(CH_ID_MQTT, &g_mqtt.ch);
+    g_mqtt.me = g_mqtt_channel_tmpl;
+    g_mqtt.me.state = CH_STATE_UP;
+    app_channel_register(CH_ID_MQTT, &g_mqtt.me);
 }
 
 static void mqtt_channel_deinit(void)
 {
-    g_mqtt.ch.state = CH_STATE_DOWN;
+    g_mqtt.me.state = CH_STATE_DOWN;
     app_channel_register(CH_ID_MQTT, nullptr);
 }
 
@@ -126,7 +126,7 @@ void mqtt_connection(void)
                                     mqtt_connection_cb, NULL, &mqtt_client_info);
     UNLOCK_TCPIP_CORE();
 
-    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&g_mqtt.ch);
+    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&g_mqtt.me);
 
     if (err == ERR_OK) {
         g_mqtt.state = MQTT_ST_CONNECTING;

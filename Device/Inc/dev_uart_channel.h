@@ -17,7 +17,7 @@
 
 /** @brief UART 通道实例（channel_t 子类） */
 typedef struct {
-    channel_t ch;
+    channel_t me;
     pl_uart_handle_t uart;
     osMessageQueueId_t rx_queue;
     bool rs485_mode;      /**< true=RS485 半双工（发送时自动 RE 控制） */

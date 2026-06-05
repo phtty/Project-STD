@@ -25,7 +25,7 @@
 #define W25Q_READ_STATUS1  0x05
 
 typedef struct {
-    dev_storage_t dev;
+    dev_storage_t me;
     pl_spi_handle_t spi;
     uint16_t device_id; /* JEDEC ID: Memory Type << 8 | Capacity */
     uint16_t page_size;
@@ -70,7 +70,7 @@ static inline uint8_t _put_addr(uint8_t *cmd, uint32_t addr, dev_w25qxx_t *s)
 }
 
 dev_storage_t *dev_w25qxx_get(void)
-{ return &g_w25qxx.dev; }
+{ return &g_w25qxx.me; }
 
 /* ---- CS 控制 ---- */
 static void _cs_low(void)
@@ -279,7 +279,7 @@ static const dev_storage_ops_t w25qxx_ops = {
 /* ---- 自动初始化 ---- */
 void dev_w25qxx_init(void)
 {
-    g_w25qxx.dev.ops = &w25qxx_ops;
-    _init(&g_w25qxx.dev);
+    g_w25qxx.me.ops = &w25qxx_ops;
+    _init(&g_w25qxx.me);
 }
 hw_dev_initcall(dev_w25qxx_init);

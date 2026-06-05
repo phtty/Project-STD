@@ -81,7 +81,7 @@ void ah_mqtt_handle_task(void *argument)
         }
 
         // 通锟斤拷topic锟斤拷知锟斤拷锟侥革拷锟斤拷锟斤拷
-        uint16_t cmd = handle_topic(container_of(msg.ch, mqtt_channel_t, ch)->topic);
+        uint16_t cmd = handle_topic(container_of(msg.ch, mqtt_channel_t, me)->topic);
 
         g_ah_mqtt_cmd_table[cmd](msg.ch, (char *)(msg.data));
     }
@@ -112,8 +112,8 @@ uint8_t handle_topic(const char topic[])
 proto_probe_sta_t ah_mqtt_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
 {
     (void)buff;
-    *payload_len = container_of(ch, mqtt_channel_t, ch)->payload_len;
-    *cmd_num     = handle_topic(container_of(ch, mqtt_channel_t, ch)->topic);
+    *payload_len = container_of(ch, mqtt_channel_t, me)->payload_len;
+    *cmd_num     = handle_topic(container_of(ch, mqtt_channel_t, me)->topic);
 
     return PROTO_PROBE_READY;
 }

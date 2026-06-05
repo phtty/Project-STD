@@ -18,18 +18,18 @@
 #define LDI_SIZE   0x20000 /* 128KB */
 
 typedef struct {
-    dev_storage_t dev;
+    dev_storage_t me;
     uint32_t base_addr;
     uint32_t sector;
 } dev_flash_int_t;
 
 /* ---- 两个实例 ---- */
-static dev_flash_int_t g_flash_iap = {.dev = {.capacity = IAP_SIZE}, .base_addr = IAP_BASE, .sector = PL_FLASH_SECTOR_1};
-static dev_flash_int_t g_flash_ldi = {.dev = {.capacity = LDI_SIZE}, .base_addr = LDI_BASE, .sector = PL_FLASH_SECTOR_11};
+static dev_flash_int_t g_flash_iap = {.me = {.capacity = IAP_SIZE}, .base_addr = IAP_BASE, .sector = PL_FLASH_SECTOR_1};
+static dev_flash_int_t g_flash_ldi = {.me = {.capacity = LDI_SIZE}, .base_addr = LDI_BASE, .sector = PL_FLASH_SECTOR_11};
 
 dev_storage_t *dev_flash_int_get(uint8_t id)
 {
-    return (id == 0) ? &g_flash_iap.dev : &g_flash_ldi.dev;
+    return (id == 0) ? &g_flash_iap.me : &g_flash_ldi.me;
 }
 
 /* ---- OPS ---- */
@@ -92,7 +92,7 @@ static const dev_storage_ops_t flash_int_ops = {
 /* ---- 初始化（hw_initcall 设置 ops） ---- */
 static void _dev_flash_int_init(void)
 {
-    g_flash_iap.dev.ops = &flash_int_ops;
-    g_flash_ldi.dev.ops = &flash_int_ops;
+    g_flash_iap.me.ops = &flash_int_ops;
+    g_flash_ldi.me.ops = &flash_int_ops;
 }
 hw_dev_initcall(_dev_flash_int_init);

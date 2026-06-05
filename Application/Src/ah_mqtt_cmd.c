@@ -51,7 +51,7 @@ static void cmd_display(channel_t *ch, char *buff)
     // 锟斤拷锟铰憋拷锟截碉拷notify id
     memcpy(&xNotifyID, &(para->nid), sizeof(xNotifyID));
 
-    snprintf(container_of(ch, mqtt_channel_t, ch)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
+    snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -72,7 +72,7 @@ static void cmd_fill(channel_t *ch, char *buff)
 
     app_render_fill(dev_display_get(), disp_color[(uint8_t)(para->color) - 0x30]);
 
-    snprintf(container_of(ch, mqtt_channel_t, ch)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
+    snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -88,7 +88,7 @@ static void cmd_fill(channel_t *ch, char *buff)
  */
 static void cmd_restart(channel_t *ch, char *buff)
 {
-    snprintf(container_of(ch, mqtt_channel_t, ch)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
+    snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/restart",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,
@@ -112,7 +112,7 @@ static void cmd_checktime(channel_t *ch, char *buff)
     if (para->type == '1')
         memcpy(&(xNotifyID.date_time), date, sizeof(notify_date_t));
 
-    snprintf(container_of(ch, mqtt_channel_t, ch)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/checktime",
+    snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/op/checktime",
              topic_info.station_hex,
              topic_info.lane_hex,
              topic_info.device_type,

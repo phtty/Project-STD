@@ -8,7 +8,7 @@
 /* ---- 统一 send：方向控制由 pl_uart_send 内部回调完成 ---- */
 static int32_t uart_channel_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
-    uart_channel_t *self = container_of(ch, uart_channel_t, ch);
+    uart_channel_t *self = container_of(ch, uart_channel_t, me);
     return pl_uart_send(self->uart, data, len, 100);
 }
 
@@ -19,9 +19,9 @@ void uart_channel_init(uart_channel_t *self, pl_uart_handle_t uart,
                        uint8_t ch_id, bool rs485_mode,
                        uint8_t *rx_buf, uint16_t rx_buf_size)
 {
-    self->ch.ch_id    = ch_id;
-    self->ch.ops      = &uart_ch_ops;
-    self->ch.state    = CH_STATE_DOWN;
+    self->me.ch_id    = ch_id;
+    self->me.ops      = &uart_ch_ops;
+    self->me.state    = CH_STATE_DOWN;
     self->uart        = uart;
     self->rs485_mode  = rs485_mode;
     self->rx_buf      = rx_buf;
@@ -30,8 +30,8 @@ void uart_channel_init(uart_channel_t *self, pl_uart_handle_t uart,
 
 void uart_channel_deinit(uart_channel_t *self)
 {
-    self->ch.state = CH_STATE_DOWN;
-    app_channel_register(self->ch.ch_id, NULL);
+    self->me.state = CH_STATE_DOWN;
+    app_channel_register(self->me.ch_id, NULL);
 }
 
 /* ---- ISR 回调通知 + 注册 ---- */
@@ -58,8 +58,8 @@ void uart_channel_task(void *argument)
     uart_channel_t *self = (uart_channel_t *)argument;
 
     self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), NULL);
-    app_channel_register(self->ch.ch_id, &self->ch);
-    self->ch.state = CH_STATE_UP;
+    app_channel_register(self->me.ch_id, &self->me);
+    self->me.state = CH_STATE_UP;
 
     uart_channel_register_isr(self, self->uart);
     pl_uart_start_rx(self->uart, self->rx_buf, self->rx_buf_size);
@@ -67,6 +67,6 @@ void uart_channel_task(void *argument)
     for (;;) {
         uint16_t rx_len = 0;
         osMessageQueueGet(self->rx_queue, &rx_len, 0, osWaitForever);
-        app_channel_dispatch(&self->ch, self->rx_buf, rx_len);
+        app_channel_dispatch(&self->me, self->rx_buf, rx_len);
     }
 }

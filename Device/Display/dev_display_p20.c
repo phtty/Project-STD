@@ -38,14 +38,14 @@ typedef struct {
 
 /* ---- P20 实例 ---- */
 typedef struct {
-    dev_display_t dev;
+    dev_display_t me;
 } dev_display_p20_t;
 
 [[gnu::section(".ccmram")]] static uint8_t p20_pixel_map[P20_BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t p20_hub75_buff[P20_BUFFER_SIZE];
 
 static dev_display_p20_t g_p20 = {
-    .dev = {
+    .me = {
         .ops                 = nullptr, /* 由 _p20_init 设置 */
         .module_rows         = P20_MODULE_PIXEL_ROW,
         .module_cols         = P20_MODULE_PIXEL_COL,
@@ -66,7 +66,7 @@ static dev_display_p20_t g_p20 = {
 
 dev_display_t *dev_display_p20_get(void)
 {
-    return &g_p20.dev;
+    return &g_p20.me;
 }
 
 /* ---- prepare: pixel_map → hub75_buff ---- */
@@ -131,9 +131,9 @@ static const dev_display_ops_t p20_ops = {
 /* ---- 自动初始化：填充 BSRR + 绑定 ops ---- */
 void dev_display_p20_init(void)
 {
-    g_p20.dev.ops = &p20_ops;
+    g_p20.me.ops = &p20_ops;
 
-    for (uint8_t ch = 0; ch < g_p20.dev.total_channels; ch++) {
+    for (uint8_t ch = 0; ch < g_p20.me.total_channels; ch++) {
         for (uint8_t c = 0; c < 8; c++) {
             g_bsrr[ch][c].r.port = g_hub75_pin_r[ch].port;
             g_bsrr[ch][c].r.val  = (c & 1) ? (uint32_t)g_hub75_pin_r[ch].pin

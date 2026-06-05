@@ -19,7 +19,7 @@
 static uint8_t s_rs485_buf[RS485_BUF_SIZE];
 
 /* ---- 通道实例 ---- */
-uart_channel_t g_rs485 = {.ch = {.ch_id = CH_ID_RS485}};
+uart_channel_t g_rs485 = {.me = {.ch_id = CH_ID_RS485}};
 
 uart_channel_t *dev_rs485_get_channel(void)
 {

@@ -35,7 +35,7 @@ const osThreadAttr_t tcp_server_conn_attr = {
 /* ---- TCP 通道虚表：send = netconn_write ---- */
 static int32_t tcp_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
-    tcp_server_channel_t *tcp = container_of(ch, tcp_server_channel_t, ch);
+    tcp_server_channel_t *tcp = container_of(ch, tcp_server_channel_t, me);
     struct netconn *nc = (struct netconn *)tcp->conn;
     err_t err          = netconn_write(nc, data, len, NETCONN_COPY);
     return (err == ERR_OK) ? (int32_t)len : -1;
@@ -172,18 +172,18 @@ void tcp_server_listen_task(void *ctx)
 
 void tcp_server_channel_init(tcp_server_channel_t *self, void *conn, channel_t *tmpl, tcp_server_listener_ctx_t *listener)
 {
-    self->ch       = *tmpl;
-    self->ch.state = CH_STATE_UP;
+    self->me = *tmpl;
+    self->me.state = CH_STATE_UP;
     self->conn     = conn;
     self->listener = listener;
     tcp_keepaliveinit(conn);
-    app_channel_register(CH_ID_TCP_SERVER, &self->ch);
+    app_channel_register(CH_ID_TCP_SERVER, &self->me);
 }
 
 void tcp_server_channel_deinit(tcp_server_channel_t *self)
 {
-    self->ch.ops   = nullptr;
-    self->ch.state = CH_STATE_DOWN;
+    self->me.ops   = nullptr;
+    self->me.state = CH_STATE_DOWN;
     app_channel_register(CH_ID_TCP_SERVER, nullptr);
     netconn_close((struct netconn *)self->conn);
     netconn_delete((struct netconn *)self->conn);
@@ -197,7 +197,7 @@ void tcp_server_conn_task(void *argument)
     tcp_server_channel_t tcp;
     tcp_server_channel_init(&tcp, newconn, &g_tcp_server_channel_tmpl, listener);
 
-    channel_t *ch = &tcp.ch;
+    channel_t *ch = &tcp.me;
     struct netbuf *buf;
     err_t err;
     void *data;

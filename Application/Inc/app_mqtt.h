@@ -36,7 +36,7 @@ typedef struct {
 
 /** @brief MQTT 通道子类（单例，channel_t 为第一个成员） */
 typedef struct {
-    channel_t ch;
+    channel_t me;
     mqtt_state_t state; /**< MQTT 连接状态机 */
     mqtt_ctx_t ctx;     /**< 运行时上下文 */
     char topic[64];

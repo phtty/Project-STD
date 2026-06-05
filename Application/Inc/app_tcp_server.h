@@ -21,7 +21,7 @@ typedef struct {
 
 /** @brief TCP Server 通道子类（每连接实例） */
 typedef struct {
-    channel_t ch;
+    channel_t me;
     void *conn;                          /**< 不透明句柄（中间件 netconn），在 .c 中 cast 回具体类型 */
     tcp_server_listener_ctx_t *listener; /**< 所属监听器（用于断开时 conn_count--） */
 } tcp_server_channel_t;
