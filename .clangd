@@ -1,17 +1,17 @@
 CompileFlags:
-  Add:
-    - -isystem/usr/arm-none-eabi/include/c++/15.2.1
-    - -isystem/usr/arm-none-eabi/include/c++/15.2.1/arm-none-eabi/thumb/v7e-m+fp/hard
-    - -isystem/usr/arm-none-eabi/include/c++/15.2.1/backward
-    - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include
-    - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include-fixed
-    - -isystem/usr/arm-none-eabi/include
-  Remove:
-    - -fcallgraph-info*
-    - -mthumb-interwork
-  CompilationDatabase: ./build/Debug
-  Compiler: /usr/bin/arm-none-eabi-gcc
+    Add:
+        - -isystem/usr/arm-none-eabi/include/c++/15.2.1
+        - -isystem/usr/arm-none-eabi/include/c++/15.2.1/arm-none-eabi/thumb/v7e-m+fp/hard
+        - -isystem/usr/arm-none-eabi/include/c++/15.2.1/backward
+        - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include
+        - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include-fixed
+        - -isystem/usr/arm-none-eabi/include
+    Remove:
+        - -fcallgraph-info*
+        - -mthumb-interwork
+    CompilationDatabase: ./build/Debug
+    Compiler: /usr/bin/arm-none-eabi-gcc
 Diagnostics:
-  Suppress:
-    - unused-includes
-    - drv_unknown_argument
+    Suppress:
+        - unused-includes
+        - drv_unknown_argument

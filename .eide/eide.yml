@@ -362,6 +362,37 @@ targets:
           RAM: []
           ROM: []
         useCustomScatterFile: true
+      LLVM_ARM:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 1
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            C_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums
+            language-c: c23
+            language-cpp: c++23
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-debug
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            output-debug-info: enable
+          linker:
+            $toolName: clang
+            LD_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums -Wl,--specs=nano.specs -Wl,--specs=nosys.specs
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
+        scatterFilePath: Compiler/STM32F407XX_FLASH.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
     uploadConfigMap:
       Custom:
         bin: ""
@@ -381,7 +412,15 @@ targets:
         bin: ""
         interface: stlink
         target: stm32f1x
-    uploader: Custom
+      probe-rs:
+        allowEraseAll: false
+        baseAddr: "0x08000000"
+        bin: ""
+        otherOptions: ""
+        protocol: swd
+        speed: 10000
+        target: STM32F407ZG
+    uploader: probe-rs
   Release:
     cppPreprocessAttrs:
       defineList:

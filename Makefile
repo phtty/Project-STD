@@ -2,7 +2,20 @@
 # 参照 .eide/eide.yml Debug 目标配置生成
 
 # ---- Toolchain ----
-CC      = arm-none-eabi-gcc
+TOOLCHAIN ?= gcc
+
+ifeq ($(TOOLCHAIN),gcc)
+  CC       = arm-none-eabi-gcc
+  LD       = arm-none-eabi-gcc
+  TC_FLAGS =
+  SPECS    = --specs=nano.specs --specs=nosys.specs
+else
+  CC       = clang
+  LD       = arm-none-eabi-gcc
+  TC_FLAGS = --target=arm-none-eabi --sysroot=/usr/arm-none-eabi
+  SPECS    = --specs=nano.specs --specs=nosys.specs
+endif
+
 OBJCOPY = arm-none-eabi-objcopy
 SIZE    = arm-none-eabi-size
 
@@ -37,14 +50,14 @@ INC_DIRS = \
 	-I Compiler
 
 # ---- C Flags ----
-CFLAGS  = $(MCU_FLAGS) $(DEFINES) $(INC_DIRS)
+CFLAGS  = $(MCU_FLAGS) $(DEFINES) $(INC_DIRS) $(TC_FLAGS)
 CFLAGS += -std=gnu23
 CFLAGS += -Og -g
 CFLAGS += -Wall -Wextra
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-common
 CFLAGS += -fno-exceptions
-CFLAGS += --specs=nano.specs
+CFLAGS += -fshort-enums
 
 # ---- LDFLAGS ----
 LDSCRIPT  = Compiler/STM32F407XX_FLASH.ld
@@ -52,7 +65,7 @@ LDFLAGS  = $(MCU_FLAGS)
 LDFLAGS += -T $(LDSCRIPT)
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/Project_STD.map,--cref
 LDFLAGS += -Wl,--gc-sections
-LDFLAGS += --specs=nano.specs --specs=nosys.specs
+LDFLAGS += $(SPECS)
 LDFLAGS += -u _printf_float
 LDFLAGS += -lm
 
@@ -309,7 +322,7 @@ all: $(BUILD_DIR)/Project_STD.elf $(BUILD_DIR)/Project_STD.hex $(BUILD_DIR)/Proj
 $(BUILD_DIR)/Project_STD.elf: $(OBJ_ALL)
 	@echo "Linking $@"
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(LD) $(LDFLAGS) -o $@ $^
 
 $(BUILD_DIR)/Project_STD.hex: $(BUILD_DIR)/Project_STD.elf
 	$(OBJCOPY) -O ihex $< $@

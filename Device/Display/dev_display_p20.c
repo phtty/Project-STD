@@ -14,19 +14,19 @@
 #define GROUP_SIZE 16
 
 /* ---- P20 参数 ---- */
-#define P20_MODULE_ROWS         1
-#define P20_MODULE_COLS         1
-#define P20_MODULE_PIXEL_ROW    16
-#define P20_MODULE_PIXEL_COL    8
-#define P20_CHANNELS_PER_MODULE 2
-#define P20_SCAN_LINES          1
+#define P20_MODULE_ROWS         (1U)
+#define P20_MODULE_COLS         (2U)
+#define P20_MODULE_PIXEL_ROW    (16U)
+#define P20_MODULE_PIXEL_COL    (8U)
+#define P20_CHANNELS_PER_MODULE (2U)
+#define P20_SCAN_LINES          (1U)
 
 /* ---- 派生参数 ---- */
 #define P20_SCREEN_ROWS    (P20_MODULE_ROWS * P20_MODULE_PIXEL_ROW)
 #define P20_SCREEN_COLS    (P20_MODULE_COLS * P20_MODULE_PIXEL_COL)
 #define P20_BUFFER_SIZE    (P20_SCREEN_ROWS * P20_SCREEN_COLS)
 #define P20_TOTAL_CHANNELS (P20_MODULE_COLS * P20_CHANNELS_PER_MODULE)
-#define P20_CHANNEL_PIXELS (P20_MODULE_PIXEL_ROW * P20_MODULE_PIXEL_COL * P20_MODULE_ROWS / P20_TOTAL_CHANNELS)
+#define P20_CHANNEL_PIXELS (P20_MODULE_PIXEL_ROW * P20_MODULE_PIXEL_COL * P20_MODULE_ROWS / P20_CHANNELS_PER_MODULE)
 #define P20_SCAN_LINE_PX   (P20_CHANNEL_PIXELS / P20_SCAN_LINES)
 
 /* ---- BSRR 预计算查表 ---- */
@@ -100,7 +100,7 @@ static void _p20_prepare(dev_display_t *dev)
 }
 
 /* ---- scan: BSRR 查表 + CLK 脉冲 ---- */
-static void _p20_scan(dev_display_t *dev, uint8_t line)
+static inline void _p20_scan(dev_display_t *dev, uint8_t line)
 {
     for (uint16_t l = 0; l < dev->scan_line_pixels; l++) {
         uint16_t base = (uint16_t)line * dev->scan_line_pixels + l;
