@@ -23,6 +23,7 @@ static void init_task(void *argument);
 /* ---- HalfSecTask: 500ms 喂狗 / 60s RTC 备份 / LED 翻转 ---- */
 static void half_sec_task(void *argument)
 {
+    (void)argument;
     uint32_t run_time = 0;
     bool led_state    = false;
 

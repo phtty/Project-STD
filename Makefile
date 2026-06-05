@@ -7,7 +7,8 @@ OBJCOPY = arm-none-eabi-objcopy
 SIZE    = arm-none-eabi-size
 
 # ---- Directories ----
-BUILD_DIR = build
+CONFIG    ?= Debug
+BUILD_DIR  = build/$(CONFIG)
 
 # ---- MCU Flags ----
 CPU       = -mcpu=cortex-m4

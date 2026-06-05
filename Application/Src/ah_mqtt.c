@@ -64,7 +64,7 @@ void ah_mqtt_handle_task(void *argument)
     const osMessageQueueAttr_t proto_ah_mqtt_queue_attr = {
         .name = "g_proto_ah_matt_queue",
     };
-    g_proto_ah_matt_queue                          = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
+    g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
     app_proto_set_frame_queue(PROTO_MASK_AH_MQTT, g_proto_ah_matt_queue);
 
     while (g_mqtt.state != MQTT_ST_READY) { // 锟饺达拷锟斤拷锟接斤拷锟斤拷

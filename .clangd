@@ -6,9 +6,12 @@ CompileFlags:
     - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include
     - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include-fixed
     - -isystem/usr/arm-none-eabi/include
-  Remove: []
+  Remove:
+    - -fcallgraph-info*
+    - -mthumb-interwork
   CompilationDatabase: ./build/Debug
   Compiler: /usr/bin/arm-none-eabi-gcc
 Diagnostics:
   Suppress:
     - unused-includes
+    - drv_unknown_argument
