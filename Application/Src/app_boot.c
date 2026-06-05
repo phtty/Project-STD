@@ -72,7 +72,8 @@ static void init_task(void *argument)
 
     printf("\nInit Task Done\n");
 
-    dev_display_t *dsp = dev_display_p16_get();
+    // 以下为显示测试代码
+    dev_display_t *dsp = dev_display_p20_get();
 
     for (;;) {
         for (int i = 0; i < (int)dsp->buffer_size; i++) {

@@ -64,9 +64,8 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, hub75_col
 /** @brief 填充全屏，置脏标记 */
 void dev_display_fill(dev_display_t *dev, hub75_color_t color);
 
-/** @brief 获取 P16 模组显示实例 */
-dev_display_t *dev_display_p16_get(void);
+/** @brief 获取 P20 模组显示实例 */
+dev_display_t *dev_display_p20_get(void);
 
-/** @brief 获取当前显示实例（向后兼容，等同 dev_display_p16_get） */
-static inline dev_display_t *dev_display_get(void)
-    { return dev_display_p16_get(); }
+/** @brief 获取当前显示实例（向后兼容，等同 dev_display_p20_get） */
+dev_display_t *dev_display_get(void);

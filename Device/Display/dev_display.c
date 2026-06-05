@@ -61,12 +61,17 @@ static void scan_task(void *arg)
     }
 }
 
+dev_display_t *dev_display_get(void)
+{
+    return dev_display_p20_get();
+}
+
 /* ---- 软件初始化（创建事件 + 扫描任务）---- */
 void dev_display_start(void)
 {
     s_scan_evt = osEventFlagsNew(NULL);
 
-    dev_display_t *dev = dev_display_p16_get();
+    dev_display_t *dev = dev_display_p20_get();
 
     dev->dirty = true;
 
@@ -98,7 +103,7 @@ void dev_display_fill(dev_display_t *dev, hub75_color_t color)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM4) {
-        dev_display_t *dev = dev_display_p16_get();
+        dev_display_t *dev = dev_display_p20_get();
         static uint8_t pwm_cnt;
 
         pl_hub75_oe_set(pwm_cnt >= dev->light_level);

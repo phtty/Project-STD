@@ -244,6 +244,7 @@ virtualFolder:
         - name: Display
           files:
             - path: Device/Display/dev_display.c
+            - path: Device/Display/dev_display_p20.c
           folders: []
     - name: Platform
       files:
@@ -348,7 +349,6 @@ targets:
             warnings: all-warnings
           global:
             $float-abi-type: hard
-            arm-thumb-interwork: true
             arm-thumb-mode: thumb
             not-use-syscalls: true
             output-debug-info: enable

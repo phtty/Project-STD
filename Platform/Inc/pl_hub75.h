@@ -106,5 +106,17 @@ __STATIC_INLINE void pl_hub75_set_row(uint8_t row)
     HUB75_D = (row & 0x08) ? 1 : 0;
 }
 
+/* ---- BSRR 预计算值（Device 层可持有，通过 pl_hub75_bsrr_flush 写入，不碰 GPIO_TypeDef） ---- */
+typedef struct {
+    uint32_t      val;
+    GPIO_TypeDef *port;
+} pl_hub75_bsrr_t;
+
+__STATIC_INLINE void pl_hub75_bsrr_flush(const pl_hub75_bsrr_t *p)
+{
+    p->port->BSRR = p->val;
+}
+
 /* ---- 初始化 ---- */
+void pl_hub75_init(void);
 void pl_hub75_init(void);
