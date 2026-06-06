@@ -22,7 +22,7 @@ static void iap_module_init(void)
     app_proto_bind_channel(PROTO_MASK_IAP, CH_ID_UDP);
     g_iap_task_handle = osThreadNew(iap_handle_task, nullptr, &iap_task_attr);
 }
-sw_app_initcall(iap_module_init);
+// sw_app_initcall(iap_module_init);
 
 const uint8_t frame_len[] = {0, 0, 4, 0, 1, 0, 0, 0};
 

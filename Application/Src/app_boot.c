@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+
 #include "cmsis_os.h"
 #include "initcall.h"
 #include "pl_iwdg.h"
@@ -15,6 +16,7 @@
 #include "pl_dwt.h"
 #include "dev_eth.h"
 #include "dev_display.h"
+#include "app_render.h"
 
 osEventFlagsId_t SW123_Event;
 
@@ -47,7 +49,7 @@ void app_boot(void)
 {
     const osThreadAttr_t attr = {
         .name       = "init_task",
-        .stack_size = 256 * 4,
+        .stack_size = 512 * 4,
         .priority   = osPriorityHigh,
     };
 
@@ -73,16 +75,31 @@ static void init_task(void *argument)
 
     printf("\nInit Task Done\n");
 
-    // 以下为显示测试代码
-    dev_display_t *dsp = dev_display_p20_get();
+    // ----以下为显示测试代码----
+    // dev_display_t *dsp = dev_display_p20_get();
 
-    for (;;) {
-        for (int i = 0; i < (int)dsp->buffer_size; i++) {
-            dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, HUB75_COLOR_GREEN);
-            osDelay(50);
-            dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, HUB75_COLOR_BLACK);
-        }
-    }
+    // for (;;) {
+    //     for (int i = 0; i < (int)dsp->buffer_size; i++) {
+    //         dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, COLOR_GREEN);
+    //         osDelay(50);
+    //         dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, COLOR_BLACK);
+    //     }
+    // }
+
+    // ----以下为渲染测试代码----
+    app_render(&(render_cfg_t){
+        .type      = RENDER_TEXT,
+        .x         = 0,
+        .y         = 0,
+        .w         = dev_display_get()->screen_rows,
+        .h         = dev_display_get()->screen_cols,
+        .color     = COLOR_GREEN,
+        .text      = "试",
+        .len       = strlen("试"),
+        .font_size = FONT_16,
+        .font_type = FONT_HT,
+        .text_enc  = FONT_ENC_UTF8,
+    });
 
     osThreadExit();
 }

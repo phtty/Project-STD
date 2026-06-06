@@ -67,20 +67,20 @@ void ah_mqtt_handle_task(void *argument)
     g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
     app_proto_set_frame_queue(PROTO_MASK_AH_MQTT, g_proto_ah_matt_queue);
 
-    while (g_mqtt.state != MQTT_ST_READY) { // 锟饺达拷锟斤拷锟接斤拷锟斤拷
+    while (g_mqtt.state != MQTT_ST_READY) { // 等待连接建立
         osDelay(100);
     }
-    // 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟节讹拷时锟较憋拷状态锟斤拷签锟斤拷
+    // 创建两个任务，用于定时上报状态和签到
     SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
     ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
-        // 锟饺达拷锟斤拷锟捷斤拷锟斤拷锟斤拷锟斤拷锟酵讹拷锟斤拷
+        // 等待多协议多信道模块分发数据帧
         if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, &msg, NULL, osWaitForever)) {
             continue;
         }
 
-        // 通锟斤拷topic锟斤拷知锟斤拷锟侥革拷锟斤拷锟斤拷
+        // 通过topic得知是哪个命令
         uint16_t cmd = handle_topic(container_of(msg.ch, mqtt_channel_t, me)->topic);
 
         g_ah_mqtt_cmd_table[cmd](msg.ch, (char *)(msg.data));
@@ -88,7 +88,7 @@ void ah_mqtt_handle_task(void *argument)
 }
 
 /**
- * @brief 锟斤拷锟斤拷topic确锟斤拷锟斤拷锟侥革拷锟斤拷锟斤拷
+ * @brief 解析topic确认是哪个命令
  *
  */
 uint8_t handle_topic(const char topic[])
@@ -134,9 +134,9 @@ void ReportTask(void *argument)
 
     for (;;) {
         memcpy(&(report.notify), &xNotifyID, sizeof(report.notify));
-        report.run_sta = dev_display_get()->light_level ? '1' : '0'; // 锟斤拷锟捷碉拷前锟斤拷锟斤拷锟叫讹拷锟角凤拷锟斤拷示锟斤拷
+        report.run_sta = dev_display_get()->light_level ? '1' : '0'; // 根据当前亮度判断是否开显示屏
         mqtt_send_data(topic, (char *)&report);
-        osDelay(10 * 1000); // 10锟斤拷签锟斤拷1锟斤拷
+        osDelay(10 * 1000); // 10秒签到1次
     }
 }
 
@@ -164,7 +164,7 @@ void SignUpTask(void *argument)
     sign_up.type = '0';
 
     for (;;) {
-        osDelay(5 * 60 * 1000); // 5锟斤拷锟斤拷签锟斤拷1锟斤拷
+        osDelay(5 * 60 * 1000); // 5分钟签到1次
         memcpy(&(sign_up.notify), &xNotifyID, sizeof(sign_up.notify));
         mqtt_send_data(topic, (char *)&sign_up);
     }
@@ -178,4 +178,4 @@ static void ah_mqtt_module_init(void)
     app_proto_bind_channel(PROTO_MASK_AH_MQTT, CH_ID_MQTT);
     g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
 }
-sw_app_initcall(ah_mqtt_module_init);
+// sw_app_initcall(ah_mqtt_module_init);

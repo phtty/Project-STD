@@ -22,22 +22,22 @@ const ah_mqtt_cmd_handler_fn_t g_ah_mqtt_cmd_table[] = {
 };
 
 /**
- * @brief 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
+ * @brief 测试用命令
  *
- * @param meta mqtt锟脚碉拷元锟斤拷锟斤拷
- * @param buff 锟斤拷锟斤拷锟斤拷锟
+ * @param ch 通道实例
+ * @param buff 命令参数
  */
 static void cmd_default(channel_t *ch, char *buff)
 {
 }
 
-const static hub75_color_t disp_color[] = {HUB75_COLOR_BLACK, HUB75_COLOR_GREEN, HUB75_COLOR_RED, HUB75_COLOR_YELLOW};
-const static font_size_t disp_size[]    = {0, 0, FONT_SIZE_16, FONT_SIZE_24, FONT_SIZE_32, 0, 0, 0, FONT_SIZE_32};
+const static display_color_t disp_color[] = {COLOR_BLACK, COLOR_GREEN, COLOR_RED, COLOR_YELLOW};
+const static font_size_t disp_size[]    = {0, 0, FONT_16, FONT_24, FONT_32, 0, 0, 0, FONT_32};
 /**
- * @brief 锟斤拷示锟斤拷锟斤拷
+ * @brief 显示文字
  *
- * @param meta mqtt锟脚碉拷元锟斤拷锟斤拷
- * @param buff 锟斤拷锟斤拷锟斤拷锟
+ * @param ch 通道实例
+ * @param buff 命令参数
  */
 static void cmd_display(channel_t *ch, char *buff)
 {
@@ -46,9 +46,18 @@ static void cmd_display(channel_t *ch, char *buff)
     char gbk_txt[128]   = {0};
 
     UTF8ToGBK(para->text, length - sizeof(cmd_display_t), gbk_txt, &gbk_len);
-    app_render_string(dev_display_get(), NULL, 0, 0, gbk_txt, gbk_len, disp_color[(uint8_t)(para->color) - 0x30], disp_size[(uint8_t)(para->size) - 0x30]);
+    app_render(&(render_cfg_t){
+        .type = RENDER_TEXT,
+        .x = 0, .y = 0,
+        .w = dev_display_get()->screen_rows, .h = dev_display_get()->screen_cols,
+        .color    = disp_color[(uint8_t)(para->color) - 0x30],
+        .text      = gbk_txt, .len = (uint16_t)gbk_len,
+        .font_size = disp_size[(uint8_t)(para->size) - 0x30],
+        .font_type = FONT_ST,
+        .text_enc  = FONT_ENC_UTF8,
+    });
 
-    // 锟斤拷锟铰憋拷锟截碉拷notify id
+    // 更新本地的notify id
     memcpy(&xNotifyID, &(para->nid), sizeof(xNotifyID));
 
     snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/board/NULL",
@@ -60,17 +69,17 @@ static void cmd_display(channel_t *ch, char *buff)
 }
 
 /**
- * @brief 全锟斤拷锟斤拷锟
+ * @brief 全屏填充
  *
- * @param meta mqtt锟脚碉拷元锟斤拷锟斤拷
- * @param buff 锟斤拷锟斤拷锟斤拷锟
+ * @param ch 通道实例
+ * @param buff 命令参数
  */
 static void cmd_fill(channel_t *ch, char *buff)
 {
     // uint32_t length  = strlen(buff);
     cmd_fill_t *para = (cmd_fill_t *)buff;
 
-    app_render_fill(dev_display_get(), disp_color[(uint8_t)(para->color) - 0x30]);
+    app_render(&(render_cfg_t){.type = RENDER_FILL, .color = disp_color[(uint8_t)(para->color) - 0x30]});
 
     snprintf(container_of(ch, mqtt_channel_t, me)->topic, 64, "%.8s/%.2s/%.2s/%.2s/Reply/display/clean",
              topic_info.station_hex,
@@ -81,10 +90,10 @@ static void cmd_fill(channel_t *ch, char *buff)
 }
 
 /**
- * @brief 锟斤拷锟斤拷
+ * @brief 重启
  *
- * @param meta mqtt锟脚碉拷元锟斤拷锟斤拷
- * @param buff 锟斤拷锟斤拷锟斤拷锟
+ * @param ch 通道实例
+ * @param buff 命令参数
  */
 static void cmd_restart(channel_t *ch, char *buff)
 {
@@ -99,10 +108,10 @@ static void cmd_restart(channel_t *ch, char *buff)
 }
 
 /**
- * @brief 锟斤拷时
+ * @brief 对时
  *
- * @param meta mqtt锟脚碉拷元锟斤拷锟斤拷
- * @param buff 锟斤拷锟斤拷锟斤拷锟
+ * @param ch 通道实例
+ * @param buff 命令参数
  */
 static void cmd_checktime(channel_t *ch, char *buff)
 {
@@ -121,11 +130,11 @@ static void cmd_checktime(channel_t *ch, char *buff)
 }
 
 /**
- * @brief  锟节诧拷锟斤拷锟斤拷锟斤拷锟斤拷装锟剿帮拷协锟斤拷锟绞斤拷锟斤拷锟斤拷锟较
+ * @brief 内部函数，封装了按协议格式发送消息
  *
- * @param  meta mqtt锟脚碉拷元锟斤拷锟捷ｏ拷锟斤拷topic锟斤拷息
- * @param  ReturnLen 锟斤拷息锟斤拷锟斤拷
- * @param  ReturnData 锟斤拷锟斤拷锟斤拷锟斤拷息
+ * @param ch 通道实例
+ * @param ReturnLen 消息长度
+ * @param ReturnData 发布的消息
  */
 static void cmd_SendData(channel_t *ch, uint32_t ReturnLen, char *ReturnData)
 {

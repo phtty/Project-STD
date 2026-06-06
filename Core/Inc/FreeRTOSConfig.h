@@ -68,7 +68,7 @@ extern uint32_t SystemCoreClock;
 #define configTICK_RATE_HZ                      ((TickType_t)1000)
 #define configMAX_PRIORITIES                    (56)
 #define configMINIMAL_STACK_SIZE                ((uint16_t)128)
-#define configTOTAL_HEAP_SIZE                   ((size_t)32 * 1024)
+#define configTOTAL_HEAP_SIZE                   ((size_t)20 * 1024)
 #define configMAX_TASK_NAME_LEN                 (16)
 #define configUSE_TRACE_FACILITY                1
 #define configUSE_16_BIT_TICKS                  0
@@ -171,9 +171,9 @@ standard names. */
 
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
-#define configUSE_TRACE_FACILITY                 1 // ±ØÐëÎª 1£¬ÆôÓÃ¸ú×Ù¹¦ÄÜ
-#define configUSE_STATS_FORMATTING_FUNCTIONS     1 // ¿ÉÑ¡£¬ÈôÒªÓÃ vTaskList()
-#define configRECORD_STACK_HIGH_ADDRESS          1 // ±ØÐëÎª 1£¬¼ÇÂ¼Õ»¸ßË®Î»
+#define configUSE_TRACE_FACILITY                 1 // ï¿½ï¿½ï¿½ï¿½Îª 1ï¿½ï¿½ï¿½ï¿½ï¿½Ã¸ï¿½ï¿½Ù¹ï¿½ï¿½ï¿½
+#define configUSE_STATS_FORMATTING_FUNCTIONS     1 // ï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ vTaskList()
+#define configRECORD_STACK_HIGH_ADDRESS          1 // ï¿½ï¿½ï¿½ï¿½Îª 1ï¿½ï¿½ï¿½ï¿½Â¼Õ»ï¿½ï¿½Ë®Î»
 
 #define configGENERATE_RUN_TIME_STATS            1
 #define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() vConfigureTimerForRunTimeStats()

@@ -70,14 +70,16 @@ static inline uint8_t _put_addr(uint8_t *cmd, uint32_t addr, dev_w25qxx_t *s)
 }
 
 dev_storage_t *dev_w25qxx_get(void)
-{ return &g_w25qxx.me; }
+{
+    return &g_w25qxx.me;
+}
 
 /* ---- CS 控制 ---- */
-static void _cs_low(void)
+static inline void _cs_low(void)
 {
     pl_gpio_write(PL_PORT_B, 1, false);
 }
-static void _cs_high(void)
+static inline void _cs_high(void)
 {
     pl_gpio_write(PL_PORT_B, 1, true);
 }
@@ -107,7 +109,7 @@ static int32_t _init(dev_storage_t *dev)
     pl_delay_ms(10);
 
     /* JEDEC ID → 容量（阻塞全双工，无需RTOS） */
-    uint8_t tx[4]  = {W25Q_READ_JEDEC_ID, 0xFF, 0xFF, 0xFF}, rx[4] = {0};
+    uint8_t tx[4] = {W25Q_READ_JEDEC_ID, 0xFF, 0xFF, 0xFF}, rx[4] = {0};
     _cs_low();
     pl_spi_transmit_receive(self->spi, tx, rx, 4);
     _cs_high();
@@ -130,23 +132,22 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
 
     if (!s_evt) {
         s_evt = osEventFlagsNew(NULL);
+        if (!s_evt) return -1;
         pl_spi_set_rx_cplt_cb(self->spi, _dma_cb, NULL);
     }
 
-    uint8_t al           = _addr_len(self);
-    uint8_t tx[5 + 2048] = {0}, rx[4 + 2048] = {0};
-    uint16_t total = (uint16_t)(al + 1 + len);
-
-    tx[0] = W25Q_READ_CMD;
-    _put_addr(tx + 1, addr, self);
+    uint8_t al = _addr_len(self);
+    uint8_t cmd[5];
+    cmd[0] = W25Q_READ_CMD;
+    _put_addr(cmd + 1, addr, self);
 
     s_ok = false;
     _cs_low();
-    pl_spi_transmit_receive_dma(self->spi, tx, rx, total);
-    osEventFlagsWait(s_evt, 0x01, osFlagsWaitAny, 100);
+    pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
+    pl_spi_receive_dma(self->spi, buf, (uint16_t)len);
+    while (!s_ok)
+        osDelay(1);
     _cs_high();
-
-    memcpy(buf, rx + al + 1, len);
     return (int32_t)len;
 }
 

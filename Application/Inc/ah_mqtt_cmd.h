@@ -4,7 +4,7 @@
 
 #include "ah_mqtt.h"
 
-// ��ʾ����ָ��
+// 显示控制指令
 typedef struct [[gnu::packed]] cmd_disp {
     notify_id_t nid;
     char scrn_sw;
@@ -13,13 +13,13 @@ typedef struct [[gnu::packed]] cmd_disp {
     char text[];
 } cmd_display_t;
 
-// ��Ļ���
+// 屏幕填充
 typedef struct [[gnu::packed]] cmd_fill {
     notify_id_t nid;
     char color;
 } cmd_fill_t;
 
-// ����
+// 重启
 typedef struct [[gnu::packed]] cmd_restart {
     notify_id_t nid;
     char type;
@@ -28,7 +28,7 @@ typedef struct [[gnu::packed]] cmd_restart {
     char reserve;
 } cmd_restart_t;
 
-// ��ʱ
+// 对时
 typedef struct [[gnu::packed]] cmd_checktime {
     notify_id_t nid;
     char type;

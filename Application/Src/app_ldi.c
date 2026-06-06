@@ -109,7 +109,7 @@ static void ldi_module_init(void)
     g_ldi_task_handle       = osThreadNew(ldi_handle_task, nullptr, &ldi_task_attr);
     g_ldi_timer_task_handle = osThreadNew(ldi_timer_task, nullptr, &ldi_timer_task_attr);
 }
-sw_app_initcall(ldi_module_init);
+// sw_app_initcall(ldi_module_init);
 
 osMessageQueueId_t g_ldi_msg_queue;
 osThreadId_t g_ldi_task_handle;

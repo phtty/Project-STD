@@ -64,8 +64,21 @@ int32_t pl_spi_receive(pl_spi_handle_t h, uint8_t *data, uint16_t size)
     return (HAL_SPI_Receive(ctx->hspi, data, size, 100) == HAL_OK) ? 0 : -1;
 }
 
+int32_t pl_spi_receive_dma(pl_spi_handle_t h, uint8_t *data, uint16_t size)
+{
+    spi_ctx_t *ctx = (spi_ctx_t *)h;
+    if (!ctx || !ctx->hspi) return -1;
+    return (HAL_SPI_Receive_DMA(ctx->hspi, data, size) == HAL_OK) ? 0 : -1;
+}
+
 /* SPI DMA 完成回调 → 转发到 Device 层 */
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if (hspi == &hspi1 && g_spi_ctx.rx_cplt_cb)
+        g_spi_ctx.rx_cplt_cb(g_spi_ctx.rx_cplt_ctx);
+}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if (hspi == &hspi1 && g_spi_ctx.rx_cplt_cb)
         g_spi_ctx.rx_cplt_cb(g_spi_ctx.rx_cplt_ctx);

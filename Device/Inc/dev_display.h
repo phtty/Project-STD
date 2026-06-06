@@ -12,6 +12,18 @@
 #include <stdbool.h>
 #include "pl_hub75.h"
 
+/* ---- 颜色（上层 API 使用，不与 HUB75 引脚耦合）---- */
+typedef enum {
+    COLOR_BLACK  = 0,
+    COLOR_RED    = 1,
+    COLOR_GREEN  = 2,
+    COLOR_YELLOW = 3,
+    COLOR_BLUE   = 4,
+    COLOR_PURPLE = 5,
+    COLOR_CYAN   = 6,
+    COLOR_WHITE  = 7,
+} display_color_t;
+
 typedef struct dev_display dev_display_t;
 
 /* ---- 操作虚表 ---- */
@@ -59,10 +71,15 @@ void dev_display_init(void);
 void dev_display_start(void);
 
 /** @brief 设置单个像素颜色，置脏标记 */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, hub75_color_t color);
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
 
 /** @brief 填充全屏，置脏标记 */
-void dev_display_fill(dev_display_t *dev, hub75_color_t color);
+void dev_display_fill(dev_display_t *dev, display_color_t color);
+
+/** @brief 绘制矩形位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color */
+void dev_display_draw_bitmap(dev_display_t *dev,
+    uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+    const uint8_t *bitmap, display_color_t color);
 
 /** @brief 获取 P20 模组显示实例 */
 dev_display_t *dev_display_p20_get(void);

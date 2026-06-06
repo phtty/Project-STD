@@ -27,4 +27,7 @@ int32_t  pl_spi_transmit_receive_dma(pl_spi_handle_t h, const uint8_t *tx_data, 
 /** @brief 阻塞接收 */
 int32_t  pl_spi_receive(pl_spi_handle_t h, uint8_t *data, uint16_t size);
 
+/** @brief DMA 半双工接收（先发命令，再 DMA 收数据直入 buf） */
+int32_t  pl_spi_receive_dma(pl_spi_handle_t h, uint8_t *data, uint16_t size);
+
 void     pl_spi_set_rx_cplt_cb(pl_spi_handle_t h, pl_spi_rx_cplt_cb_t cb, void *ctx);

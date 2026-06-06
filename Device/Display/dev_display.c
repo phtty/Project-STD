@@ -85,17 +85,31 @@ void dev_display_start(void)
 sw_dev_initcall(dev_display_start);
 
 /* ---- 通用像素操作 ---- */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, hub75_color_t color)
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color)
 {
     if (x < dev->screen_rows && y < dev->screen_cols) {
         dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-        dev->dirty = true;
+        dev->dirty                               = true;
     }
 }
 
-void dev_display_fill(dev_display_t *dev, hub75_color_t color)
+void dev_display_fill(dev_display_t *dev, display_color_t color)
 {
     memset(dev->pixel_map, (uint8_t)color, dev->buffer_size);
+    dev->dirty = true;
+}
+
+void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, display_color_t color)
+{
+    if (x + w > dev->screen_rows || y + h > dev->screen_cols) return;
+
+    uint16_t row_bytes = (w + 7) / 8;
+    for (uint16_t row = 0; row < h; row++) {
+        for (uint16_t col = 0; col < w; col++) {
+            if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
+                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
+        }
+    }
     dev->dirty = true;
 }
 
