@@ -52,6 +52,7 @@ static dev_display_p20_t g_p20 = {
         .channels_per_module = P20_CHANNELS_PER_MODULE,
         .modules_per_row     = P20_MODULE_ROWS,
         .modules_per_col     = P20_MODULE_COLS,
+        .scan_lines          = P20_SCAN_LINES,
         .screen_rows         = P20_SCREEN_ROWS,
         .screen_cols         = P20_SCREEN_COLS,
         .total_channels      = P20_TOTAL_CHANNELS,
@@ -125,7 +126,6 @@ static const dev_display_ops_t p20_ops = {
     .prepare    = _p20_prepare,
     .scan       = _p20_scan,
     .set_row    = _p20_set_row,
-    .scan_lines = P20_SCAN_LINES,
 };
 
 /* ---- 自动初始化：填充 BSRR + 绑定 ops ---- */

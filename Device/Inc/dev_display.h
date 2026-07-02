@@ -31,7 +31,6 @@ typedef struct dev_display_ops {
     void (*prepare)(dev_display_t *dev);           /* 像素→发送缓存 (dirty 时调用) */
     void (*scan)(dev_display_t *dev, uint8_t line); /* 输出一个扫描行 */
     void (*set_row)(uint8_t row);                  /* ABCD 行地址编码 */
-    uint8_t scan_lines;                            /* 扫描行数 */
 } dev_display_ops_t;
 
 /* ---- 基类 (派生类必须将其放在第一个成员位置) ---- */
@@ -44,13 +43,14 @@ struct dev_display {
     uint8_t  channels_per_module; /* 每模块通道数 */
     uint8_t  modules_per_row;     /* 每行模块数 */
     uint8_t  modules_per_col;     /* 每列模块数 */
+    uint8_t  scan_lines;          /* 扫描行数 (静态=1, 1/4扫=4...) */
 
     /* 派生参数 */
     uint16_t screen_rows;         /* = modules_per_row * module_rows */
     uint16_t screen_cols;         /* = modules_per_col * module_cols */
     uint8_t  total_channels;      /* = modules_per_col * channels_per_module */
     uint16_t channel_pixels;      /* = module_rows * module_cols * modules_per_row / total_channels */
-    uint16_t scan_line_pixels;    /* = channel_pixels / ops->scan_lines */
+    uint16_t scan_line_pixels;    /* = channel_pixels / scan_lines */
     uint16_t buffer_size;         /* = screen_rows * screen_cols */
 
     /* 缓冲区 (CCMRAM，派生实例静态分配) */
@@ -83,6 +83,9 @@ void dev_display_draw_bitmap(dev_display_t *dev,
 
 /** @brief 获取 P20 模组显示实例 */
 dev_display_t *dev_display_p20_get(void);
+
+/** @brief 设置亮度 (0=最暗/关闭, 7=最亮)，PWM 粒度 1/8 */
+void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
 
 /** @brief 获取当前显示实例（向后兼容，等同 dev_display_p20_get） */
 dev_display_t *dev_display_get(void);

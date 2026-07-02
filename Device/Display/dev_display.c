@@ -57,7 +57,7 @@ static void scan_task(void *arg)
         pl_tim_irq_enable(TIM4_IRQn);
         osKernelUnlock();
 
-        scan_line = (scan_line + 1) % dev->ops->scan_lines;
+        scan_line = (scan_line + 1) % dev->scan_lines;
     }
 }
 
@@ -91,6 +91,12 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_c
         dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
         dev->dirty                               = true;
     }
+}
+
+void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
+{
+    if (level > 7) level = 7;
+    dev->light_level = level;
 }
 
 void dev_display_fill(dev_display_t *dev, display_color_t color)

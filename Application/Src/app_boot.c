@@ -94,10 +94,10 @@ static void init_task(void *argument)
         .w         = dev_display_get()->screen_rows,
         .h         = dev_display_get()->screen_cols,
         .color     = COLOR_GREEN,
-        .text      = "试",
-        .len       = strlen("试"),
+        .text      = "通",
+        .len       = strlen("通"),
         .font_size = FONT_16,
-        .font_type = FONT_HT,
+        .font_type = FONT_ST,
         .text_enc  = FONT_ENC_UTF8,
     });
 
