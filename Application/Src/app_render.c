@@ -164,7 +164,7 @@ static inline void _render_text(const render_cfg_t *cfg)
 
     uint16_t i = 0;
     while (i < text_len) {
-        if (text_buf[i] == '\n') {
+        if (text_buf[i] == '\n') { // 处理换行符
             cur_x = cfg->x;
             cur_y += gbk_key.size;
             i++;
@@ -175,7 +175,7 @@ static inline void _render_text(const render_cfg_t *cfg)
             // ascii字符（半宽）
             uint8_t fw_asc = _glyph_width_px(asc_key);
 
-            if (cur_x + fw_asc > cfg->w) {
+            if (cur_x + fw_asc > cfg->w) { // 处理光标移动到最右边的情况
                 if (cfg->style && cfg->style->word_wrap) {
                     cur_x = cfg->x;
                     cur_y += gbk_key.size;
