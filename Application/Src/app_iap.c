@@ -14,12 +14,14 @@
 #include "app_iap_cmd.h"
 
 /* ---- 协议模块自注册 ---- */
-static void iap_module_init(void)
+[[maybe_unused]] static void iap_module_init(void)
 {
     ring_buffer_t *rb = app_proto_acquire_buf(0, 2048);
     app_proto_register(PROTO_MASK_IAP, iap_probe_frame, rb);
     app_proto_bind_channel(PROTO_MASK_IAP, CH_ID_RS485);
     app_proto_bind_channel(PROTO_MASK_IAP, CH_ID_UDP);
+
+    // 创建协议处理任务
     g_iap_task_handle = osThreadNew(iap_handle_task, nullptr, &iap_task_attr);
 }
 // sw_app_initcall(iap_module_init);

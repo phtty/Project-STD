@@ -171,11 +171,13 @@ void SignUpTask(void *argument)
 }
 
 /* ---- 自注册到 app_dispatch ---- */
-static void ah_mqtt_module_init(void)
+[[maybe_unused]] static void ah_mqtt_module_init(void)
 {
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
     app_proto_register(PROTO_MASK_AH_MQTT, ah_mqtt_probe_frame, rb);
     app_proto_bind_channel(PROTO_MASK_AH_MQTT, CH_ID_MQTT);
+
+    // 创建协议处理任务
     g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
 }
 // sw_app_initcall(ah_mqtt_module_init);

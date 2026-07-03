@@ -41,12 +41,10 @@ ldi_ctx_t g_ldi = {
 
 void ldi_ctx_init(ldi_ctx_t *self)
 {
-    volatile const dev_flash_ldi_record_t *rec = (volatile const dev_flash_ldi_record_t *)ADDR_LDI_CONFIG_SECTOR;
+    dev_flash_ldi_cfg_info_t flash_cfg = {0};
 
-    if (!dev_flash_ldi_is_config_empty(rec) && dev_flash_ldi_is_config_valid(rec)) {
-        /* Flash 有有效配置：加载全部字段，应用到运行环境 */
-        dev_flash_ldi_cfg_info_t flash_cfg = {0};
-        dev_flash_ldi_load_config(&flash_cfg);
+    if (dev_flash_ldi_load_config(&flash_cfg)) {
+        /* Flash 有有效配置：应用到运行环境 */
 
         /* 网络参数（device_ip/mask/gw/host_ip/host_port 等） */
         memcpy(self->cfg.device_ip, flash_cfg.device_ip, sizeof(self->cfg.device_ip));
@@ -91,7 +89,7 @@ void ldi_ctx_init(ldi_ctx_t *self)
 }
 
 /* ---- 协议自注册 ---- */
-static void ldi_module_init(void)
+[[maybe_unused]] static void ldi_module_init(void)
 {
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
     app_proto_register(PROTO_MASK_LDI, ldi_probe_frame, rb);
@@ -106,6 +104,7 @@ static void ldi_module_init(void)
     const osMutexAttr_t tx_lock_attr = {.name = "ldi_tx_lock", .attr_bits = osMutexPrioInherit};
     g_ldi.tx_lock                    = osMutexNew(&tx_lock_attr);
 
+    // 创建协议相关处理任务
     g_ldi_task_handle       = osThreadNew(ldi_handle_task, nullptr, &ldi_task_attr);
     g_ldi_timer_task_handle = osThreadNew(ldi_timer_task, nullptr, &ldi_timer_task_attr);
 }

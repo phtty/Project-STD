@@ -2,29 +2,24 @@
 #include "dev_flash_ldi.h"
 
 #include "pl_crc.h"
-#include "dev_flash_int.h"
+#include "dev_w25qxx.h"
 #include "initcall.h"
 
-#define LDI_SIZE 0x20000 /* 128KB */
+/* ---- LDI 配置在 W25Qxx 的存储地址（最后一个 4KB 扇区，避免与字库冲突） ---- */
+static uint32_t s_ldi_base;
 
-/* ---- LDI Flash 存储实例 ---- */
-static dev_flash_int_t g_flash_ldi = {
-    .me        = {.capacity = LDI_SIZE},
-    .base_addr = ADDR_LDI_CONFIG_SECTOR,
-    .sector    = PL_FLASH_SECTOR_11,
-};
+/* ---- 初始化（sw_dev_initcall: 确保 dev_w25qxx 已初始化） ---- */
+static void _dev_flash_ldi_storage_init(void)
+{
+    dev_storage_t *w25 = dev_w25qxx_get();
+    s_ldi_base         = dev_storage_capacity(w25) - 4096;
+}
+sw_dev_initcall(_dev_flash_ldi_storage_init);
 
 dev_storage_t *dev_flash_ldi_get_storage(void)
 {
-    return &g_flash_ldi.me;
+    return dev_w25qxx_get();
 }
-
-/* ---- ops 绑定（hw_dev_initcall） ---- */
-static void _dev_flash_ldi_storage_init(void)
-{
-    g_flash_ldi.me.ops = &flash_int_ops;
-}
-hw_dev_initcall(_dev_flash_ldi_storage_init);
 
 // dev_flash_ldi_record_t: magic(4) + cfg(106) + padding(2) + crc32(4) = 116 byte = 29 words
 #define FLASH_WORD_COUNT ((sizeof(dev_flash_ldi_record_t) + 3) / 4)
@@ -44,14 +39,14 @@ bool dev_flash_ldi_is_config_empty(volatile const dev_flash_ldi_record_t *rec)
 }
 
 /**
- * @brief 验证 Flash 配置校验值 (magic CRC32)
+ * @brief 验证 Flash 配置校验值 (magic + CRC32)
  */
 bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
 {
     if (rec->magic != DEV_FLASH_LDI_MAGIC)
         return false;
 
-    // CRC 瑕疵检查 magic 配置，不包含 crc32 字节（链长 1 字）
+    /* CRC 校验覆盖 magic + 配置，不包含 crc32 自身 */
     uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)rec, (FLASH_WORD_COUNT - 1) * 4);
     if (rec->crc32 != crc)
         return false;
@@ -60,19 +55,19 @@ bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
 }
 
 /**
- * @brief 擦除 Sector 11 (0x080E0000, 128KB)
+ * @brief 擦除 W25Qxx 中 LDI 配置所在扇区（最后一个 4KB 扇区）
  */
 int32_t dev_flash_ldi_erase_config(void)
 {
-    return dev_storage_erase(dev_flash_ldi_get_storage(), 0, 0);
+    return dev_storage_erase(dev_flash_ldi_get_storage(), s_ldi_base, 4096);
 }
 
 /**
- * @brief 将 dev_flash_ldi_record_t 的 word 写入 Flash 扇区 11
+ * @brief 将 dev_flash_ldi_record_t 写入 W25Qxx
  */
 int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec)
 {
-    return dev_storage_write(dev_flash_ldi_get_storage(), 0, (uint8_t *)rec, sizeof(*rec));
+    return dev_storage_write(dev_flash_ldi_get_storage(), s_ldi_base, (uint8_t *)rec, sizeof(*rec));
 }
 
 /**
@@ -90,16 +85,26 @@ void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info)
 }
 
 /**
- * @brief 从Flash加载LDI配置信息，用于错误或验证失败后的回退
+ * @brief 从 W25Qxx 加载 LDI 配置信息
+ * @param info  输出参数，有效配置写入此处
+ * @return true  读取到有效配置
+ * @return false 配置为空/校验失败/读取错误
  */
-void dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info)
+bool dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info)
 {
-    volatile dev_flash_ldi_record_t *rec = (volatile dev_flash_ldi_record_t *)ADDR_LDI_CONFIG_SECTOR;
+    dev_flash_ldi_record_t rec;
+    dev_storage_t *w25 = dev_flash_ldi_get_storage();
 
-    if (dev_flash_ldi_is_config_empty(rec) || !dev_flash_ldi_is_config_valid(rec)) {
+    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) < 0) {
         memset(info, 0, sizeof(dev_flash_ldi_cfg_info_t));
-        return;
+        return false;
     }
 
-    memcpy(info, (void *)&rec->cfg, sizeof(dev_flash_ldi_cfg_info_t));
+    if (dev_flash_ldi_is_config_empty(&rec) || !dev_flash_ldi_is_config_valid(&rec)) {
+        memset(info, 0, sizeof(dev_flash_ldi_cfg_info_t));
+        return false;
+    }
+
+    memcpy(info, &rec.cfg, sizeof(dev_flash_ldi_cfg_info_t));
+    return true;
 }

@@ -3,9 +3,8 @@
 #include <stdint.h>
 #include "dev_storage.h"
 
-// Flash Sector 11: 0x080E0000 ~ 0x080FFFFF, 128KB
-// 存放 LDI 车道设备接口协议配置信息
-#define ADDR_LDI_CONFIG_SECTOR 0x080E0000
+// Flash Sector 11 (0x080E0000~0x080FFFFF, 128KB) 已释放。
+// LDI 配置现已迁移至 W25Qxx 最后一个 4KB 扇区，通过 dev_storage_ops 访问。
 #define DEV_FLASH_LDI_MAGIC    0x0D001B00
 #define DEV_FLASH_LDI_MAX_MODULES (6U) // Flash 最大可存储的功能模块数量
 
@@ -57,7 +56,8 @@ bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec);
 int32_t dev_flash_ldi_erase_config(void);
 int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec);
 void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info);
-void dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info);
+/** @brief 从 W25Qxx 加载 LDI 配置，返回 true 表示读取到有效配置 */
+bool dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info);
 
 /** @brief 获取 LDI Flash 存储句柄（内部使用） */
 dev_storage_t *dev_flash_ldi_get_storage(void);
