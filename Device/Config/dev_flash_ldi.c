@@ -4,7 +4,7 @@
 #include "pl_crc.h"
 #include "dev_flash_int.h"
 
-// dev_flash_ldi_record_t: magic(4) + cfg(106) + padding(2) + crc32(4) = 116 瀛楄妭 = 29 words
+// dev_flash_ldi_record_t: magic(4) + cfg(106) + padding(2) + crc32(4) = 116 byte = 29 words
 #define FLASH_WORD_COUNT ((sizeof(dev_flash_ldi_record_t) + 3) / 4)
 
 /* ================================================================
@@ -22,7 +22,7 @@ bool dev_flash_ldi_is_config_empty(volatile const dev_flash_ldi_record_t *rec)
 }
 
 /**
- * @brief 鏍￠獙 Flash 閰嶇疆鍖哄畬鏁存 (magic + CRC32)
+ * @brief 验证 Flash 配置校验值 (magic CRC32)
  */
 bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
 {
