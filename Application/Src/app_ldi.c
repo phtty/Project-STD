@@ -93,11 +93,15 @@ static proto_mask_t s_ldi_mask;
 
 [[maybe_unused]] static void ldi_module_init(void)
 {
+    // 指定协议使用的环形缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
-    s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
-    if (s_ldi_mask == 0) return;
 
-    // 绑定协议使用的通道
+    // 注册协议到多通道多协议解析模块
+    s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
+    if (s_ldi_mask == 0)
+        return;
+
+    // 绑定协议使用到的通道
     app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_SERVER);
     app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_CLIENT);
     app_proto_bind_channel(s_ldi_mask, CH_ID_UDP);
