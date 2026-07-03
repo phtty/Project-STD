@@ -34,7 +34,7 @@ ldi_ctx_t g_ldi = {
         .module_count = 2,
         .modules      = {
             {.device_type = LDI_DEV_TYPE_VMS, .device_index = 1},
-            {.device_type = LDI_DEV_TYPE_CANOPY_LIGHT, .device_index = 1},
+            // {.device_type = LDI_DEV_TYPE_CANOPY_LIGHT, .device_index = 1},
         },
     },
 };

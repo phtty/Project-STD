@@ -92,8 +92,8 @@ void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info)
  */
 bool dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info)
 {
-    dev_flash_ldi_record_t rec;
-    dev_storage_t *w25 = dev_flash_ldi_get_storage();
+    dev_flash_ldi_record_t rec = {0};
+    dev_storage_t *w25         = dev_flash_ldi_get_storage();
 
     if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) < 0) {
         memset(info, 0, sizeof(dev_flash_ldi_cfg_info_t));

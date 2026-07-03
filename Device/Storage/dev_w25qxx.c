@@ -117,10 +117,12 @@ static int32_t _init(dev_storage_t *dev)
     self->device_id = (uint16_t)(rx[2] << 8) | rx[3]; /* Type|Capacity */
     dev->capacity   = _jedec_capacity(self->device_id);
 
-    /* >128Mb ? 4BYTE */
+    /* >128Mb → 4 字节地址模式 */
     if (_addr_len(self) == 4) {
         uint8_t c4 = W25Q_ENTER_4BYTE;
+        _cs_low();
         pl_spi_transmit(self->spi, &c4, 1);
+        _cs_high();
     }
     return 0;
 }

@@ -54,7 +54,10 @@ int32_t pl_spi_transmit(pl_spi_handle_t h, const uint8_t *data, uint16_t size)
 {
     spi_ctx_t *ctx = (spi_ctx_t *)h;
     if (!ctx || !ctx->hspi) return -1;
-    return (HAL_SPI_Transmit(ctx->hspi, (uint8_t *)data, size, 100) == HAL_OK) ? 0 : -1;
+    HAL_StatusTypeDef st = HAL_SPI_Transmit(ctx->hspi, (uint8_t *)data, size, 100);
+    /* HAL_SPI_Transmit 返回后移位寄存器可能仍在忙，必须等 BSY 清除才能操作 CS */
+    while (__HAL_SPI_GET_FLAG(ctx->hspi, SPI_FLAG_BSY)) {}
+    return (st == HAL_OK) ? 0 : -1;
 }
 
 int32_t pl_spi_receive(pl_spi_handle_t h, uint8_t *data, uint16_t size)
