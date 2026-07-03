@@ -21,7 +21,7 @@ __STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn);
 
 static const osThreadAttr_t tcp_listen_attr = {
     .name       = "tcp_svr_listen",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4,
     .priority   = osPriorityNormal,
 };
 
@@ -36,8 +36,8 @@ const osThreadAttr_t tcp_server_conn_attr = {
 static int32_t tcp_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
     tcp_server_channel_t *tcp = container_of(ch, tcp_server_channel_t, me);
-    struct netconn *nc = (struct netconn *)tcp->conn;
-    err_t err          = netconn_write(nc, data, len, NETCONN_COPY);
+    struct netconn *nc        = (struct netconn *)tcp->conn;
+    err_t err                 = netconn_write(nc, data, len, NETCONN_COPY);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
 
@@ -77,11 +77,16 @@ const osThreadAttr_t tcp_server_task_attr = {
  *  主任务：遍历监听器数组，为每端口创建 listen worker
  * ================================================================ */
 
+/* ---- 调试变量：Watch 窗口查看 ---- */
+volatile void *g_tcp_listen_task_handle;
+
 void tcp_server_task(void *argument)
 {
     (void)argument;
-    for (size_t i = 0; i < sizeof(g_listeners) / sizeof(g_listeners[0]); i++)
-        osThreadNew(tcp_server_listen_task, &g_listeners[i], &tcp_listen_attr);
+
+    for (size_t i = 0; i < sizeof(g_listeners) / sizeof(g_listeners[0]); i++) {
+        g_tcp_listen_task_handle = osThreadNew(tcp_server_listen_task, &g_listeners[i], &tcp_listen_attr);
+    }
 
     osThreadExit();
 }
@@ -172,7 +177,7 @@ void tcp_server_listen_task(void *ctx)
 
 void tcp_server_channel_init(tcp_server_channel_t *self, void *conn, channel_t *tmpl, tcp_server_listener_ctx_t *listener)
 {
-    self->me = *tmpl;
+    self->me       = *tmpl;
     self->me.state = CH_STATE_UP;
     self->conn     = conn;
     self->listener = listener;
