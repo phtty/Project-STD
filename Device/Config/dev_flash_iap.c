@@ -13,6 +13,28 @@
 #include "dev_flash_iap.h"
 #include "dev_flash_int.h"
 #include "pl_crc.h"
+#include "initcall.h"
+
+#define IAP_SIZE 0x4000 /* 16KB */
+
+/* ---- IAP Flash 存储实例 ---- */
+static dev_flash_int_t g_flash_iap = {
+    .me        = {.capacity = IAP_SIZE},
+    .base_addr = ADDR_CONFIG_SECTOR,
+    .sector    = PL_FLASH_SECTOR_1,
+};
+
+dev_storage_t *dev_flash_iap_get_storage(void)
+{
+    return &g_flash_iap.me;
+}
+
+/* ---- ops 绑定（hw_dev_initcall） ---- */
+static void _dev_flash_iap_storage_init(void)
+{
+    g_flash_iap.me.ops = &flash_int_ops;
+}
+hw_dev_initcall(_dev_flash_iap_storage_init);
 
 dev_flash_iap_sys_info_t *g_config = (dev_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR; /* 直接映射到 Flash 地址 */
 
@@ -73,11 +95,11 @@ void dev_flash_iap_edit_config(dev_flash_iap_sys_info_t *info)
 /** @brief 擦除 Sector 1（0x08004000，16KB） */
 int32_t dev_flash_iap_erase_config(void)
 {
-    return dev_storage_erase(dev_flash_int_get(DEV_FLASH_INT_IAP), 0, 0);
+    return dev_storage_erase(dev_flash_iap_get_storage(), 0, 0);
 }
 
 /** @brief 写入 dev_flash_iap_sys_info_t 到 Flash */
 int32_t dev_flash_iap_write_config(dev_flash_iap_sys_info_t *info)
 {
-    return dev_storage_write(dev_flash_int_get(DEV_FLASH_INT_IAP), 0, (uint8_t *)info, sizeof(*info));
+    return dev_storage_write(dev_flash_iap_get_storage(), 0, (uint8_t *)info, sizeof(*info));
 }

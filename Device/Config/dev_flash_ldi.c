@@ -3,6 +3,28 @@
 
 #include "pl_crc.h"
 #include "dev_flash_int.h"
+#include "initcall.h"
+
+#define LDI_SIZE 0x20000 /* 128KB */
+
+/* ---- LDI Flash 存储实例 ---- */
+static dev_flash_int_t g_flash_ldi = {
+    .me        = {.capacity = LDI_SIZE},
+    .base_addr = ADDR_LDI_CONFIG_SECTOR,
+    .sector    = PL_FLASH_SECTOR_11,
+};
+
+dev_storage_t *dev_flash_ldi_get_storage(void)
+{
+    return &g_flash_ldi.me;
+}
+
+/* ---- ops 绑定（hw_dev_initcall） ---- */
+static void _dev_flash_ldi_storage_init(void)
+{
+    g_flash_ldi.me.ops = &flash_int_ops;
+}
+hw_dev_initcall(_dev_flash_ldi_storage_init);
 
 // dev_flash_ldi_record_t: magic(4) + cfg(106) + padding(2) + crc32(4) = 116 byte = 29 words
 #define FLASH_WORD_COUNT ((sizeof(dev_flash_ldi_record_t) + 3) / 4)
@@ -42,7 +64,7 @@ bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
  */
 int32_t dev_flash_ldi_erase_config(void)
 {
-    return dev_storage_erase(dev_flash_int_get(DEV_FLASH_INT_LDI), 0, 0);
+    return dev_storage_erase(dev_flash_ldi_get_storage(), 0, 0);
 }
 
 /**
@@ -50,7 +72,7 @@ int32_t dev_flash_ldi_erase_config(void)
  */
 int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec)
 {
-    return dev_storage_write(dev_flash_int_get(DEV_FLASH_INT_LDI), 0, (uint8_t *)rec, sizeof(*rec));
+    return dev_storage_write(dev_flash_ldi_get_storage(), 0, (uint8_t *)rec, sizeof(*rec));
 }
 
 /**

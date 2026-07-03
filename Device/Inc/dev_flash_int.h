@@ -1,15 +1,23 @@
 /**
  * @file    dev_flash_int.h
- * @brief   STM32 内部 Flash 存储设备（继承 dev_storage_t）
+ * @brief   STM32 内部 Flash 存储设备基类 — 不持有实例
  *
- * 一个模块，两个实例：Sector1(IAP=16KB) 和 Sector11(LDI=128KB)
+ * 仅提供 dev_flash_int_t 派生类型和 flash_int_ops 虚表引用。
+ * 实例由各自的配置模块创建（dev_flash_iap.c / dev_flash_ldi.c），
+ * 在各自的 hw_dev_initcall 中绑定 ops。
  */
 
 #pragma once
 
 #include "dev_storage.h"
+#include "pl_flash.h"
 
-#define DEV_FLASH_INT_IAP 0
-#define DEV_FLASH_INT_LDI 1
+/** @brief 内部 Flash 派生类型（dev_storage_t 子类） */
+typedef struct {
+    dev_storage_t me;
+    uint32_t base_addr;
+    uint32_t sector;
+} dev_flash_int_t;
 
-dev_storage_t *dev_flash_int_get(uint8_t id);
+/** @brief 共享的 flash_int_ops 虚表（定义在 dev_flash_int.c） */
+extern const dev_storage_ops_t flash_int_ops;

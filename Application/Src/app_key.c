@@ -115,7 +115,7 @@ bool app_key_test_pressed(void)
 }
 
 /* ---- 模块自注册 ---- */
-static void app_key_init(void)
+void app_key_init(void)
 {
     const osThreadAttr_t attr = {
         .name       = "key_poll_task",

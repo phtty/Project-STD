@@ -1,36 +1,16 @@
 /**
  * @file    dev_flash_int.c
- * @brief   STM32 内部 Flash 存储设备 — 实现 dev_storage_ops
+ * @brief   STM32 内部 Flash 存储 — flash_int_ops 虚表实现（不含实例）
  *
- * 一个模块，两个实例：Sector1 (IAP) 和 Sector11 (LDI)，共享同一套 ops。
+ * 实例和 ops 绑定由各自的配置模块负责：
+ *   dev_flash_iap.c → g_flash_iap → hw_dev_initcall
+ *   dev_flash_ldi.c → g_flash_ldi → hw_dev_initcall
  */
 
 #include "dev_flash_int.h"
 
 #include <string.h>
-#include "initcall.h"
 #include "pl_flash.h"
-
-#define IAP_BASE   0x08004000
-#define IAP_SIZE   0x4000 /* 16KB */
-
-#define LDI_BASE   0x080E0000
-#define LDI_SIZE   0x20000 /* 128KB */
-
-typedef struct {
-    dev_storage_t me;
-    uint32_t base_addr;
-    uint32_t sector;
-} dev_flash_int_t;
-
-/* ---- 两个实例 ---- */
-static dev_flash_int_t g_flash_iap = {.me = {.capacity = IAP_SIZE}, .base_addr = IAP_BASE, .sector = PL_FLASH_SECTOR_1};
-static dev_flash_int_t g_flash_ldi = {.me = {.capacity = LDI_SIZE}, .base_addr = LDI_BASE, .sector = PL_FLASH_SECTOR_11};
-
-dev_storage_t *dev_flash_int_get(uint8_t id)
-{
-    return (id == 0) ? &g_flash_iap.me : &g_flash_ldi.me;
-}
 
 /* ---- OPS ---- */
 static int32_t _init(dev_storage_t *dev)
@@ -81,18 +61,10 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
 static uint32_t _capacity(dev_storage_t *dev)
 { return dev->capacity; }
 
-static const dev_storage_ops_t flash_int_ops = {
+const dev_storage_ops_t flash_int_ops = {
     .init     = _init,
     .read     = _read,
     .write    = _write,
     .erase    = _erase,
     .capacity = _capacity,
 };
-
-/* ---- 初始化（hw_initcall 设置 ops） ---- */
-static void _dev_flash_int_init(void)
-{
-    g_flash_iap.me.ops = &flash_int_ops;
-    g_flash_ldi.me.ops = &flash_int_ops;
-}
-hw_dev_initcall(_dev_flash_int_init);

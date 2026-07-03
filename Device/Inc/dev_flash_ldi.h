@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "dev_storage.h"
 
 // Flash Sector 11: 0x080E0000 ~ 0x080FFFFF, 128KB
 // 存放 LDI 车道设备接口协议配置信息
@@ -57,3 +58,6 @@ int32_t dev_flash_ldi_erase_config(void);
 int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec);
 void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info);
 void dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info);
+
+/** @brief 获取 LDI Flash 存储句柄（内部使用） */
+dev_storage_t *dev_flash_ldi_get_storage(void);

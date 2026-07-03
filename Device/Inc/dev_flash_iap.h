@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include "dev_storage.h"
 
 // 地址与常量定义
 #define ADDR_CONFIG_SECTOR  0x08004000
@@ -46,3 +47,6 @@ void dev_flash_iap_init_config(dev_flash_iap_sys_info_t *info);
 void dev_flash_iap_edit_config(dev_flash_iap_sys_info_t *info);
 int32_t dev_flash_iap_erase_config(void);
 int32_t dev_flash_iap_write_config(dev_flash_iap_sys_info_t *info);
+
+/** @brief 获取 IAP Flash 存储句柄（内部使用） */
+dev_storage_t *dev_flash_iap_get_storage(void);
