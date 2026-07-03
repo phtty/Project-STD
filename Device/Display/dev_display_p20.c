@@ -39,10 +39,10 @@
  * 每个组 16 字节 = 4 行 × 4 列，每组内布局：
  *   偏移  row%4  col: 0   1   2   3
  *   ───── ─────  ───────────────────
- *    0..3    0       6   4   2   0   ← 列镜像 (3 - col)
- *    4..7    1       7   5   3   1   ← 列镜像 + 偏移 1
- *    8..11   2       8  10  12  14   ← 列正序 + 偏移 8
- *   12..15   3       9  11  13  15   ← 列正序 + 偏移 9
+ *    0..3    0       6   4   2   0   ← 行镜像 (3 - col)
+ *    4..7    1       7   5   3   1   ← 行镜像 + 偏移 1
+ *    8..11   2       8  10  12  14   ← 行正序 + 偏移 9
+ *   12..15   3       9  11  13  15   ← 行正序 + 偏移 8
  *
  * 每组 2 字节一组（对应 R/G/B 三色），每组内 4 行的偏移规律
  * 由 HUB75 驱动芯片的数据输入格式决定。
@@ -55,10 +55,10 @@
 /* 组内行偏移的基准值 */
 #define GROUP_ROW0_OFFSET  0 /* row%4 == 0: 双字节对偏移 0 */
 #define GROUP_ROW1_OFFSET  1 /* row%4 == 1: 双字节对偏移 1 */
-#define GROUP_ROW2_OFFSET  8 /* row%4 == 2: 双字节对偏移 8 */
-#define GROUP_ROW3_OFFSET  9 /* row%4 == 3: 双字节对偏移 9 */
+#define GROUP_ROW2_OFFSET  9 /* row%4 == 2: 双字节对偏移 9 */
+#define GROUP_ROW3_OFFSET  8 /* row%4 == 3: 双字节对偏移 8 */
 
-#define GROUP_COLS_PER_ROW (P20_MODULE_COLS * GROUP_PIXEL_W) /* 每组行对应的列分组数 */
+#define GROUP_COLS_PER_ROW (P20_MODULE_ROWS * GROUP_PIXEL_W) /* 每行模块的水平组数 */
 
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
@@ -124,19 +124,19 @@ static void _p20_prepare(dev_display_t *dev)
 
         /* 根据行模 4 结果选择组内偏移，匹配 HUB75 驱动芯片的输入格式 */
         switch (pixel_row % GROUP_PIXEL_H) {
-            case 0: /* 第 0 行: 列镜像 (3 - col%4), 双字节对起始偏移 0 */
+            case 0: /* 第 0 行: 行镜像 (3 - col%4), 双字节对起始偏移 0 */
                 dev->hub75_buff[GROUP_ROW0_OFFSET + 2 * (GROUP_PIXEL_W - 1 - pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
-            case 1: /* 第 1 行: 列镜像, 双字节对起始偏移 1 */
+            case 1: /* 第 1 行: 行镜像, 双字节对起始偏移 1 */
                 dev->hub75_buff[GROUP_ROW1_OFFSET + 2 * (GROUP_PIXEL_W - 1 - pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
-            case 2: /* 第 2 行: 列正序, 双字节对起始偏移 8 */
+            case 2: /* 第 2 行: 行正序, 双字节对起始偏移 8 */
                 dev->hub75_buff[GROUP_ROW2_OFFSET + 2 * (pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
-            case 3: /* 第 3 行: 列正序, 双字节对起始偏移 9 */
+            case 3: /* 第 3 行: 行正序, 双字节对起始偏移 9 */
                 dev->hub75_buff[GROUP_ROW3_OFFSET + 2 * (pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
                 break;
             default:

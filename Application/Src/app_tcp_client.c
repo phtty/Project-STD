@@ -36,7 +36,7 @@ channel_t g_tcp_client_channel_tmpl = {
 
 /* ---- 通道实例（单例，持远端配置） ---- */
 tcp_client_channel_t g_tcp_client = {
-    .host_ip   = {192, 168, 1, 101},
+    .host_ip   = {192, 168, 2, 17},
     .host_port = 9529,
 };
 

@@ -17,10 +17,12 @@
 #include "pl_dwt.h"
 #include "initcall.h"
 
-/* 板级默认网络配置: 192.168.1.100/24, 网关 192.168.1.1 */
-static const uint8_t g_default_ip[4]   = {192, 168, 1, 100};
+/* 板级默认网络配置: 192.168.2.100/24, 网关 192.168.1.1 */
+// static const uint8_t g_default_ip[4]   = {192, 168, 1, 100};
+static const uint8_t g_default_ip[4]   = {192, 168, 2, 100};
 static const uint8_t g_default_mask[4] = {255, 255, 255, 0};
-static const uint8_t g_default_gw[4]   = {192, 168, 1, 1};
+// static const uint8_t g_default_gw[4]   = {192, 168, 1, 1};
+static const uint8_t g_default_gw[4] = {192, 168, 2, 1};
 
 /* DP83848 PHY 设备对象与 IO 上下文 */
 static dev_dp83848_obj_t g_dp83848;

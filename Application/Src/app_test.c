@@ -22,13 +22,13 @@ void app_test_pixel_scan(void)
     for (;;) {
         for (int i = 0; i < (int)dsp->buffer_size; i++) {
             dev_display_set_pixel(dsp,
-                                  i % dsp->screen_rows,
-                                  i / dsp->screen_rows,
+                                  i % dsp->screen_cols, /* 逐列 x */
+                                  i / dsp->screen_cols, /* 逐行 y */
                                   COLOR_GREEN);
             osDelay(50);
             dev_display_set_pixel(dsp,
-                                  i % dsp->screen_rows,
-                                  i / dsp->screen_rows,
+                                  i % dsp->screen_cols,
+                                  i / dsp->screen_cols,
                                   COLOR_BLACK);
         }
     }
@@ -47,8 +47,8 @@ void app_test_render_text(void)
         .w         = dev_display_get()->screen_rows,
         .h         = dev_display_get()->screen_cols,
         .color     = COLOR_GREEN,
-        .text      = "通",
-        .len       = strlen("通"),
+        .text      = "a",
+        .len       = strlen("a"),
         .font_size = FONT_16,
         .font_type = FONT_ST,
         .text_enc  = FONT_ENC_UTF8,
@@ -107,8 +107,8 @@ void app_test_led_mapping(void)
 
 void app_test_run(void)
 {
-    app_test_led_mapping(); /* 新模组灯序确认时启用 */
+    // app_test_led_mapping(); /* 新模组灯序确认时启用 */
     // app_test_pixel_scan();
-    // app_test_render_text();
+    app_test_render_text();
     // app_test_io_output();
 }

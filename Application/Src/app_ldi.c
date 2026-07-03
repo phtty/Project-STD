@@ -73,7 +73,7 @@ void ldi_ctx_init(ldi_ctx_t *self)
         self->cfg_valid = true;
 
     } else {
-        /* ROM 无有效配置，填入网络参数，modules[] 沿用静态初始化中的编译期默认值 */
+        /* flash 无有效配置，填入网络参数，modules[] 沿用静态初始化中的编译期默认值 */
         uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
         pl_net_get_ip(ip, mask, gw);
         memcpy(self->cfg.device_ip, ip, sizeof(ip));
@@ -91,8 +91,11 @@ void ldi_ctx_init(ldi_ctx_t *self)
 /* ---- 协议自注册 ---- */
 [[maybe_unused]] static void ldi_module_init(void)
 {
+    // 指定协议使用的缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
+    // 注册协议的帧探测函数
     app_proto_register(PROTO_MASK_LDI, ldi_probe_frame, rb);
+    // 绑定协议使用的通道
     app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_TCP_SERVER);
     app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_TCP_CLIENT);
     app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_UDP);
@@ -108,7 +111,7 @@ void ldi_ctx_init(ldi_ctx_t *self)
     g_ldi_task_handle       = osThreadNew(ldi_handle_task, nullptr, &ldi_task_attr);
     g_ldi_timer_task_handle = osThreadNew(ldi_timer_task, nullptr, &ldi_timer_task_attr);
 }
-// sw_app_initcall(ldi_module_init);
+sw_app_initcall(ldi_module_init);
 
 osMessageQueueId_t g_ldi_msg_queue;
 osThreadId_t g_ldi_task_handle;

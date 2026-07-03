@@ -73,7 +73,7 @@ static void init_task(void *argument)
 
     printf("\nInit Task Done\n");
 
-    app_test_run();
+    // app_test_run();
 
     osThreadExit();
 }
