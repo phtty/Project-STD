@@ -15,8 +15,7 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
-#include "dev_display.h"
-#include "app_render.h"
+#include "app_test.h"
 #include "app_key.h"
 
 static void init_task(void *argument);
@@ -74,31 +73,7 @@ static void init_task(void *argument)
 
     printf("\nInit Task Done\n");
 
-    // ----以下为显示测试代码----
-    // dev_display_t *dsp = dev_display_p20_get();
-
-    // for (;;) {
-    //     for (int i = 0; i < (int)dsp->buffer_size; i++) {
-    //         dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, COLOR_GREEN);
-    //         osDelay(50);
-    //         dev_display_set_pixel(dsp, i % dsp->screen_rows, i / dsp->screen_rows, COLOR_BLACK);
-    //     }
-    // }
-
-    // ----以下为渲染测试代码----
-    // app_render(&(render_cfg_t){
-    //     .type      = RENDER_TEXT,
-    //     .x         = 0,
-    //     .y         = 0,
-    //     .w         = dev_display_get()->screen_rows,
-    //     .h         = dev_display_get()->screen_cols,
-    //     .color     = COLOR_GREEN,
-    //     .text      = "通",
-    //     .len       = strlen("通"),
-    //     .font_size = FONT_16,
-    //     .font_type = FONT_ST,
-    //     .text_enc  = FONT_ENC_UTF8,
-    // });
+    app_test_run();
 
     osThreadExit();
 }

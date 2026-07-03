@@ -14,6 +14,7 @@ virtualFolder:
         - path: Application/Src/app_render.c
         - path: Application/Src/app_key.c
         - path: Application/Src/app_light_sensor.c
+        - path: Application/Src/app_test.c
       folders:
         - name: channel
           files:

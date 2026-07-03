@@ -659,3 +659,9 @@ void HAL_ETH_TxFreeCallback(uint32_t *buff)
 {
     pbuf_free((struct pbuf *)buff);
 }
+
+/* ---- ETH ISR ---- */
+void ETH_IRQHandler(void)
+{
+    HAL_ETH_IRQHandler(&heth);
+}
