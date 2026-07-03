@@ -5,5 +5,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
+void dev_io_ctrl_init(void);
 void dev_io_lane_light(bool enable);
 void dev_io_flash_light(bool enable);

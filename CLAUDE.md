@@ -18,7 +18,7 @@ STM32F407ZGTx 嵌入式项目，工具链 `arm-none-eabi-gcc`，C23 标准。
 |---|---|---|
 | `Project_STD.elf` | ELF（带调试符号） | 链接器输出，含完整符号表，调试器（probe-rs / cortex-debug）直接使用。`arm-none-eabi-size` 输出各段大小 |
 | `Project_STD.hex` | Intel HEX（ASCII 文本） | 烧录文件。OpenOCD 通过 `program ... verify` 写入并回读比对。文本格式，每行含地址+数据+校验和 |
-| `Project_STD.bin` | 纯二进制 | 裸二进制映像，无地址信息。适用于 IAP bootloader 直接写入 Flash（从 `0x08040000` 偏移处） |
+| `Project_STD.bin` | 纯二进制 | 裸二进制映像，无地址信息。适用于 IAP bootloader 直接写入 Flash |
 
 **链接优化**：`--gc-sections` + `-ffunction-sections -fdata-sections`，未引用的函数/数据自动丢弃。`--specs=nano.specs` 链接精简版 newlib。
 
@@ -42,7 +42,7 @@ Flash (1024KB, 起始 0x08000000)
 ├─ Sector 3:  0x0800C000  16KB  (预留)
 ├─ Sector 4:  0x08010000  64KB  }
 ├─ Sector 5:  0x08020000  128KB } 应用程序 (.text/.rodata)
-├─ Sector 6:  0x08040000  128KB } ← 主固件入口 (SCB->VTOR = 0x08040000)
+├─ Sector 6:  0x08040000  128KB } 应用程序 (.text/.rodata) — IAP 适配后主固件入口
 ├─ Sector 7:  0x08060000  128KB }
 ├─ Sector 8:  0x08080000  128KB  (预留扩展)
 ├─ Sector 9:  0x080A0000  128KB  (预留扩展)
@@ -69,6 +69,9 @@ CCMRAM (64KB, 0x10000000, NOLOAD 段)
 **CCMRAM 特性**：零等待状态，与内核直连不经过总线矩阵。NOLOAD 段在 `startup.c` 中整体循环清零（行为等同 .bss）。仅数据可用，不可执行代码。
 
 ## 闪存扇区职能地图
+
+> **当前状态**：固件入口为 `0x08000000`，无 IAP bootloader 运行。`dev_flash_iap` 模块和 Recovery 区域已预留，待 IAP 适配后启用。
+> **IAP 适配后**：bootloader 占 Sector 0~3，主固件从 `0x08040000` 启动（需修改链接脚本 ORIGIN、`VECT_TAB_OFFSET`、`SCB->VTOR`）。
 
 | 扇区 | 地址 | 大小 | 内容 | 读写方式 |
 |---|---|---|---|---|
@@ -154,7 +157,7 @@ pl_sys (SystemClock_Config, delay, reset)
 ```
 硬件上电 → Reset_Handler (Compiler/startup.c)
   ├─ .data 拷贝 (Flash→SRAM), .bss 清零, CCMRAM 清零
-  ├─ SystemInit() — FPU 使能, 向量表重定位
+  ├─ SystemInit() — FPU 使能 (VTOR 默认 0x08000000，IAP 适配后设为 0x08040000)
   └─ main() (Core/Src/main.c)
        ├─ HAL_Init()                     ← HAL 库基础
        ├─ SystemClock_Config()           ← 168MHz

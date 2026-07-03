@@ -8,11 +8,11 @@
 #define FLASH_WORD_COUNT ((sizeof(dev_flash_ldi_record_t) + 3) / 4)
 
 /* ================================================================
- *  瀹炵幇
+ *  实现
  * ================================================================ */
 
 /**
- * @brief 鍒ゆ柇 Flash 閰嶇疆鍖烘槸鍚︿负绌 (鍏 0xFF 鍗充粠鏈鍐欏叆杩)
+ * @brief 判断 Flash 配置项是否为空（或 0xFF 默认值）
  */
 bool dev_flash_ldi_is_config_empty(volatile const dev_flash_ldi_record_t *rec)
 {
@@ -29,7 +29,7 @@ bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
     if (rec->magic != DEV_FLASH_LDI_MAGIC)
         return false;
 
-    // CRC 瑕嗙洊 magic + cfg, 涓嶅惈 crc32 鑷韬 (鏈鍚 1 word)
+    // CRC 瑕疵检查 magic 配置，不包含 crc32 字节（链长 1 字）
     uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)rec, (FLASH_WORD_COUNT - 1) * 4);
     if (rec->crc32 != crc)
         return false;
@@ -38,7 +38,7 @@ bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec)
 }
 
 /**
- * @brief 鎿﹂櫎 Sector 11 (0x080E0000, 128KB)
+ * @brief 擦除 Sector 11 (0x080E0000, 128KB)
  */
 int32_t dev_flash_ldi_erase_config(void)
 {
@@ -46,7 +46,7 @@ int32_t dev_flash_ldi_erase_config(void)
 }
 
 /**
- * @brief 灏 dev_flash_ldi_record_t 鎸 word 鍐欏叆 Flash Sector 11
+ * @brief 将 dev_flash_ldi_record_t 的 word 写入 Flash 扇区 11
  */
 int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec)
 {
@@ -54,12 +54,12 @@ int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec)
 }
 
 /**
- * @brief 淇濆瓨 LDI 閰嶇疆淇℃伅鍒 Flash (鍏堟摝闄ゅ啀鍐欏叆)
+ * @brief 保存 LDI 配置信息至 Flash（用于出厂时预置）
  */
 void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info)
 {
     dev_flash_ldi_record_t rec = {0};
-    rec.magic = DEV_FLASH_LDI_MAGIC;
+    rec.magic                  = DEV_FLASH_LDI_MAGIC;
     memcpy(&rec.cfg, info, sizeof(dev_flash_ldi_cfg_info_t));
     rec.crc32 = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)&rec, (FLASH_WORD_COUNT - 1) * 4);
 
@@ -68,7 +68,7 @@ void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info)
 }
 
 /**
- * @brief 浠 Flash 鍔犺浇 LDI 閰嶇疆淇℃伅, 鑻ヤ负绌烘垨鏍￠獙澶辫触鍒欒繑鍥炲叏闆
+ * @brief 从Flash加载LDI配置信息，用于错误或验证失败后的回退
  */
 void dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info)
 {

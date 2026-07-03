@@ -12,6 +12,8 @@ virtualFolder:
       files:
         - path: Application/Src/app_boot.c
         - path: Application/Src/app_render.c
+        - path: Application/Src/app_key.c
+        - path: Application/Src/app_light_sensor.c
       folders:
         - name: channel
           files:
@@ -264,6 +266,7 @@ virtualFolder:
         - path: Platform/Src/pl_adc.c
         - path: Platform/Src/pl_spi.c
         - path: Platform/Src/pl_uart.c
+        - path: Platform/Src/pl_exti.c
       folders: []
     - name: Kernel
       files:

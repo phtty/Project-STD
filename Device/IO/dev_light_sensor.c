@@ -29,8 +29,13 @@ uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
     temp_val /= MEAN_PARAMETER;
     if (temp_val > 4000) temp_val = 4000;
 
-    uint8_t level = (uint8_t)(temp_val / 500);
-    return (level < 1) ? 1 : level;
+    /* ADC 值越大 = 光越暗 (LDR 分压: 光强↓ → 电阻↑ → 电压↑)
+       映射: ADC 0(最亮) → level 7,  ADC 3000+(最暗) → level 1
+       display 支持 0~7 (0=关, 7=最亮)，这里只出 1~7（不关屏） */
+    uint8_t level = 7 - (uint8_t)(temp_val / 500);
+    if (level < 1) level = 1;
+    if (level > 7) level = 7;
+    return level;
 }
 
 void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
