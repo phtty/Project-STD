@@ -5,6 +5,8 @@
 #include "app_mqtt.h"
 #include "initcall.h"
 
+static proto_mask_t s_ah_mqtt_mask;
+
 osMessageQueueId_t g_proto_ah_matt_queue;
 
 topic_info_t topic_info = {
@@ -65,7 +67,7 @@ void ah_mqtt_handle_task(void *argument)
         .name = "g_proto_ah_matt_queue",
     };
     g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
-    app_proto_set_frame_queue(PROTO_MASK_AH_MQTT, g_proto_ah_matt_queue);
+    app_proto_set_frame_queue(s_ah_mqtt_mask, g_proto_ah_matt_queue);
 
     while (g_mqtt.state != MQTT_ST_READY) { // 等待连接建立
         osDelay(100);
@@ -174,8 +176,10 @@ void SignUpTask(void *argument)
 [[maybe_unused]] static void ah_mqtt_module_init(void)
 {
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
-    app_proto_register(PROTO_MASK_AH_MQTT, ah_mqtt_probe_frame, rb);
-    app_proto_bind_channel(PROTO_MASK_AH_MQTT, CH_ID_MQTT);
+    s_ah_mqtt_mask = app_proto_register(ah_mqtt_probe_frame, rb);
+    if (s_ah_mqtt_mask == 0) return;
+
+    app_proto_bind_channel(s_ah_mqtt_mask, CH_ID_MQTT);
 
     // 创建协议处理任务
     g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);

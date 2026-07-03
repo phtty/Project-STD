@@ -2,9 +2,11 @@
  * @file    app_dispatch.h
  * @brief   协议调度框架（Application 层核心）
  *
- * 协议模块通过 APP_PROTO_MODULE() 自注册（linker section），
- * app_dispatch_init() 自动遍历所有注册模块并创建任务。
+ * 协议模块通过 sw_app_initcall 自注册，app_dispatch_init() 初始化调度框架。
  * 新增协议只需写新的协议模块文件，框架零改动。
+ *
+ * 协议掩码由 app_proto_register 自动分配（bit_ctz(~registered_mask)），
+ * 协议模块不硬编码掩码值，增减协议互不影响。
  */
 
 #pragma once
@@ -19,18 +21,10 @@
 /** @brief 环形缓冲区池容量（按需调整） */
 #define RB_CNT_MAX (4U)
 
-/** @brief 协议掩码 */
-typedef enum {
-    PROTO_MASK_NONE    = (uint32_t)0b0000,
-    PROTO_MASK_IAP     = (uint32_t)0b0001,
-    PROTO_MASK_LDI     = (uint32_t)0b0010,
-    PROTO_MASK_AH_MQTT = (uint32_t)0b0100,
-    PROTO_MASK_ALL     = (uint32_t)0xffffffff,
-} proto_mask_t;
+typedef uint32_t proto_mask_t;
 
 /** @brief 协议探测函数类型 */
-typedef proto_probe_sta_t (*proto_probe_fn_t)(const channel_t *ch, const ring_buffer_t *rb,
-                                              uint32_t *total_len, uint8_t *aux);
+typedef proto_probe_sta_t (*proto_probe_fn_t)(const channel_t *ch, const ring_buffer_t *rb, uint32_t *total_len, uint8_t *aux);
 
 /** @brief 帧消息（调度任务 → 协议处理任务） */
 typedef struct {
@@ -52,9 +46,9 @@ typedef struct {
  */
 typedef struct {
     /* ---- 协议注册表 ---- */
-    uint8_t proto_count;                             /**< 实际已注册的协议数量（app_proto_register 内部递增） */
-    ring_buffer_t *proto_rb[PROTO_MAX_COUNT];        /**< 协议 → 环形缓冲区指针（app_proto_register 设置） */
-    proto_probe_fn_t proto_probe[PROTO_MAX_COUNT];   /**< 协议 → 帧探测函数（app_proto_register 设置） */
+    uint32_t registered_mask;                        /**< 已注册协议位图（app_proto_register 按位 OR） */
+    ring_buffer_t *proto_rb[PROTO_MAX_COUNT];        /**< 协议 → 环形缓冲区指针 */
+    proto_probe_fn_t proto_probe[PROTO_MAX_COUNT];   /**< 协议 → 帧探测函数 */
     osMessageQueueId_t frame_queue[PROTO_MAX_COUNT]; /**< 协议 → 帧消息队列句柄（协议任务创建并设置） */
 
     /* ---- 环形缓冲区池 ---- */
@@ -74,8 +68,8 @@ extern dispatch_ctx_t g_dispatch;
 
 /* ---- 调度 API ---- */
 uint8_t proto_index(uint32_t mask);
-void app_proto_register(uint32_t mask, proto_probe_fn_t probe, ring_buffer_t *rb);
-void app_proto_set_frame_queue(uint32_t mask, osMessageQueueId_t queue);
+proto_mask_t app_proto_register(proto_probe_fn_t probe, ring_buffer_t *rb);
+void app_proto_set_frame_queue(proto_mask_t mask, osMessageQueueId_t queue);
 void app_proto_bind_channel(proto_mask_t mask, channel_id_t ch_id);
 ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size);
 void frame_dispatch_task(void *argument);

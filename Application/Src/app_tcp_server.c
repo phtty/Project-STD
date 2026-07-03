@@ -1,13 +1,10 @@
 /**
- * @file    dev_tcp_server.c
- * @brief   TCP 服务器通道 — 多端口监听 + accept + 每连接独立收发
+ * @file    app_tcp_server.c
+ * @brief   TCP 服务器通道 — manage 任务 + conn 任务
  *
- * 两层任务架构：
- *   tcp_server_task()           → 遍历 g_listeners[]，每端口 spawn 一个 listen worker
- *   tcp_server_listen_task(ctx) → bind(ctx->port) → listen → accept 循环
- *       └─ tcp_server_conn_task(newconn) → netconn_recv → app_channel_dispatch
- *
- * 发送通过 tcp_ch_ops.send = netconn_write（NETCONN_COPY 模式）。
+ * 参照 tcp_client 模式:
+ *   tcp_server_task       bind→listen→accept→派生conn→等待断开→循环
+ *   tcp_server_conn_task  netconn_recv→dispatch，断开时释放信号量
  */
 
 #include "app_tcp_server.h"
@@ -15,15 +12,10 @@
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
 
-/* ---- 前向声明 ---- */
-void tcp_server_conn_task(void *argument);
-__STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn);
+#define TCP_SERVER_PORT 9528
 
-static const osThreadAttr_t tcp_listen_attr = {
-    .name       = "tcp_svr_listen",
-    .stack_size = 256 * 4,
-    .priority   = osPriorityNormal,
-};
+/* ---- 信号量 ---- */
+static osSemaphoreId_t s_disconnect_sem;
 
 /* ---- 连接任务属性 ---- */
 const osThreadAttr_t tcp_server_conn_attr = {
@@ -36,35 +28,25 @@ const osThreadAttr_t tcp_server_conn_attr = {
 static int32_t tcp_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
     tcp_server_channel_t *tcp = container_of(ch, tcp_server_channel_t, me);
-    struct netconn *nc        = (struct netconn *)tcp->conn;
-    err_t err                 = netconn_write(nc, data, len, NETCONN_COPY);
+    err_t err                 = netconn_write((struct netconn *)tcp->conn, data, len, NETCONN_COPY);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
 
 const ch_ops_t tcp_ch_ops = {.send = tcp_send};
 
-/* ---- 通道元数据模板 ---- */
+/* ---- 通道元数据模板（每连接 copy） ---- */
 channel_t g_tcp_server_channel_tmpl = {
     .ch_id = CH_ID_TCP_SERVER,
     .ops   = &tcp_ch_ops,
 };
 
-/* ---- 监听器数组（每端口一个 ctx，加端口只加数组元素） ---- */
-static tcp_server_listener_ctx_t g_listeners[] = {
-    {.port = 9528, .max_conns = 2},
-};
+/* ---- 配置接口 ---- */
+static uint16_t g_port = TCP_SERVER_PORT;
 
-/* ---- 配置接口（操作第一个监听器） ---- */
 void app_tcp_server_set_port(uint16_t port)
-{
-    g_listeners[0].port    = port;
-    g_listeners[0].restart = true; /* 监听任务的 accept 超时后检测到此标志，自行重 bind */
-}
-
+{ g_port = port; }
 uint16_t app_tcp_server_get_port(void)
-{
-    return g_listeners[0].port;
-}
+{ return g_port; }
 
 osThreadId_t tcp_server_task_handle;
 const osThreadAttr_t tcp_server_task_attr = {
@@ -73,142 +55,88 @@ const osThreadAttr_t tcp_server_task_attr = {
     .priority   = osPriorityNormal,
 };
 
-/* ================================================================
- *  主任务：遍历监听器数组，为每端口创建 listen worker
- * ================================================================ */
+/* ---- 调试变量 ---- */
+volatile int g_tcp_server_connected;
 
-/* ---- 调试变量：Watch 窗口查看 ---- */
-volatile void *g_tcp_listen_task_handle;
-
-void tcp_server_task(void *argument)
-{
-    (void)argument;
-
-    for (size_t i = 0; i < sizeof(g_listeners) / sizeof(g_listeners[0]); i++) {
-        g_tcp_listen_task_handle = osThreadNew(tcp_server_listen_task, &g_listeners[i], &tcp_listen_attr);
-    }
-
-    osThreadExit();
-}
-
-/* ================================================================
- *  监听任务：bind → listen → accept 循环（每端口一个）
- * ================================================================ */
-
-void tcp_server_listen_task(void *ctx)
-{
-    tcp_server_listener_ctx_t *l = (tcp_server_listener_ctx_t *)ctx;
-
-    for (;;) {
-        /* ---- 创建 + bind + listen ---- */
-        struct netconn *conn = netconn_new(NETCONN_TCP);
-        if (conn == NULL) {
-            osThreadExit();
-            return;
-        }
-        l->listen_conn = conn;
-
-        ip_addr_t ip_addr;
-        IP4_ADDR(&ip_addr, 0, 0, 0, 0);
-        err_t err = netconn_bind(conn, &ip_addr, l->port);
-        if (err != ERR_OK) {
-            netconn_delete(conn);
-            l->listen_conn = NULL;
-            osThreadExit();
-            return;
-        }
-
-        netconn_listen(conn);
-        netconn_set_recvtimeout(conn, 1000); /* accept 超时 1s，用于检测 restart 标志 */
-
-        /* ---- accept 循环 ---- */
-        for (;;) {
-            struct netconn *newconn = NULL;
-            err                     = netconn_accept(conn, &newconn);
-
-            if (err == ERR_OK) {
-                if (l->conn_count >= l->max_conns) {
-                    netconn_close(newconn);
-                    netconn_delete(newconn);
-                } else {
-                    l->conn_count++;
-                    struct {
-                        struct netconn *c;
-                        tcp_server_listener_ctx_t *l;
-                    } arg            = {newconn, l};
-                    osThreadId_t tid = osThreadNew(tcp_server_conn_task, &arg, &tcp_server_conn_attr);
-                    if (tid == NULL) {
-                        l->conn_count--;
-                        netconn_close(newconn);
-                        netconn_delete(newconn);
-                    }
-                }
-
-            } else if (err == ERR_TIMEOUT) {
-                /* 超时非错误：检查外部 set_port 是否要求重启 */
-                if (l->restart)
-                    break;
-                continue;
-
-            } else {
-                if (newconn) netconn_delete(newconn);
-                break; /* 真正的错误 → 退出 accept 循环 */
-            }
-        }
-
-        /* ---- 清理旧 conn ---- */
-        netconn_delete(conn);
-        l->listen_conn = NULL;
-
-        /* 重启标志为真 → 回外层循环重新 bind；为假 → 退出任务 */
-        if (l->restart) {
-            l->restart = false;
-        } else {
-            break;
-        }
-    }
-
-    osThreadExit();
-}
-
-/* ================================================================
- *  连接处理任务：keepalive → netconn_recv → dispatch，断开时 conn_count--
- * ================================================================ */
-
-void tcp_server_channel_init(tcp_server_channel_t *self, void *conn, channel_t *tmpl, tcp_server_listener_ctx_t *listener)
+/* ---- 通道生命周期 ---- */
+static void tcp_channel_init(tcp_server_channel_t *self, void *conn, channel_t *tmpl)
 {
     self->me       = *tmpl;
     self->me.state = CH_STATE_UP;
     self->conn     = conn;
-    self->listener = listener;
-    tcp_keepaliveinit(conn);
     app_channel_register(CH_ID_TCP_SERVER, &self->me);
 }
 
-void tcp_server_channel_deinit(tcp_server_channel_t *self)
+/* ================================================================
+ *  manage 任务: bind → listen → accept → 派生 conn → 等待断开 → 循环
+ * ================================================================ */
+
+void tcp_server_task(void *argument)
 {
-    self->me.ops   = nullptr;
-    self->me.state = CH_STATE_DOWN;
-    app_channel_register(CH_ID_TCP_SERVER, nullptr);
-    netconn_close((struct netconn *)self->conn);
-    netconn_delete((struct netconn *)self->conn);
+    (void)argument;
+    if (s_disconnect_sem == NULL)
+        s_disconnect_sem = osSemaphoreNew(1, 0, NULL);
+
+    for (;;) {
+        struct netconn *conn = netconn_new(NETCONN_TCP);
+        if (conn == NULL) {
+            osDelay(500);
+            continue;
+        }
+
+        err_t err = netconn_bind(conn, IP_ADDR_ANY, g_port);
+        if (err != ERR_OK) {
+            netconn_delete(conn);
+            osDelay(500);
+            continue;
+        }
+
+        netconn_listen(conn);
+
+        /* accept 一个连接 */
+        struct netconn *newconn = NULL;
+        err                     = netconn_accept(conn, &newconn);
+        netconn_delete(conn);
+
+        if (err != ERR_OK || newconn == NULL) {
+            osDelay(500);
+            continue;
+        }
+
+        /* 派生 conn 任务 */
+        while (osSemaphoreAcquire(s_disconnect_sem, 0) == osOK);
+        osThreadId_t tid = osThreadNew(tcp_server_conn_task, newconn, &tcp_server_conn_attr);
+
+        if (tid != NULL) {
+            osSemaphoreAcquire(s_disconnect_sem, osWaitForever);
+
+        } else {
+            netconn_close(newconn);
+            netconn_delete(newconn);
+            osDelay(500);
+        }
+    }
 }
+
+/* ================================================================
+ *  conn 任务: netconn_recv → dispatch，断开时释放信号量
+ * ================================================================ */
 
 void tcp_server_conn_task(void *argument)
 {
-    struct netconn *newconn             = ((struct { struct netconn *c; tcp_server_listener_ctx_t *l; } *)argument)->c;
-    tcp_server_listener_ctx_t *listener = ((struct { struct netconn *c; tcp_server_listener_ctx_t *l; } *)argument)->l;
+    struct netconn *conn = (struct netconn *)argument;
 
     tcp_server_channel_t tcp;
-    tcp_server_channel_init(&tcp, newconn, &g_tcp_server_channel_tmpl, listener);
+    tcp_channel_init(&tcp, conn, &g_tcp_server_channel_tmpl);
 
-    channel_t *ch = &tcp.me;
+    channel_t *ch          = &tcp.me;
+    g_tcp_server_connected = 1;
+
     struct netbuf *buf;
-    err_t err;
     void *data;
     uint16_t len;
 
-    while ((err = netconn_recv(newconn, &buf)) == ERR_OK) {
+    while (netconn_recv(conn, &buf) == ERR_OK) {
         do {
             netbuf_data(buf, &data, &len);
             if (len > 1)
@@ -217,17 +145,12 @@ void tcp_server_conn_task(void *argument)
         netbuf_delete(buf);
     }
 
-    tcp_server_channel_deinit(&tcp);
-    tcp.listener->conn_count--;
+    g_tcp_server_connected = 0;
+    tcp.me.ops             = nullptr;
+    tcp.me.state           = CH_STATE_DOWN;
+    app_channel_register(CH_ID_TCP_SERVER, nullptr);
+    netconn_close(conn);
+    netconn_delete(conn);
+    osSemaphoreRelease(s_disconnect_sem);
     osThreadExit();
-}
-
-/* ---- TCP Keepalive 配置 ---- */
-__STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn)
-{
-    if (conn == NULL || conn->pcb.tcp == NULL) return;
-    ip_set_option(conn->pcb.tcp, SOF_KEEPALIVE);
-    conn->pcb.tcp->keep_idle  = 10000;
-    conn->pcb.tcp->keep_intvl = 2000;
-    conn->pcb.tcp->keep_cnt   = 3;
 }

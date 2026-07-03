@@ -46,7 +46,6 @@ static osThreadId_t g_dispatch_task_handle; /**< 帧分发任务句柄 */
  * @brief 协议掩码 → 数组索引
  *
  * 通过 bit_ctz 计算尾零位数，将 bitmask 映射为 0~31 的索引。
- * 例如: PROTO_MASK_IAP(0b0001) → 0, PROTO_MASK_LDI(0b0010) → 1
  *
  * @param mask  协议掩码（必须是 2 的幂或 0）
  * @return      对应的数组索引，mask=0 返回 0xFF
@@ -61,28 +60,32 @@ uint8_t proto_index(uint32_t mask)
  *  协议注册 — 协议模块通过 sw_app_initcall 自注册
  *
  *  各协议模块的 init 函数中调用以下函数完成注册：
- *    1. app_proto_acquire_buf() — 获取环形缓冲区
- *    2. app_proto_register()    — 注册探测函数 + 缓冲区指针
+ *    1. app_proto_acquire_buf()  — 获取环形缓冲区
+ *    2. app_proto_register()     — 注册探测函数 + 缓冲区，自动分配掩码并返回
  *    3. app_proto_bind_channel() — 声明该协议走哪些通道
- *    4. osThreadNew()           — 创建协议处理任务
- *
- *  proto_count 由 app_proto_register 内部递增，无需手动维护。
+ *    4. osThreadNew()            — 创建协议处理任务
  * ================================================================ */
 
 /**
- * @brief 注册协议探测函数和环形缓冲区
- * @param mask   协议掩码（PROTO_MASK_IAP / PROTO_MASK_LDI）
+ * @brief 注册协议探测函数和环形缓冲区，自动分配掩码
  * @param probe  帧探测函数指针
- * @param rb     环形缓冲区指针（来自 app_proto_acquire_buf）
+ * @param rb     环形缓冲区指针
+ * @return       自动分配的协议掩码（2 的幂），0 = 槽位已满
  */
-void app_proto_register(uint32_t mask, proto_probe_fn_t probe, ring_buffer_t *rb)
+proto_mask_t app_proto_register(proto_probe_fn_t probe, ring_buffer_t *rb)
 {
-    uint8_t idx = proto_index(mask);
-    if (idx >= PROTO_MAX_COUNT) return;
+    /* 找第一个空闲位 */
+    uint32_t free_bits = ~g_dispatch.registered_mask;
+    if (free_bits == 0) return 0; /* 32 槽全满 */
 
-    g_dispatch.proto_rb[idx]    = rb;    /**< 协议 → 环形缓冲区 */
-    g_dispatch.proto_probe[idx] = probe; /**< 协议 → 探测函数 */
-    g_dispatch.proto_count++;            /**< 运行时自动计数 */
+    uint8_t idx       = (uint8_t)bit_ctz(free_bits);
+    proto_mask_t mask = (proto_mask_t)(1U << idx);
+
+    g_dispatch.proto_rb[idx]    = rb;
+    g_dispatch.proto_probe[idx] = probe;
+    g_dispatch.registered_mask  |= mask;
+
+    return mask;
 }
 
 /**
@@ -92,7 +95,7 @@ void app_proto_register(uint32_t mask, proto_probe_fn_t probe, ring_buffer_t *rb
  *
  * 协议处理任务创建队列后调用，框架据此将完整帧推入对应队列。
  */
-void app_proto_set_frame_queue(uint32_t mask, osMessageQueueId_t queue)
+void app_proto_set_frame_queue(proto_mask_t mask, osMessageQueueId_t queue)
 {
     uint8_t idx = proto_index(mask);
     if (idx >= PROTO_MAX_COUNT) return;
@@ -176,7 +179,7 @@ sw_app_initcall(app_dispatch_init);
  *  流程:
  *    1. 阻塞等待 g_dispatch.ch_queue 中的通道指针通知
  *    2. 根据 channel_t->ch_id 查表获得协议掩码 (ch_proto_map)
- *    3. 遍历所有已注册协议 (proto_count)
+ *    3. 遍历所有协议位 (PROTO_MAX_COUNT)
  *    4. 对每个缓冲区，调用协议的探测函数 (probe) 检测完整帧
  *    5. 探测成功 → 从 ring buffer 读出完整帧 → 推入协议队列
  *    6. 探测失败 → 跳过 1 字节继续尝试
@@ -205,9 +208,12 @@ void frame_dispatch_task(void *argument)
         /* 根据通道 ID 查表获得该通道承载的协议掩码 */
         proto_mask_t proto = g_dispatch.ch_proto_map[ch->ch_id];
 
-        /* 外循环：遍历所有已注册协议 */
-        for (uint8_t i = 0; i < g_dispatch.proto_count; i++) {
-            uint32_t mask     = (1U << i);
+        /* 外循环：遍历已注册协议位 */
+        uint32_t outer_iter = g_dispatch.registered_mask;
+        while (outer_iter) {
+            uint8_t i        = (uint8_t)bit_ctz(outer_iter);
+            outer_iter      &= outer_iter - 1;
+            uint32_t mask    = (1U << i);
             ring_buffer_t *rb = g_dispatch.proto_rb[i];
 
             /* 跳过：通道不承载此协议 / 空缓冲区 */
@@ -223,7 +229,7 @@ void frame_dispatch_task(void *argument)
                 }
             if (dup) continue;
 
-            /* 持锁跨整轮探测+读取，消除 TOCTOU */
+            /* 持锁跨整轮探测+读取，消除TOCTOU */
             rb_lock(rb);
             uint16_t avail = rb_avail(rb, nullptr);
 
@@ -232,8 +238,11 @@ void frame_dispatch_task(void *argument)
                 bool parsed   = false; /**< 本轮是否成功解析一帧 */
                 bool all_wait = true;  /**< 所有协议是否都返回 WAIT */
 
-                /* 按协议优先级顺序探测 */
-                for (uint8_t j = 0; j < g_dispatch.proto_count; j++) {
+                /* 按协议优先级顺序探测已注册协议 */
+                uint32_t inner_iter = g_dispatch.registered_mask;
+                while (inner_iter) {
+                    uint8_t j        = (uint8_t)bit_ctz(inner_iter);
+                    inner_iter      &= inner_iter - 1;
                     uint32_t inner_mask = (1U << j);
 
                     if ((proto & inner_mask) == 0) continue;
@@ -332,8 +341,11 @@ void app_channel_dispatch(const channel_t *ch, const uint8_t *data, uint16_t len
     proto_mask_t proto                   = g_dispatch.ch_proto_map[ch->ch_id];
     ring_buffer_t *seen[PROTO_MAX_COUNT] = {nullptr}; /**< 已写入的 RB 指针集合 */
 
-    /* 遍历所有协议，将数据写入匹配的环形缓冲区 */
-    for (uint8_t i = 0; i < g_dispatch.proto_count; i++) {
+    /* 遍历已注册协议位，将数据写入匹配的环形缓冲区 */
+    uint32_t write_iter = g_dispatch.registered_mask;
+    while (write_iter) {
+        uint8_t i     = (uint8_t)bit_ctz(write_iter);
+        write_iter   &= write_iter - 1;
         uint32_t mask = (1U << i);
         if ((proto & mask) == 0) continue;
 

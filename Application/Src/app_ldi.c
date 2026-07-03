@@ -89,16 +89,18 @@ void ldi_ctx_init(ldi_ctx_t *self)
 }
 
 /* ---- 协议自注册 ---- */
+static proto_mask_t s_ldi_mask;
+
 [[maybe_unused]] static void ldi_module_init(void)
 {
-    // 指定协议使用的缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
-    // 注册协议的帧探测函数
-    app_proto_register(PROTO_MASK_LDI, ldi_probe_frame, rb);
+    s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
+    if (s_ldi_mask == 0) return;
+
     // 绑定协议使用的通道
-    app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_TCP_SERVER);
-    app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_TCP_CLIENT);
-    app_proto_bind_channel(PROTO_MASK_LDI, CH_ID_UDP);
+    app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_SERVER);
+    app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_CLIENT);
+    app_proto_bind_channel(s_ldi_mask, CH_ID_UDP);
 
     /* 上下文初始化必须在创建任务之前，保证 IP/端口在通道任务启动前就绪 */
     ldi_ctx_init(&g_ldi);
@@ -213,7 +215,7 @@ void ldi_handle_task(void *argument)
     static frame_msg_t msg;
     const osMessageQueueAttr_t proto_ldi_queue_attr = {.name = "proto_ldi_queue"};
     g_ldi_msg_queue                                 = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_ldi_queue_attr);
-    app_proto_set_frame_queue(PROTO_MASK_LDI, g_ldi_msg_queue);
+    app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_ldi_msg_queue, &msg, NULL, osWaitForever))
