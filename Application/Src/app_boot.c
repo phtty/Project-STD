@@ -15,6 +15,8 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
+#include "app_tcp_server.h"
+#include "app_tcp_client.h"
 #include "app_test.h"
 #include "app_key.h"
 
@@ -71,9 +73,10 @@ static void init_task(void *argument)
     };
     osThreadNew(half_sec_task, NULL, &hst_attr);
 
-    printf("\nInit Task Done\n");
+    app_tcp_server_start();
+    app_tcp_client_start();
 
-    // app_test_run();
+    printf("\nInit Task Done\n");
 
     osThreadExit();
 }
