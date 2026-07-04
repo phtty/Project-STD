@@ -40,23 +40,23 @@ typedef enum {
 
 /* ---- 字库三元组：内部检索 key，调用方无需接触 ---- */
 typedef struct {
-    font_size_t size;    /* 字号 */
-    font_enc_t  charset; /* 字库编码 (ASCII/GBK) — 渲染器内部按字符自动填充 */
-    font_type_t type;    /* 字型 */
+    font_size_t size;   /* 字号 */
+    font_enc_t charset; /* 字库编码 (ASCII/GBK) — 渲染器内部按字符自动填充 */
+    font_type_t type;   /* 字型 */
 } font_key_t;
 
 /* ---- 水平/垂直对齐 ---- */
 typedef enum {
-    ALIGN_L = 0, /* 左对齐 / 上对齐 */
-    ALIGN_C = 1, /* 居中 */
-    ALIGN_R = 2, /* 右对齐 / 下对齐 */
+    ALIGN_LEFT_UP    = 0, /* 左对齐 / 上对齐 */
+    ALIGN_CENTER     = 1, /* 居中 */
+    ALIGN_RIGHT_DOWN = 2, /* 右对齐 / 下对齐 */
 } align_t;
 
 /* ---- 渲染风格（文字专属）---- */
 typedef struct {
-    align_t h_align;  /* 水平对齐 */
-    align_t v_align;  /* 垂直对齐 */
-    bool    word_wrap;/* 超宽时自动换行 */
+    align_t h_align; /* 水平对齐 */
+    align_t v_align; /* 垂直对齐 */
+    bool word_wrap;  /* 超宽时自动换行 */
 } render_style_t;
 
 /* ---- 渲染类型：告诉 app_render 如何解析 union ---- */
@@ -69,20 +69,20 @@ typedef enum {
 /* ---- 统一渲染参数 — tagged union — type 决定哪个 union 分支生效 ---- */
 typedef struct {
     /* 公共 — 调用方设置后渲染器只读 */
-    const uint16_t x, y;          /* 目标起点 */
-    const uint16_t w, h;          /* 目标宽高 (fill 时 w/h=0 表示全屏) */
+    const uint16_t x, y;         /* 目标起点 */
+    const uint16_t w, h;         /* 目标宽高 (fill 时 w/h=0 表示全屏) */
     const display_color_t color; /* 绘制颜色 */
-    const render_type_t   type;  /* 标签: 指定使用哪个 union 分支 */
+    const render_type_t type;    /* 标签: 指定使用哪个 union 分支 */
 
     union {
         /* RENDER_TEXT — 文字专属 */
         struct {
-            const char            *text;      /* 字符串 */
-            const uint16_t         len;       /* 字符串长度（字节数） */
-            const font_size_t      font_size; /* 字号 */
-            const font_type_t      font_type; /* 字型 */
-            const render_style_t  *style;     /* 对齐/换行 (NULL=默认) */
-            const font_enc_t       text_enc;  /* 输入文本编码 (UTF8需转换/GBK直通) */
+            const char *text;            /* 字符串 */
+            const uint16_t len;          /* 字符串长度（字节数） */
+            const font_size_t font_size; /* 字号 */
+            const font_type_t font_type; /* 字型 */
+            const render_style_t *style; /* 对齐/换行 (NULL=默认) */
+            const font_enc_t text_enc;   /* 输入文本编码 (UTF8需转换/GBK直通) */
         };
 
         /* RENDER_BITMAP — 位图专属 */

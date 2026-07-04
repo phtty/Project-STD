@@ -41,14 +41,18 @@ void app_test_pixel_scan(void)
 void app_test_render_text(void)
 {
     app_render(&(render_cfg_t){
-        .type      = RENDER_TEXT,
-        .x         = 0,
-        .y         = 0,
-        .w         = dev_display_get()->screen_rows,
-        .h         = dev_display_get()->screen_cols,
+        .type  = RENDER_TEXT,
+        .x     = 0,
+        .y     = 0,
+        .w     = dev_display_get()->screen_rows,
+        .h     = dev_display_get()->screen_cols,
+        .style = &(render_style_t){
+            .h_align = ALIGN_CENTER,
+            .v_align = ALIGN_CENTER,
+        },
         .color     = COLOR_GREEN,
-        .text      = "a",
-        .len       = strlen("a"),
+        .text      = "A",
+        .len       = strlen("A"),
         .font_size = FONT_16,
         .font_type = FONT_ST,
         .text_enc  = FONT_ENC_UTF8,

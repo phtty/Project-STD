@@ -7,6 +7,7 @@
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_sys.h"
+#include "app_vms_ctrl.h"
 #include "app_udp.h"
 #include "app_tcp_server.h"
 
@@ -858,7 +859,7 @@ static void cmd_ctrl(channel_t *ch, void *data)
             }
             case LDI_DEV_TYPE_VMS: { // E9H → VMS (01H)
                 ldi_ctrl_vms_t *ctrl = (ldi_ctrl_vms_t *)payload;
-                (void)ctrl;
+                vms_ctrl(*ctrl);
                 break;
             }
             case LDI_DEV_TYPE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)

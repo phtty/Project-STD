@@ -76,6 +76,8 @@ static void init_task(void *argument)
     app_tcp_server_start();
     app_tcp_client_start();
 
+    app_test_run();
+
     printf("\nInit Task Done\n");
 
     osThreadExit();

@@ -43,6 +43,7 @@ virtualFolder:
               files:
                 - path: Application/Src/app_ldi.c
                 - path: Application/Src/app_ldi_cmd.c
+                - path: Application/Src/app_vms_ctrl.c
               folders: []
     - name: Drivers
       files: []

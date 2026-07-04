@@ -162,66 +162,128 @@ static inline void _render_text(const render_cfg_t *cfg)
         text_len = n;
     }
 
-    uint16_t i = 0;
-    while (i < text_len) {
-        if (text_buf[i] == '\n') { // 处理换行符
-            cur_x = cfg->x;
-            cur_y += gbk_key.size;
-            i++;
+    /* ---- 测量趟：计算文本实际尺寸（用于对齐） ---- */
+    uint16_t text_w   = 0; /* 最宽行的像素宽度 */
+    uint16_t text_h   = 0; /* 总像素高度 */
+    uint16_t line_w   = 0;
+    uint16_t line_h   = gbk_key.size;
+    uint16_t char_pos = 0;
+
+    text_h = line_h; /* 至少一行 */
+    while (char_pos < text_len) {
+        if (text_buf[char_pos] == '\n') { // 处理手动换行的情况
+            if (line_w > text_w)
+                text_w = line_w;
+
+            line_w = 0;
+            text_h += line_h;
+            char_pos++;
             continue;
         }
 
-        if (text_buf[i] >= 0x20 && text_buf[i] <= 0x7F) {
-            // ascii字符（半宽）
-            uint8_t fw_asc = _glyph_width_px(asc_key);
+        // 按字符编码移动字符计数
+        uint8_t glyph_w;
+        if (text_buf[char_pos] >= 0x20 && text_buf[char_pos] <= 0x7F) {
+            glyph_w = _glyph_width_px(asc_key);
+            char_pos += 1;
+        } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
+            glyph_w = _glyph_width_px(gbk_key);
+            char_pos += 2;
+        } else {
+            char_pos++;
+            continue;
+        }
 
-            if (cur_x + fw_asc > cfg->w) { // 处理光标移动到最右边的情况
+        if (line_w + glyph_w > cfg->w) {
+            if (cfg->style && cfg->style->word_wrap) {
+                if (line_w > text_w) text_w = line_w;
+                line_w = glyph_w;
+                text_h += line_h;
+            }
+            /* 不换行：超出部分截断，不计入宽度 */
+        } else {
+            line_w += glyph_w;
+        }
+    }
+
+    if (line_w > text_w)
+        text_w = line_w;
+
+    /* ---- 应用对齐偏移 ---- */
+    if (cfg->style) {
+        if (cfg->style->h_align == ALIGN_CENTER)
+            cur_x += (cfg->w - text_w) / 2;
+        else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
+            cur_x += (cfg->w - text_w);
+
+        if (cfg->style->v_align == ALIGN_CENTER && cfg->h > text_h)
+            cur_y += (cfg->h - text_h) / 2;
+        else if (cfg->style->v_align == ALIGN_RIGHT_DOWN && cfg->h > text_h)
+            cur_y += (cfg->h - text_h);
+    }
+
+    /* ---- 渲染趟 ---- */
+    uint16_t origin_x = cur_x; /* 对齐后的行起始 x（换行/wrap 时重置到此） */
+    char_pos          = 0;
+    while (char_pos < text_len) {
+        if (text_buf[char_pos] == '\n') { // 处理换行符
+            cur_x = origin_x;
+            cur_y += gbk_key.size;
+            char_pos++;
+            continue;
+        }
+
+        if (text_buf[char_pos] >= 0x20 && text_buf[char_pos] <= 0x7F) {
+            // ascii字符（半宽）
+            uint8_t glyph_w = _glyph_width_px(asc_key);
+
+            if (cur_x + glyph_w > cfg->w) { // 处理光标移动到最右边的情况
                 if (cfg->style && cfg->style->word_wrap) {
-                    cur_x = cfg->x;
+                    cur_x = origin_x;
                     cur_y += gbk_key.size;
                     if (cur_y + gbk_key.size > cfg->h) return;
                 } else {
-                    i++; /* 截断: 跳过超出右边界字符 */
+                    char_pos++; /* 截断: 跳过超出右边界字符 */
                     continue;
                 }
             }
 
-            uint8_t ch    = (uint8_t)text_buf[i];
-            uint32_t addr = _char_addr(&asc_key, &ch);
+            uint8_t ch_byte = (uint8_t)text_buf[char_pos];
+            uint32_t addr   = _char_addr(&asc_key, &ch_byte);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, fw_asc, asc_key.size, font_buf, cfg->color);
+            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
 
-            cur_x += fw_asc;
-            i++;
+            cur_x += glyph_w;
+            char_pos++;
             continue;
 
-        } else if (i + 1 < text_len && _is_gbk((uint8_t)text_buf[i], (uint8_t)text_buf[i + 1])) {
+        } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
             // GBK字符（全宽）
-            uint8_t fw_gbk = _glyph_width_px(gbk_key);
+            uint8_t glyph_w = _glyph_width_px(gbk_key);
 
-            if (cur_x + fw_gbk > cfg->w) {
+            if (cur_x + glyph_w > cfg->w) {
                 if (cfg->style && cfg->style->word_wrap) {
-                    cur_x = cfg->x;
+                    cur_x = origin_x;
                     cur_y += gbk_key.size;
                     if (cur_y + gbk_key.size > cfg->h) return;
                 } else {
-                    i += 2; /* 截断: 跳过超出右边界字符 */
+                    char_pos += 2; /* 截断: 跳过超出右边界字符 */
                     continue;
                 }
             }
 
-            uint8_t ch[2] = {(uint8_t)text_buf[i], (uint8_t)text_buf[i + 1]};
-            uint32_t addr = _char_addr(&gbk_key, ch);
+            uint8_t gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
+            uint32_t addr     = _char_addr(&gbk_key, gbk_ch);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, fw_gbk, gbk_key.size, font_buf, cfg->color);
+            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
 
-            cur_x += fw_gbk;
-            i += 2;
+            cur_x += glyph_w;
+            char_pos += 2;
             continue;
 
         } else {
             // 非法字符，跳过
-            i++;
+            char_pos++;
         }
     }
 }
