@@ -11,8 +11,15 @@
 /* ---- 配置 ---- */
 static uint16_t g_udp_port = 10011; /**< IAP 升级通道 */
 
-void app_udp_set_port(uint16_t port) { g_udp_port = port; }
-uint16_t app_udp_get_port(void) { return g_udp_port; }
+void app_udp_set_port(uint16_t port)
+{
+    g_udp_port = port;
+}
+
+uint16_t app_udp_get_port(void)
+{
+    return g_udp_port;
+}
 
 void app_udp_broadcast(const uint8_t *data, uint16_t len)
 {
@@ -57,7 +64,9 @@ static int32_t udp_ch_send(channel_t *ch, const uint8_t *data, uint16_t len)
 {
     udp_channel_t *udp = container_of(ch, udp_channel_t, me);
     struct netbuf *nb  = netbuf_new();
-    if (!nb) return -1;
+    if (!nb)
+        return -1;
+
     netbuf_ref(nb, data, len);
     /* 从字节数组重建 ip_addr_t，隔离 middleware 类型 */
     struct netconn *conn = (struct netconn *)udp->conn;
@@ -120,9 +129,9 @@ void udp_task(void *argument)
 /* ---- 构造 / 析构 ---- */
 static void udp_channel_init(udp_channel_t *self, struct netconn *conn, channel_t *tmpl)
 {
-    self->me = *tmpl;
-    self->me.state   = CH_STATE_UP;
-    self->conn       = conn;
+    self->me          = *tmpl;
+    self->me.state    = CH_STATE_UP;
+    self->conn        = conn;
     self->listen_port = g_udp_port;
     app_channel_register(CH_ID_UDP, &self->me);
 }
@@ -152,11 +161,11 @@ void udp_connect_task(void *argument)
             netbuf_data(buf, &data, &len);
             if (len > 0) {
                 const ip_addr_t *addr = netbuf_fromaddr(buf);
-                udp.src_ip[0] = ip4_addr1((const ip4_addr_t *)addr);
-                udp.src_ip[1] = ip4_addr2((const ip4_addr_t *)addr);
-                udp.src_ip[2] = ip4_addr3((const ip4_addr_t *)addr);
-                udp.src_ip[3] = ip4_addr4((const ip4_addr_t *)addr);
-                udp.src_port   = netbuf_fromport(buf);
+                udp.src_ip[0]         = ip4_addr1((const ip4_addr_t *)addr);
+                udp.src_ip[1]         = ip4_addr2((const ip4_addr_t *)addr);
+                udp.src_ip[2]         = ip4_addr3((const ip4_addr_t *)addr);
+                udp.src_ip[3]         = ip4_addr4((const ip4_addr_t *)addr);
+                udp.src_port          = netbuf_fromport(buf);
                 app_channel_dispatch(ch, (uint8_t *)data, len);
             }
         } while (netbuf_next(buf) >= 0);

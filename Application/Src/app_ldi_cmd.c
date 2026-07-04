@@ -906,7 +906,35 @@ static void cmd_rep_func(channel_t *ch, void *data)
  */
 static void cmd_search(channel_t *ch, void *data)
 {
-    (void)ch;
     (void)data;
-    /* TODO: UDP broadcast search — 需 app_udp_broadcast + app_tcp_client_set_remote */
+
+    ldi_search_rsp_t rsp;
+    rsp.cmd_type = LDI_CMD_SEARCH_RSP;
+    rsp.err_code = 0x00;
+
+    memcpy(rsp.ip, g_ldi.cfg.device_ip, sizeof(rsp.ip));
+    rsp.port[0] = (uint8_t)(g_ldi.cfg.device_port >> 8);
+    rsp.port[1] = (uint8_t)(g_ldi.cfg.device_port);
+    memcpy(rsp.gateway, g_ldi.cfg.gateway, sizeof(rsp.gateway));
+    memcpy(rsp.mask, g_ldi.cfg.netmask, sizeof(rsp.mask));
+
+    /* 构造 LDI 帧 + 广播发送 */
+    osMutexAcquire(g_ldi.tx_lock, osWaitForever);
+    ldi_frame_t *frame   = (ldi_frame_t *)g_ldi.tx_buf;
+    frame->stx[0]        = 0xFF;
+    frame->stx[1]        = 0xFF;
+    frame->ver           = 0x00;
+    frame->seq           = ldi_next_rpt_seq();
+    uint16_t payload_len = sizeof(ldi_search_rsp_t);
+    frame->len[0]        = (uint8_t)(payload_len >> 24);
+    frame->len[1]        = (uint8_t)(payload_len >> 16);
+    frame->len[2]        = (uint8_t)(payload_len >> 8);
+    frame->len[3]        = (uint8_t)payload_len;
+    memcpy(frame->data_crc, &rsp, payload_len);
+    uint16_t crc                     = crc16_xmodem(&frame->ver, sizeof(*frame) - sizeof(frame->stx) + payload_len);
+    frame->data_crc[payload_len]     = (uint8_t)(crc >> 8);
+    frame->data_crc[payload_len + 1] = (uint8_t)(crc & 0xFF);
+    osMutexRelease(g_ldi.tx_lock);
+
+    app_udp_broadcast(g_ldi.tx_buf, sizeof(ldi_frame_t) + payload_len + 2);
 }

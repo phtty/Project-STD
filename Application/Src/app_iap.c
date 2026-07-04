@@ -18,17 +18,21 @@ static proto_mask_t s_iap_mask;
 
 [[maybe_unused]] static void iap_module_init(void)
 {
+    // 指定使用的环形缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(0, 2048);
+
+    // 注册协议到多通道多协议解析模块
     s_iap_mask = app_proto_register(iap_probe_frame, rb);
     if (s_iap_mask == 0) return;
 
+    // 绑定协议使用到的通道
     app_proto_bind_channel(s_iap_mask, CH_ID_RS485);
     app_proto_bind_channel(s_iap_mask, CH_ID_UDP);
 
     // 创建协议处理任务
     g_iap_task_handle = osThreadNew(iap_handle_task, nullptr, &iap_task_attr);
 }
-// sw_app_initcall(iap_module_init);
+sw_app_initcall(iap_module_init);
 
 const uint8_t frame_len[] = {0, 0, 4, 0, 1, 0, 0, 0};
 
