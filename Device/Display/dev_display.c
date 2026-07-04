@@ -114,6 +114,8 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
         for (uint16_t col = 0; col < w; col++) {
             if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
                 dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
+            else
+                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)COLOR_BLACK;
         }
     }
     dev->dirty = true;

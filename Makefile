@@ -289,6 +289,7 @@ SRC_APPLICATION = \
 	Application/Src/app_render.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
+	Application/Src/app_vms_ctrl.c \
 	Application/Src/app_udp.c \
 	Application/Src/app_tcp_server.c \
 	Application/Src/app_tcp_client.c \

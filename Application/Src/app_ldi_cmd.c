@@ -859,7 +859,7 @@ static void cmd_ctrl(channel_t *ch, void *data)
             }
             case LDI_DEV_TYPE_VMS: { // E9H → VMS (01H)
                 ldi_ctrl_vms_t *ctrl = (ldi_ctrl_vms_t *)payload;
-                vms_ctrl(*ctrl);
+                vms_ctrl(ctrl, mod_len - sizeof(ldi_ctrl_vms_t) - sizeof(ldi_module_head_t));
                 break;
             }
             case LDI_DEV_TYPE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)
