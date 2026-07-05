@@ -280,6 +280,7 @@ SRC_DEVICE = \
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
 	Application/Src/app_test.c \
+	Application/Src/app_factory_test.c \
 	Application/Src/app_boot.c \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_iap.c \

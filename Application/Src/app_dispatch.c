@@ -35,8 +35,8 @@ RB_DEFINE(g_rb3, 2048); /**< id=3: 暂未使用，预留 */
  *  所有调度函数统一通过 g_dispatch 访问。
  * ================================================================ */
 
-dispatch_ctx_t g_dispatch;                  /**< 全局调度上下文 */
-static osThreadId_t g_dispatch_task_handle; /**< 帧分发任务句柄 */
+dispatch_ctx_t g_dispatch;              /**< 全局调度上下文 */
+osThreadId_t g_dispatch_task_handle;    /**< 帧分发任务句柄（外部用于 Suspend/Resume） */
 
 /* ================================================================
  *  工具函数

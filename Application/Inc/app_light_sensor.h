@@ -5,7 +5,10 @@
 
 #pragma once
 
+#include "cmsis_os2.h"
 #include "dev_light_sensor.h"
+
+extern osThreadId_t g_light_sensor_task_handle;
 
 void app_light_sensor_init(void);
 void app_light_sensor_task(void *argument);

@@ -65,6 +65,7 @@ typedef struct {
 } dispatch_ctx_t;
 
 extern dispatch_ctx_t g_dispatch;
+extern osThreadId_t g_dispatch_task_handle;
 
 /* ---- 调度 API ---- */
 uint8_t proto_index(uint32_t mask);
