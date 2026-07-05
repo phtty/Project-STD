@@ -13,6 +13,7 @@ void app_boot(void);
 
 int main(void)
 {
+    SCB->VTOR = FLASH_BASE | 0x40000;
     __enable_irq();
 
     HAL_Init();

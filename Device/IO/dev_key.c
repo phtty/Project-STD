@@ -50,7 +50,8 @@ sw_dev_initcall(dev_key_sw_init);
 
 bool dev_key_get_state(dev_key_id_t key_id)
 {
-    if (key_id >= DEV_KEY_COUNT) return false;
+    if (key_id >= DEV_KEY_COUNT)
+        return false;
     return s_state[key_id];
 }
 
@@ -62,6 +63,7 @@ void dev_key_clear_state(dev_key_id_t key_id)
 
 bool dev_key_test_pressed(void)
 {
-    if (!s_test_sem) return false;
+    if (!s_test_sem)
+        return false;
     return (osSemaphoreAcquire(s_test_sem, 0) == osOK);
 }
