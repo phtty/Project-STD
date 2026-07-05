@@ -31,13 +31,10 @@ uint32_t pl_rtc_bkup_read(pl_rtc_handle_t h, uint32_t reg)
 
 uint32_t pl_rtc_get_timestamp(pl_rtc_handle_t h)
 {
-    (void)h;
-    return 0; /* TODO: 实现 Unix 时间戳读取 */
+    return (uint32_t)RTC_GetUnixTimestamp();
 }
 
 bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
 {
-    (void)h;
-    (void)ts;
-    return false; /* TODO: 实现 Unix 时间戳设置 */
+    return RTC_Set_UnixTimeStamp((time_t)ts) == HAL_OK;
 }
