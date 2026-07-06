@@ -4,7 +4,7 @@
 
 #include "app_render.h"
 
-static void vms_display_ctrl(const ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
     display_color_t color = COLOR_BLACK;
     if (ctx->font_color == 1) // 将ldi协议的颜色编号映射到文字渲染模块的颜色编号
@@ -26,12 +26,18 @@ static void vms_display_ctrl(const ldi_ctrl_vms_t *ctx, const uint16_t text_len)
         style.h_align = ALIGN_RIGHT_DOWN;
 
     font_size_t font_size = FONT_16;
-    if (ctx->font_size == 1) // 将ldi协议的字号映射到文字渲染模块的字号
+    if (ctx->font_size == 0) // 将ldi协议的字号映射到文字渲染模块的字号
+        font_size = FONT_SELF_ADAPT;
+    else if (ctx->font_size == 1)
         font_size = FONT_16;
     else if (ctx->font_size == 2)
         font_size = FONT_24;
     else if (ctx->font_size == 3)
         font_size = FONT_32;
+
+    for (uint16_t i = 0; i < text_len; i++) // LDI协议定义'_'为换行符
+        if (ctx->text[i] == '_')
+            ctx->text[i] = '\n';
 
     // 显示前先清屏
     app_render(&(render_cfg_t){
@@ -61,7 +67,7 @@ static void vms_display_ctrl(const ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     app_render(&txt_cfg);
 }
 
-static void vms_clean_ctrl(const ldi_ctrl_vms_t *ctx)
+static void vms_clean_ctrl(ldi_ctrl_vms_t *ctx)
 {
     display_color_t color = COLOR_BLACK;
     if (ctx->clear_type == 0) // 将ldi协议的颜色编号映射到显示模块的颜色编号
@@ -70,6 +76,8 @@ static void vms_clean_ctrl(const ldi_ctrl_vms_t *ctx)
         color = COLOR_RED;
     else if (ctx->clear_type == 2)
         color = COLOR_GREEN;
+    else if (ctx->clear_type == 3)
+        color = COLOR_YELLOW;
 
     app_render(&(render_cfg_t){
         .type  = RENDER_FILL,
@@ -81,7 +89,7 @@ static void vms_clean_ctrl(const ldi_ctrl_vms_t *ctx)
     });
 }
 
-void vms_ctrl(const ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+void vms_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
     if (ctx->device_func_type == 0x01)
         vms_display_ctrl(ctx, text_len);
