@@ -15,8 +15,8 @@
  *  P20 模组参数
  * ================================================================ */
 
-#define P20_MODULE_ROWS         (1U)  /* 每行模块数 */
-#define P20_MODULE_COLS         (2U)  /* 每列模块数 */
+#define P20_MODULE_ROWS         (8U)  /* 每行模块数 */
+#define P20_MODULE_COLS         (4U)  /* 每列模块数 */
 #define P20_MODULE_PIXEL_ROW    (16U) /* 单模块像素行数 */
 #define P20_MODULE_PIXEL_COL    (8U)  /* 单模块像素列数 */
 #define P20_CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */

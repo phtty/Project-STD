@@ -78,7 +78,7 @@ static void init_task(void *argument)
     app_tcp_client_start();
     app_udp_start();
 
-    // app_test_run();
+    app_test_run();
 
     printf("\nInit Task Done\n");
 

@@ -90,39 +90,39 @@ CCMRAM (64KB, 0x10000000, NOLOAD 段)
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Application/  (app_*)                                           │
-│  业务逻辑：boot编排、协议处理(IAP/LDI/AH_MQTT)、渲染引擎、        │
+│  业务逻辑：boot编排、协议处理(IAP/LDI/AH_MQTT)、渲染引擎、       │
 │  传感器管理、网络通道(UDP/TCP/MQTT/RS232/RS485任务)              │
 │                                                                  │
-│  依赖：Device/ + Kernel/ + Platform/ (不直接碰 HAL 地址)          │
+│  依赖：Device/ + Kernel/ + Platform/ (不直接碰 HAL 地址)         │
 ├──────────────────────────────────────────────────────────────────┤
 │  Device/  (dev_*)                                                │
-│  设备抽象：OCP 虚表封装硬件差异                                   │
+│  设备抽象：OCP 虚表封装硬件差异                                  │
 │  Display/  Storage/  Comm/  Network/  IO/  Config/               │
 │                                                                  │
-│  依赖：Platform/ + Kernel/ (通过 pl_* 接口操作硬件)               │
+│  依赖：Platform/ + Kernel/ (通过 pl_* 接口操作硬件)              │
 ├──────────────────────────────────────────────────────────────────┤
 │  Kernel/                                                         │
 │  纯软件工具：ring_buffer、initcall、dispatch_types、text_cvt、   │
 │  bit_utils、crc_utils                                            │
 │                                                                  │
-│  依赖：无（零硬件依赖，仅 stdint/stddef/stdbool）                 │
+│  依赖：无（零硬件依赖，仅 stdint/stddef/stdbool）                │
 ├──────────────────────────────────────────────────────────────────┤
 │  Platform/  (pl_*)                                               │
-│  HAL 薄封装：不透明句柄 (void*)，HAL 类型对外不可见               │
-│  pl_spi  pl_tim  pl_uart  pl_gpio  pl_hub75  pl_eth  pl_net    │
-│  pl_flash  pl_crc  pl_rtc  pl_iwdg  pl_dma  pl_dwt  pl_sys     │
+│  HAL 薄封装：不透明句柄 (void*)，HAL 类型对外不可见              │
+│  pl_spi  pl_tim  pl_uart  pl_gpio  pl_hub75  pl_eth  pl_net      │
+│  pl_flash  pl_crc  pl_rtc  pl_iwdg  pl_dma  pl_dwt  pl_sys       │
 │                                                                  │
-│  依赖：Core/ + HAL 库 (仅 .c 文件 include Core 头文件)            │
+│  依赖：Core/ + HAL 库 (仅 .c 文件 include Core 头文件)           │
 ├──────────────────────────────────────────────────────────────────┤
 │  Core/                                                           │
 │  STM32CubeMX 生成：MX_xxx_Init()、ISR 声明、HAL 配置             │
-│  main.c  system_stm32f4xx.c  stm32f4xx_it.c  FreeRTOSConfig.h   │
+│  main.c  system_stm32f4xx.c  stm32f4xx_it.c  FreeRTOSConfig.h    │
 │                                                                  │
 │  依赖：HAL 库 + CMSIS                                            │
 ├──────────────────────────────────────────────────────────────────┤
 │  Compiler/                                                       │
-│  startup.c (C 语言 Reset_Handler + 自定义向量表)                  │
-│  STM32F407XX_FLASH.ld (链接脚本，含 initcall 段定义)              │
+│  startup.c (C 语言 Reset_Handler + 自定义向量表)                 │
+│  STM32F407XX_FLASH.ld (链接脚本，含 initcall 段定义)             │
 └──────────────────────────────────────────────────────────────────┘
 ```
 

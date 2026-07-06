@@ -51,9 +51,9 @@ void app_test_render_text(void)
             .v_align = ALIGN_CENTER,
         },
         .color     = COLOR_GREEN,
-        .text      = "A",
-        .len       = strlen("A"),
-        .font_size = FONT_16,
+        .text      = "车道关闭",
+        .len       = strlen("车道关闭"),
+        .font_size = FONT_32,
         .font_type = FONT_ST,
         .text_enc  = FONT_ENC_UTF8,
     });
