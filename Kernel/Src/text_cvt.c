@@ -164,7 +164,6 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
     uint32_t utfcode;
     uint32_t size = 0;
     while (fromSize != 0) {
-
         if (*from < 0X80) { // ASCII
             utfcode = *from;
             from++;
@@ -188,7 +187,6 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
             break; // ERROR: not support
 
         if (unicode < 0X80) { // ASCII
-
             *to++ = unicode;
             size++;
 

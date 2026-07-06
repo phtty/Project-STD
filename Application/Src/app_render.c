@@ -20,60 +20,43 @@ typedef struct {
     uint32_t unit_size; /* 该三元组的总字节数 */
 } font_unit_t;
 
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
+#define N_ASC_CHARS    (96U)
+#define N_GBK_CHARS    (23940U)
+#define N_GB2312_CHARS (8837U)
 
 /* 字库单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
-#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
-#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+#define ASC_UNIT(sz)    ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
+#define GBK_UNIT(sz)    ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+#define GB2312_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GB2312_CHARS)
 
 /* 字库描述表 — 顺序必须与 Flash 中字库单元的排列一致 */
 static const font_unit_t g_font_lib[] = {
-    /* 14号 */
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(14)},
-    /* 16号 */
     {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(16)},
     {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(16)},
     {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(16)},
     {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(16)},
-    /* 20号 */
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(20)},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_ST}, GB2312_UNIT(16)},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_FS}, GB2312_UNIT(16)},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_KT}, GB2312_UNIT(16)},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_HT}, GB2312_UNIT(16)},
     /* 24号 */
     {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(24)},
     {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(24)},
     {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(24)},
     {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(24)},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_ST}, GB2312_UNIT(24)},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_FS}, GB2312_UNIT(24)},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_KT}, GB2312_UNIT(24)},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_HT}, GB2312_UNIT(24)},
     /* 32号 */
     {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(32)},
     {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(32)},
     {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(32)},
     {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(32)},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_ST}, GB2312_UNIT(32)},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, GB2312_UNIT(32)},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, GB2312_UNIT(32)},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GB2312_UNIT(32)},
 };
 
 /* ---- 内部: bytes_per_char ---- */
@@ -164,15 +147,15 @@ static inline void _render_text(const render_cfg_t *cfg)
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
     uint16_t line_widths[32];
-    uint8_t  line_count = 0;
-    uint16_t line_w     = 0;
-    uint16_t line_h     = gbk_key.size;
-    uint16_t char_pos   = 0;
+    uint8_t line_count = 0;
+    uint16_t line_w    = 0;
+    uint16_t line_h    = gbk_key.size;
+    uint16_t char_pos  = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
             line_widths[line_count++] = line_w;
-            line_w = 0;
+            line_w                    = 0;
             char_pos++;
             continue;
         }
@@ -192,7 +175,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         if (line_w + glyph_w > cfg->w) {
             if (cfg->style && cfg->style->word_wrap) {
                 line_widths[line_count++] = line_w;
-                line_w = glyph_w;
+                line_w                    = glyph_w;
             }
             /* 不换行：超出部分截断，不计入宽度 */
         } else {
@@ -211,7 +194,7 @@ static inline void _render_text(const render_cfg_t *cfg)
     }
 
     /* ---- 渲染趟：逐行独立水平对齐 ---- */
-    uint8_t  line_idx      = 0;
+    uint8_t line_idx       = 0;
     uint16_t line_origin_x = cfg->x;
     if (cfg->style) {
         if (cfg->style->h_align == ALIGN_CENTER)
@@ -219,7 +202,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
             line_origin_x += (cfg->w - line_widths[line_idx]);
     }
-    cur_x   = line_origin_x;
+    cur_x    = line_origin_x;
     char_pos = 0;
 
     while (char_pos < text_len) {
