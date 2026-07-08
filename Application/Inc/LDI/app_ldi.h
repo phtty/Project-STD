@@ -2,7 +2,7 @@
 
 #include "cmsis_os2.h"
 #include "app_dispatch.h"
-#include "dev_flash_ldi.h"
+#include "app_ldi_cfg.h"
 #include "ring_buffer.h"
 
 #define DEVICE_NUM (2U) // 本设备使用到的功能模块数量

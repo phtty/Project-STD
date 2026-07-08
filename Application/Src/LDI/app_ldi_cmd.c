@@ -3,7 +3,7 @@
 #include <time.h>
 
 #include "crc_utils.h"
-#include "dev_flash_ldi.h"
+#include "app_ldi_cfg.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_sys.h"

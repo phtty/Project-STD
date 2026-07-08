@@ -15,6 +15,16 @@
 
 /* ---- 扫描任务事件 ---- */
 static osEventFlagsId_t s_scan_evt;
+static dev_display_t *s_active_display;
+
+/* ---- 实例注册（由派生模组的 hw_dev_initcall 调用）---- */
+void dev_display_register(dev_display_t *dev) { s_active_display = dev; }
+
+dev_display_t *dev_display_get(void) { return s_active_display; }
+
+/* ---- TIM 周期回调（前向声明，实现在文件末尾）---- */
+static void _on_tim3_period(void);
+static void _on_tim4_period(void);
 
 /* ---- 硬件初始化（所有模组通用）---- */
 void dev_display_init(void)
@@ -22,6 +32,8 @@ void dev_display_init(void)
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM3));
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM4));
     pl_hub75_init();
+    pl_tim_register_period_cb(PL_TIM3, _on_tim3_period);
+    pl_tim_register_period_cb(PL_TIM4, _on_tim4_period);
 }
 hw_dev_initcall(dev_display_init);
 
@@ -61,17 +73,12 @@ static void scan_task(void *arg)
     }
 }
 
-dev_display_t *dev_display_get(void)
-{
-    return dev_display_p20_get();
-}
-
 /* ---- 软件初始化（创建事件 + 扫描任务）---- */
 void dev_display_start(void)
 {
     s_scan_evt = osEventFlagsNew(NULL);
 
-    dev_display_t *dev = dev_display_p20_get();
+    dev_display_t *dev = s_active_display;
 
     dev->dirty = true;
 
@@ -99,9 +106,13 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
     dev->light_level = level;
 }
 
-void dev_display_fill(dev_display_t *dev, display_color_t color)
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color)
 {
-    memset(dev->pixel_map, (uint8_t)color, dev->buffer_size);
+    if (x + w > dev->screen_rows) w = dev->screen_rows - x;
+    if (y + h > dev->screen_cols) h = dev->screen_cols - y;
+
+    for (uint16_t row = 0; row < h; row++)
+        memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
     dev->dirty = true;
 }
 
@@ -114,27 +125,23 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
         for (uint16_t col = 0; col < w; col++) {
             if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
                 dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
-            else
-                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)COLOR_BLACK;
         }
     }
     dev->dirty = true;
 }
 
-/* ---- HAL 周期回调 ---- */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+/* ---- TIM 周期回调（通过 pl_tim_register_period_cb 注册到 Platform 层）---- */
+
+static void _on_tim3_period(void)
 {
-    if (htim->Instance == TIM4) {
-        dev_display_t *dev = dev_display_p20_get();
-        static uint8_t pwm_cnt;
+    osEventFlagsSet(s_scan_evt, 0x01);
+}
 
-        pl_hub75_oe_set(pwm_cnt >= dev->light_level);
-        pwm_cnt = (pwm_cnt + 1) & 7;
+static void _on_tim4_period(void)
+{
+    dev_display_t *dev = dev_display_get();
+    static uint8_t pwm_cnt;
 
-    } else if (htim->Instance == TIM3) {
-        osEventFlagsSet(s_scan_evt, 0x01);
-
-    } else if (htim->Instance == TIM7) {
-        HAL_IncTick();
-    }
+    pl_hub75_oe_set(pwm_cnt >= dev->light_level);
+    pwm_cnt = (pwm_cnt + 1) & 7;
 }

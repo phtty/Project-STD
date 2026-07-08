@@ -3,7 +3,7 @@
 
 #include "app_ldi_cmd.h"
 #include "crc_utils.h"
-#include "dev_flash_ldi.h"
+#include "app_ldi_cfg.h"
 #include "app_tcp_client.h"
 #include "app_tcp_server.h"
 #include "pl_net.h"

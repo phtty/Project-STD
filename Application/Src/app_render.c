@@ -164,15 +164,15 @@ static inline void _render_text(const render_cfg_t *cfg)
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
     uint16_t line_widths[32];
-    uint8_t  line_count = 0;
-    uint16_t line_w     = 0;
-    uint16_t line_h     = gbk_key.size;
-    uint16_t char_pos   = 0;
+    uint8_t line_count = 0;
+    uint16_t line_w    = 0;
+    uint16_t line_h    = gbk_key.size;
+    uint16_t char_pos  = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
             line_widths[line_count++] = line_w;
-            line_w = 0;
+            line_w                    = 0;
             char_pos++;
             continue;
         }
@@ -192,7 +192,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         if (line_w + glyph_w > cfg->w) {
             if (cfg->style && cfg->style->word_wrap) {
                 line_widths[line_count++] = line_w;
-                line_w = glyph_w;
+                line_w                    = glyph_w;
             }
             /* 不换行：超出部分截断，不计入宽度 */
         } else {
@@ -211,7 +211,7 @@ static inline void _render_text(const render_cfg_t *cfg)
     }
 
     /* ---- 渲染趟：逐行独立水平对齐 ---- */
-    uint8_t  line_idx      = 0;
+    uint8_t line_idx       = 0;
     uint16_t line_origin_x = cfg->x;
     if (cfg->style) {
         if (cfg->style->h_align == ALIGN_CENTER)
@@ -219,7 +219,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
             line_origin_x += (cfg->w - line_widths[line_idx]);
     }
-    cur_x   = line_origin_x;
+    cur_x    = line_origin_x;
     char_pos = 0;
 
     while (char_pos < text_len) {
@@ -263,6 +263,7 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint8_t ch_byte = (uint8_t)text_buf[char_pos];
             uint32_t addr   = _char_addr(&asc_key, &ch_byte);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
+            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -294,6 +295,7 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint8_t gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
             uint32_t addr     = _char_addr(&gbk_key, gbk_ch);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
+            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -315,31 +317,26 @@ static inline void _render_bitmap(const render_cfg_t *cfg)
 
 static inline void _render_fill(const render_cfg_t *cfg)
 {
-    if (!cfg->w || !cfg->h) {
-        dev_display_fill(s_render_display, cfg->color); /* 全屏 */
-        return;
+    uint16_t w = cfg->w, h = cfg->h;
+    if (!w || !h) {
+        w = s_render_display->screen_rows;
+        h = s_render_display->screen_cols;
     }
-
-    for (uint16_t row = 0; row < cfg->h; row++)
-        for (uint16_t col = 0; col < cfg->w; col++)
-            dev_display_set_pixel(s_render_display, cfg->x + col, cfg->y + row, cfg->color);
+    dev_display_fill(s_render_display, cfg->x, cfg->y, w, h, cfg->color);
 }
+
+/* ---- 渲染跳表 ---- */
+typedef void (*render_fn_t)(const render_cfg_t *);
+static const render_fn_t g_render_fn[] = {
+    [RENDER_TEXT]   = _render_text,
+    [RENDER_BITMAP] = _render_bitmap,
+    [RENDER_FILL]   = _render_fill,
+};
 
 /* ---- 公开 API：tagged union 分派 ---- */
 void app_render(const render_cfg_t *cfg)
 {
-    if (!cfg || !s_render_display)
-        return;
-
-    switch (cfg->type) {
-        case RENDER_TEXT:
-            _render_text(cfg);
-            break;
-        case RENDER_BITMAP:
-            _render_bitmap(cfg);
-            break;
-        case RENDER_FILL:
-            _render_fill(cfg);
-            break;
-    }
+    if (!cfg || !s_render_display) return;
+    if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
+        g_render_fn[cfg->type](cfg);
 }
