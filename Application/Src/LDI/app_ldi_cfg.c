@@ -1,5 +1,5 @@
 #include <string.h>
-#include "dev_flash_ldi.h"
+#include "app_ldi_cfg.h"
 
 #include "pl_crc.h"
 #include "dev_w25qxx.h"

@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #include "cmsis_os2.h"
-#include "dispatch_types.h"
+#include "app_dispatch.h"
 
 /* 复用 app_tcp_server.h 中的 tcp_ch_ops */
 #include "app_tcp_server.h"

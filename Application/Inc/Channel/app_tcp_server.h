@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include "cmsis_os2.h"
-#include "dispatch_types.h"
+#include "app_dispatch.h"
 
 /** @brief TCP Server 通道子类 */
 typedef struct {

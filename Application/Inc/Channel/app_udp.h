@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #include "cmsis_os2.h"
-#include "dispatch_types.h"
+#include "app_dispatch.h"
 
 /** @brief UDP 通道子类（每 bind 实例） */
 typedef struct {

@@ -10,7 +10,7 @@
 #include "initcall.h"
 #include "pl_crc.h"
 #include "app_udp.h"
-#include "dev_flash_iap.h"
+#include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
 
 /* ---- 协议模块自注册 ---- */

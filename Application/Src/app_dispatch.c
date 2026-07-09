@@ -131,14 +131,9 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
     (void)size;
 
     static const char *names[RB_CNT_MAX] = {"rb_0", "rb_1", "rb_2", "rb_3"};
-    ring_buffer_t *rb                    = nullptr;
+    static ring_buffer_t *const g_rb_pool[RB_CNT_MAX] = {&g_rb0, &g_rb1, &g_rb2, &g_rb3};
 
-    /* id → 预分配的 RB_DEFINE 硬绑定 */
-    if (id == 0) rb = &g_rb0;
-    if (id == 1) rb = &g_rb1;
-    if (id == 2) rb = &g_rb2;
-    if (id == 3) rb = &g_rb3;
-    if (rb == nullptr) return nullptr;
+    ring_buffer_t *rb = g_rb_pool[id];
 
     /* 已初始化则直接返回 */
     if (g_dispatch.buf_pool[id] != nullptr)

@@ -200,6 +200,7 @@ static const dev_display_ops_t p20_ops = {
 void dev_display_p20_init(void)
 {
     g_p20.me.ops = &p20_ops;
+    dev_display_register(&g_p20.me);
 
     for (uint8_t ch = 0; ch < g_p20.me.total_channels; ch++) {
         for (uint8_t color = 0; color < 8; color++) {
