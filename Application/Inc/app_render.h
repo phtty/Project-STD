@@ -16,11 +16,12 @@
 
 /* ---- 字号（像素高度，ASCII 半宽 = size/2）---- */
 typedef enum {
-    FONT_14 = 14,
-    FONT_16 = 16,
-    FONT_20 = 20,
-    FONT_24 = 24,
-    FONT_32 = 32,
+    FONT_SELF_ADAPT = 0,
+    FONT_14         = 14,
+    FONT_16         = 16,
+    FONT_20         = 20,
+    FONT_24         = 24,
+    FONT_32         = 32,
 } font_size_t;
 
 /* ---- 字型 ---- */

@@ -15,21 +15,26 @@
 #include "app_light_sensor.h"
 
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
-#define PROGRAM_CODE "9210209840"
+#define PROGRAM_CODE "9210209C40"
 
 static const display_color_t s_dead_pixel_colors[] = {
     COLOR_RED,
     COLOR_GREEN,
-    COLOR_BLUE,
     COLOR_YELLOW,
-    COLOR_CYAN,
-    COLOR_PURPLE,
-    COLOR_WHITE,
 };
 #define DEAD_PIXEL_COLOR_COUNT (sizeof(s_dead_pixel_colors) / sizeof(s_dead_pixel_colors[0]))
 
-static const font_size_t s_aging_sizes[] = {FONT_14, FONT_16, FONT_20, FONT_24, FONT_32};
-static const font_type_t s_aging_types[] = {FONT_ST, FONT_FS, FONT_KT, FONT_HT};
+static const font_size_t s_aging_sizes[] = {
+    FONT_16,
+    FONT_24,
+    FONT_32,
+};
+static const font_type_t s_aging_types[] = {
+    FONT_ST,
+    FONT_FS,
+    FONT_KT,
+    FONT_HT,
+};
 #define AGING_SIZE_COUNT (sizeof(s_aging_sizes) / sizeof(s_aging_sizes[0]))
 #define AGING_TYPE_COUNT (sizeof(s_aging_types) / sizeof(s_aging_types[0]))
 
@@ -42,7 +47,6 @@ typedef enum {
 
 /* ---- 调试变量 ---- */
 volatile int g_factory_state_debug;
-volatile int g_factory_color_idx;
 volatile int g_factory_aging_type;
 volatile int g_factory_aging_size;
 
@@ -72,15 +76,17 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
         .type      = RENDER_TEXT,
         .x         = 0,
         .y         = 0,
-        .w         = dsp->screen_cols,
-        .h         = dsp->screen_rows,
-        .color     = COLOR_RED,
+        .w         = dsp->screen_rows,
+        .h         = dsp->screen_cols,
+        .color     = COLOR_WHITE,
         .text      = buf,
         .len       = pos,
         .font_size = size,
         .font_type = type,
         .text_enc  = FONT_ENC_UTF8,
         .style     = &(render_style_t){
+            .h_align   = ALIGN_CENTER,
+            .v_align   = ALIGN_CENTER,
             .word_wrap = true,
         },
     });
@@ -101,8 +107,6 @@ static void factory_monitor_task(void *argument)
 
         /* 进入工厂模式 */
         osThreadSuspend(g_dispatch_task_handle);
-        osThreadSuspend(g_light_sensor_task_handle);
-        dev_display_set_brightness(dsp, 7);
 
         /* ===== SHOW_CODE ===== */
         g_factory_state_debug = FACTORY_STATE_SHOW_CODE;
@@ -111,27 +115,27 @@ static void factory_monitor_task(void *argument)
             .type      = RENDER_TEXT,
             .x         = 0,
             .y         = 0,
-            .w         = dsp->screen_cols,
-            .h         = dsp->screen_rows,
-            .color     = COLOR_RED,
+            .w         = dsp->screen_rows,
+            .h         = dsp->screen_cols,
+            .color     = COLOR_GREEN,
             .text      = PROGRAM_CODE,
             .len       = strlen(PROGRAM_CODE),
             .font_size = FONT_16,
             .font_type = FONT_ST,
-            .text_enc  = FONT_ENC_ASCII,
+            .text_enc  = FONT_ENC_UTF8,
             .style     = &(render_style_t){
-                .h_align   = ALIGN_CENTER,
-                .v_align   = ALIGN_CENTER,
-                .word_wrap = true,
+                .h_align = ALIGN_CENTER,
+                .v_align = ALIGN_CENTER,
             },
         });
 
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         /* ===== DEAD_PIXEL ===== */
+        osThreadSuspend(g_light_sensor_task_handle);
+        dev_display_set_brightness(dsp, 7);
         g_factory_state_debug = FACTORY_STATE_DEAD_PIXEL;
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
-            g_factory_color_idx = i;
             dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
@@ -169,7 +173,6 @@ static void factory_monitor_task(void *argument)
 
         /* 退出工厂模式 */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
-        osThreadResume(g_light_sensor_task_handle);
         osThreadResume(g_dispatch_task_handle);
         g_factory_state_debug = FACTORY_STATE_IDLE;
     }
