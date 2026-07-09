@@ -6,9 +6,6 @@
     ],
     "settings": {
         "terminal.integrated.shellIntegration.enabled": false,
-        "clangd.arguments": [
-            "--header-insertion=never"
-        ],
         "files.autoGuessEncoding": true,
         "C_Cpp.default.configurationProvider": "cl.eide",
         "C_Cpp.errorSquiggles": "disabled",
@@ -30,9 +27,14 @@
             "editor.autoIndent": "advanced"
         },
         "cortex-debug.variableUseNaturalFormat": true,
-        "Codegeex.RepoIndex": true,
-        "Codegeex.CommitMessageStyle": "ConventionalCommits",
-        "Codegeex.Chat.fontSize": 14
+        "makefile.configureOnOpen": false,
+        "makefile.launchConfigurations": [
+            {
+                "cwd": "/home/mqj/workspace/Project-STD/build/Debug",
+                "binaryPath": "/home/mqj/workspace/Project-STD/build/Debug/Project_STD.elf",
+                "binaryArgs": []
+            }
+        ]
     },
     "extensions": {
         "recommendations": [
