@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include "cmsis_os2.h"
-#include "dispatch_types.h"
+#include "app_dispatch.h"
 
 /** @brief MQTT 连接状态机 */
 typedef enum {

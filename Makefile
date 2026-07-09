@@ -273,7 +273,6 @@ SRC_DEVICE = \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
-	Device/Comm/dev_uart_channel.c \
 	Device/Network/dev_dp83848.c \
 	Device/Network/dev_eth.c \
 	Device/Comm/dev_rs485.c \
