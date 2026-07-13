@@ -1,4 +1,5 @@
 #include "app_ldi.h"
+#include "FreeRTOS.h"
 #include "initcall.h"
 
 #include "app_ldi_cmd.h"
@@ -8,6 +9,17 @@
 #include "app_tcp_server.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
+
+/* ---- proto_ldi_queue 静态分配 ---- */
+static StaticQueue_t s_ldi_queue_cb;
+static frame_msg_t s_ldi_queue_buf[2];
+static const osMessageQueueAttr_t s_ldi_queue_attr = {
+    .name    = "proto_ldi_queue",
+    .cb_mem  = &s_ldi_queue_cb,
+    .cb_size = sizeof(s_ldi_queue_cb),
+    .mq_mem  = s_ldi_queue_buf,
+    .mq_size = sizeof(s_ldi_queue_buf),
+};
 
 static_assert(sizeof(ldi_device_t) == 1, "ldi_device_t must be 1 byte");
 static_assert(sizeof(ldi_cmd_type_t) == 1, "ldi_cmd_type_t must be 1 byte");
@@ -217,8 +229,7 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
 void ldi_handle_task(void *argument)
 {
     static frame_msg_t msg;
-    const osMessageQueueAttr_t proto_ldi_queue_attr = {.name = "proto_ldi_queue"};
-    g_ldi_msg_queue                                 = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_ldi_queue_attr);
+    g_ldi_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &s_ldi_queue_attr);
     app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {

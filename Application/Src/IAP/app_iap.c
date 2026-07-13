@@ -7,11 +7,23 @@
  */
 
 #include "app_iap.h"
+#include "FreeRTOS.h"
 #include "initcall.h"
 #include "pl_crc.h"
 #include "app_udp.h"
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
+
+/* ---- proto_iap_queue 静态分配 ---- */
+static StaticQueue_t s_iap_queue_cb;
+static frame_msg_t s_iap_queue_buf[2];
+static const osMessageQueueAttr_t s_iap_queue_attr = {
+    .name    = "proto_iap_queue",
+    .cb_mem  = &s_iap_queue_cb,
+    .cb_size = sizeof(s_iap_queue_cb),
+    .mq_mem  = s_iap_queue_buf,
+    .mq_size = sizeof(s_iap_queue_buf),
+};
 
 /* ---- 协议模块自注册 ---- */
 static proto_mask_t s_iap_mask;
@@ -52,10 +64,7 @@ const osThreadAttr_t iap_task_attr = {
 void iap_handle_task(void *argument)
 {
     static frame_msg_t msg;
-    const osMessageQueueAttr_t proto_iap_queue_attr = {
-        .name = "proto_iap_queue",
-    };
-    g_iap_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_iap_queue_attr);
+    g_iap_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &s_iap_queue_attr);
     app_proto_set_frame_queue(s_iap_mask, g_iap_msg_queue);
 
     for (;;) {

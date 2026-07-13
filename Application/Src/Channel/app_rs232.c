@@ -8,6 +8,7 @@
 
 #include "app_rs232.h"
 
+#include "FreeRTOS.h"
 #include "pl_uart.h"
 #include "dev_rs232.h"
 #include "app_dispatch.h"
@@ -21,6 +22,39 @@ typedef struct {
 } rs232_ch_t;
 
 #define RS232_BUF_SIZE (2048U)
+
+/* ---- rs232_rx_queue 静态分配 ---- */
+static StaticQueue_t s_rs232_0_rx_cb;
+static uint16_t s_rs232_0_rx_buf[1];
+static const osMessageQueueAttr_t s_rs232_0_rx_attr = {
+    .name    = "rs232_0_rx",
+    .cb_mem  = &s_rs232_0_rx_cb,
+    .cb_size = sizeof(s_rs232_0_rx_cb),
+    .mq_mem  = s_rs232_0_rx_buf,
+    .mq_size = sizeof(s_rs232_0_rx_buf),
+};
+
+static StaticQueue_t s_rs232_1_rx_cb;
+static uint16_t s_rs232_1_rx_buf[1];
+static const osMessageQueueAttr_t s_rs232_1_rx_attr = {
+    .name    = "rs232_1_rx",
+    .cb_mem  = &s_rs232_1_rx_cb,
+    .cb_size = sizeof(s_rs232_1_rx_cb),
+    .mq_mem  = s_rs232_1_rx_buf,
+    .mq_size = sizeof(s_rs232_1_rx_buf),
+};
+
+/* ---- rs232 task attr ---- */
+static const osThreadAttr_t s_rs232_0_attr = {
+    .name       = "rs232_0_task",
+    .stack_size = 256 * 4,
+    .priority   = osPriorityNormal,
+};
+static const osThreadAttr_t s_rs232_1_attr = {
+    .name       = "rs232_1_task",
+    .stack_size = 256 * 4,
+    .priority   = osPriorityNormal,
+};
 
 /* ---- 实例 ---- */
 static rs232_ch_t g_rs232_0 = {.me = {.ch_id = CH_ID_RS232}};
@@ -48,7 +82,11 @@ static void rs232_task(void *argument)
 {
     rs232_ch_t *self = (rs232_ch_t *)argument;
 
-    self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), NULL);
+    self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), self->me.ch_id == CH_ID_RS232 ? &s_rs232_0_rx_attr : &s_rs232_1_rx_attr);
+    if (self->rx_queue == NULL) {
+        osThreadExit();
+        return;
+    }
     app_channel_register(self->me.ch_id, &self->me);
 
     pl_uart_set_rx_cb(self->uart, rs232_isr_cb, self);
@@ -70,7 +108,7 @@ osThreadId_t app_rs232_start(void)
     self->uart        = pl_uart_get_handle(PL_UART3);
     self->rx_buf      = dev_rs232_get_buf(0);
     self->rx_buf_size = RS232_BUF_SIZE;
-    return osThreadNew(rs232_task, self, &rs232_0_task_attr);
+    return osThreadNew(rs232_task, self, &s_rs232_0_attr);
 }
 
 osThreadId_t app_rs232_1_start(void)
@@ -80,5 +118,5 @@ osThreadId_t app_rs232_1_start(void)
     self->uart        = pl_uart_get_handle(PL_UART6);
     self->rx_buf      = dev_rs232_get_buf(1);
     self->rx_buf_size = RS232_BUF_SIZE;
-    return osThreadNew(rs232_task, self, &rs232_1_task_attr);
+    return osThreadNew(rs232_task, self, &s_rs232_1_attr);
 }

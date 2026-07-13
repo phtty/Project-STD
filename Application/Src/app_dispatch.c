@@ -11,9 +11,21 @@
  */
 
 #include "app_dispatch.h"
+#include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "bit_utils.h"
 #include "initcall.h"
+
+/* ---- g_ch_queue 静态分配 ---- */
+static StaticQueue_t s_ch_queue_cb;
+static channel_t *s_ch_queue_buf[MAX_CHANNELS];
+static const osMessageQueueAttr_t s_ch_queue_attr = {
+    .name    = "g_ch_queue",
+    .cb_mem  = &s_ch_queue_cb,
+    .cb_size = sizeof(s_ch_queue_cb),
+    .mq_mem  = s_ch_queue_buf,
+    .mq_size = sizeof(s_ch_queue_buf),
+};
 
 /* ================================================================
  *  环形缓冲区池 — 编译期静态分配，按 id 复用
@@ -154,9 +166,7 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
 
 void app_dispatch_init(void)
 {
-    /* 通道指针通知队列：max 32 个槽位，每项 sizeof(channel_t *) = 4 字节 */
-    osMessageQueueAttr_t ch_queue_attr = {.name = "g_ch_queue"};
-    g_dispatch.ch_queue                = osMessageQueueNew(MAX_CHANNELS, sizeof(channel_t *), &ch_queue_attr);
+    g_dispatch.ch_queue = osMessageQueueNew(MAX_CHANNELS, sizeof(channel_t *), &s_ch_queue_attr);
 
     /* 帧分发任务：遍历 ring buffer，调用各协议的探测函数 */
     const osThreadAttr_t frame_dispatch_task_attr = {

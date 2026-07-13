@@ -8,6 +8,7 @@
 
 #include "app_rs485.h"
 
+#include "FreeRTOS.h"
 #include "pl_uart.h"
 #include "dev_rs485.h"
 #include "app_dispatch.h"
@@ -21,6 +22,17 @@ typedef struct {
 } rs485_ch_t;
 
 #define RS485_BUF_SIZE (2048U)
+
+/* ---- rs485_rx_queue 静态分配 ---- */
+static StaticQueue_t s_rs485_rx_cb;
+static uint16_t s_rs485_rx_buf[1];
+static const osMessageQueueAttr_t s_rs485_rx_attr = {
+    .name    = "rs485_rx",
+    .cb_mem  = &s_rs485_rx_cb,
+    .cb_size = sizeof(s_rs485_rx_cb),
+    .mq_mem  = s_rs485_rx_buf,
+    .mq_size = sizeof(s_rs485_rx_buf),
+};
 
 /* ---- 实例 ---- */
 static rs485_ch_t g_rs485 = {.me = {.ch_id = CH_ID_RS485}};
@@ -47,9 +59,10 @@ static void rs485_task(void *argument)
 {
     rs485_ch_t *self = (rs485_ch_t *)argument;
 
-    self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), NULL);
+    self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), &s_rs485_rx_attr);
     if (self->rx_queue == NULL) {
         osThreadExit();
+        return;
     }
     app_channel_register(self->me.ch_id, &self->me);
 

@@ -1,9 +1,20 @@
 #include "app_rls.h"
+#include "FreeRTOS.h"
 #include "initcall.h"
 
 #include "bcc_utils.h"
 #include "app_rls_cmd.h"
-#include "app_rs485.h"
+
+/* ---- proto_rls_queue 静态分配 ---- */
+static StaticQueue_t s_rls_queue_cb;
+static frame_msg_t s_rls_queue_buf[2];
+static const osMessageQueueAttr_t s_rls_queue_attr = {
+    .name    = "proto_rls_queue",
+    .cb_mem  = &s_rls_queue_cb,
+    .cb_size = sizeof(s_rls_queue_cb),
+    .mq_mem  = s_rls_queue_buf,
+    .mq_size = sizeof(s_rls_queue_buf),
+};
 
 const static rls_cmd_type_t cmd_index_table[] = {
     RLS_CMD_TEST,
@@ -25,8 +36,7 @@ const osThreadAttr_t rls_task_attr = {
 void rls_handle_task(void *argument)
 {
     static frame_msg_t msg;
-    const osMessageQueueAttr_t proto_rls_queue_attr = {.name = "proto_rls_queue"};
-    g_rls_msg_queue                                 = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_rls_queue_attr);
+    g_rls_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &s_rls_queue_attr);
     app_proto_set_frame_queue(s_rls_mask, g_rls_msg_queue);
 
     for (;;) {
