@@ -94,7 +94,7 @@ static proto_mask_t s_ldi_mask;
 [[maybe_unused]] static void ldi_module_init(void)
 {
     // 指定协议使用的环形缓冲区
-    ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
+    ring_buffer_t *rb = app_proto_acquire_buf(1, 512);
 
     // 注册协议到多通道多协议解析模块
     s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
@@ -234,11 +234,11 @@ void ldi_handle_task(void *argument)
 
         /* 查表分派 */
         uint8_t idx = 0xFF;
-        for (uint8_t i = 0; i < sizeof(cmd_index_table); i++)
+        for (uint8_t i = 0; i < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]); i++)
             if (cmd_index_table[i] == req_head->cmd_type)
                 idx = i;
 
-        if (idx < sizeof(cmd_index_table))
+        if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
             g_ldi_cmd_table[idx](msg.ch, ldi_frame->data_crc);
     }
 }
@@ -267,7 +267,7 @@ proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 
     g_ldi.rsp_seq = frame->seq; /* 保存序号用于响应回显 */
 
-    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] & 0xFF00) | (frame->len[1] & 0xFF0000) | (frame->len[0] & 0xFF000000);
+    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] << 8 & 0xFF00) | (frame->len[1] << 16 & 0xFF0000) | (frame->len[0] << 24 & 0xFF000000);
     uint16_t frame_crc = (frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1];
     uint16_t calc_crc  = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
     if (frame_crc != calc_crc)

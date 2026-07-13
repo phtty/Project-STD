@@ -48,6 +48,12 @@ virtualFolder:
                 - path: Application/Src/LDI/app_vms_ctrl.c
                 - path: Application/Src/LDI/app_ldi_cfg.c
               folders: []
+            - name: rls
+              files:
+                - path: Application/Src/RLS/app_rls_cfg.c
+                - path: Application/Src/RLS/app_rls_cmd.c
+                - path: Application/Src/RLS/app_rls.c
+              folders: []
     - name: Drivers
       files: []
       folders:
@@ -274,6 +280,7 @@ virtualFolder:
         - path: Kernel/Src/bit_utils.c
         - path: Kernel/Src/crc_utils.c
         - path: Kernel/Src/text_cvt.c
+        - path: Kernel/Src/bcc_utils.c
       folders: []
     - name: Core
       files:
@@ -324,6 +331,7 @@ targets:
         - Application/Inc/IAP
         - Application/Inc/LDI
         - Application/Inc/AH_MQTT
+        - Application/Inc/RLS
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -416,8 +424,8 @@ targets:
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
-        interface: stlink
-        target: stm32f1x
+        interface: cmsis-dap
+        target: stm32f4x
       probe-rs:
         allowEraseAll: false
         baseAddr: "0x08000000"
@@ -426,7 +434,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: probe-rs
+    uploader: Custom
   Release:
     cppPreprocessAttrs:
       defineList:

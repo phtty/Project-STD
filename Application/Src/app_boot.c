@@ -18,6 +18,7 @@
 #include "app_udp.h"
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
+#include "app_rs485.h"
 #include "app_test.h"
 #include "app_key.h"
 
@@ -77,6 +78,7 @@ static void init_task(void *argument)
     app_tcp_server_start();
     app_tcp_client_start();
     app_udp_start();
+    app_rs485_start();
 
     // app_test_run();
 

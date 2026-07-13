@@ -48,6 +48,9 @@ static void rs485_task(void *argument)
     rs485_ch_t *self = (rs485_ch_t *)argument;
 
     self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), NULL);
+    if (self->rx_queue == NULL) {
+        osThreadExit();
+    }
     app_channel_register(self->me.ch_id, &self->me);
 
     pl_uart_set_rx_cb(self->uart, rs485_isr_cb, self);
@@ -55,8 +58,9 @@ static void rs485_task(void *argument)
 
     for (;;) {
         uint16_t rx_len = 0;
-        osMessageQueueGet(self->rx_queue, &rx_len, 0, osWaitForever);
-        app_channel_dispatch(&self->me, self->rx_buf, rx_len);
+        if (osMessageQueueGet(self->rx_queue, &rx_len, 0, osWaitForever) == osOK) {
+            app_channel_dispatch(&self->me, self->rx_buf, rx_len);
+        }
     }
 }
 
@@ -64,10 +68,16 @@ static void rs485_task(void *argument)
 
 osThreadId_t app_rs485_start(void)
 {
-    rs485_ch_t *self = &g_rs485;
+    rs485_ch_t *self  = &g_rs485;
     self->me.ops      = &rs485_ops;
     self->uart        = pl_uart_get_handle(PL_UART1);
     self->rx_buf      = dev_rs485_get_buf();
     self->rx_buf_size = RS485_BUF_SIZE;
+
+    osThreadAttr_t rs485_task_attr = {
+        .name       = "rs485_task",
+        .stack_size = 256 * 4,
+        .priority   = osPriorityNormal,
+    };
     return osThreadNew(rs485_task, self, &rs485_task_attr);
 }
