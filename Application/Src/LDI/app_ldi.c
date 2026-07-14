@@ -11,8 +11,10 @@
 #include "pl_rtc.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
+#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
+
 static StaticQueue_t s_ldi_queue_cb;
-static frame_msg_t s_ldi_queue_buf[2];
+static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE];
 static const osMessageQueueAttr_t s_ldi_queue_attr = {
     .name    = "proto_ldi_queue",
     .cb_mem  = &s_ldi_queue_cb,
@@ -228,15 +230,16 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
 
 void ldi_handle_task(void *argument)
 {
-    static frame_msg_t msg;
-    g_ldi_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &s_ldi_queue_attr);
+    static uint8_t _msg_buf[LDI_MSG_SIZE];
+    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
     app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_ldi_msg_queue, &msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(g_ldi_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg.data;
+        ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg->data;
         ldi_req_head_t *req_head = (ldi_req_head_t *)ldi_frame->data_crc;
 
         /* 状态门禁 */
@@ -250,7 +253,7 @@ void ldi_handle_task(void *argument)
                 idx = i;
 
         if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_ldi_cmd_table[idx](msg.ch, ldi_frame->data_crc);
+            g_ldi_cmd_table[idx](msg->ch, ldi_frame->data_crc);
     }
 }
 

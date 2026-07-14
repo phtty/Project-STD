@@ -1,5 +1,6 @@
 #include "ah_mqtt.h"
 
+#include "FreeRTOS.h"
 #include "ah_mqtt_cmd.h"
 #include "dev_display.h"
 #include "app_mqtt.h"
@@ -62,30 +63,34 @@ static uint8_t handle_topic(const char topic[]);
 
 void ah_mqtt_handle_task(void *argument)
 {
-    frame_msg_t msg;
-    const osMessageQueueAttr_t proto_ah_mqtt_queue_attr = {
-        .name = "g_proto_ah_matt_queue",
+    static uint8_t _msg_buf[sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX];
+    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    static StaticQueue_t s_ah_mqtt_queue_cb;
+    static uint8_t s_ah_mqtt_queue_buf[sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX];
+    static const osMessageQueueAttr_t s_ah_mqtt_queue_attr = {
+        .name    = "g_proto_ah_matt_queue",
+        .cb_mem  = &s_ah_mqtt_queue_cb,
+        .cb_size = sizeof(s_ah_mqtt_queue_cb),
+        .mq_mem  = s_ah_mqtt_queue_buf,
+        .mq_size = sizeof(s_ah_mqtt_queue_buf),
     };
-    g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t), &proto_ah_mqtt_queue_attr);
+    g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX, &s_ah_mqtt_queue_attr);
     app_proto_set_frame_queue(s_ah_mqtt_mask, g_proto_ah_matt_queue);
 
-    while (g_mqtt.state != MQTT_ST_READY) { // 等待连接建立
+    while (g_mqtt.state != MQTT_ST_READY) {
         osDelay(100);
     }
-    // 创建两个任务，用于定时上报状态和签到
     SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
     ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
-        // 等待多协议多信道模块分发数据帧
-        if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, &msg, NULL, osWaitForever)) {
+        if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, msg, NULL, osWaitForever)) {
             continue;
         }
 
-        // 通过topic得知是哪个命令
-        uint16_t cmd = handle_topic(container_of(msg.ch, mqtt_channel_t, me)->topic);
+        uint16_t cmd = handle_topic(container_of(msg->ch, mqtt_channel_t, me)->topic);
 
-        g_ah_mqtt_cmd_table[cmd](msg.ch, (char *)(msg.data));
+        g_ah_mqtt_cmd_table[cmd](msg->ch, (char *)(msg->data));
     }
 }
 

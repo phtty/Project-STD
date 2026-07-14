@@ -27,6 +27,9 @@ static const osMessageQueueAttr_t s_ch_queue_attr = {
     .mq_size = sizeof(s_ch_queue_buf),
 };
 
+/* ---- 帧分发任务缓冲区 ---- */
+static uint8_t _msg_dispatch_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN];
+
 /* ================================================================
  *  环形缓冲区池 — 编译期静态分配，按 id 复用
  *
@@ -198,7 +201,7 @@ sw_app_initcall(app_dispatch_init);
 void frame_dispatch_task(void *argument)
 {
     channel_t *ch;          /**< 来源通道指针（从 ch_queue 取出） */
-    static frame_msg_t msg; /**< 帧消息（推入协议队列） */
+    frame_msg_t *msg = (frame_msg_t *)_msg_dispatch_buf;
     uint32_t frame_len = 0; /**< 探测到的完整帧长度 */
     uint8_t aux        = 0; /**< 辅助信息（如命令码） */
 
@@ -260,13 +263,13 @@ void frame_dispatch_task(void *argument)
                     if (state == PROTO_PROBE_READY) {
                         /* 完整帧就绪：从缓冲区读出 → 推入协议处理队列 */
                         if (avail >= frame_len) {
-                            uint16_t actual = rb_read(rb, msg.data, frame_len, nullptr);
+                            uint16_t actual = rb_read(rb, msg->data, frame_len, nullptr);
                             avail           = rb_avail(rb, nullptr);
 
                             if (actual == frame_len) {
-                                msg.data_len = frame_len;
-                                msg.ch       = ch;
-                                osMessageQueuePut(g_dispatch.frame_queue[j], &msg, 0, 0);
+                                msg->data_len = frame_len;
+                                msg->ch       = ch;
+                                osMessageQueuePut(g_dispatch.frame_queue[j], msg, 0, 0);
                             } else {
                                 /* 异常：读出字节数不匹配，丢弃已读部分 */
                                 rb_skip(rb, actual, nullptr);

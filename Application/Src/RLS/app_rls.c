@@ -6,8 +6,10 @@
 #include "app_rls_cmd.h"
 
 /* ---- proto_rls_queue 静态分配 ---- */
+#define RLS_MSG_SIZE (sizeof(frame_msg_t) + RLS_PAYLOAD_MAX)
+
 static StaticQueue_t s_rls_queue_cb;
-static frame_msg_t s_rls_queue_buf[2];
+static uint8_t s_rls_queue_buf[2 * RLS_MSG_SIZE];
 static const osMessageQueueAttr_t s_rls_queue_attr = {
     .name    = "proto_rls_queue",
     .cb_mem  = &s_rls_queue_cb,
@@ -35,15 +37,16 @@ const osThreadAttr_t rls_task_attr = {
 /*--- 帧任务---*/
 void rls_handle_task(void *argument)
 {
-    static frame_msg_t msg;
-    g_rls_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &s_rls_queue_attr);
+    static uint8_t _msg_buf[RLS_MSG_SIZE];
+    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    g_rls_msg_queue = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
     app_proto_set_frame_queue(s_rls_mask, g_rls_msg_queue);
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_rls_msg_queue, &msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(g_rls_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        rls_frame_t *rls_frame = (rls_frame_t *)msg.data;
+        rls_frame_t *rls_frame = (rls_frame_t *)msg->data;
 
         /* 查表分派 */
         uint8_t idx = 0xFF;
@@ -52,7 +55,7 @@ void rls_handle_task(void *argument)
                 idx = i;
 
         if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_rls_cmd_table[idx](msg.ch, rls_frame->data_bcc_tail);
+            g_rls_cmd_table[idx](msg->ch, rls_frame->data_bcc_tail);
     }
 }
 
