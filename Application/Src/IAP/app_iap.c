@@ -15,6 +15,7 @@
 #include "app_iap_cmd.h"
 
 /* ---- proto_iap_queue 静态分配 ---- */
+#define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
 #define IAP_MSG_SIZE (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
 
 static StaticQueue_t s_iap_queue_cb;

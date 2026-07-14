@@ -81,14 +81,8 @@ typedef struct {
     uint8_t data[]; /* 柔性数组, sizeof(frame_msg_t)=8 */
 } frame_msg_t;
 
-/* 协议帧最大载荷 (分发任务缓冲区用) */
+/* 分发任务缓冲区上限 (平台约束, 非协议知识) */
 #define FRAME_DATA_MAX_LEN (1044U)
-
-/* 各协议 payload 上限 (不含 frame_msg_t header) */
-#define IAP_PAYLOAD_MAX     (1044U) /* FRAME_MAX_LEN * 4 */
-#define LDI_PAYLOAD_MAX     (512U)  /* 与探头 mem_pool 容量一致 */
-#define RLS_PAYLOAD_MAX     (530U)  /* 帧头(6B) + bitmap(512B) + BCC(1B) + 尾(2B) + 余量 */
-#define AH_MQTT_PAYLOAD_MAX (533U)  /* MQTT_FRAME_MAX_LEN */
 
 typedef struct {
     void (*init)(void);

@@ -6,6 +6,7 @@
 #include "app_rls_cmd.h"
 
 /* ---- proto_rls_queue 静态分配 ---- */
+#define RLS_PAYLOAD_MAX (530U) /* 帧头(6B) + bitmap(512B) + BCC(1B) + 尾(2B) + 余量 */
 #define RLS_MSG_SIZE (sizeof(frame_msg_t) + RLS_PAYLOAD_MAX)
 
 static StaticQueue_t s_rls_queue_cb;

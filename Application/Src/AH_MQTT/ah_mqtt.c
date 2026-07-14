@@ -63,6 +63,7 @@ static uint8_t handle_topic(const char topic[]);
 
 void ah_mqtt_handle_task(void *argument)
 {
+#define AH_MQTT_PAYLOAD_MAX (533U) /* MQTT_FRAME_MAX_LEN */
     static uint8_t _msg_buf[sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
     static StaticQueue_t s_ah_mqtt_queue_cb;

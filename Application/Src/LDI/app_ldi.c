@@ -11,6 +11,7 @@
 #include "pl_rtc.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
+#define LDI_PAYLOAD_MAX (512U) /* 与探头 mem_pool 容量一致 */
 #define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
