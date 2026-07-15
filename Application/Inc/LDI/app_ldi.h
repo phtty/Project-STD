@@ -137,7 +137,7 @@ typedef struct {
     uint8_t rsp_seq; // 响应序号（探头保存，回显 host 请求帧）
     uint8_t rpt_seq; // 主动上报序号计数器（→ 0x10, 0x20...）
 
-    dev_flash_ldi_cfg_info_t cfg; // RAM 镜像 — 唯一配置真源
+    app_flash_ldi_cfg_info_t cfg; // RAM 镜像 — 唯一配置真源
     bool cfg_valid;
 
     uint32_t last_cert_tick; // 上次发送 0EH 的 RTOS tick（3 秒间隔）

@@ -5,8 +5,8 @@
 
 // Flash Sector 11 (0x080E0000~0x080FFFFF, 128KB) 已释放。
 // LDI 配置现已迁移至 W25Qxx 最后一个 4KB 扇区，通过 dev_storage_ops 访问。
-#define DEV_FLASH_LDI_MAGIC    0x0D001B00
-#define DEV_FLASH_LDI_MAX_MODULES (6U) // Flash 最大可存储的功能模块数量
+#define APP_FLASH_LDI_MAGIC    0x0D001B00
+#define APP_FLASH_LDI_MAX_MODULES (6U) // Flash 最大可存储的功能模块数量
 
 /**
  * 单功能模块配置信息（从 0BH 命令下发，共 12 字节）
@@ -18,9 +18,9 @@ typedef struct {
     uint8_t device_type;   // ldi_device_t 枚举值 (E1H~EBH)
     uint8_t device_index;  // 功能模块序号，从 01H 开始
     uint8_t vendor[10];    // 厂商自定义参数段 (0BH 命令下发的 Vendor[] 段)
-} dev_flash_ldi_module_cfg_t;
+} app_flash_ldi_module_cfg_t;
 
-static_assert(sizeof(dev_flash_ldi_module_cfg_t) == 12);
+static_assert(sizeof(app_flash_ldi_module_cfg_t) == 12);
 
 /**
  * LDI 车道设备配置信息 (共 46 字节)
@@ -38,8 +38,8 @@ typedef struct {
     uint8_t lane_hex[5];   // 车道 HEX 编号 (来自 req_head.lane_code)
     uint8_t cert[8];       // 设备验证信息 (来自 req_head.cert_info)
     uint8_t module_count;  // 功能模块数量 N
-    dev_flash_ldi_module_cfg_t modules[DEV_FLASH_LDI_MAX_MODULES]; // N <= MAX_MODULES
-} dev_flash_ldi_cfg_info_t;
+    app_flash_ldi_module_cfg_t modules[APP_FLASH_LDI_MAX_MODULES]; // N <= MAX_MODULES
+} app_flash_ldi_cfg_info_t;
 
 /**
  * Flash 存储记录 = magic + 配置 + CRC32 校验
@@ -47,17 +47,17 @@ typedef struct {
  */
 typedef struct {
     uint32_t magic;
-    dev_flash_ldi_cfg_info_t cfg;
+    app_flash_ldi_cfg_info_t cfg;
     uint32_t crc32;
-} dev_flash_ldi_record_t;
+} app_flash_ldi_record_t;
 
-bool dev_flash_ldi_is_config_empty(volatile const dev_flash_ldi_record_t *rec);
-bool dev_flash_ldi_is_config_valid(volatile const dev_flash_ldi_record_t *rec);
-int32_t dev_flash_ldi_erase_config(void);
-int32_t dev_flash_ldi_write_config(dev_flash_ldi_record_t *rec);
-void dev_flash_ldi_save_config(dev_flash_ldi_cfg_info_t *info);
+bool app_flash_ldi_is_config_empty(volatile const app_flash_ldi_record_t *rec);
+bool app_flash_ldi_is_config_valid(volatile const app_flash_ldi_record_t *rec);
+int32_t app_flash_ldi_erase_config(void);
+int32_t app_flash_ldi_write_config(app_flash_ldi_record_t *rec);
+void app_flash_ldi_save_config(app_flash_ldi_cfg_info_t *info);
 /** @brief 从 W25Qxx 加载 LDI 配置，返回 true 表示读取到有效配置 */
-bool dev_flash_ldi_load_config(dev_flash_ldi_cfg_info_t *info);
+bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info);
 
 /** @brief 获取 LDI Flash 存储句柄（内部使用） */
-dev_storage_t *dev_flash_ldi_get_storage(void);
+dev_storage_t *app_flash_ldi_get_storage(void);

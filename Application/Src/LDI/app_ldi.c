@@ -5,6 +5,7 @@
 #include "app_ldi_cmd.h"
 #include "crc_utils.h"
 #include "app_ldi_cfg.h"
+#include "app_iap_cfg.h"
 #include "app_tcp_client.h"
 #include "app_tcp_server.h"
 #include "pl_net.h"
@@ -56,9 +57,9 @@ ldi_ctx_t g_ldi = {
 
 void ldi_ctx_init(ldi_ctx_t *self)
 {
-    dev_flash_ldi_cfg_info_t flash_cfg = {0};
+    app_flash_ldi_cfg_info_t flash_cfg = {0};
 
-    if (dev_flash_ldi_load_config(&flash_cfg)) {
+    if (app_flash_ldi_load_config(&flash_cfg)) {
         /* Flash 有有效配置：应用到运行环境 */
 
         /* 网络参数（device_ip/mask/gw/host_ip/host_port 等） */
@@ -87,13 +88,27 @@ void ldi_ctx_init(ldi_ctx_t *self)
         }
         self->cfg_valid = true;
 
+        /* 同步 IP 到 IAP 内部 flash（仅当 IAP 已有有效配置且不一致时） */
+        if (app_flash_iap_is_config_valid(g_config)
+         && (memcmp(self->cfg.device_ip, g_config->net_cfg.ip, 4)
+          || memcmp(self->cfg.netmask, g_config->net_cfg.mask, 4)
+          || memcmp(self->cfg.gateway, g_config->net_cfg.gw, 4)))
+            app_flash_iap_update_net_cfg(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
+
     } else {
-        /* flash 无有效配置，填入网络参数，modules[] 沿用静态初始化中的编译期默认值 */
-        uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
-        pl_net_get_ip(ip, mask, gw);
-        memcpy(self->cfg.device_ip, ip, sizeof(ip));
-        memcpy(self->cfg.netmask, mask, sizeof(mask));
-        memcpy(self->cfg.gateway, gw, sizeof(gw));
+        /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
+        if (app_flash_iap_is_config_valid(g_config)) {
+            memcpy(self->cfg.device_ip, g_config->net_cfg.ip, 4);
+            memcpy(self->cfg.netmask, g_config->net_cfg.mask, 4);
+            memcpy(self->cfg.gateway, g_config->net_cfg.gw, 4);
+        } else {
+            /* IAP 也无有效配置，使用上电默认 IP */
+            uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
+            pl_net_get_ip(ip, mask, gw);
+            memcpy(self->cfg.device_ip, ip, sizeof(ip));
+            memcpy(self->cfg.netmask, mask, sizeof(mask));
+            memcpy(self->cfg.gateway, gw, sizeof(gw));
+        }
         self->cfg.device_port = app_tcp_server_get_port();
         memcpy(self->cfg.host_ip, app_tcp_client_get_host_ip(), 4);
         self->cfg.host_port = app_tcp_client_get_host_port();
