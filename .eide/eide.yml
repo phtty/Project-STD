@@ -50,7 +50,6 @@ virtualFolder:
               folders: []
             - name: rls
               files:
-                - path: Application/Src/RLS/app_rls_cfg.c
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
               folders: []

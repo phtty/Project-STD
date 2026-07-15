@@ -18,37 +18,49 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
 
 static void cmd_display(channel_t *ch, void *data)
 {
-    rls_dispaly_t *frame  = (rls_dispaly_t *)(((rls_frame_t *)data)->data_bcc_tail);
-    display_color_t color = COLOR_BLACK;
+    rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
-    switch (frame->color) {
-        case 0x00:
-            color = COLOR_RED;
-            break;
-
-        case 0x01:
-            color = COLOR_GREEN;
-            break;
-
-        case 0x02:
-            color = COLOR_YELLOW;
-            break;
-
-        default:
-            break;
-    }
-
+    // 显示前先清屏
+    app_render(&(render_cfg_t){
+        .type  = RENDER_FILL,
+        .x     = 0,
+        .y     = 0,
+        .w     = 0,
+        .h     = 0,
+        .color = COLOR_BLACK,
+    });
     app_render(&(render_cfg_t){
         .type   = RENDER_BITMAP,
         .x      = 0,
         .y      = 0,
         .w      = dev_display_get()->screen_rows,
         .h      = dev_display_get()->screen_cols,
-        .color  = color,
-        .bitmap = frame->bitmap,
+        .color  = display_ctx->color,
+        .bitmap = display_ctx->bitmap,
     });
 }
 
 static void cmd_display_save(channel_t *ch, void *data)
 {
+    rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
+
+    // 显示前先清屏
+    app_render(&(render_cfg_t){
+        .type  = RENDER_FILL,
+        .x     = 0,
+        .y     = 0,
+        .w     = 0,
+        .h     = 0,
+        .color = COLOR_BLACK,
+    });
+    app_render(&(render_cfg_t){
+        .type   = RENDER_BITMAP,
+        .x      = 0,
+        .y      = 0,
+        .w      = dev_display_get()->screen_rows,
+        .h      = dev_display_get()->screen_cols,
+        .color  = display_ctx->color,
+        .bitmap = display_ctx->bitmap,
+    });
+    app_render_save();
 }

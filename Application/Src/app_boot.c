@@ -21,6 +21,7 @@
 #include "app_rs485.h"
 #include "app_test.h"
 #include "app_key.h"
+#include "app_render.h"
 
 static void init_task(void *argument);
 
@@ -60,6 +61,29 @@ void app_boot(void)
     osKernelStart();
 }
 
+static void app_default_display(void)
+{
+    if (!app_render_restore()) {
+        app_render(&(render_cfg_t){
+            .type  = RENDER_TEXT,
+            .x     = 0,
+            .y     = 0,
+            .w     = dev_display_get()->screen_rows,
+            .h     = dev_display_get()->screen_cols,
+            .style = &(render_style_t){
+                .h_align = ALIGN_CENTER,
+                .v_align = ALIGN_CENTER,
+            },
+            .color     = COLOR_RED,
+            .text      = "车道关闭",
+            .len       = strlen("车道关闭"),
+            .font_size = FONT_32,
+            .font_type = FONT_HT,
+            .text_enc  = FONT_ENC_UTF8,
+        });
+    }
+}
+
 static void init_task(void *argument)
 {
     (void)argument;
@@ -81,6 +105,7 @@ static void init_task(void *argument)
     app_rs485_start();
 
     // app_test_run();
+    app_default_display();
 
     printf("\nInit Task Done\n");
 

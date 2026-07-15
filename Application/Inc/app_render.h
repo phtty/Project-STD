@@ -97,3 +97,23 @@ typedef struct {
 
 /** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现 */
 void app_render(const render_cfg_t *cfg);
+
+/* ---- 持久化显示 ---- */
+
+#define RENDER_PERSIST_MAGIC (0x0d000721U)
+
+typedef struct [[gnu::packed]] {
+    uint32_t magic;
+    uint16_t screen_rows;
+    uint16_t screen_cols;
+    uint8_t  color;         /* 非黑像素颜色 (display_color_t) */
+    uint32_t crc32;         /* bitmap 数据的 CRC32 */
+    uint8_t  bitmap[];      /* ((rows*cols+7)/8) 字节, MSB first per row */
+} render_persist_t;
+
+/** @brief 将当前显存写入存储设备持久化扇区 */
+void app_render_save(void);
+
+/** @brief 从存储设备加载持久化数据恢复显存
+ *  @return true=成功恢复并置脏标记, false=无有效数据/尺寸不匹配/CRC错误 */
+bool app_render_restore(void);

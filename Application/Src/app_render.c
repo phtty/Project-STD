@@ -12,6 +12,7 @@
 #include <string.h>
 #include "text_cvt.h"
 #include "initcall.h"
+#include "crc_utils.h"
 #include "dev_w25qxx.h"
 
 /* ---- 字库单元描述 ---- */
@@ -125,12 +126,14 @@ static bool _is_gbk(uint8_t high, uint8_t low)
 /* ---- 注册的句柄 ---- */
 static dev_display_t *s_render_display;
 static dev_storage_t *s_render_font;
+static uint32_t s_persist_addr;
 
 /* ---- 模块自注册，依赖storage和display模块）---- */
 static void _render_init(void)
 {
     s_render_display = dev_display_get();
     s_render_font    = dev_w25qxx_get();
+    s_persist_addr   = dev_storage_capacity(s_render_font) - 4096 * 2;
 }
 sw_app_initcall(_render_init);
 
@@ -339,4 +342,77 @@ void app_render(const render_cfg_t *cfg)
     if (!cfg || !s_render_display) return;
     if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
         g_render_fn[cfg->type](cfg);
+}
+
+/* ================================================================
+ *  持久化显示 — 将显存以位图格式保存/恢复到存储设备
+ *
+ *  pixel_map (逐像素颜色) → bitmap (1bit/pixel + 单色)，大幅压缩闪存占用。
+ *  恢复阶段 fill(BLACK) + draw_bitmap(color) 重建 pixel_map。
+ * ================================================================ */
+
+#define PERSIST_BUF_SIZE (sizeof(render_persist_t) + 512) /* 容纳 64×64 像素位图 */
+
+void app_render_save(void)
+{
+    dev_display_t *d = s_render_display;
+    if (!d || !s_render_font) return;
+
+    uint16_t rows      = d->screen_rows;
+    uint16_t cols      = d->screen_cols;
+    uint16_t row_bytes = (rows + 7) / 8;
+    uint16_t bm_bytes  = cols * row_bytes;
+
+    static uint8_t buf[PERSIST_BUF_SIZE];
+    render_persist_t *r = (render_persist_t *)buf;
+    memset(r->bitmap, 0, bm_bytes);
+
+    uint8_t color = COLOR_BLACK;
+    for (uint16_t y = 0; y < cols; y++) {
+        for (uint16_t x = 0; x < rows; x++) {
+            uint8_t px = d->pixel_map[y * rows + x];
+            if (px != COLOR_BLACK) {
+                r->bitmap[y * row_bytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
+                if (color == COLOR_BLACK) color = px;
+            }
+        }
+    }
+
+    r->magic       = RENDER_PERSIST_MAGIC;
+    r->screen_rows = rows;
+    r->screen_cols = cols;
+    r->color       = color;
+    r->crc32       = crc32_calc(r->bitmap, bm_bytes);
+
+    dev_storage_write(s_render_font, s_persist_addr, buf,
+                      sizeof(render_persist_t) + bm_bytes);
+}
+
+bool app_render_restore(void)
+{
+    dev_display_t *d = s_render_display;
+    if (!d || !s_render_font)
+        return false;
+
+    uint16_t rows      = d->screen_rows;
+    uint16_t cols      = d->screen_cols;
+    uint16_t row_bytes = (rows + 7) / 8;
+    uint16_t bm_bytes  = cols * row_bytes;
+
+    static uint8_t buf[PERSIST_BUF_SIZE];
+    if (dev_storage_read(s_render_font, s_persist_addr, buf,
+                         sizeof(render_persist_t) + bm_bytes) < 0)
+        return false;
+
+    render_persist_t *r = (render_persist_t *)buf;
+    if (r->magic != RENDER_PERSIST_MAGIC)
+        return false;
+    if (r->screen_rows != rows || r->screen_cols != cols)
+        return false;
+    if (r->crc32 != crc32_calc(r->bitmap, bm_bytes))
+        return false;
+
+    dev_display_fill(d, 0, 0, rows, cols, COLOR_BLACK);
+    dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
+    return true;
 }

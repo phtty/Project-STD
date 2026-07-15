@@ -47,7 +47,7 @@ void rls_handle_task(void *argument)
         if (osOK != osMessageQueueGet(g_rls_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        rls_frame_t *rls_frame = (rls_frame_t *)msg->data;
+        rls_frame_t *rls_frame = (rls_frame_t *)(msg->data);
 
         /* 查表分派 */
         uint8_t idx = 0xFF;
