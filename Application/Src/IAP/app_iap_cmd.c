@@ -91,7 +91,7 @@ static void cmd_Test_00(channel_t *ch, iap_frame_t *IAP_Data)
 /** @brief 0x01: Report current IP config */
 static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    dev_flash_iap_sys_info_t config_info = *((dev_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t ReData[4] = {0};
     ReData[0]          = config_info.net_cfg.ip[0] << 24 | config_info.net_cfg.ip[1] << 16 | config_info.net_cfg.ip[2] << 8 | config_info.net_cfg.ip[3];
@@ -107,12 +107,12 @@ static iap_ipconfig_t ipconfig = {0};
 /** @brief 0x02: Force modify IP and write to Flash */
 static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    dev_flash_iap_sys_info_t config_info = *((dev_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t TmpData[4] = {0};
     memcpy(TmpData, IAP_Data->data_crc, sizeof(TmpData));
 
-    dev_flash_iap_net_cfg_t net_info = {0};
+    app_flash_iap_net_cfg_t net_info = {0};
     net_info.ip[0]       = (uint8_t)(TmpData[0] >> 24);
     net_info.ip[1]       = (uint8_t)(TmpData[0] >> 16);
     net_info.ip[2]       = (uint8_t)(TmpData[0] >> 8);
@@ -133,14 +133,14 @@ static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
     IP4_ADDR(&ipconfig.gw, net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3]);
     tcpip_callback(iap_update_ip, &ipconfig);
 
-    dev_flash_iap_edit_config(&config_info);
+    app_flash_iap_edit_config(&config_info);
     cmd_SendReData(ch, IAP_Data->seq, rtn_cmd02, 0, NULL);
 }
 
 /** @brief 0x03: Report firmware version, size, CRC32, update status */
 static void cmd_ReportFirmwareStatus_03(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    dev_flash_iap_sys_info_t config_info = *((dev_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
     uint32_t ReData[11] = {0};
     ReData[0]           = config_info.app_info.size;

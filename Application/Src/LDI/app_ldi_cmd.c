@@ -4,6 +4,7 @@
 
 #include "crc_utils.h"
 #include "app_ldi_cfg.h"
+#include "app_iap_cfg.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_sys.h"
@@ -414,7 +415,8 @@ void cmd_set_ip(channel_t *ch, void *data)
     memcpy(g_ldi.cfg.gateway, info->net.gateway, sizeof(g_ldi.cfg.gateway));
     g_ldi.cfg_valid = true;
 
-    dev_flash_ldi_save_config(&g_ldi.cfg);
+    app_flash_ldi_save_config(&g_ldi.cfg);
+    app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
 
     ldi_status_rsp_t rsp = {.status = 0x00};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);
@@ -477,7 +479,7 @@ static void cmd_set_config(channel_t *ch, void *data)
     }
 
     if (result)
-        dev_flash_ldi_save_config(&g_ldi.cfg);
+        app_flash_ldi_save_config(&g_ldi.cfg);
 
     ldi_status_rsp_t rsp = {.status = result ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_PARA_RSP);
@@ -565,7 +567,7 @@ static void cmd_rep_config(channel_t *ch, void *data)
 
     uint8_t *dst = rsp->modules;
     for (uint8_t i = 0; i < g_ldi.cfg.module_count; i++) {
-        dev_flash_ldi_module_cfg_t *mod = &g_ldi.cfg.modules[i];
+        app_flash_ldi_module_cfg_t *mod = &g_ldi.cfg.modules[i];
 
         // module 公共头
         *dst++ = mod->device_type;
