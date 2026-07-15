@@ -228,10 +228,10 @@ void frame_dispatch_task(void *argument)
             if ((proto & mask) == 0) continue;
             if (rb == nullptr) continue;
 
-            /* 跳过已处理过的缓冲区（多个协议共享同一 RB 时去重） */
+            /* 跳过已处理过的缓冲区（仅限同一通道上的协议） */
             bool dup = false;
             for (uint8_t k = 0; k < i; k++)
-                if (g_dispatch.proto_rb[k] == rb) {
+                if ((proto & (1U << k)) && g_dispatch.proto_rb[k] == rb) {
                     dup = true;
                     break;
                 }

@@ -7,7 +7,7 @@
 
 /* ---- proto_rls_queue 静态分配 ---- */
 #define RLS_PAYLOAD_MAX (530U) /* 帧头(6B) + bitmap(512B) + BCC(1B) + 尾(2B) + 余量 */
-#define RLS_MSG_SIZE (sizeof(frame_msg_t) + RLS_PAYLOAD_MAX)
+#define RLS_MSG_SIZE    (sizeof(frame_msg_t) + RLS_PAYLOAD_MAX)
 
 static StaticQueue_t s_rls_queue_cb;
 static uint8_t s_rls_queue_buf[2 * RLS_MSG_SIZE];
@@ -40,7 +40,7 @@ void rls_handle_task(void *argument)
 {
     static uint8_t _msg_buf[RLS_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
-    g_rls_msg_queue = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
+    g_rls_msg_queue  = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
     app_proto_set_frame_queue(s_rls_mask, g_rls_msg_queue);
 
     for (;;) {
@@ -79,13 +79,14 @@ proto_probe_sta_t rls_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 
     uint16_t data_len = (frame->length[1] & 0xFF) | ((frame->length[0] << 8) & 0xFF00);
 
-    if (memcmp(rls_tail, frame->data_bcc_tail + sizeof(rls_frame_t), sizeof(rls_tail)))
+    if (memcmp(rls_tail, (uint8_t *)frame + data_len - 2, sizeof(rls_tail)))
         return PROTO_PROBE_FAKE;
 
-    uint8_t frame_bcc = frame->data_bcc_tail[sizeof(rls_frame_t) - 1];
-    uint8_t calc_bcc  = bcc_calcu(frame->data_bcc_tail, data_len - sizeof(rls_frame_t) - 4);
-    if (frame_bcc != calc_bcc)
-        return PROTO_PROBE_FAKE;
+    // 上位机的bcc校验没有做
+    // uint8_t frame_bcc = ((uint8_t *)frame)[data_len - 3];
+    // uint8_t calc_bcc  = bcc_calcu(frame->data_bcc_tail, data_len - sizeof(rls_frame_t) - 4);
+    // if (frame_bcc != calc_bcc)
+    //     return PROTO_PROBE_FAKE;
 
     (void)*aux;
     *total_len = data_len;

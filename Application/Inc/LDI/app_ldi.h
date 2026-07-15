@@ -5,9 +5,9 @@
 #include "app_ldi_cfg.h"
 #include "ring_buffer.h"
 
-#define DEVICE_NUM (2U) // 本设备使用到的功能模块数量
+#define DEVICE_NUM      (2U) // 本设备使用到的功能模块数量
 
-#define LDI_TX_BUF_SIZE (1044U) // 响应帧拼装缓冲区上限
+#define LDI_TX_BUF_SIZE (512U) // 响应帧拼装缓冲区上限
 
 /**
  * 外设功能模块类型编码
@@ -143,7 +143,7 @@ typedef struct {
     uint32_t last_cert_tick; // 上次发送 0EH 的 RTOS tick（3 秒间隔）
     uint32_t last_rpt_tick;  // 上次发送 0CH 的 RTOS tick（5 秒间隔）
 
-    osMutexId_t tx_lock;               // 保护 tx_buf，两个任务共享
+    osMutexId_t tx_lock;             // 保护 tx_buf，两个任务共享
     uint8_t tx_buf[LDI_TX_BUF_SIZE]; // 响应帧拼装缓冲区
 } ldi_ctx_t;
 
