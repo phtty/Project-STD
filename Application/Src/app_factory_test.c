@@ -60,7 +60,7 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
     if (cols == 0) cols = 1;
     if (rows == 0) rows = 1;
 
-    dev_display_fill(dsp, COLOR_BLACK);
+    dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
     dsp->dirty = false; /* 防止 scan 在 fill 和 render 之间输出全黑帧 */
 
     /* 把字符重复 cols×rows 份放缓冲区，word_wrap 自动分行 */
@@ -110,7 +110,7 @@ static void factory_monitor_task(void *argument)
 
         /* ===== SHOW_CODE ===== */
         g_factory_state_debug = FACTORY_STATE_SHOW_CODE;
-        dev_display_fill(dsp, COLOR_BLACK);
+        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
         app_render(&(render_cfg_t){
             .type      = RENDER_TEXT,
             .x         = 0,
@@ -136,7 +136,7 @@ static void factory_monitor_task(void *argument)
         dev_display_set_brightness(dsp, 7);
         g_factory_state_debug = FACTORY_STATE_DEAD_PIXEL;
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
-            dev_display_fill(dsp, s_dead_pixel_colors[i]);
+            dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
 
@@ -172,7 +172,7 @@ static void factory_monitor_task(void *argument)
         }
 
         /* 退出工厂模式 */
-        dev_display_fill(dsp, COLOR_BLACK);
+        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
         osThreadResume(g_dispatch_task_handle);
         g_factory_state_debug = FACTORY_STATE_IDLE;
     }

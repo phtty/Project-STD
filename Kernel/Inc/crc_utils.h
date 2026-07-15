@@ -34,3 +34,15 @@ uint16_t crc16_xmodem(const uint8_t *data, size_t len);
  * @return  CRC16 校验值
  */
 uint16_t crc16_ibm(const uint8_t *data, size_t len);
+
+/**
+ * @brief   CRC-32 软件计算
+ *
+ * 多项式 0xEDB88320 (Ethernet 标准)，初始值 0xFFFFFFFF，结果取反。
+ * 与 STM32 硬件 CRC32 计算单元输出一致。
+ *
+ * @param   data  数据指针
+ * @param   len   数据长度（字节）
+ * @return  CRC32 校验值
+ */
+uint32_t crc32_calc(const uint8_t *data, size_t len);

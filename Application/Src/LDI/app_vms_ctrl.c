@@ -65,6 +65,7 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
         .text_enc  = FONT_ENC_GBK,
     };
     app_render(&txt_cfg);
+    app_render_save(); // 显示持久化
 }
 
 static void vms_clean_ctrl(ldi_ctrl_vms_t *ctx)

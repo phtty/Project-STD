@@ -34,6 +34,10 @@ DEFINES = -DUSE_HAL_DRIVER -DSTM32F407xx
 
 INC_DIRS = \
 	-I Application/Inc \
+	-I Application/Inc/IAP \
+	-I Application/Inc/LDI \
+	-I Application/Inc/AH_MQTT \
+	-I Application/Inc/Channel \
 	-I Device/Inc \
 	-I Platform/Inc \
 	-I Kernel/Inc \
@@ -266,12 +270,9 @@ SRC_DEVICE = \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
 	Device/Display/dev_display_p20.c \
-	Device/Config/dev_flash_iap.c \
-	Device/Config/dev_flash_ldi.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
-	Device/Comm/dev_uart_channel.c \
 	Device/Network/dev_dp83848.c \
 	Device/Network/dev_eth.c \
 	Device/Comm/dev_rs485.c \
@@ -283,22 +284,24 @@ SRC_APPLICATION = \
 	Application/Src/app_factory_test.c \
 	Application/Src/app_boot.c \
 	Application/Src/app_dispatch.c \
-	Application/Src/app_iap.c \
-	Application/Src/app_iap_cmd.c \
-	Application/Src/app_ldi.c \
-	Application/Src/app_ldi_cmd.c \
 	Application/Src/app_render.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
-	Application/Src/app_vms_ctrl.c \
-	Application/Src/app_udp.c \
-	Application/Src/app_tcp_server.c \
-	Application/Src/app_tcp_client.c \
-	Application/Src/app_mqtt.c \
-	Application/Src/app_rs232.c \
-	Application/Src/app_rs485.c \
-	Application/Src/ah_mqtt.c \
-	Application/Src/ah_mqtt_cmd.c
+	Application/Src/IAP/app_iap.c \
+	Application/Src/IAP/app_iap_cmd.c \
+	Application/Src/IAP/app_iap_cfg.c \
+	Application/Src/LDI/app_ldi.c \
+	Application/Src/LDI/app_ldi_cmd.c \
+	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/AH_MQTT/ah_mqtt.c \
+	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
+	Application/Src/Channel/app_udp.c \
+	Application/Src/Channel/app_tcp_server.c \
+	Application/Src/Channel/app_tcp_client.c \
+	Application/Src/Channel/app_mqtt.c \
+	Application/Src/Channel/app_rs232.c \
+	Application/Src/Channel/app_rs485.c
 
 # ---- All Sources ----
 SRC_ALL = \

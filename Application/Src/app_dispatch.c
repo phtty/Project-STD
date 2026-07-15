@@ -11,9 +11,24 @@
  */
 
 #include "app_dispatch.h"
+#include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "bit_utils.h"
 #include "initcall.h"
+
+/* ---- g_ch_queue 静态分配 ---- */
+static StaticQueue_t s_ch_queue_cb;
+static channel_t *s_ch_queue_buf[MAX_CHANNELS];
+static const osMessageQueueAttr_t s_ch_queue_attr = {
+    .name    = "g_ch_queue",
+    .cb_mem  = &s_ch_queue_cb,
+    .cb_size = sizeof(s_ch_queue_cb),
+    .mq_mem  = s_ch_queue_buf,
+    .mq_size = sizeof(s_ch_queue_buf),
+};
+
+/* ---- 帧分发任务缓冲区 ---- */
+static uint8_t _msg_dispatch_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN];
 
 /* ================================================================
  *  环形缓冲区池 — 编译期静态分配，按 id 复用
@@ -131,14 +146,9 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
     (void)size;
 
     static const char *names[RB_CNT_MAX] = {"rb_0", "rb_1", "rb_2", "rb_3"};
-    ring_buffer_t *rb                    = nullptr;
+    static ring_buffer_t *const g_rb_pool[RB_CNT_MAX] = {&g_rb0, &g_rb1, &g_rb2, &g_rb3};
 
-    /* id → 预分配的 RB_DEFINE 硬绑定 */
-    if (id == 0) rb = &g_rb0;
-    if (id == 1) rb = &g_rb1;
-    if (id == 2) rb = &g_rb2;
-    if (id == 3) rb = &g_rb3;
-    if (rb == nullptr) return nullptr;
+    ring_buffer_t *rb = g_rb_pool[id];
 
     /* 已初始化则直接返回 */
     if (g_dispatch.buf_pool[id] != nullptr)
@@ -159,9 +169,7 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
 
 void app_dispatch_init(void)
 {
-    /* 通道指针通知队列：max 32 个槽位，每项 sizeof(channel_t *) = 4 字节 */
-    osMessageQueueAttr_t ch_queue_attr = {.name = "g_ch_queue"};
-    g_dispatch.ch_queue                = osMessageQueueNew(MAX_CHANNELS, sizeof(channel_t *), &ch_queue_attr);
+    g_dispatch.ch_queue = osMessageQueueNew(MAX_CHANNELS, sizeof(channel_t *), &s_ch_queue_attr);
 
     /* 帧分发任务：遍历 ring buffer，调用各协议的探测函数 */
     const osThreadAttr_t frame_dispatch_task_attr = {
@@ -193,7 +201,7 @@ sw_app_initcall(app_dispatch_init);
 void frame_dispatch_task(void *argument)
 {
     channel_t *ch;          /**< 来源通道指针（从 ch_queue 取出） */
-    static frame_msg_t msg; /**< 帧消息（推入协议队列） */
+    frame_msg_t *msg = (frame_msg_t *)_msg_dispatch_buf;
     uint32_t frame_len = 0; /**< 探测到的完整帧长度 */
     uint8_t aux        = 0; /**< 辅助信息（如命令码） */
 
@@ -220,10 +228,10 @@ void frame_dispatch_task(void *argument)
             if ((proto & mask) == 0) continue;
             if (rb == nullptr) continue;
 
-            /* 跳过已处理过的缓冲区（多个协议共享同一 RB 时去重） */
+            /* 跳过已处理过的缓冲区（仅限同一通道上的协议） */
             bool dup = false;
             for (uint8_t k = 0; k < i; k++)
-                if (g_dispatch.proto_rb[k] == rb) {
+                if ((proto & (1U << k)) && g_dispatch.proto_rb[k] == rb) {
                     dup = true;
                     break;
                 }
@@ -255,13 +263,13 @@ void frame_dispatch_task(void *argument)
                     if (state == PROTO_PROBE_READY) {
                         /* 完整帧就绪：从缓冲区读出 → 推入协议处理队列 */
                         if (avail >= frame_len) {
-                            uint16_t actual = rb_read(rb, msg.data, frame_len, nullptr);
+                            uint16_t actual = rb_read(rb, msg->data, frame_len, nullptr);
                             avail           = rb_avail(rb, nullptr);
 
                             if (actual == frame_len) {
-                                msg.data_len = frame_len;
-                                msg.ch       = ch;
-                                osMessageQueuePut(g_dispatch.frame_queue[j], &msg, 0, 0);
+                                msg->data_len = frame_len;
+                                msg->ch       = ch;
+                                osMessageQueuePut(g_dispatch.frame_queue[j], msg, 0, 0);
                             } else {
                                 /* 异常：读出字节数不匹配，丢弃已读部分 */
                                 rb_skip(rb, actual, nullptr);

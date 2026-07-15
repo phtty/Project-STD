@@ -7,11 +7,26 @@
  */
 
 #include "app_iap.h"
+#include "FreeRTOS.h"
 #include "initcall.h"
 #include "pl_crc.h"
 #include "app_udp.h"
-#include "dev_flash_iap.h"
+#include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
+
+/* ---- proto_iap_queue 静态分配 ---- */
+#define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
+#define IAP_MSG_SIZE (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
+
+static StaticQueue_t s_iap_queue_cb;
+static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE];
+static const osMessageQueueAttr_t s_iap_queue_attr = {
+    .name    = "proto_iap_queue",
+    .cb_mem  = &s_iap_queue_cb,
+    .cb_size = sizeof(s_iap_queue_cb),
+    .mq_mem  = s_iap_queue_buf,
+    .mq_size = sizeof(s_iap_queue_buf),
+};
 
 /* ---- 协议模块自注册 ---- */
 static proto_mask_t s_iap_mask;
@@ -51,21 +66,19 @@ const osThreadAttr_t iap_task_attr = {
 /** @brief IAP 协议处理任务：阻塞等待帧队列 → 按 cmd 字段查表分派到命令处理函数 */
 void iap_handle_task(void *argument)
 {
-    static frame_msg_t msg;
-    const osMessageQueueAttr_t proto_iap_queue_attr = {
-        .name = "proto_iap_queue",
-    };
-    g_iap_msg_queue = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_iap_queue_attr);
+    static uint8_t _msg_buf[IAP_MSG_SIZE];
+    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    g_iap_msg_queue = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
     app_proto_set_frame_queue(s_iap_mask, g_iap_msg_queue);
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_iap_msg_queue, &msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(g_iap_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        iap_frame_t *frame_data = (iap_frame_t *)msg.data;
+        iap_frame_t *frame_data = (iap_frame_t *)msg->data;
         uint8_t cmd             = (uint8_t)((frame_data->cmd) & 0xff);
 
-        g_iap_cmd_table[cmd](msg.ch, frame_data);
+        g_iap_cmd_table[cmd](msg->ch, frame_data);
     }
 }
 

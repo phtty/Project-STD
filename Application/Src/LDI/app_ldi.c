@@ -1,13 +1,28 @@
 #include "app_ldi.h"
+#include "FreeRTOS.h"
 #include "initcall.h"
 
 #include "app_ldi_cmd.h"
 #include "crc_utils.h"
-#include "dev_flash_ldi.h"
+#include "app_ldi_cfg.h"
 #include "app_tcp_client.h"
 #include "app_tcp_server.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
+
+/* ---- proto_ldi_queue 静态分配 ---- */
+#define LDI_PAYLOAD_MAX (512U) /* 与探头 mem_pool 容量一致 */
+#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
+
+static StaticQueue_t s_ldi_queue_cb;
+static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE];
+static const osMessageQueueAttr_t s_ldi_queue_attr = {
+    .name    = "proto_ldi_queue",
+    .cb_mem  = &s_ldi_queue_cb,
+    .cb_size = sizeof(s_ldi_queue_cb),
+    .mq_mem  = s_ldi_queue_buf,
+    .mq_size = sizeof(s_ldi_queue_buf),
+};
 
 static_assert(sizeof(ldi_device_t) == 1, "ldi_device_t must be 1 byte");
 static_assert(sizeof(ldi_cmd_type_t) == 1, "ldi_cmd_type_t must be 1 byte");
@@ -94,7 +109,7 @@ static proto_mask_t s_ldi_mask;
 [[maybe_unused]] static void ldi_module_init(void)
 {
     // 指定协议使用的环形缓冲区
-    ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
+    ring_buffer_t *rb = app_proto_acquire_buf(1, 512);
 
     // 注册协议到多通道多协议解析模块
     s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
@@ -216,16 +231,16 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
 
 void ldi_handle_task(void *argument)
 {
-    static frame_msg_t msg;
-    const osMessageQueueAttr_t proto_ldi_queue_attr = {.name = "proto_ldi_queue"};
-    g_ldi_msg_queue                                 = osMessageQueueNew(2, sizeof(frame_msg_t), &proto_ldi_queue_attr);
+    static uint8_t _msg_buf[LDI_MSG_SIZE];
+    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
     app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_ldi_msg_queue, &msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(g_ldi_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg.data;
+        ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg->data;
         ldi_req_head_t *req_head = (ldi_req_head_t *)ldi_frame->data_crc;
 
         /* 状态门禁 */
@@ -234,12 +249,12 @@ void ldi_handle_task(void *argument)
 
         /* 查表分派 */
         uint8_t idx = 0xFF;
-        for (uint8_t i = 0; i < sizeof(cmd_index_table); i++)
+        for (uint8_t i = 0; i < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]); i++)
             if (cmd_index_table[i] == req_head->cmd_type)
                 idx = i;
 
-        if (idx < sizeof(cmd_index_table))
-            g_ldi_cmd_table[idx](msg.ch, ldi_frame->data_crc);
+        if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
+            g_ldi_cmd_table[idx](msg->ch, ldi_frame->data_crc);
     }
 }
 
@@ -267,7 +282,7 @@ proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 
     g_ldi.rsp_seq = frame->seq; /* 保存序号用于响应回显 */
 
-    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] & 0xFF00) | (frame->len[1] & 0xFF0000) | (frame->len[0] & 0xFF000000);
+    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] << 8 & 0xFF00) | (frame->len[1] << 16 & 0xFF0000) | (frame->len[0] << 24 & 0xFF000000);
     uint16_t frame_crc = (frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1];
     uint16_t calc_crc  = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
     if (frame_crc != calc_crc)

@@ -1,36 +1,19 @@
 /**
  * @file    dev_rs232.c
- * @brief   RS232 串口板级实例化（USART3=RS232-0, USART6=RS232-1，全双工）
+ * @brief   RS232 串口板级资源（USART3=RS232-0, USART6=RS232-1）
  *
- * 板级实例化层：声明 UART 外设、DMA 缓冲区、ISR 适配回调，
- * 通道逻辑由 dev_uart_channel 统一提供。
+ * 仅提供 DMA 缓冲区等板级静态资源。
+ * 通道生命周期和任务循环由 Application 层 app_rs232 负责。
  */
 
 #include "dev_rs232.h"
 
-#include "initcall.h"
-#include "pl_uart.h"
-#include "dev_uart_channel.h"
-
 #define RS232_BUF_SIZE (2048U)
 
-/* ---- 静态资源 ---- */
 static uint8_t s_rs232_0_buf[RS232_BUF_SIZE];
 static uint8_t s_rs232_1_buf[RS232_BUF_SIZE];
 
-/* ---- 通道实例 ---- */
-uart_channel_t g_rs232_0 = {.me = {.ch_id = CH_ID_RS232}};
-uart_channel_t g_rs232_1 = {.me = {.ch_id = CH_ID_RS232_1}};
-
-uart_channel_t *dev_rs232_get_channel(uint8_t index)
+uint8_t *dev_rs232_get_buf(uint8_t index)
 {
-    return (index == 0) ? &g_rs232_0 : &g_rs232_1;
+    return (index == 0) ? s_rs232_0_buf : s_rs232_1_buf;
 }
-
-/* ---- 板级硬件初始化（hw_initcall，RTOS 前） ---- */
-void dev_rs232_init(void)
-{
-    uart_channel_init(&g_rs232_0, pl_uart_get_handle(PL_UART3), CH_ID_RS232, false, s_rs232_0_buf, RS232_BUF_SIZE);
-    uart_channel_init(&g_rs232_1, pl_uart_get_handle(PL_UART6), CH_ID_RS232_1, false, s_rs232_1_buf, RS232_BUF_SIZE);
-}
-hw_dev_initcall(dev_rs232_init);

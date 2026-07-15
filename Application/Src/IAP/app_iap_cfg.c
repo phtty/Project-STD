@@ -1,5 +1,5 @@
 /**
- * @file    dev_flash_iap.c
+ * @file    app_iap_cfg.c
  * @brief   IAP 系统配置 Flash 存储（Sector 1, 0x08004000）
  *
  * dev_flash_iap_sys_info_t 记录 = magic(4B) | update_sta(4B) | FWInfo(40B) | NetConfig(16B) | CRC32(4B)
@@ -10,7 +10,7 @@
  *   读取 → 直接内存映射 (ADDR_CONFIG_SECTOR) → 空/完整性检查 → 使用
  */
 
-#include "dev_flash_iap.h"
+#include "app_iap_cfg.h"
 #include "dev_flash_int.h"
 #include "pl_crc.h"
 #include "initcall.h"

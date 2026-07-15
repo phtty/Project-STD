@@ -31,25 +31,25 @@ typedef struct dev_storage {
 
 static inline int32_t dev_storage_init(dev_storage_t *d)
 {
-    return d->ops->init ? d->ops->init(d) : 0;
+    return (d && d->ops && d->ops->init) ? d->ops->init(d) : 0;
 }
 
 static inline int32_t dev_storage_read(dev_storage_t *d, uint32_t addr, uint8_t *buf, uint32_t len)
 {
-    return d->ops->read(d, addr, buf, len);
+    return (d && d->ops && d->ops->read) ? d->ops->read(d, addr, buf, len) : -1;
 }
 
 static inline int32_t dev_storage_write(dev_storage_t *d, uint32_t addr, const uint8_t *buf, uint32_t len)
 {
-    return d->ops->write(d, addr, buf, len);
+    return (d && d->ops && d->ops->write) ? d->ops->write(d, addr, buf, len) : -1;
 }
 
 static inline int32_t dev_storage_erase(dev_storage_t *d, uint32_t addr, uint32_t len)
 {
-    return d->ops->erase(d, addr, len);
+    return (d && d->ops && d->ops->erase) ? d->ops->erase(d, addr, len) : -1;
 }
 
 static inline uint32_t dev_storage_capacity(dev_storage_t *d)
 {
-    return d->ops->capacity ? d->ops->capacity(d) : d->capacity;
+    return (d && d->ops && d->ops->capacity) ? d->ops->capacity(d) : (d ? d->capacity : 0);
 }
