@@ -105,9 +105,6 @@ static void factory_monitor_task(void *argument)
         /* IDLE: 等待 TEST 激活 */
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
-        /* 进入工厂模式 */
-        osThreadSuspend(g_dispatch_task_handle);
-
         /* ===== SHOW_CODE ===== */
         g_factory_state_debug = FACTORY_STATE_SHOW_CODE;
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
@@ -134,7 +131,6 @@ static void factory_monitor_task(void *argument)
         /* ===== DEAD_PIXEL ===== */
         osThreadSuspend(g_light_sensor_task_handle);
         dev_display_set_brightness(dsp, 7);
-        osThreadSuspend(g_light_sensor_task_handle);
         g_factory_state_debug = FACTORY_STATE_DEAD_PIXEL;
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
             dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
@@ -174,7 +170,6 @@ static void factory_monitor_task(void *argument)
 
         /* 退出工厂模式 */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
-        osThreadResume(g_dispatch_task_handle);
         g_factory_state_debug = FACTORY_STATE_IDLE;
     }
 }
