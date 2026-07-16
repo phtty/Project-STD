@@ -15,6 +15,7 @@
 #include "cmsis_os2.h"
 #include "bit_utils.h"
 #include "initcall.h"
+#include "app_factory_test.h"
 
 /* ---- g_ch_queue 静态分配 ---- */
 static StaticQueue_t s_ch_queue_cb;
@@ -50,8 +51,8 @@ RB_DEFINE(g_rb3, 2048); /**< id=3: 暂未使用，预留 */
  *  所有调度函数统一通过 g_dispatch 访问。
  * ================================================================ */
 
-dispatch_ctx_t g_dispatch;              /**< 全局调度上下文 */
-osThreadId_t g_dispatch_task_handle;    /**< 帧分发任务句柄（外部用于 Suspend/Resume） */
+dispatch_ctx_t g_dispatch;           /**< 全局调度上下文 */
+osThreadId_t g_dispatch_task_handle; /**< 帧分发任务句柄（外部用于 Suspend/Resume） */
 
 /* ================================================================
  *  工具函数
@@ -98,7 +99,7 @@ proto_mask_t app_proto_register(proto_probe_fn_t probe, ring_buffer_t *rb)
 
     g_dispatch.proto_rb[idx]    = rb;
     g_dispatch.proto_probe[idx] = probe;
-    g_dispatch.registered_mask  |= mask;
+    g_dispatch.registered_mask |= mask;
 
     return mask;
 }
@@ -145,7 +146,7 @@ ring_buffer_t *app_proto_acquire_buf(uint8_t id, uint16_t size)
     if (id >= RB_CNT_MAX) return nullptr;
     (void)size;
 
-    static const char *names[RB_CNT_MAX] = {"rb_0", "rb_1", "rb_2", "rb_3"};
+    static const char *names[RB_CNT_MAX]              = {"rb_0", "rb_1", "rb_2", "rb_3"};
     static ring_buffer_t *const g_rb_pool[RB_CNT_MAX] = {&g_rb0, &g_rb1, &g_rb2, &g_rb3};
 
     ring_buffer_t *rb = g_rb_pool[id];
@@ -200,8 +201,8 @@ sw_app_initcall(app_dispatch_init);
 
 void frame_dispatch_task(void *argument)
 {
-    channel_t *ch;          /**< 来源通道指针（从 ch_queue 取出） */
-    frame_msg_t *msg = (frame_msg_t *)_msg_dispatch_buf;
+    channel_t *ch; /**< 来源通道指针（从 ch_queue 取出） */
+    frame_msg_t *msg   = (frame_msg_t *)_msg_dispatch_buf;
     uint32_t frame_len = 0; /**< 探测到的完整帧长度 */
     uint8_t aux        = 0; /**< 辅助信息（如命令码） */
 
@@ -219,9 +220,9 @@ void frame_dispatch_task(void *argument)
         /* 外循环：遍历已注册协议位 */
         uint32_t outer_iter = g_dispatch.registered_mask;
         while (outer_iter) {
-            uint8_t i        = (uint8_t)bit_ctz(outer_iter);
-            outer_iter      &= outer_iter - 1;
-            uint32_t mask    = (1U << i);
+            uint8_t i = (uint8_t)bit_ctz(outer_iter);
+            outer_iter &= outer_iter - 1;
+            uint32_t mask     = (1U << i);
             ring_buffer_t *rb = g_dispatch.proto_rb[i];
 
             /* 跳过：通道不承载此协议 / 空缓冲区 */
@@ -249,8 +250,8 @@ void frame_dispatch_task(void *argument)
                 /* 按协议优先级顺序探测已注册协议 */
                 uint32_t inner_iter = g_dispatch.registered_mask;
                 while (inner_iter) {
-                    uint8_t j        = (uint8_t)bit_ctz(inner_iter);
-                    inner_iter      &= inner_iter - 1;
+                    uint8_t j = (uint8_t)bit_ctz(inner_iter);
+                    inner_iter &= inner_iter - 1;
                     uint32_t inner_mask = (1U << j);
 
                     if ((proto & inner_mask) == 0) continue;
@@ -352,8 +353,8 @@ void app_channel_dispatch(const channel_t *ch, const uint8_t *data, uint16_t len
     /* 遍历已注册协议位，将数据写入匹配的环形缓冲区 */
     uint32_t write_iter = g_dispatch.registered_mask;
     while (write_iter) {
-        uint8_t i     = (uint8_t)bit_ctz(write_iter);
-        write_iter   &= write_iter - 1;
+        uint8_t i = (uint8_t)bit_ctz(write_iter);
+        write_iter &= write_iter - 1;
         uint32_t mask = (1U << i);
         if ((proto & mask) == 0) continue;
 
@@ -372,6 +373,9 @@ void app_channel_dispatch(const channel_t *ch, const uint8_t *data, uint16_t len
         rb_write(rb, data, len, rb->mutex);
         seen[i] = rb;
     }
+
+    // 关闭工厂模式
+    app_factory_mode_interrupt();
 
     /* 通知帧分发任务：传入通道指针的地址（不是通道结构体的地址）
      * 队列每项大小为 sizeof(channel_t *)，拷贝的是指针值本身。

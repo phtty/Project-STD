@@ -8,5 +8,5 @@
 
 #pragma once
 
-/** @brief 工厂检测任务入口 */
-void app_factory_test_task(void *argument);
+/** @brief 终止工厂测试模式 */
+void app_factory_mode_interrupt(void);

@@ -61,7 +61,7 @@ void app_boot(void)
     osKernelStart();
 }
 
-static void app_default_display(void)
+[[maybe_unused]] static void app_default_display(void)
 {
     if (!app_render_restore()) {
         app_render(&(render_cfg_t){
