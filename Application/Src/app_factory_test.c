@@ -38,17 +38,7 @@ static const font_type_t s_aging_types[] = {
 #define AGING_SIZE_COUNT (sizeof(s_aging_sizes) / sizeof(s_aging_sizes[0]))
 #define AGING_TYPE_COUNT (sizeof(s_aging_types) / sizeof(s_aging_types[0]))
 
-typedef enum {
-    FACTORY_STATE_IDLE = 0,
-    FACTORY_STATE_SHOW_CODE,
-    FACTORY_STATE_DEAD_PIXEL,
-    FACTORY_STATE_AGING,
-} factory_state_t;
-
-/* ---- 调试变量 ---- */
-volatile int g_factory_state_debug;
-volatile int g_factory_aging_type;
-volatile int g_factory_aging_size;
+osThreadId_t g_factory_test;
 
 /* ---- 老化辅助 ---- */
 static void _aging_fill_screen(font_size_t size, font_type_t type, const char *ch_utf8, uint8_t ch_len)
@@ -105,11 +95,7 @@ static void factory_monitor_task(void *argument)
         /* IDLE: 等待 TEST 激活 */
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
-        /* 进入工厂模式 */
-        osThreadSuspend(g_dispatch_task_handle);
-
         /* ===== SHOW_CODE ===== */
-        g_factory_state_debug = FACTORY_STATE_SHOW_CODE;
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
         app_render(&(render_cfg_t){
             .type      = RENDER_TEXT,
@@ -134,14 +120,12 @@ static void factory_monitor_task(void *argument)
         /* ===== DEAD_PIXEL ===== */
         osThreadSuspend(g_light_sensor_task_handle);
         dev_display_set_brightness(dsp, 7);
-        g_factory_state_debug = FACTORY_STATE_DEAD_PIXEL;
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
             dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
 
         /* ===== AGING ===== */
-        g_factory_state_debug = FACTORY_STATE_AGING;
         osThreadResume(g_light_sensor_task_handle);
 
         bool aging_exit = false;
@@ -156,8 +140,6 @@ static void factory_monitor_task(void *argument)
                     char single_ch[4] = {ch_ptr[0], ch_len > 1 ? ch_ptr[1] : 0,
                                          ch_len > 2 ? ch_ptr[2] : 0, 0};
 
-                    g_factory_aging_type = type_idx;
-                    g_factory_aging_size = size_idx;
                     _aging_fill_screen(fsize, s_aging_types[type_idx], single_ch, ch_len);
 
                     if (dev_key_wait_press(DEV_KEY_TST, 3000)) {
@@ -173,8 +155,6 @@ static void factory_monitor_task(void *argument)
 
         /* 退出工厂模式 */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
-        osThreadResume(g_dispatch_task_handle);
-        g_factory_state_debug = FACTORY_STATE_IDLE;
     }
 }
 
@@ -186,6 +166,14 @@ static void _factory_test_init(void)
         .stack_size = 512 * 4,
         .priority   = osPriorityBelowNormal,
     };
-    osThreadNew(factory_monitor_task, NULL, &attr);
+    g_factory_test = osThreadNew(factory_monitor_task, NULL, &attr);
 }
 sw_app_initcall(_factory_test_init);
+
+// 对外提供一个终止工厂测试模式的接口
+void app_factory_mode_interrupt(void)
+{
+    // dev_display_fill(dev_display_get(), 0, 0, dev_display_get()->screen_rows, dev_display_get()->screen_cols, COLOR_BLACK);
+    osThreadTerminate(g_factory_test);
+    _factory_test_init();
+}

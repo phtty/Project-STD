@@ -3,6 +3,7 @@
 #include "initcall.h"
 
 #include "app_ldi_cmd.h"
+#include "app_vms_ctrl.h"
 #include "crc_utils.h"
 #include "app_ldi_cfg.h"
 #include "app_iap_cfg.h"
@@ -350,6 +351,8 @@ void ldi_timer_task(void *argument)
 
     for (;;) {
         osDelay(1000);
+
+        vms_timer_poll(); /* VMS 定时清屏 — 不受通道状态影响 */
 
         channel_t *ch = app_channel_get(CH_ID_TCP_CLIENT);
 

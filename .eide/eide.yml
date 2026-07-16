@@ -409,7 +409,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${fileWorkspaceFolderBasename}.hex verify reset exit"
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${workspaceFolderBasename}.hex verify reset exit"
         eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""
