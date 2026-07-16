@@ -15,7 +15,7 @@
 #include "app_light_sensor.h"
 
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
-#define PROGRAM_CODE "9210209C40"
+#define PROGRAM_CODE "9210209C41"
 
 static const display_color_t s_dead_pixel_colors[] = {
     COLOR_RED,
