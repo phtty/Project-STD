@@ -12,6 +12,13 @@
 extern TIM_HandleTypeDef htim7;
 
 static TIM_HandleTypeDef *g_tim_handle[PL_TIM_MAX];
+static pl_tim_period_cb_t g_period_cb[PL_TIM_MAX];
+
+/* ---- 回调注册 ---- */
+void pl_tim_register_period_cb(uint8_t tim_id, pl_tim_period_cb_t cb)
+{
+    if (tim_id < PL_TIM_MAX) g_period_cb[tim_id] = cb;
+}
 
 /* ---- 初始化 ---- */
 void pl_tim_init(void)
@@ -45,7 +52,17 @@ void pl_tim_irq_enable(uint8_t irq)
 
 void pl_tim_dbg_freeze(pl_tim_handle_t h)
 {
-    if (h) __HAL_DBGMCU_FREEZE_TIM3(); /* TIM3 是唯一需要 freeze 的 */
+    if (h && ((TIM_HandleTypeDef *)h)->Instance == TIM3)
+        __HAL_DBGMCU_FREEZE_TIM3();
+}
+
+/* ---- HAL 周期回调（分派到注册的模块回调）---- */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM7) { HAL_IncTick(); return; }
+    for (uint8_t i = 0; i < PL_TIM_MAX; i++)
+        if ((TIM_HandleTypeDef *)g_tim_handle[i] == htim && g_period_cb[i])
+            { g_period_cb[i](); return; }
 }
 
 /* ---- ISR ---- */

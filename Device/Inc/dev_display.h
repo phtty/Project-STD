@@ -73,10 +73,11 @@ void dev_display_start(void);
 /** @brief 设置单个像素颜色，置脏标记 */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
 
-/** @brief 填充全屏，置脏标记 */
-void dev_display_fill(dev_display_t *dev, display_color_t color);
+/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记 */
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color);
 
-/** @brief 绘制矩形位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color */
+/** @brief 叠加绘制位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color, bit=0不改变原像素。
+ *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色 */
 void dev_display_draw_bitmap(dev_display_t *dev,
     uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     const uint8_t *bitmap, display_color_t color);
@@ -84,8 +85,11 @@ void dev_display_draw_bitmap(dev_display_t *dev,
 /** @brief 获取 P20 模组显示实例 */
 dev_display_t *dev_display_p20_get(void);
 
+/** @brief 注册活动显示实例（由显示模组的 hw_dev_initcall 调用） */
+void dev_display_register(dev_display_t *dev);
+
+/** @brief 获取当前活动显示实例 */
+dev_display_t *dev_display_get(void);
+
 /** @brief 设置亮度 (0=最暗/关闭, 7=最亮)，PWM 粒度 1/8 */
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
-
-/** @brief 获取当前显示实例（向后兼容，等同 dev_display_p20_get） */
-dev_display_t *dev_display_get(void);

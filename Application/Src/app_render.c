@@ -12,6 +12,7 @@
 #include <string.h>
 #include "text_cvt.h"
 #include "initcall.h"
+#include "crc_utils.h"
 #include "dev_w25qxx.h"
 
 /* ---- 字库单元描述 ---- */
@@ -125,12 +126,14 @@ static bool _is_gbk(uint8_t high, uint8_t low)
 /* ---- 注册的句柄 ---- */
 static dev_display_t *s_render_display;
 static dev_storage_t *s_render_font;
+static uint32_t s_persist_addr;
 
 /* ---- 模块自注册，依赖storage和display模块）---- */
 static void _render_init(void)
 {
     s_render_display = dev_display_get();
     s_render_font    = dev_w25qxx_get();
+    s_persist_addr   = dev_storage_capacity(s_render_font) - 4096 * 2;
 }
 sw_app_initcall(_render_init);
 
@@ -164,15 +167,15 @@ static inline void _render_text(const render_cfg_t *cfg)
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
     uint16_t line_widths[32];
-    uint8_t  line_count = 0;
-    uint16_t line_w     = 0;
-    uint16_t line_h     = gbk_key.size;
-    uint16_t char_pos   = 0;
+    uint8_t line_count = 0;
+    uint16_t line_w    = 0;
+    uint16_t line_h    = gbk_key.size;
+    uint16_t char_pos  = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
             line_widths[line_count++] = line_w;
-            line_w = 0;
+            line_w                    = 0;
             char_pos++;
             continue;
         }
@@ -192,7 +195,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         if (line_w + glyph_w > cfg->w) {
             if (cfg->style && cfg->style->word_wrap) {
                 line_widths[line_count++] = line_w;
-                line_w = glyph_w;
+                line_w                    = glyph_w;
             }
             /* 不换行：超出部分截断，不计入宽度 */
         } else {
@@ -211,7 +214,7 @@ static inline void _render_text(const render_cfg_t *cfg)
     }
 
     /* ---- 渲染趟：逐行独立水平对齐 ---- */
-    uint8_t  line_idx      = 0;
+    uint8_t line_idx       = 0;
     uint16_t line_origin_x = cfg->x;
     if (cfg->style) {
         if (cfg->style->h_align == ALIGN_CENTER)
@@ -219,7 +222,7 @@ static inline void _render_text(const render_cfg_t *cfg)
         else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
             line_origin_x += (cfg->w - line_widths[line_idx]);
     }
-    cur_x   = line_origin_x;
+    cur_x    = line_origin_x;
     char_pos = 0;
 
     while (char_pos < text_len) {
@@ -263,6 +266,7 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint8_t ch_byte = (uint8_t)text_buf[char_pos];
             uint32_t addr   = _char_addr(&asc_key, &ch_byte);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
+            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -294,6 +298,7 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint8_t gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
             uint32_t addr     = _char_addr(&gbk_key, gbk_ch);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
+            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -315,31 +320,99 @@ static inline void _render_bitmap(const render_cfg_t *cfg)
 
 static inline void _render_fill(const render_cfg_t *cfg)
 {
-    if (!cfg->w || !cfg->h) {
-        dev_display_fill(s_render_display, cfg->color); /* 全屏 */
-        return;
+    uint16_t w = cfg->w, h = cfg->h;
+    if (!w || !h) {
+        w = s_render_display->screen_rows;
+        h = s_render_display->screen_cols;
     }
-
-    for (uint16_t row = 0; row < cfg->h; row++)
-        for (uint16_t col = 0; col < cfg->w; col++)
-            dev_display_set_pixel(s_render_display, cfg->x + col, cfg->y + row, cfg->color);
+    dev_display_fill(s_render_display, cfg->x, cfg->y, w, h, cfg->color);
 }
+
+/* ---- 渲染跳表 ---- */
+typedef void (*render_fn_t)(const render_cfg_t *);
+static const render_fn_t g_render_fn[] = {
+    [RENDER_TEXT]   = _render_text,
+    [RENDER_BITMAP] = _render_bitmap,
+    [RENDER_FILL]   = _render_fill,
+};
 
 /* ---- 公开 API：tagged union 分派 ---- */
 void app_render(const render_cfg_t *cfg)
 {
-    if (!cfg || !s_render_display)
-        return;
+    if (!cfg || !s_render_display) return;
+    if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
+        g_render_fn[cfg->type](cfg);
+}
 
-    switch (cfg->type) {
-        case RENDER_TEXT:
-            _render_text(cfg);
-            break;
-        case RENDER_BITMAP:
-            _render_bitmap(cfg);
-            break;
-        case RENDER_FILL:
-            _render_fill(cfg);
-            break;
+/* ================================================================
+ *  持久化显示 — 将显存以位图格式保存/恢复到存储设备
+ *
+ *  pixel_map (逐像素颜色) → bitmap (1bit/pixel + 单色)，大幅压缩闪存占用。
+ *  恢复阶段 fill(BLACK) + draw_bitmap(color) 重建 pixel_map。
+ * ================================================================ */
+
+#define PERSIST_BUF_SIZE (sizeof(render_persist_t) + 512) /* 容纳 64×64 像素位图 */
+
+void app_render_save(void)
+{
+    dev_display_t *d = s_render_display;
+    if (!d || !s_render_font) return;
+
+    uint16_t rows      = d->screen_rows;
+    uint16_t cols      = d->screen_cols;
+    uint16_t row_bytes = (rows + 7) / 8;
+    uint16_t bm_bytes  = cols * row_bytes;
+
+    static uint8_t buf[PERSIST_BUF_SIZE];
+    render_persist_t *r = (render_persist_t *)buf;
+    memset(r->bitmap, 0, bm_bytes);
+
+    uint8_t color = COLOR_BLACK;
+    for (uint16_t y = 0; y < cols; y++) {
+        for (uint16_t x = 0; x < rows; x++) {
+            uint8_t px = d->pixel_map[y * rows + x];
+            if (px != COLOR_BLACK) {
+                r->bitmap[y * row_bytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
+                if (color == COLOR_BLACK) color = px;
+            }
+        }
     }
+
+    r->magic       = RENDER_PERSIST_MAGIC;
+    r->screen_rows = rows;
+    r->screen_cols = cols;
+    r->color       = color;
+    r->crc32       = crc32_calc(r->bitmap, bm_bytes);
+
+    dev_storage_write(s_render_font, s_persist_addr, buf,
+                      sizeof(render_persist_t) + bm_bytes);
+}
+
+bool app_render_restore(void)
+{
+    dev_display_t *d = s_render_display;
+    if (!d || !s_render_font)
+        return false;
+
+    uint16_t rows      = d->screen_rows;
+    uint16_t cols      = d->screen_cols;
+    uint16_t row_bytes = (rows + 7) / 8;
+    uint16_t bm_bytes  = cols * row_bytes;
+
+    static uint8_t buf[PERSIST_BUF_SIZE];
+    if (dev_storage_read(s_render_font, s_persist_addr, buf,
+                         sizeof(render_persist_t) + bm_bytes) < 0)
+        return false;
+
+    render_persist_t *r = (render_persist_t *)buf;
+    if (r->magic != RENDER_PERSIST_MAGIC)
+        return false;
+    if (r->screen_rows != rows || r->screen_cols != cols)
+        return false;
+    if (r->crc32 != crc32_calc(r->bitmap, bm_bytes))
+        return false;
+
+    dev_display_fill(d, 0, 0, rows, cols, COLOR_BLACK);
+    dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
+    return true;
 }
