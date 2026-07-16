@@ -250,7 +250,7 @@ virtualFolder:
         - name: Display
           files:
             - path: Device/Display/dev_display.c
-            - path: Device/Display/dev_display_p20.c
+            - path: Device/Display/dev_display_p5.c
           folders: []
     - name: Platform
       files:
@@ -415,8 +415,8 @@ targets:
         baseAddr: ""
         bin: ""
         cpuInfo:
-          cpuName: "null"
-          vendor: "null"
+          cpuName: STM32F407ZG
+          vendor: ST
         otherCmds: ""
         proType: 1
         speed: 8000
@@ -433,7 +433,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: Custom
+    uploader: JLink
   Release:
     cppPreprocessAttrs:
       defineList:

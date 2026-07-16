@@ -17,18 +17,18 @@
 
 void app_test_pixel_scan(void)
 {
-    dev_display_t *dsp = dev_display_p20_get();
+    dev_display_t *dsp = dev_display_p5_get();
 
     for (;;) {
         for (int i = 0; i < (int)dsp->buffer_size; i++) {
             dev_display_set_pixel(dsp,
-                                  i % dsp->screen_cols, /* 逐列 x */
-                                  i / dsp->screen_cols, /* 逐行 y */
+                                  i % dsp->screen_rows, /* 逐列 x */
+                                  i / dsp->screen_rows, /* 逐行 y */
                                   COLOR_GREEN);
             osDelay(50);
             dev_display_set_pixel(dsp,
-                                  i % dsp->screen_cols,
-                                  i / dsp->screen_cols,
+                                  i % dsp->screen_rows,
+                                  i / dsp->screen_rows,
                                   COLOR_BLACK);
         }
     }
@@ -84,7 +84,7 @@ void app_test_io_output(void)
 
 void app_test_led_mapping(void)
 {
-    dev_display_t *dsp = dev_display_p20_get();
+    dev_display_t *dsp = dev_display_p5_get();
 
     /* 清空 hub75_buff，确保 prepare 不会覆盖（dirty=false） */
     memset(dsp->hub75_buff, 0, dsp->buffer_size);
@@ -112,7 +112,7 @@ void app_test_led_mapping(void)
 void app_test_run(void)
 {
     // app_test_led_mapping(); /* 新模组灯序确认时启用 */
-    // app_test_pixel_scan();
-    app_test_render_text();
+    app_test_pixel_scan();
+    // app_test_render_text();
     // app_test_io_output();
 }
