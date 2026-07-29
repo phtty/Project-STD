@@ -4,6 +4,7 @@
 
 #include "app_ldi_cmd.h"
 #include "app_vms_ctrl.h"
+#include "app_ldi_device.h"
 #include "crc_utils.h"
 #include "app_ldi_cfg.h"
 #include "app_iap_cfg.h"
@@ -48,10 +49,12 @@ const static ldi_cmd_type_t cmd_index_table[] = {
 ldi_ctx_t g_ldi = {
     .state = LDI_ST_UNINIT,
     .cfg   = {
-        .module_count = 2,
+        .module_count = 4,
         .modules      = {
-            {.device_type = LDI_DEV_TYPE_VMS, .device_index = 1},
-            // {.device_type = LDI_DEV_TYPE_CANOPY_LIGHT, .device_index = 1},
+            {.device_type = LDI_DEV_TYPE_DISPLAY, .device_index = 1},
+            {.device_type = LDI_DEV_TYPE_LANE_SIGNAL, .device_index = 1},
+            {.device_type = LDI_DEV_TYPE_ALARM, .device_index = 1},
+            {.device_type = LDI_DEV_TYPE_VOICE, .device_index = 1},
         },
     },
 };
@@ -139,6 +142,7 @@ static proto_mask_t s_ldi_mask;
 
     /* 上下文初始化必须在创建任务之前，保证 IP/端口在通道任务启动前就绪 */
     ldi_ctx_init(&g_ldi);
+    ldi_device_init();
 
     /* 保护 tx_buf，ldi_handle_task 和 ldi_timer_task 共享 */
     const osMutexAttr_t tx_lock_attr = {.name = "ldi_tx_lock", .attr_bits = osMutexPrioInherit};
@@ -283,12 +287,14 @@ const static uint8_t ldi_stx[2] = {0xFF, 0xFF};
 proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *total_len, uint8_t *aux)
 {
     uint32_t avail = rb_avail(buff, nullptr);
-    if (avail < sizeof(ldi_frame_t) + sizeof(ldi_req_head_t) + 2)
+    /* 先等到定长帧头（STX/VER/SEQ/LEN），再按 LEN 等完整帧。
+     * 创迪发现口 21H 可能仅携带 1 字节 CmdType，不能再要求完整 ldi_req_head_t。 */
+    if (avail < sizeof(ldi_frame_t))
         return PROTO_PROBE_WAIT;
 
     static uint8_t mem_pool[512] = {0};
     memset(mem_pool, 0, sizeof(mem_pool));
-    rb_peek(buff, 0, mem_pool, avail, nullptr);
+    rb_peek(buff, 0, mem_pool, avail > sizeof(mem_pool) ? sizeof(mem_pool) : avail, nullptr);
     ldi_frame_t *frame = (ldi_frame_t *)mem_pool;
 
     if (memcmp(ldi_stx, frame->stx, sizeof(ldi_stx)))
@@ -298,8 +304,23 @@ proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 
     g_ldi.rsp_seq = frame->seq; /* 保存序号用于响应回显 */
 
-    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] << 8 & 0xFF00) | (frame->len[1] << 16 & 0xFF0000) | (frame->len[0] << 24 & 0xFF000000);
-    uint16_t frame_crc = (frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1];
+    uint32_t data_len = ((uint32_t)frame->len[0] << 24) | ((uint32_t)frame->len[1] << 16) |
+                        ((uint32_t)frame->len[2] << 8) | (uint32_t)frame->len[3];
+    /* DATA 至少要有 CmdType；上限保护，避免脏 LEN 越界 */
+    if (data_len < 1 || data_len > (sizeof(mem_pool) - sizeof(ldi_frame_t) - 2))
+        return PROTO_PROBE_FAKE;
+
+    uint32_t need = sizeof(ldi_frame_t) + data_len + 2;
+    if (avail < need)
+        return PROTO_PROBE_WAIT;
+    if (need > sizeof(mem_pool))
+        return PROTO_PROBE_FAKE;
+
+    /* 完整帧已齐，再 peek 一次确保 CRC 落在 mem_pool 内 */
+    rb_peek(buff, 0, mem_pool, need, nullptr);
+    frame = (ldi_frame_t *)mem_pool;
+
+    uint16_t frame_crc = ((uint16_t)frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1];
     uint16_t calc_crc  = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
     if (frame_crc != calc_crc)
         return PROTO_PROBE_FAKE;
@@ -353,6 +374,7 @@ void ldi_timer_task(void *argument)
         osDelay(1000);
 
         vms_timer_poll(); /* VMS 定时清屏 — 不受通道状态影响 */
+        ldi_device_timer_poll(); /* E6 KeepTime / E8 KeepTime */
 
         channel_t *ch = app_channel_get(CH_ID_TCP_CLIENT);
 

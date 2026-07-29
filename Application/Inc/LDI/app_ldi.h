@@ -5,7 +5,7 @@
 #include "app_ldi_cfg.h"
 #include "ring_buffer.h"
 
-#define DEVICE_NUM      (2U) // 本设备使用到的功能模块数量
+#define DEVICE_NUM      (4U) // 本设备使用到的功能模块数量
 
 #define LDI_TX_BUF_SIZE (512U) // 响应帧拼装缓冲区上限
 

@@ -1,10 +1,14 @@
 /**
  * @file    app_render.h
- * @brief   文字/图形渲染 — tagged union 统一入参
+ * @brief   文字/图形渲染 — tagged union 统一入参 + 多字库芯片切换
  *
- * 字库存储为 (字号, 编码, 字型) 三元组的顺序拼接。
- * 新增字号/字型只需在 g_font_lib 追加条目。
- * 新增渲染类型只需在 render_type_t 和 union 中追加。
+ * 上电时通过 DEV_KEY_DIP2 拨码开关自动选择字库芯片配置：
+ *   - DIP2 逻辑 0（开关 OFF，GPIO 高）→ W25Q64:   非连续布局, 16/24/32pt, GB2312 94列序
+ *   - DIP2 逻辑 1（开关 ON，GPIO 低）→ MX25L256: 连续布局, 14/16/20/24/32pt, GBK 190列序
+ *
+ * 运行中也可通过 app_render_chip_select() 手动切换。
+ * 每种芯片对应一个 font_chip_config_t 实例，包含地址查找表和自适应字号候选列表。
+ * 新增字号/字型只需在对应配置的 region 表中追加条目。
  */
 
 #pragma once
@@ -93,10 +97,39 @@ typedef struct {
     };
 } render_cfg_t;
 
+/* ---- 字库芯片配置 ---- */
+
+/** @brief 字库芯片配置 — 每种芯片一个实例 */
+typedef struct {
+    const char *name;                    /* 配置名称 */
+    const void *regions;                 /* flash_region_t 数组指针 */
+    uint8_t region_count;                /* 数组元素个数 */
+    const font_size_t *adaptive_sizes;   /* 自适应字号候选列表（从大到小） */
+    uint8_t adaptive_count;              /* 候选列表长度 */
+    bool ascii_raw_code;                 /* true=ASCII 用原始字符码（W25Q64）; false=减 0x20（MX25L256） */
+    bool gbk_index_190;                  /* true=GBK 用 190 列序（MX25L256）; false=94 列序（W25Q64） */
+} font_chip_config_t;
+
+/** @brief 芯片配置ID */
+typedef enum {
+    FONT_CHIP_W25Q64  = 0,  /* W25Q64: 非连续布局, 16/24/32, ASCII 用原始字符码 */
+    FONT_CHIP_MX25L256 = 1, /* MX25L256: 连续布局, 14/16/20/24/32, ASCII 用 ch-0x20 */
+    FONT_CHIP_CNT,
+} font_chip_id_t;
+
 /* ---- API（模块自注册 sw_app_initcall，调用方无需传 display/font 句柄）---- */
 
 /** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现 */
 void app_render(const render_cfg_t *cfg);
+
+/** @brief 切换字库芯片配置 — 可在任意时刻调用，立即生效
+ *  @param id 芯片配置ID (FONT_CHIP_W25Q64 / FONT_CHIP_MX25L256)
+ *  @return true=切换成功, false=无效ID */
+bool app_render_chip_select(font_chip_id_t id);
+
+/** @brief 获取当前激活的字库芯片配置
+ *  @return 当前配置ID */
+font_chip_id_t app_render_chip_current(void);
 
 /* ---- 持久化显示 ---- */
 

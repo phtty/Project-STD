@@ -1,9 +1,11 @@
 /**
- * @file    dev_udp.h
- * @brief   UDP 广播接收通道（Device 层）
+ * @file    app_udp.h
+ * @brief   UDP 广播接收通道
  *
- * 监听 UDP 广播，用于 IAP 固件升级协议。
- * 端口 10011 硬编码，不可修改（升级通道必须保持可连接）。
+ * 默认监听端口 10011，同口承载：
+ *   - 创迪发现口（LDI 21H/12H）
+ *   - IAP 固件升级（0x5A5A5A5A）
+ * 端口可改，但出厂联调默认保持 10011。
  */
 
 #pragma once

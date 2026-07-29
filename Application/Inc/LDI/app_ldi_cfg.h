@@ -6,7 +6,7 @@
 // Flash Sector 11 (0x080E0000~0x080FFFFF, 128KB) 已释放。
 // LDI 配置现已迁移至 W25Qxx 最后一个 4KB 扇区，通过 dev_storage_ops 访问。
 #define APP_FLASH_LDI_MAGIC    0x0D001B00
-#define APP_FLASH_LDI_MAX_MODULES (6U) // Flash 最大可存储的功能模块数量
+#define APP_FLASH_LDI_MAX_MODULES (11U) // Flash 最大可存储的功能模块数量
 
 /**
  * 单功能模块配置信息（从 0BH 命令下发，共 12 字节）

@@ -1,6 +1,13 @@
 /**
  * @file    app_factory_test.c
  * @brief   出厂检测模式 — monitor 监听 TEST 驱动状态机
+ *
+ * 状态流程（每次按键递进）：
+ *   IDLE ──[1]──▶ SHOW_CODE ──[2]──▶ RED ──[3]──▶ GREEN ──[4]──▶ YELLOW
+ *   ──[5]──▶ AGING ──[6]──▶ NVIC_SystemReset()
+ *
+ * 按键测试阶段（SHOW_CODE / RED / GREEN / YELLOW）：光敏自动调光生效。
+ * 老化循环阶段（AGING）：强制最大亮度，光敏暂停。
  */
 
 #include "app_factory_test.h"
@@ -14,8 +21,10 @@
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
 
+#include "stm32f4xx_hal.h"
+
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
-#define PROGRAM_CODE "9210209C41"
+#define PROGRAM_CODE "9K10212482"
 
 static const display_color_t s_dead_pixel_colors[] = {
     COLOR_RED,
@@ -92,10 +101,10 @@ static void factory_monitor_task(void *argument)
     dev_display_t *dsp = dev_display_get();
 
     for (;;) {
-        /* IDLE: 等待 TEST 激活 */
+        /* ===== IDLE: 等待 TEST 激活 ===== */
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
-        /* ===== SHOW_CODE ===== */
+        /* ===== 第1次按键 → SHOW_CODE: 显示固件/模组信息 ===== */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
         app_render(&(render_cfg_t){
             .type      = RENDER_TEXT,
@@ -104,29 +113,38 @@ static void factory_monitor_task(void *argument)
             .w         = dsp->screen_rows,
             .h         = dsp->screen_cols,
             .color     = COLOR_GREEN,
-            .text      = PROGRAM_CODE,
-            .len       = strlen(PROGRAM_CODE),
-            .font_size = FONT_16,
+            .text      = "FW:"PROGRAM_CODE"\nMD:1000000969",
+            .len       = strlen("FW:"PROGRAM_CODE"\nMD:1000000969"),
+            .font_size = FONT_SELF_ADAPT,
             .font_type = FONT_ST,
             .text_enc  = FONT_ENC_UTF8,
             .style     = &(render_style_t){
-                .h_align = ALIGN_CENTER,
-                .v_align = ALIGN_CENTER,
+                .h_align   = ALIGN_CENTER,
+                .v_align   = ALIGN_CENTER,
             },
         });
 
+        /* ===== 第2次按键 → RED: 全屏红色 =====
+         * 光敏自动调光生效（未暂停 light_sensor_task） */
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
+        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_RED);
+        dev_display_commit_frame(dsp);
 
-        /* ===== DEAD_PIXEL ===== */
+        /* ===== 第3次按键 → GREEN: 全屏绿色 ===== */
+        dev_key_wait_press(DEV_KEY_TST, osWaitForever);
+        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_GREEN);
+        dev_display_commit_frame(dsp);
+
+        /* ===== 第4次按键 → YELLOW: 全屏黄色 ===== */
+        dev_key_wait_press(DEV_KEY_TST, osWaitForever);
+        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_YELLOW);
+        dev_display_commit_frame(dsp);
+
+        /* ===== 第5次按键 → AGING: 进入老化循环 =====
+         * 暂停光敏，强制最大亮度 */
+        dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         osThreadSuspend(g_light_sensor_task_handle);
         dev_display_set_brightness(dsp, 7);
-        for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
-            dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
-            dev_key_wait_press(DEV_KEY_TST, osWaitForever);
-        }
-
-        /* ===== AGING ===== */
-        osThreadResume(g_light_sensor_task_handle);
 
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
@@ -153,8 +171,8 @@ static void factory_monitor_task(void *argument)
             if (aging_exit) break;
         }
 
-        /* 退出工厂模式 */
-        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
+        /* ===== 第6次按键 → 重启程序 ===== */
+        NVIC_SystemReset();
     }
 }
 

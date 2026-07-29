@@ -1,6 +1,10 @@
 /**
- * @file    dev_udp.c
- * @brief       UDP 广播接收通道（监听端口 10011）
+ * @file    app_udp.c
+ * @brief   UDP 广播接收通道（默认端口 10011）
+ *
+ * 同端口承载两类协议（由 app_dispatch 按帧头分流）：
+ *   - 创迪发现口：LDI 21H/12H 搜索
+ *   - IAP 升级：0x5A5A5A5A 帧
  */
 
 #include "app_udp.h"
@@ -9,7 +13,7 @@
 #include "pl_net_adapt.h"
 
 /* ---- 配置 ---- */
-static uint16_t g_udp_port = 10011; /**< IAP 升级通道 */
+static uint16_t g_udp_port = 10011; /**< 创迪发现口 + IAP 共用 */
 
 void app_udp_set_port(uint16_t port)
 {
@@ -27,6 +31,11 @@ void app_udp_broadcast(const uint8_t *data, uint16_t len)
     if (conn == NULL) return;
 
     ip_set_option(conn->pcb.udp, SOF_BROADCAST);
+    if (netconn_bind(conn, IP_ADDR_ANY, g_udp_port) != ERR_OK) {
+        netconn_delete(conn);
+        return;
+    }
+
     ip_addr_t bc_addr;
     IP4_ADDR(&bc_addr, 255, 255, 255, 255);
 
@@ -103,24 +112,28 @@ void udp_task(void *argument)
         udp_disconnect_sem = osSemaphoreNew(1, 0, NULL);
     pl_net_register_link_listener(udp_link_listener);
 
-    struct netconn *conn = netconn_new(NETCONN_UDP);
-    if (conn == NULL) {
-        osThreadExit();
-        return;
-    }
-
     for (;;) {
+        struct netconn *conn = netconn_new(NETCONN_UDP);
+        if (conn == NULL) {
+            osDelay(2000);
+            continue;
+        }
+
         ip_set_option(conn->pcb.udp, SOF_BROADCAST);
         err_t err = netconn_bind(conn, IP_ADDR_ANY, g_udp_port);
 
         if (err == ERR_OK) {
+            /* 清空残留断开信号，避免刚起来就误退 */
             while (osSemaphoreAcquire(udp_disconnect_sem, 0) == osOK);
 
             osThreadId_t tid = osThreadNew(udp_connect_task, conn, &udp_connect_attr);
-            if (tid != NULL)
+            if (tid != NULL) {
+                /* 链路断开 / recv 失败后由 connect_task 释放信号量 */
                 osSemaphoreAcquire(udp_disconnect_sem, osWaitForever);
+            }
         }
 
+        /* 每次循环新建 netconn：delete 后不可再 bind 旧句柄 */
         netconn_delete(conn);
         osDelay(2000);
     }

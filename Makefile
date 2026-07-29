@@ -269,7 +269,7 @@ SRC_DEVICE = \
 	Device/IO/dev_io_ctrl.c \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
-	Device/Display/dev_display_p20.c \
+	Device/Display/dev_display_1_260.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
@@ -293,6 +293,7 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/LDI/app_ldi_cmd.c \
 	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_ldi_device.c \
 	Application/Src/LDI/app_vms_ctrl.c \
 	Application/Src/AH_MQTT/ah_mqtt.c \
 	Application/Src/AH_MQTT/ah_mqtt_cmd.c \

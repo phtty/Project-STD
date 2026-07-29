@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /** @brief 运行全部测试用例 */
 void app_test_run(void);
 
@@ -22,3 +24,12 @@ void app_test_io_output(void);
 
 /** @brief LED 灯序测试：逐通道逐像素点亮 hub75_buff，用于确认物理灯序映射 */
 void app_test_led_mapping(void);
+
+/** @brief 扫描行顺序测试：逐行点亮水平线，确认 1/8 扫描的行地址映射 */
+void app_test_scan_line_order(void);
+
+/** @brief 对角线测试：验证整体坐标映射是否正确 */
+void app_test_diagonal(void);
+
+/** @brief prepare 映射测试：通过 set_pixel 逐像素点亮，验证 prepare 像素重排是否正确 */
+void app_test_prepare_mapping(void);

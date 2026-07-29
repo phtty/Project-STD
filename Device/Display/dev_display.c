@@ -16,11 +16,23 @@
 /* ---- 扫描任务事件 ---- */
 static osEventFlagsId_t s_scan_evt;
 static dev_display_t *s_active_display;
+static uint8_t *s_frame_front;
+static uint8_t *s_frame_back;
+static uint8_t *s_pending_frame;
+static uint8_t s_frame_ready;
 
 /* ---- 实例注册（由派生模组的 hw_dev_initcall 调用）---- */
 void dev_display_register(dev_display_t *dev) { s_active_display = dev; }
 
 dev_display_t *dev_display_get(void) { return s_active_display; }
+
+void dev_display_commit_frame(dev_display_t *dev)
+{
+    if (!dev)
+        return;
+    s_pending_frame = dev->pixel_map;
+    s_frame_ready   = 1U;
+}
 
 /* ---- TIM 周期回调（前向声明，实现在文件末尾）---- */
 static void _on_tim3_period(void);
@@ -46,11 +58,20 @@ static void scan_task(void *arg)
     pl_tim_start_it(pl_tim_get_handle(PL_TIM3));
     pl_tim_start_it(pl_tim_get_handle(PL_TIM4));
 
+    s_frame_front = dev->pixel_map;
+    s_frame_back  = dev->pixel_map;
+
     for (;;) {
         osEventFlagsWait(s_scan_evt, 0x01, osFlagsWaitAny, osWaitForever);
 
-        /* 脏标记 → 预计算（off critical path） */
-        if (dev->dirty) {
+        /* 帧提交 → 预计算（off critical path） */
+        if (s_frame_ready) {
+            osKernelLock();
+            s_frame_front  = s_pending_frame;
+            s_frame_back   = dev->hub75_buff;
+            s_frame_ready  = 0U;
+            osKernelUnlock();
+
             dev->dirty = false;
             if (dev->ops->prepare)
                 dev->ops->prepare(dev);
@@ -84,7 +105,7 @@ void dev_display_start(void)
 
     const osThreadAttr_t attr = {
         .name       = "scan_task",
-        .stack_size = 512,
+        .stack_size = 512 * 4,
         .priority   = osPriorityRealtime,
     };
     osThreadNew(scan_task, dev, &attr);
