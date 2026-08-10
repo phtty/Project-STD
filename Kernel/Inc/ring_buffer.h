@@ -25,6 +25,10 @@
     static uint8_t name##_buf[sz]; \
     ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
 
+#define RB_DEFINE_CCM(name, sz)    \
+    static uint8_t name##_buf[sz] __attribute__((section(".ccmram"))); \
+    ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
+
 /** @brief 环形缓冲区结构体 */
 typedef struct {
     uint8_t *data;

@@ -39,10 +39,10 @@ static uint8_t _msg_dispatch_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN];
  *  id 与具体的 RB_DEFINE 通过 if(id==N) 硬绑定，扩容需同步修改。
  * ================================================================ */
 
-RB_DEFINE(g_rb0, 2048); /**< id=0: IAP 协议专用（高可靠性组） */
-RB_DEFINE(g_rb1, 2048); /**< id=1: 通用业务协议组（LDI 等共用） */
-RB_DEFINE(g_rb2, 2048); /**< id=2: 暂未使用，预留 */
-RB_DEFINE(g_rb3, 2048); /**< id=3: 暂未使用，预留 */
+RB_DEFINE_CCM(g_rb0, 2048); /**< id=0: IAP 协议专用（高可靠性组） */
+RB_DEFINE_CCM(g_rb1, 2048); /**< id=1: 通用业务协议组（LDI 等共用） */
+RB_DEFINE_CCM(g_rb2, 2048); /**< id=2: 暂未使用，预留 */
+RB_DEFINE_CCM(g_rb3, 2048); /**< id=3: 暂未使用，预留 */
 
 /* ================================================================
  *  调度上下文 — 全部运行时的唯一状态聚合

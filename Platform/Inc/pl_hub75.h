@@ -98,7 +98,15 @@ __STATIC_INLINE void pl_hub75_oe_set(bool enable)
     HUB75_OE = enable ? 1 : 0;
 }
 
-__STATIC_INLINE void pl_hub75_set_row(uint8_t row)
+/**
+ * @brief 译码器型行驱动（74HC138 等）
+ *
+ * A/B/C 直接输出二进制行地址，由译码器硬件选通对应行，
+ * D 引脚用于使能/片选（1/16 扫时选高低 8 行）。
+ *
+ * @param row 物理行号（0 ~ N-1，N 由扫描方式决定）
+ */
+__STATIC_INLINE void pl_hub75_Decoder_set_row(uint8_t row)
 {
     HUB75_A = (row & 0x01) ? 1 : 0;
     HUB75_B = (row & 0x02) ? 1 : 0;
@@ -106,9 +114,63 @@ __STATIC_INLINE void pl_hub75_set_row(uint8_t row)
     HUB75_D = (row & 0x08) ? 1 : 0;
 }
 
+/**
+ * @brief 移位寄存器型行驱动（SM5266PH 等）
+ *
+ * 通过 A(时钟)、B(数据)、C(使能/锁存) 三线接口驱动 8 位移位寄存器，
+ * 配合 D 引脚二进制解码选择芯片（最多 2 颗）。
+ *
+ * @param row       物理行号（0 ~ N×8-1，N 为芯片数）
+ * @param chip_bits 芯片选择引脚数（1 = 仅 D，2 = D + E）
+ *
+ * 驱动流程：C 高 → 清零 → 移入独热码 → C 低锁存
+ */
+__STATIC_INLINE void pl_hub75_ShiftRegister_set_row(uint8_t row, uint8_t chip_bits)
+{
+    uint8_t chip = row / 8;
+    uint8_t bit  = row % 8;
+
+    /* 芯片选择（D = bit0, E = bit1） */
+    HUB75_D = (chip & 0x01) ? 1 : 0;
+#ifdef HUB75_E
+    if (chip_bits > 1)
+        HUB75_E = (chip & 0x02) ? 1 : 0;
+#endif
+
+    /* 进入移位模式 */
+    HUB75_C = 1;
+
+    /* 清零移位寄存器 */
+    for (uint8_t i = 0; i < 8; i++) {
+        HUB75_B = 0;
+        HUB75_A = 1;
+        __NOP();
+        __NOP();
+        HUB75_A = 0;
+        __NOP();
+        __NOP();
+    }
+
+    /* 移入独热码（bit 位为 1） */
+    for (uint8_t i = 0; i < 8; i++) {
+        HUB75_B = (i == bit) ? 1 : 0;
+        HUB75_A = 1;
+        __NOP();
+        __NOP();
+        HUB75_A = 0;
+        __NOP();
+        __NOP();
+    }
+
+    /* 锁存到行输出 */
+    HUB75_C = 0;
+    __NOP();
+    __NOP();
+}
+
 /* ---- BSRR 预计算值（Device 层可持有，通过 pl_hub75_bsrr_flush 写入，不碰 GPIO_TypeDef） ---- */
 typedef struct {
-    uint32_t      val;
+    uint32_t val;
     GPIO_TypeDef *port;
 } pl_hub75_bsrr_t;
 

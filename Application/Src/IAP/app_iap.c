@@ -3,7 +3,7 @@
  * @brief   IAP 固件升级协议处理
  *
  * 帧格式: 0x5A5A5A5A (4B) | seq (4B) | cmd (4B) | len (4B) | data | CRC32 (4B)
- * 承载于 RS485 + UDP，配置存储于 Flash 0x08004000。
+ * 承载于 RS485 + UDP，配置存储于 Flash 0x08004000。 
  */
 
 #include "app_iap.h"
