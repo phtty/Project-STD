@@ -504,7 +504,9 @@ app_key key_poll_task (20ms) → 轮询 GPIO 实际电平确认释放
 
 ### 光传感器 (`dev_light_sensor.c`)
 
-ADC1 采样光敏电阻分压（LDR：光越暗→电阻越大→ADC 值越高），8 次均值滤波后映射为亮度等级 1~7。`dev_light_sensor_auto_adjust()` 自动更新 `display->light_level`。
+ADC1 采样光敏电阻分压（LDR：光越暗→电阻越大→ADC 值越高），8 次均值滤波后映射为亮度等级。`dev_light_sensor_auto_adjust()` 自动更新 `display->light_level`。
+
+**亮度范围限制**：`light_sensor_dev_t` 含 `min_level`/`max_level` 字段（默认 1~7），`dev_light_sensor_read()` 输出前按范围钳位。`app_light_sensor_init()`（`sw_app_initcall`）上电时调用 `dev_light_sensor_set_range(4, 7)`，将光敏自动调光限制在 4~7 级（满足出厂最低/最高亮度要求）。外部可通过 `app_light_sensor_set_range(min, max)` 运行时动态调整。
 
 `app_light_sensor_init`（`sw_app_initcall`）创建 1 秒周期的自动调节任务。
 

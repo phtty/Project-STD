@@ -17,7 +17,7 @@ __STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn);
 /* ---- 连接任务属性 ---- */
 const osThreadAttr_t tcp_client_conn_attr = {
     .name       = "tcp_client_conn_task",
-    .stack_size = 256 * 4,
+    .stack_size = 256 * 8,
     .priority   = osPriorityNormal,
 };
 

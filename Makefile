@@ -36,6 +36,7 @@ INC_DIRS = \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
+	-I Application/Inc/ProtocolParser_QingHai \
 	-I Application/Inc/AH_MQTT \
 	-I Application/Inc/Channel \
 	-I Device/Inc \
@@ -54,7 +55,15 @@ INC_DIRS = \
 	-I Compiler
 
 # ---- C Flags ----
+PROTO ?= LDI
+ifeq ($(PROTO),QH)
+APP_PROTOCOL ?= 2
+else
+APP_PROTOCOL ?= 1
+endif
+
 CFLAGS  = $(MCU_FLAGS) $(DEFINES) $(INC_DIRS) $(TC_FLAGS)
+CFLAGS += -DAPP_PROTOCOL=$(APP_PROTOCOL)
 CFLAGS += -std=gnu23
 CFLAGS += -Og -g
 CFLAGS += -Wall -Wextra
@@ -269,7 +278,7 @@ SRC_DEVICE = \
 	Device/IO/dev_io_ctrl.c \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
-	Device/Display/dev_display_p20.c \
+	Device/Display/dev_display_1_260.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
@@ -277,6 +286,10 @@ SRC_DEVICE = \
 	Device/Network/dev_eth.c \
 	Device/Comm/dev_rs485.c \
 	Device/Comm/dev_rs232.c
+
+ifeq ($(PROTO),QH)
+SRC_DEVICE += Device/Comm/dev_rs232_voice.c
+endif
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
@@ -293,6 +306,7 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/LDI/app_ldi_cmd.c \
 	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_ldi_device.c \
 	Application/Src/LDI/app_vms_ctrl.c \
 	Application/Src/AH_MQTT/ah_mqtt.c \
 	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
@@ -302,6 +316,14 @@ SRC_APPLICATION = \
 	Application/Src/Channel/app_mqtt.c \
 	Application/Src/Channel/app_rs232.c \
 	Application/Src/Channel/app_rs485.c
+
+ifeq ($(PROTO),QH)
+SRC_APPLICATION += \
+	Application/Src/ProtocolParser_QingHai/app_qh_proto.c \
+	Application/Src/ProtocolParser_QingHai/app_qh_proto_parse.c \
+	Application/Src/ProtocolParser_QingHai/app_qh_proto_cmd.c \
+	Application/Src/ProtocolParser_QingHai/app_qh_proto_voice.c
+endif
 
 # ---- All Sources ----
 SRC_ALL = \
@@ -320,11 +342,21 @@ SRC_ALL = \
 OBJ_ALL = $(addprefix $(BUILD_DIR)/,$(SRC_ALL:.c=.o))
 
 # ---- Targets ----
-.PHONY: all clean
+.PHONY: all clean compile_commands
 
 all: $(BUILD_DIR)/Project_STD.elf $(BUILD_DIR)/Project_STD.hex $(BUILD_DIR)/Project_STD.bin
 	@echo "==== Build complete ===="
 	@$(SIZE) $(BUILD_DIR)/Project_STD.elf
+
+compile_commands: $(BUILD_DIR)/compile_commands.json
+	@ln -sf $(BUILD_DIR)/compile_commands.json compile_commands.json
+	@echo "==== compile_commands.json ready ===="
+
+$(BUILD_DIR)/compile_commands.json:
+	@mkdir -p $(BUILD_DIR)
+	@SRC_LIST="$(SRC_ALL)" CC_BIN="$(CC)" CFLAGS_STR="$(CFLAGS)" BUILD_DIR="$(BUILD_DIR)" \
+	  python3 -c 'import json,os,shlex; from pathlib import Path; root=Path.cwd(); build_dir=root/Path(os.environ["BUILD_DIR"]); cc_bin=os.environ["CC_BIN"]; cflags=shlex.split(os.environ["CFLAGS_STR"]); src_list=[s for s in os.environ["SRC_LIST"].split() if s.endswith(".c")]; entries=[]; \
+for src in src_list: entries.append({"directory": str(root), "command": " ".join(shlex.quote(x) for x in [cc_bin, *cflags, "-c", "-o", str(build_dir / src.replace(".c", ".o")), src]), "file": str(root / src), "output": str(build_dir / src.replace(".c", ".o"))}); (build_dir / "compile_commands.json").write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")'
 
 $(BUILD_DIR)/Project_STD.elf: $(OBJ_ALL)
 	@echo "Linking $@"
@@ -344,4 +376,4 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) compile_commands.json

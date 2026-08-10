@@ -28,38 +28,39 @@ typedef struct dev_display dev_display_t;
 
 /* ---- 操作虚表 ---- */
 typedef struct dev_display_ops {
-    void (*prepare)(dev_display_t *dev);           /* 像素→发送缓存 (dirty 时调用) */
+    void (*prepare)(dev_display_t *dev);            /* 像素→发送缓存 (dirty 时调用) */
     void (*scan)(dev_display_t *dev, uint8_t line); /* 输出一个扫描行 */
-    void (*set_row)(uint8_t row);                  /* ABCD 行地址编码 */
+    void (*set_row)(uint8_t row);                   /* ABCD 行地址编码 */
 } dev_display_ops_t;
 
 /* ---- 基类 (派生类必须将其放在第一个成员位置) ---- */
 struct dev_display {
-    const dev_display_ops_t *ops;  /* 第一个成员 */
+    const dev_display_ops_t *ops; /* 第一个成员 */
 
     /* 通用参数 */
-    uint8_t  module_rows;         /* 单模块像素行数 */
-    uint8_t  module_cols;         /* 单模块像素列数 */
-    uint8_t  channels_per_module; /* 每模块通道数 */
-    uint8_t  modules_per_row;     /* 每行模块数 */
-    uint8_t  modules_per_col;     /* 每列模块数 */
-    uint8_t  scan_lines;          /* 扫描行数 (静态=1, 1/4扫=4...) */
+    uint8_t module_rows;         /* 单模块像素行数 */
+    uint8_t module_cols;         /* 单模块像素列数 */
+    uint8_t channels_per_module; /* 每模块通道数 */
+    uint8_t modules_per_row;     /* 每行模块数 */
+    uint8_t modules_per_col;     /* 每列模块数 */
+    uint8_t scan_lines;          /* 扫描行数 (静态=1, 1/4扫=4...) */
 
     /* 派生参数 */
-    uint16_t screen_rows;         /* = modules_per_row * module_rows */
-    uint16_t screen_cols;         /* = modules_per_col * module_cols */
-    uint8_t  total_channels;      /* = modules_per_col * channels_per_module */
-    uint16_t channel_pixels;      /* = module_rows * module_cols * modules_per_row / total_channels */
-    uint16_t scan_line_pixels;    /* = channel_pixels / scan_lines */
-    uint16_t buffer_size;         /* = screen_rows * screen_cols */
+    uint16_t screen_rows;      /* = modules_per_row * module_rows */
+    uint16_t screen_cols;      /* = modules_per_col * module_cols */
+    uint8_t total_channels;    /* = modules_per_col * channels_per_module */
+    uint16_t channel_pixels;   /* = module_rows * module_cols * modules_per_row / total_channels */
+    uint16_t scan_line_pixels; /* = channel_pixels / scan_lines */
+    uint16_t buffer_size;      /* = screen_rows * screen_cols */
 
     /* 缓冲区 (CCMRAM，派生实例静态分配) */
     uint8_t *pixel_map;
     uint8_t *hub75_buff;
 
     /* 运行时 */
+    const char *module_code; /* 模组编码字符串，由派生模组绑定 */
     volatile uint8_t light_level;
-    volatile bool    dirty;
+    volatile bool dirty;
 };
 
 /* ---- 通用 API ---- */
@@ -70,26 +71,43 @@ void dev_display_init(void);
 /** @brief 软件初始化 (sw_dev_initcall): 创建 scan_task + 启动 TIM3/4 */
 void dev_display_start(void);
 
-/** @brief 设置单个像素颜色，置脏标记 */
+/** @brief 设置单个像素颜色，置脏标记
+ *
+ *  坐标约定: x 为水平方向 (0..screen_rows-1), y 为垂直方向 (0..screen_cols-1)。
+ *  注意: screen_rows 是每行像素数(宽度), screen_cols 是每列像素数(高度)。
+ *  pixel_map 按行主序存储: pixel_map[y * screen_rows + x] */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
 
-/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记 */
+/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记
+ *
+ *  坐标约定同 dev_display_set_pixel */
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color);
 
 /** @brief 叠加绘制位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color, bit=0不改变原像素。
- *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色 */
+ *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色
+ *
+ *  坐标约定同 dev_display_set_pixel */
 void dev_display_draw_bitmap(dev_display_t *dev,
-    uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-    const uint8_t *bitmap, display_color_t color);
+                             uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint8_t *bitmap, display_color_t color);
 
-/** @brief 获取 P20 模组显示实例 */
-dev_display_t *dev_display_p20_get(void);
+/** @brief 获取 1-969 模组显示实例 */
+dev_display_t *dev_display_1_969_get(void);
+
+/** @brief 获取 1-260 模组显示实例 */
+dev_display_t *dev_display_1_260_get(void);
+
+/** @brief 获取 1-577 模组显示实例 */
+dev_display_t *dev_display_1_577_get(void);
 
 /** @brief 注册活动显示实例（由显示模组的 hw_dev_initcall 调用） */
 void dev_display_register(dev_display_t *dev);
 
 /** @brief 获取当前活动显示实例 */
 dev_display_t *dev_display_get(void);
+
+/** @brief 将当前逻辑帧提交到扫描帧，供 scan_task 读取 */
+void dev_display_commit_frame(dev_display_t *dev);
 
 /** @brief 设置亮度 (0=最暗/关闭, 7=最亮)，PWM 粒度 1/8 */
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);

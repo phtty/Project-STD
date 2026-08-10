@@ -20,9 +20,15 @@ void app_light_sensor_task(void *argument)
     }
 }
 
+void app_light_sensor_set_range(uint8_t min, uint8_t max)
+{
+    dev_light_sensor_set_range(&s_sensor_dev, min, max);
+}
+
 void app_light_sensor_init(void)
 {
     dev_light_sensor_init(&s_sensor_dev, dev_display_get());
+    dev_light_sensor_set_range(&s_sensor_dev, LIGHT_SENSOR_MIN_LEVEL, LIGHT_SENSOR_MAX_LEVEL);
 
     const osThreadAttr_t attr = {
         .name       = "light_sensor_task",
