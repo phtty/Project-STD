@@ -99,7 +99,7 @@ proto_probe_sta_t msl_probe_frame(const channel_t *ch, const ring_buffer_t *buff
         return;
 
     // 绑定协议使用到的通道
-    app_proto_bind_channel(s_msl_mask, CH_ID_RS485);
+    app_proto_bind_channel(s_msl_mask, CH_ID_RS232);
 
     g_msl_task_handle = osThreadNew(msl_handle_task, nullptr, &msl_task_attr);
 }

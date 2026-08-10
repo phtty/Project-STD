@@ -747,5 +747,5 @@ void app_bitmap_sychro(dev_display_t *dsp, uint8_t addr, render_cfg_t ctx, bool 
     ((uint8_t *)f_ctx)[data_len] = bcc_calcu(&(f->addr), data_len + sizeof(msl_frame_t) - 2);
 
     // 发送数据帧
-    pl_uart_send(pl_uart_get_handle(PL_UART1), send_buf, data_len + sizeof(msl_frame_t) + 1, 50);
+    pl_uart_send(pl_uart_get_handle(PL_UART3), send_buf, data_len + sizeof(msl_frame_t) + 1, 50);
 }
