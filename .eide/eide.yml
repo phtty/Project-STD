@@ -444,7 +444,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: probe-rs
+    uploader: OpenOCD
   Release:
     cppPreprocessAttrs:
       defineList:

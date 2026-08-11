@@ -76,9 +76,9 @@ void app_boot(void)
                 .v_align = ALIGN_CENTER,
             },
             .color     = COLOR_RED,
-            .text      = "车道关闭",
-            .len       = strlen("车道关闭"),
-            .font_size = FONT_32,
+            .text      = "车",
+            .len       = strlen("车"),
+            .font_size = FONT_24,
             .font_type = FONT_HT,
             .text_enc  = FONT_ENC_UTF8,
         });
@@ -104,21 +104,21 @@ static void init_task(void *argument)
     // app_tcp_client_start();
     // app_udp_start();
     // app_rs485_start();
-    app_rs232_start();
+    // app_rs232_start();
 
     // app_test_run();
-    // app_default_display();
+    app_default_display();
 
-    printf("\nInit Task Done\n");
-    render_cfg_t ctx = {
-        .type  = RENDER_BITMAP,
-        .x     = 0,
-        .y     = 0,
-        .w     = dev_display_get()->screen_rows,
-        .h     = dev_display_get()->screen_cols,
-        .color = COLOR_RED,
-    };
-    app_bitmap_sychro(dev_display_get(), 0x01, ctx, true);
+    // printf("\nInit Task Done\n");
+    // render_cfg_t ctx = {
+    //     .type  = RENDER_BITMAP,
+    //     .x     = 0,
+    //     .y     = 0,
+    //     .w     = dev_display_get()->screen_rows,
+    //     .h     = dev_display_get()->screen_cols,
+    //     .color = COLOR_RED,
+    // };
+    // app_bitmap_sychro(dev_display_get(), 0x01, ctx, true);
 
     osThreadExit();
 }

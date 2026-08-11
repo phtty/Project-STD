@@ -59,12 +59,12 @@ static const dev_key_ops_t dip_key_ops = {
  *  实例
  * ================================================================ */
 
-static exti_key_t g_sw1  = {.me = {.id = DEV_KEY_SW1,  .port = PL_PORT_E, .pin = 12, .active_low = true}};
-static exti_key_t g_sw2  = {.me = {.id = DEV_KEY_SW2,  .port = PL_PORT_E, .pin = 11, .active_low = true}};
-static exti_key_t g_sw3  = {.me = {.id = DEV_KEY_SW3,  .port = PL_PORT_E, .pin = 10, .active_low = true}};
-static exti_key_t g_tst  = {.me = {.id = DEV_KEY_TST,  .port = PL_PORT_D, .pin =  8, .active_low = true}};
-static dip_key_t  g_dip1 = {.me = {.id = DEV_KEY_DIP1, .port = PL_PORT_E, .pin =  7, .active_low = true}};
-static dip_key_t  g_dip2 = {.me = {.id = DEV_KEY_DIP2, .port = PL_PORT_E, .pin =  8, .active_low = true}};
+static exti_key_t g_sw1 = {.me = {.id = DEV_KEY_SW1, .port = PL_PORT_E, .pin = 12, .active_low = true}};
+static exti_key_t g_sw2 = {.me = {.id = DEV_KEY_SW2, .port = PL_PORT_E, .pin = 11, .active_low = true}};
+static exti_key_t g_sw3 = {.me = {.id = DEV_KEY_SW3, .port = PL_PORT_E, .pin = 10, .active_low = true}};
+static exti_key_t g_tst = {.me = {.id = DEV_KEY_TST, .port = PL_PORT_D, .pin = 8, .active_low = true}};
+static dip_key_t g_dip1 = {.me = {.id = DEV_KEY_DIP1, .port = PL_PORT_E, .pin = 8, .active_low = true}};
+static dip_key_t g_dip2 = {.me = {.id = DEV_KEY_DIP2, .port = PL_PORT_E, .pin = 9, .active_low = true}};
 
 static dev_key_t *s_keys[DEV_KEY_COUNT];
 
@@ -81,7 +81,7 @@ static void _exti_cb(uint16_t pin, void *ctx)
 {
     (void)ctx;
     for (uint8_t i = 0; i < DEV_KEY_COUNT; i++) {
-        dev_key_t *k = s_keys[i];
+        dev_key_t *k        = s_keys[i];
         uint16_t k_pin_mask = (uint16_t)(1U << k->pin);
 
         if (pin == k_pin_mask && k->press_sem) {

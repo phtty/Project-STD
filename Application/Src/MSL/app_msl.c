@@ -87,8 +87,8 @@ proto_probe_sta_t msl_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 [[maybe_unused]] static void msl_module_init(void)
 {
     // 通过拨码开关检测
-    msl_addr |= (app_key_get_state(DEV_KEY_DIP1)) & 0b01;
-    msl_addr |= (app_key_get_state(DEV_KEY_DIP2) << 1) & 0b10;
+    msl_addr |= dev_key_get_state(DEV_KEY_DIP1) & 0b01;
+    msl_addr |= (dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10;
 
     // 指定协议使用的环形缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);

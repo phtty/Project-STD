@@ -22,60 +22,42 @@ typedef struct {
     uint32_t unit_size; /* 该三元组的总字节数 */
 } font_unit_t;
 
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
-
-/* 字库单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
-#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
-#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+/* 字号描述表，标识已启用字号 */
+font_size_t font_size_table[] = {
+    FONT_SELF_ADAPT,
+    FONT_16,
+    FONT_24,
+    FONT_32,
+};
 
 /* 字库描述表 — 顺序必须与 Flash 中字库单元的排列一致 */
 static const font_unit_t g_font_lib[] = {
-    /* 14号 */
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(14)},
-    /* 16号 */
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(16)},
-    /* 20号 */
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(20)},
+    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_ST}, 2080},
+    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_FS}, 2080},
+    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_KT}, 2080},
+    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_HT}, 2080},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_ST}, 282784},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_FS}, 282784},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_KT}, 282784},
+    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_HT}, 282784},
     /* 24号 */
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(24)},
+    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_ST}, 6176},
+    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_FS}, 6176},
+    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_KT}, 6176},
+    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_HT}, 6176},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_ST}, 636224},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_FS}, 636224},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_KT}, 636224},
+    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_HT}, 636224},
     /* 32号 */
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(32)},
+    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_ST}, 8224},
+    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_FS}, 8224},
+    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_KT}, 8224},
+    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_HT}, 8224},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_ST}, 1131040},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, 1131040},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, 1131040},
+    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, 1131040},
 };
 
 /* ---- 内部: bytes_per_char ---- */
@@ -111,10 +93,10 @@ static uint32_t _char_addr(const font_key_t *key, const uint8_t *ch)
 
     // ascii: 1字节, ch[0] = 字符码
     if (key->charset == FONT_ENC_ASCII)
-        return base + (ch[0] - 0x20) * bytes;
+        return base + ch[0] * bytes;
 
-    // GBK: 2字节, ch[0]=高字节, ch[1]=低字节
-    uint32_t idx = (uint32_t)(ch[0] - 0x81) * 190 + (ch[1] >= 0x80 ? ch[1] - 0x41 : ch[1] - 0x40);
+    // G2312: 2字节, ch[0]=高字节, ch[1]=低字节
+    uint32_t idx = (94 * (ch[0] - 0xA1) + (ch[1] - 0xA1));
     return base + idx * bytes;
 }
 
@@ -143,7 +125,7 @@ sw_app_initcall(_render_init);
 static inline void _render_text(const render_cfg_t *cfg)
 {
     // 入口参数检查
-    if (!cfg->text || !cfg->len || !cfg->font_size)
+    if (!cfg->text || !cfg->len)
         return;
     if (!cfg->w || !cfg->h)
         return;
@@ -164,6 +146,21 @@ static inline void _render_text(const render_cfg_t *cfg)
         uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);
         memcpy(text_buf, cfg->text, n);
         text_len = n;
+    }
+
+    /* 字号自适应 */
+    if (cfg->font_size == FONT_SELF_ADAPT) {
+        gbk_key.size = FONT_16;
+        asc_key.size = FONT_16;
+        for (int8_t i = sizeof(font_size_table) / sizeof(font_size_table[0]); i >= 1; i--) {
+            uint16_t h_res = cfg->h / font_size_table[i];
+            uint16_t w_res = cfg->w / (font_size_table[i] / 2);
+            if (text_len <= h_res * w_res) {
+                gbk_key.size = font_size_table[i];
+                asc_key.size = font_size_table[i];
+                break;
+            }
+        }
     }
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
