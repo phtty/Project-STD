@@ -30,6 +30,16 @@ static void cmd_text(channel_t *ch, void *data)
     (void)ch;
     msl_text_t *ctx = data;
 
+    // 先清屏再显示
+    app_render(&(render_cfg_t){
+        .type  = RENDER_FILL,
+        .x     = 0,
+        .y     = 0,
+        .w     = 0,
+        .h     = 0,
+        .color = COLOR_BLACK,
+    });
+
     app_render(&(render_cfg_t){
         .type  = RENDER_TEXT,
         .x     = (ctx->x[1] & 0xFF) | ((ctx->x[0] << 8) & 0xFF00),
@@ -60,6 +70,15 @@ static void cmd_bitmap(channel_t *ch, void *data)
     (void)ch;
     msl_bitmap_t *ctx = data;
 
+    // 先清屏再显示
+    app_render(&(render_cfg_t){
+        .type  = RENDER_FILL,
+        .x     = 0,
+        .y     = 0,
+        .w     = 0,
+        .h     = 0,
+        .color = COLOR_BLACK,
+    });
     app_render(&(render_cfg_t){
         .type   = RENDER_BITMAP,
         .x      = 0,

@@ -124,29 +124,44 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     vms_clear_screen();
 
     /* ---- 渲染文字 ---- */
-    msl_render_text(
-        &(render_cfg_t){
-            .type      = RENDER_TEXT,
-            .x         = 0,
-            .y         = render_y,
-            .w         = screen_w,
-            .h         = render_h,
-            .color     = color,
-            .text      = (char *)ctx->text,
-            .len       = text_len,
-            .style     = &style,
-            .font_size = font_size,
-            .font_type = FONT_HT,
-            .text_enc  = FONT_ENC_GBK,
-        },
-        false);
 
     /* ---- 持久化策略 ---- */
-    if (ctx->keep_time == 0) {
-        /* 永久显示：存入 Flash */
-        app_render_save();
+    if (ctx->keep_time == 0) { /* 永久显示：存入 Flash */
+        msl_render_text(
+            &(render_cfg_t){
+                .type      = RENDER_TEXT,
+                .x         = 0,
+                .y         = render_y,
+                .w         = screen_w,
+                .h         = render_h,
+                .color     = color,
+                .text      = (char *)ctx->text,
+                .len       = text_len,
+                .style     = &style,
+                .font_size = font_size,
+                .font_type = FONT_HT,
+                .text_enc  = FONT_ENC_GBK,
+            },
+            true);
         s_vms_timer_active = false;
+
     } else {
+        msl_render_text(
+            &(render_cfg_t){
+                .type      = RENDER_TEXT,
+                .x         = 0,
+                .y         = render_y,
+                .w         = screen_w,
+                .h         = render_h,
+                .color     = color,
+                .text      = (char *)ctx->text,
+                .len       = text_len,
+                .style     = &style,
+                .font_size = font_size,
+                .font_type = FONT_HT,
+                .text_enc  = FONT_ENC_GBK,
+            },
+            false);
         /* 定时显示：keep_time 秒后自动清屏 */
         s_vms_clear_tick   = osKernelGetTickCount() + (uint32_t)ctx->keep_time * 1000U;
         s_vms_timer_active = true;
@@ -170,7 +185,7 @@ static void vms_clean_ctrl(ldi_ctrl_vms_t *ctx)
             .h     = 0,
             .color = color,
         },
-        false);
+        true);
 
     /* 主动清屏时取消定时器 */
     s_vms_timer_active = false;

@@ -86,7 +86,7 @@ extern uint8_t msl_addr;
                 .font_type = FONT_HT,
                 .text_enc  = FONT_ENC_UTF8,
             },
-            false);
+            true);
     }
 }
 
@@ -105,9 +105,9 @@ static void init_task(void *argument)
     };
     osThreadNew(half_sec_task, NULL, &hst_attr);
 
-    // app_tcp_server_start();
-    // app_tcp_client_start();
-    // app_udp_start();
+    app_tcp_server_start();
+    app_tcp_client_start();
+    app_udp_start();
     // app_rs485_start();
     // app_rs232_start();
     app_rs232_1_start();
@@ -115,16 +115,7 @@ static void init_task(void *argument)
     // app_test_run();
     app_default_display();
 
-    // printf("\nInit Task Done\n");
-    // render_cfg_t ctx = {
-    //     .type  = RENDER_BITMAP,
-    //     .x     = 0,
-    //     .y     = 0,
-    //     .w     = dev_display_get()->screen_rows,
-    //     .h     = dev_display_get()->screen_cols,
-    //     .color = COLOR_RED,
-    // };
-    // app_bitmap_sychro(dev_display_get(), 0x01, ctx, true);
+    printf("\nInit Task Done\n");
 
     osThreadExit();
 }

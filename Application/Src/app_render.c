@@ -597,6 +597,8 @@ void msl_render_bitmap(const render_cfg_t *cfg, bool pers)
     };
     app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
 
+    osDelay(50);
+
     render_cfg_t ctx2 = {
         .type  = RENDER_BITMAP,
         .x     = addr_part_table[2].col_start,
@@ -634,6 +636,8 @@ void msl_render_fill(const render_cfg_t *cfg, bool pers)
         .color = cfg->color,
     };
     app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
+
+    osDelay(50);
 
     render_cfg_t ctx2 = {
         .type  = RENDER_BITMAP,
