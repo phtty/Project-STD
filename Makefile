@@ -37,6 +37,8 @@ INC_DIRS = \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
 	-I Application/Inc/AH_MQTT \
+	-I Application/Inc/RLS \
+	-I Application/Inc/MSL \
 	-I Application/Inc/Channel \
 	-I Device/Inc \
 	-I Platform/Inc \
@@ -242,6 +244,7 @@ SRC_KERNEL = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/bit_utils.c \
 	Kernel/Src/crc_utils.c \
+	Kernel/Src/bcc_utils.c \
 	Kernel/Src/text_cvt.c
 
 # Platform（仅含无冲突的文件，其他在 Phase 3 逐步加入）
@@ -269,7 +272,7 @@ SRC_DEVICE = \
 	Device/IO/dev_io_ctrl.c \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
-	Device/Display/dev_display_p20.c \
+	Device/Display/dev_display_old_p20.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
@@ -287,19 +290,17 @@ SRC_APPLICATION = \
 	Application/Src/app_render.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
-	Application/Src/IAP/app_iap.c \
-	Application/Src/IAP/app_iap_cmd.c \
-	Application/Src/IAP/app_iap_cfg.c \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/LDI/app_ldi_cmd.c \
 	Application/Src/LDI/app_ldi_cfg.c \
 	Application/Src/LDI/app_vms_ctrl.c \
-	Application/Src/AH_MQTT/ah_mqtt.c \
-	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c \
+	Application/Src/MSL/app_msl.c \
+	Application/Src/MSL/app_msl_cmd.c \
 	Application/Src/Channel/app_udp.c \
 	Application/Src/Channel/app_tcp_server.c \
 	Application/Src/Channel/app_tcp_client.c \
-	Application/Src/Channel/app_mqtt.c \
 	Application/Src/Channel/app_rs232.c \
 	Application/Src/Channel/app_rs485.c
 
