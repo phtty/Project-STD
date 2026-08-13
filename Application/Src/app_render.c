@@ -18,6 +18,10 @@
 #include "dev_w25qxx.h"
 #include "pl_uart.h"
 
+#include "app_msl.h"
+#include "app_msl_cmd.h"
+#include "bcc_utils.h"
+
 /* ---- 字库单元描述 ---- */
 typedef struct {
     font_key_t key;
@@ -356,6 +360,9 @@ void msl_render_text(const render_cfg_t *cfg, bool pers)
     if (!cfg->w || !cfg->h)
         return;
 
+    // 主卡 UART6 发送互斥：保护 msl_ins / static 缓冲 / 阻塞发送的完整序列
+    osMutexAcquire(msl_tx_lock, osWaitForever);
+
     font_key_t gbk_key = {.size = cfg->font_size, .type = cfg->font_type, .charset = FONT_ENC_GBK};
     font_key_t asc_key = {.size = gbk_key.size, .type = gbk_key.type, .charset = FONT_ENC_ASCII};
 
@@ -480,7 +487,7 @@ void msl_render_text(const render_cfg_t *cfg, bool pers)
                             line_origin_x += (cfg->w - line_widths[line_idx]);
                     }
                     cur_x = line_origin_x;
-                    if (cur_y + line_h > cfg->h) return;
+                    if (cur_y + line_h > cfg->h) goto done;
                 } else {
                     char_pos++;
                     continue;
@@ -512,7 +519,7 @@ void msl_render_text(const render_cfg_t *cfg, bool pers)
                             line_origin_x += (cfg->w - line_widths[line_idx]);
                     }
                     cur_x = line_origin_x;
-                    if (cur_y + line_h > cfg->h) return;
+                    if (cur_y + line_h > cfg->h) goto done;
                 } else {
                     char_pos += 2;
                     continue;
@@ -543,6 +550,18 @@ void msl_render_text(const render_cfg_t *cfg, bool pers)
     if (pers)
         app_render_save();
 
+    render_cfg_t ctx2 = {
+        .type  = RENDER_BITMAP,
+        .x     = addr_part_table[2].col_start,
+        .y     = 0,
+        .w     = addr_part_table[2].col_inc,
+        .h     = msl_ins.screen_cols,
+        .color = cfg->color,
+    };
+    app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
+
+    osDelay(50);
+
     render_cfg_t ctx1 = {
         .type  = RENDER_BITMAP,
         .x     = addr_part_table[1].col_start,
@@ -553,20 +572,16 @@ void msl_render_text(const render_cfg_t *cfg, bool pers)
     };
     app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
 
-    render_cfg_t ctx2 = {
-        .type  = RENDER_BITMAP,
-        .x     = addr_part_table[2].col_start,
-        .y     = 0,
-        .w     = addr_part_table[2].col_inc,
-        .h     = msl_ins.screen_cols,
-        .color = cfg->color,
-    };
-    app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
+done:
+    osMutexRelease(msl_tx_lock);
 }
 
 void msl_render_bitmap(const render_cfg_t *cfg, bool pers)
 {
     if (!cfg->w || !cfg->h || !cfg->bitmap) return;
+
+    // 主卡 UART6 发送互斥：保护 msl_ins / static 缓冲 / 阻塞发送的完整序列
+    osMutexAcquire(msl_tx_lock, osWaitForever);
 
     dev_display_draw_bitmap(&msl_ins, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
     if (pers)
@@ -591,6 +606,8 @@ void msl_render_bitmap(const render_cfg_t *cfg, bool pers)
         .color = cfg->color,
     };
     app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
+
+    osMutexRelease(msl_tx_lock);
 }
 
 void msl_render_fill(const render_cfg_t *cfg, bool pers)
@@ -600,6 +617,10 @@ void msl_render_fill(const render_cfg_t *cfg, bool pers)
         w = msl_ins.screen_rows;
         h = msl_ins.screen_cols;
     }
+
+    // 主卡 UART6 发送互斥：保护 msl_ins / static 缓冲 / 阻塞发送的完整序列
+    osMutexAcquire(msl_tx_lock, osWaitForever);
+
     dev_display_fill(&msl_ins, cfg->x, cfg->y, w, h, cfg->color);
     if (pers)
         app_render_save();
@@ -623,6 +644,8 @@ void msl_render_fill(const render_cfg_t *cfg, bool pers)
         .color = cfg->color,
     };
     app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
+
+    osMutexRelease(msl_tx_lock);
 }
 
 /* ---- 渲染跳表 ---- */
@@ -713,10 +736,6 @@ bool app_render_restore(void)
     dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
     return true;
 }
-
-#include "app_msl.h"
-#include "app_msl_cmd.h"
-#include "bcc_utils.h"
 
 #define MSL_PAYLOAD_MAX (1032U)
 /**

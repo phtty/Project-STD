@@ -1,7 +1,6 @@
 #include "app_msl_cmd.h"
 
 #include "app_render.h"
-#include "app_light_sensor.h"
 
 static void cmd_test(channel_t *ch, void *data);
 static void cmd_text(channel_t *ch, void *data);
@@ -28,6 +27,7 @@ const msl_cmd_handler_fn_t g_msl_cmd_table[] = {
  */
 static void cmd_text(channel_t *ch, void *data)
 {
+    (void)ch;
     msl_text_t *ctx = data;
 
     app_render(&(render_cfg_t){
@@ -36,7 +36,6 @@ static void cmd_text(channel_t *ch, void *data)
         .y     = (ctx->y[1] & 0xFF) | ((ctx->y[0] << 8) & 0xFF00),
         .w     = dev_display_get()->screen_rows,
         .h     = dev_display_get()->screen_cols,
-        .color = ctx->color,
         .style = &(render_style_t){
             .h_align   = ctx->col_style,
             .v_align   = ctx->row_style,
@@ -58,6 +57,7 @@ static void cmd_text(channel_t *ch, void *data)
  */
 static void cmd_bitmap(channel_t *ch, void *data)
 {
+    (void)ch;
     msl_bitmap_t *ctx = data;
 
     app_render(&(render_cfg_t){
@@ -78,6 +78,7 @@ static void cmd_bitmap(channel_t *ch, void *data)
  */
 static void cmd_fill(channel_t *ch, void *data)
 {
+    (void)ch;
     app_render(&(render_cfg_t){
         .type  = RENDER_FILL,
         .x     = 0,
@@ -93,5 +94,7 @@ static void cmd_fill(channel_t *ch, void *data)
  */
 static void cmd_lightlevel(channel_t *ch, void *data)
 {
-    app_light_sensor_get()->display->light_level = *(uint8_t *)data;
+    (void)ch;
+    // 直接作用于真实显示设备：副卡不初始化光传感器(display 为 NULL)，不能走传感器路径
+    dev_display_set_brightness(dev_display_get(), *(uint8_t *)data);
 }

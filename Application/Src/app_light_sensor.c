@@ -18,6 +18,9 @@ osThreadId_t g_light_sensor_task_handle;
 
 static void send_light_adjust(uint8_t light_lev)
 {
+    // 与显示内容发送共用 UART6 和 msl_tx_lock，避免帧竞争
+    osMutexAcquire(msl_tx_lock, osWaitForever);
+
     uint8_t _buf[sizeof(msl_frame_t) + 2] = {0};
     msl_frame_t *f                        = (msl_frame_t *)_buf;
 
@@ -37,7 +40,9 @@ static void send_light_adjust(uint8_t light_lev)
     f->data_bcc[1] = bcc_calcu(&(f->addr), sizeof(msl_frame_t) - 1);
 
     // 发送数据帧
-    // pl_uart_send(pl_uart_get_handle(PL_UART6), _buf, sizeof(msl_frame_t) + 2, 50);
+    pl_uart_send(pl_uart_get_handle(PL_UART6), _buf, sizeof(msl_frame_t) + 2, 50);
+
+    osMutexRelease(msl_tx_lock);
 }
 
 void app_light_sensor_task(void *argument)

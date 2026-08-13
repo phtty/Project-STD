@@ -22,6 +22,7 @@ typedef enum {
 } msl_cmd_type_t;
 
 extern uint8_t msl_addr;
+extern osMutexId_t msl_tx_lock;
 extern osMessageQueueId_t g_msl_msg_queue;
 extern osThreadId_t g_msl_task_handle;
 extern const osThreadAttr_t msl_task_attr;
