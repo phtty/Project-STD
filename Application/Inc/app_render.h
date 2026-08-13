@@ -119,8 +119,9 @@ void app_render_save(void);
 bool app_render_restore(void);
 
 // 关于msl的api
-void msl_render_text(const render_cfg_t *cfg);
-void msl_render_bitmap(const render_cfg_t *cfg);
-void msl_render_fill(const render_cfg_t *cfg);
+extern dev_display_t msl_ins;
+void msl_render_text(const render_cfg_t *cfg, bool pers);
+void msl_render_bitmap(const render_cfg_t *cfg, bool pers);
+void msl_render_fill(const render_cfg_t *cfg, bool pers);
 
 void app_bitmap_sychro(dev_display_t *dsp, uint8_t addr, render_cfg_t ctx, bool pers);

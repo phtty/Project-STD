@@ -74,7 +74,7 @@ static void cmd_bitmap(channel_t *ch, void *data)
 }
 
 /**
- * @brief 手动指定亮度等级
+ * @brief 纯色填充
  */
 static void cmd_fill(channel_t *ch, void *data)
 {

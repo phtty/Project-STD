@@ -10,6 +10,8 @@
 #include "app_render.h"
 
 #include <string.h>
+#include "cmsis_os2.h"
+
 #include "text_cvt.h"
 #include "initcall.h"
 #include "crc_utils.h"
@@ -338,7 +340,7 @@ msl_addr_part_t addr_part_table[3] = {
 };
 
 [[gnu::section(".ccmram")]] uint8_t msl_pixel_map[120 * 24] = {0};
-static dev_display_t msl_ins                                = {
+dev_display_t msl_ins                                       = {
     .screen_rows = 120,
     .screen_cols = 24,
     .buffer_size = 120 * 24,
@@ -346,10 +348,10 @@ static dev_display_t msl_ins                                = {
     .light_level = 1,
 };
 
-void msl_render_text(const render_cfg_t *cfg)
+void msl_render_text(const render_cfg_t *cfg, bool pers)
 {
     // 入口参数检查
-    if (!cfg->text || !cfg->len || !cfg->font_size)
+    if (!cfg->text || !cfg->len)
         return;
     if (!cfg->w || !cfg->h)
         return;
@@ -372,12 +374,27 @@ void msl_render_text(const render_cfg_t *cfg)
         text_len = n;
     }
 
+    /* 字号自适应 */
+    if (cfg->font_size == FONT_SELF_ADAPT) {
+        gbk_key.size = FONT_16;
+        asc_key.size = FONT_16;
+        for (int8_t i = sizeof(font_size_table) / sizeof(font_size_table[0]); i >= 1; i--) {
+            uint16_t h_res = cfg->h / font_size_table[i];
+            uint16_t w_res = cfg->w / (font_size_table[i] / 2);
+            if (text_len <= h_res * w_res) {
+                gbk_key.size = font_size_table[i];
+                asc_key.size = font_size_table[i];
+                break;
+            }
+        }
+    }
+
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
-    uint16_t line_widths[32];
-    uint8_t line_count = 0;
-    uint16_t line_w    = 0;
-    uint16_t line_h    = gbk_key.size;
-    uint16_t char_pos  = 0;
+    uint16_t line_widths[32] = {0};
+    uint8_t line_count       = 0;
+    uint16_t line_w          = 0;
+    uint16_t line_h          = gbk_key.size;
+    uint16_t char_pos        = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
@@ -473,7 +490,7 @@ void msl_render_text(const render_cfg_t *cfg)
             uint8_t ch_byte = (uint8_t)text_buf[char_pos];
             uint32_t addr   = _char_addr(&asc_key, &ch_byte);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
+            dev_display_fill(&msl_ins, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(&msl_ins, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -505,7 +522,7 @@ void msl_render_text(const render_cfg_t *cfg)
             uint8_t gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
             uint32_t addr     = _char_addr(&gbk_key, gbk_ch);
             dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
+            dev_display_fill(&msl_ins, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
             dev_display_draw_bitmap(&msl_ins, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
 
             cur_x += glyph_w;
@@ -518,10 +535,13 @@ void msl_render_text(const render_cfg_t *cfg)
     }
 
     for (int16_t i = 0; i < msl_ins.screen_cols; i++) {
-        memcpy(s_render_display->pixel_map,
-               msl_ins.pixel_map + i * msl_ins.screen_rows + addr_part_table[0].col_start,
+        memcpy(&(s_render_display->pixel_map[i * s_render_display->screen_rows]),
+               &(msl_ins.pixel_map[i * msl_ins.screen_rows + addr_part_table[0].col_start]),
                addr_part_table[0].col_inc);
     }
+    s_render_display->dirty = true;
+    if (pers)
+        app_render_save();
 
     render_cfg_t ctx1 = {
         .type  = RENDER_BITMAP,
@@ -531,7 +551,7 @@ void msl_render_text(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 1, ctx1, true);
+    app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
 
     render_cfg_t ctx2 = {
         .type  = RENDER_BITMAP,
@@ -541,14 +561,16 @@ void msl_render_text(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 2, ctx2, true);
+    app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
 }
 
-void msl_render_bitmap(const render_cfg_t *cfg)
+void msl_render_bitmap(const render_cfg_t *cfg, bool pers)
 {
     if (!cfg->w || !cfg->h || !cfg->bitmap) return;
 
     dev_display_draw_bitmap(&msl_ins, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
+    if (pers)
+        app_render_save();
 
     render_cfg_t ctx1 = {
         .type  = RENDER_BITMAP,
@@ -558,7 +580,7 @@ void msl_render_bitmap(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 1, ctx1, true);
+    app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
 
     render_cfg_t ctx2 = {
         .type  = RENDER_BITMAP,
@@ -568,10 +590,10 @@ void msl_render_bitmap(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 2, ctx2, true);
+    app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
 }
 
-void msl_render_fill(const render_cfg_t *cfg)
+void msl_render_fill(const render_cfg_t *cfg, bool pers)
 {
     uint16_t w = cfg->w, h = cfg->h;
     if (!w || !h) {
@@ -579,6 +601,8 @@ void msl_render_fill(const render_cfg_t *cfg)
         h = msl_ins.screen_cols;
     }
     dev_display_fill(&msl_ins, cfg->x, cfg->y, w, h, cfg->color);
+    if (pers)
+        app_render_save();
 
     render_cfg_t ctx1 = {
         .type  = RENDER_BITMAP,
@@ -588,7 +612,7 @@ void msl_render_fill(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 1, ctx1, true);
+    app_bitmap_sychro(&msl_ins, 1, ctx1, pers);
 
     render_cfg_t ctx2 = {
         .type  = RENDER_BITMAP,
@@ -598,7 +622,7 @@ void msl_render_fill(const render_cfg_t *cfg)
         .h     = msl_ins.screen_cols,
         .color = cfg->color,
     };
-    app_bitmap_sychro(&msl_ins, 2, ctx2, true);
+    app_bitmap_sychro(&msl_ins, 2, ctx2, pers);
 }
 
 /* ---- 渲染跳表 ---- */
@@ -661,10 +685,6 @@ void app_render_save(void)
                       sizeof(render_persist_t) + bm_bytes);
 }
 
-#include "app_msl.h"
-#include "app_msl_cmd.h"
-#include "bcc_utils.h"
-
 bool app_render_restore(void)
 {
     dev_display_t *d = s_render_display;
@@ -693,6 +713,10 @@ bool app_render_restore(void)
     dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
     return true;
 }
+
+#include "app_msl.h"
+#include "app_msl_cmd.h"
+#include "bcc_utils.h"
 
 #define MSL_PAYLOAD_MAX (1032U)
 /**
@@ -730,9 +754,9 @@ void app_bitmap_sychro(dev_display_t *dsp, uint8_t addr, render_cfg_t ctx, bool 
     f_ctx->pers  = pers;
 
     // 位图数据填充
-    for (uint16_t y = ctx.y; y < cols; y++) {
-        for (uint16_t x = ctx.x; x < rows; x++) {
-            uint8_t px = dsp->pixel_map[y * rows + x];
+    for (uint16_t y = 0; y < ctx.h; y++) {
+        for (uint16_t x = 0; x < ctx.w; x++) {
+            uint8_t px = dsp->pixel_map[y * dsp->screen_rows + ctx.x + x];
             if (px != COLOR_BLACK) {
                 f_ctx->bitmap[y * row_bytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
                 if (color == COLOR_BLACK) color = px;
@@ -744,5 +768,6 @@ void app_bitmap_sychro(dev_display_t *dsp, uint8_t addr, render_cfg_t ctx, bool 
     ((uint8_t *)f_ctx)[data_len] = bcc_calcu(&(f->addr), data_len + sizeof(msl_frame_t) - 2);
 
     // 发送数据帧
-    pl_uart_send(pl_uart_get_handle(PL_UART3), send_buf, data_len + sizeof(msl_frame_t) + 1, 50);
+
+    pl_uart_send(pl_uart_get_handle(PL_UART6), send_buf, data_len + sizeof(msl_frame_t) + 1, 50);
 }

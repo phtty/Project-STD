@@ -26,34 +26,35 @@ static void send_light_adjust(uint8_t light_lev)
 
     f->addr = 0;
 
-    f->length[0] = 1;
-    f->length[1] = 0;
+    f->length[0] = 0;
+    f->length[1] = 1;
 
     f->cmd = MSL_CMD_LIGHTLEVEL;
 
     f->data_bcc[0] = light_lev;
 
     // bcc校验
-    f->data_bcc[2] = bcc_calcu(&(f->addr), sizeof(msl_frame_t) - 1);
+    f->data_bcc[1] = bcc_calcu(&(f->addr), sizeof(msl_frame_t) - 1);
 
     // 发送数据帧
-    pl_uart_send(pl_uart_get_handle(PL_UART1), _buf, sizeof(msl_frame_t) + 2, 50);
+    // pl_uart_send(pl_uart_get_handle(PL_UART6), _buf, sizeof(msl_frame_t) + 2, 50);
 }
 
 void app_light_sensor_task(void *argument)
 {
     (void)argument;
+    osDelay(10000); // 延迟开启调光，避免和发送显示内容撞上
     for (;;) {
         dev_light_sensor_auto_adjust(&s_sensor_dev);
         send_light_adjust(s_sensor_dev.display->light_level);
-        osDelay(1000);
+        osDelay(10000);
     }
 }
 
 void app_light_sensor_init(void)
 {
     // 若不是主卡则不开自动亮度
-    if (0 != (app_key_get_state(DEV_KEY_DIP1) | app_key_get_state(DEV_KEY_DIP2)))
+    if (0 != ((dev_key_get_state(DEV_KEY_DIP1) & 0b01) | ((dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10)))
         return;
 
     dev_light_sensor_init(&s_sensor_dev, dev_display_get());

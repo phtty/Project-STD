@@ -6,18 +6,20 @@
 
 /* ---- VMS 定时清屏 ---- */
 static uint32_t s_vms_clear_tick; /* 清屏时刻 (RTOS tick) */
-static bool     s_vms_timer_active; /* 定时器是否激活 */
+static bool s_vms_timer_active;   /* 定时器是否激活 */
 
 static void vms_clear_screen(void)
 {
-    app_render(&(render_cfg_t){
-        .type  = RENDER_FILL,
-        .x     = 0,
-        .y     = 0,
-        .w     = 0,
-        .h     = 0,
-        .color = COLOR_BLACK,
-    });
+    msl_render_fill(
+        &(render_cfg_t){
+            .type  = RENDER_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = 0,
+            .h     = 0,
+            .color = COLOR_BLACK,
+        },
+        false);
     app_render_save();
 }
 
@@ -75,18 +77,18 @@ static const display_color_t s_clear_color_map[] = {
 
 static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
-    display_color_t color     = MAP(s_color_map, ctx->font_color, COLOR_BLACK);
-    align_t         h_align   = MAP(s_align_map, ctx->format, ALIGN_CENTER);
-    font_size_t     font_size = MAP(s_font_size_map, ctx->font_size, FONT_16);
+    display_color_t color = MAP(s_color_map, ctx->font_color, COLOR_BLACK);
+    align_t h_align       = MAP(s_align_map, ctx->format, ALIGN_CENTER);
+    font_size_t font_size = MAP(s_font_size_map, ctx->font_size, FONT_16);
 
-    dev_display_t *d  = dev_display_get();
+    dev_display_t *d  = &msl_ins;
     uint16_t screen_w = d->screen_rows;
     uint16_t screen_h = d->screen_cols;
 
     /* ---- 计算行布局 ---- */
     uint16_t render_y = 0;
     uint16_t render_h = screen_h;
-    align_t  v_align  = ALIGN_CENTER;
+    align_t v_align   = ALIGN_CENTER;
 
     /* font_line > 0: 将屏幕按字号划分为若干行，文字显示在指定行；
        font_line == 0: 上下居中 (默认) */
@@ -122,20 +124,22 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     vms_clear_screen();
 
     /* ---- 渲染文字 ---- */
-    app_render(&(render_cfg_t){
-        .type      = RENDER_TEXT,
-        .x         = 0,
-        .y         = render_y,
-        .w         = screen_w,
-        .h         = render_h,
-        .color     = color,
-        .text      = (char *)ctx->text,
-        .len       = text_len,
-        .style     = &style,
-        .font_size = font_size,
-        .font_type = FONT_HT,
-        .text_enc  = FONT_ENC_GBK,
-    });
+    msl_render_text(
+        &(render_cfg_t){
+            .type      = RENDER_TEXT,
+            .x         = 0,
+            .y         = render_y,
+            .w         = screen_w,
+            .h         = render_h,
+            .color     = color,
+            .text      = (char *)ctx->text,
+            .len       = text_len,
+            .style     = &style,
+            .font_size = font_size,
+            .font_type = FONT_HT,
+            .text_enc  = FONT_ENC_GBK,
+        },
+        false);
 
     /* ---- 持久化策略 ---- */
     if (ctx->keep_time == 0) {
@@ -157,14 +161,16 @@ static void vms_clean_ctrl(ldi_ctrl_vms_t *ctx)
 {
     display_color_t color = MAP(s_clear_color_map, ctx->clear_type, COLOR_BLACK);
 
-    app_render(&(render_cfg_t){
-        .type  = RENDER_FILL,
-        .x     = 0,
-        .y     = 0,
-        .w     = 0,
-        .h     = 0,
-        .color = color,
-    });
+    msl_render_fill(
+        &(render_cfg_t){
+            .type  = RENDER_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = 0,
+            .h     = 0,
+            .color = color,
+        },
+        false);
 
     /* 主动清屏时取消定时器 */
     s_vms_timer_active = false;

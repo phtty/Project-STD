@@ -18,7 +18,7 @@ typedef enum {
     MSL_CMD_TEXT       = 0x01,
     MSL_CMD_BITMAP     = 0x02,
     MSL_CMD_FILL       = 0x03,
-    MSL_CMD_LIGHTLEVEL = 0x03,
+    MSL_CMD_LIGHTLEVEL = 0x04,
 } msl_cmd_type_t;
 
 extern uint8_t msl_addr;

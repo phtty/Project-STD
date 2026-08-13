@@ -62,26 +62,31 @@ void app_boot(void)
     osKernelStart();
 }
 
+extern uint8_t msl_addr;
 [[maybe_unused]] static void app_default_display(void)
 {
-    if (!app_render_restore()) {
-        app_render(&(render_cfg_t){
-            .type  = RENDER_TEXT,
-            .x     = 0,
-            .y     = 0,
-            .w     = dev_display_get()->screen_rows,
-            .h     = dev_display_get()->screen_cols,
-            .style = &(render_style_t){
-                .h_align = ALIGN_CENTER,
-                .v_align = ALIGN_CENTER,
+    msl_addr = (dev_key_get_state(DEV_KEY_DIP1) & 0b01) | ((dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10);
+
+    if ((!app_render_restore()) && (!msl_addr)) {
+        msl_render_text(
+            &(render_cfg_t){
+                .type  = RENDER_TEXT,
+                .x     = 0,
+                .y     = 0,
+                .w     = 120,
+                .h     = 24,
+                .style = &(render_style_t){
+                    .h_align = ALIGN_CENTER,
+                    .v_align = ALIGN_CENTER,
+                },
+                .color     = COLOR_RED,
+                .text      = "车道关闭",
+                .len       = strlen("车道关闭"),
+                .font_size = FONT_24,
+                .font_type = FONT_HT,
+                .text_enc  = FONT_ENC_UTF8,
             },
-            .color     = COLOR_RED,
-            .text      = "车",
-            .len       = strlen("车"),
-            .font_size = FONT_24,
-            .font_type = FONT_HT,
-            .text_enc  = FONT_ENC_UTF8,
-        });
+            false);
     }
 }
 
@@ -105,6 +110,7 @@ static void init_task(void *argument)
     // app_udp_start();
     // app_rs485_start();
     // app_rs232_start();
+    app_rs232_1_start();
 
     // app_test_run();
     app_default_display();

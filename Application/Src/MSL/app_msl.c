@@ -40,6 +40,9 @@ void msl_handle_task(void *argument)
     g_msl_msg_queue  = osMessageQueueNew(1, MSL_MSG_SIZE, &s_msl_queue_attr);
     app_proto_set_frame_queue(s_msl_mask, g_msl_msg_queue);
 
+    // 通过拨码开关检测
+    msl_addr = (dev_key_get_state(DEV_KEY_DIP1) & 0b01) | ((dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10);
+
     for (;;) {
         if (osOK != osMessageQueueGet(g_msl_msg_queue, msg, NULL, osWaitForever))
             continue;
@@ -66,6 +69,8 @@ proto_probe_sta_t msl_probe_frame(const channel_t *ch, const ring_buffer_t *buff
     if (memcmp(frame_head, frame->head, sizeof(frame->head)))
         return PROTO_PROBE_FAKE;
 
+    // 通过拨码开关检测
+    msl_addr = (dev_key_get_state(DEV_KEY_DIP1) & 0b01) | ((dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10);
     // 当地址不为0时，则检测地址是否匹配
     if ((frame->addr != 0) && (frame->addr != msl_addr))
         return PROTO_PROBE_FAKE;
@@ -87,8 +92,7 @@ proto_probe_sta_t msl_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 [[maybe_unused]] static void msl_module_init(void)
 {
     // 通过拨码开关检测
-    msl_addr |= dev_key_get_state(DEV_KEY_DIP1) & 0b01;
-    msl_addr |= (dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10;
+    msl_addr = (dev_key_get_state(DEV_KEY_DIP1) & 0b01) | ((dev_key_get_state(DEV_KEY_DIP2) << 1) & 0b10);
 
     // 指定协议使用的环形缓冲区
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
@@ -99,7 +103,7 @@ proto_probe_sta_t msl_probe_frame(const channel_t *ch, const ring_buffer_t *buff
         return;
 
     // 绑定协议使用到的通道
-    app_proto_bind_channel(s_msl_mask, CH_ID_RS232);
+    app_proto_bind_channel(s_msl_mask, CH_ID_RS232_1);
 
     g_msl_task_handle = osThreadNew(msl_handle_task, nullptr, &msl_task_attr);
 }

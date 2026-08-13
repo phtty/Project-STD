@@ -416,7 +416,7 @@ void cmd_set_ip(channel_t *ch, void *data)
     g_ldi.cfg_valid = true;
 
     app_flash_ldi_save_config(&g_ldi.cfg);
-    app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
+    // app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
 
     ldi_status_rsp_t rsp = {.status = 0x00};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);

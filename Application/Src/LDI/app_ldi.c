@@ -14,7 +14,7 @@
 
 /* ---- proto_ldi_queue 静态分配 ---- */
 #define LDI_PAYLOAD_MAX (512U) /* 与探头 mem_pool 容量一致 */
-#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
+#define LDI_MSG_SIZE    (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
 static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE];
@@ -90,26 +90,26 @@ void ldi_ctx_init(ldi_ctx_t *self)
         self->cfg_valid = true;
 
         /* 同步 IP 到 IAP 内部 flash（仅当 IAP 已有有效配置且不一致时） */
-        if (app_flash_iap_is_config_valid(g_config)
-         && (memcmp(self->cfg.device_ip, g_config->net_cfg.ip, 4)
-          || memcmp(self->cfg.netmask, g_config->net_cfg.mask, 4)
-          || memcmp(self->cfg.gateway, g_config->net_cfg.gw, 4)))
-            app_flash_iap_update_net_cfg(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
+        // if (app_flash_iap_is_config_valid(g_config)
+        //  && (memcmp(self->cfg.device_ip, g_config->net_cfg.ip, 4)
+        //   || memcmp(self->cfg.netmask, g_config->net_cfg.mask, 4)
+        //   || memcmp(self->cfg.gateway, g_config->net_cfg.gw, 4)))
+        //     app_flash_iap_update_net_cfg(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
 
     } else {
         /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
-        if (app_flash_iap_is_config_valid(g_config)) {
-            memcpy(self->cfg.device_ip, g_config->net_cfg.ip, 4);
-            memcpy(self->cfg.netmask, g_config->net_cfg.mask, 4);
-            memcpy(self->cfg.gateway, g_config->net_cfg.gw, 4);
-        } else {
-            /* IAP 也无有效配置，使用上电默认 IP */
-            uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
-            pl_net_get_ip(ip, mask, gw);
-            memcpy(self->cfg.device_ip, ip, sizeof(ip));
-            memcpy(self->cfg.netmask, mask, sizeof(mask));
-            memcpy(self->cfg.gateway, gw, sizeof(gw));
-        }
+        // if (app_flash_iap_is_config_valid(g_config)) {
+        //     memcpy(self->cfg.device_ip, g_config->net_cfg.ip, 4);
+        //     memcpy(self->cfg.netmask, g_config->net_cfg.mask, 4);
+        //     memcpy(self->cfg.gateway, g_config->net_cfg.gw, 4);
+        // } else {
+        /* IAP 也无有效配置，使用上电默认 IP */
+        uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
+        pl_net_get_ip(ip, mask, gw);
+        memcpy(self->cfg.device_ip, ip, sizeof(ip));
+        memcpy(self->cfg.netmask, mask, sizeof(mask));
+        memcpy(self->cfg.gateway, gw, sizeof(gw));
+        // }
         self->cfg.device_port = app_tcp_server_get_port();
         memcpy(self->cfg.host_ip, app_tcp_client_get_host_ip(), 4);
         self->cfg.host_port = app_tcp_client_get_host_port();
@@ -249,7 +249,7 @@ void ldi_handle_task(void *argument)
 {
     static uint8_t _msg_buf[LDI_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
-    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
+    g_ldi_msg_queue  = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
     app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {

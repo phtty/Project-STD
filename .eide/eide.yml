@@ -344,9 +344,9 @@ targets:
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
       - <virtual_root>/Device/Display/dev_display_p20.c
-      - <virtual_root>/Application/protocol/ah/ah_mqtt_cmd.c
-      - <virtual_root>/Application/protocol/ah/ah_mqtt.c
       - <virtual_root>/Application/channel/app_mqtt.c
+      - <virtual_root>/Application/protocol/iap
+      - <virtual_root>/Application/protocol/ah
     settings:
       debugger: cortex-debug
     toolchain: GCC
