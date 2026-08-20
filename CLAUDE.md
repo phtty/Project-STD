@@ -218,6 +218,7 @@ pl_sys (SystemClock_Config, delay, reset)
 | 2-dev | dev | `dev_display_start` | `dev_display.c` | 创建 scan_task + 启动 TIM3/4 |
 | 2-dev | dev | `dev_key_sw_init` | `dev_key.c` | 创建 TEST 按键信号量 |
 | 2-dev | dev | `_dev_flash_ldi_storage_init` | `dev_flash_ldi.c` | LDI 配置 W25Qxx 地址计算 |
+| 3-app | app | `app_flash_iap_apply_net_cfg` | `app_iap_cfg.c` | 应用 Flash 保存的 IP 到 LwIP |
 | 3-app | app | `app_dispatch_init` | `app_dispatch.c` | 创建 ch_queue + frame_dispatch_task |
 | 3-app | app | `_render_init` | `app_render.c` | 绑定 display + storage 句柄 |
 | 3-app | app | `app_key_init` | `app_key.c` | 创建 key_poll_task (20ms) |
@@ -232,7 +233,7 @@ pl_sys (SystemClock_Config, delay, reset)
 .sw_initcall : { KEEP(*(SORT(.sw_initcall.0))) ... KEEP(*(SORT(.sw_initcall.4))) }
 ```
 
-每个 `*_initcall(fn)` 宏生成一个 `initcall_entry_t` 常量放入对应 section。`initcall_run(start, end)` 顺序遍历调用。同层内按函数名字母序排列（`SORT()` 保证确定性）。
+每个 `*_initcall(fn)` 宏生成一个 `initcall_entry_t` 常量放入对应 section。`initcall_run(start, end)` 顺序遍历调用。**设计规则：同层内顺序不敏感**——同层 entry 的 section 名相同，`SORT()` 无法区分，实际顺序 = 链接顺序（源文件在 Makefile SRC 列表中的顺序）；有顺序依赖的初始化必须放到不同层。
 
 ## 中断体系
 
@@ -578,10 +579,11 @@ app_render(&(render_cfg_t){
 |---|---|---|---|---|
 | `app_dispatch` | 框架 | — | `sw_app_initcall` | 协议调度引擎 |
 | `app_render` | 引擎 | — | `sw_app_initcall` | 字库渲染 |
-| `app_iap` | 协议 | UDP | `sw_app_initcall` | IAP 固件升级帧处理 |
-| `app_ldi` | 协议 | RS485/RS232/TCP | `sw_app_initcall` | LDI 显示控制协议 |
-| `app_vms_ctrl` | 协议 | (LDI 子模块) | — | VMS 情报板控制（LDI→Render 桥接） |
-| `ah_mqtt` | 协议 | MQTT | (已注释) | AH 平台 MQTT（签到/状态上报/指令） |
+| `app_iap` | 协议 | RS485/UDP | `sw_app_initcall` | IAP 固件升级帧处理 |
+| `app_ldi` | 协议 | TCP_SERVER/TCP_CLIENT/UDP | `sw_app_initcall` | LDI 显示控制协议（**本分支不参与构建**） |
+| `app_rls` | 协议 | RS485/RS232/UDP | `sw_app_initcall` | RLS 信号灯协议（显示开关/位图/IP 管理） |
+| `app_vms_ctrl` | 协议 | (LDI 子模块) | — | VMS 情报板控制（**本分支不参与构建**） |
+| `ah_mqtt` | 协议 | MQTT | (已注释) | AH 平台 MQTT（**本分支不参与构建**） |
 | `app_mqtt` | 通道 | CH_ID_MQTT | — | MQTT 网络传输通道 |
 | `app_udp` | 通道 | CH_ID_UDP | — | UDP 广播通道（端口 10011） |
 | `app_tcp_server` | 通道 | CH_ID_TCP_SERVER | — | TCP 服务器通道 |
@@ -599,7 +601,7 @@ app_render(&(render_cfg_t){
 - **框架/引擎**：供协议模块调用，不直接通信
 - **应用**：硬件相关业务逻辑，不涉及通信协议
 
-**当前运行状态**：`app_boot` 显式启动 TCP Server、TCP Client、UDP 三个通道。`app_mqtt`、`app_rs232`、`app_rs485` 的 start 函数已定义（`static inline`）但未被调用。`ah_mqtt` 的 initcall 已注释。
+**当前运行状态**：`app_boot` 显式启动 TCP Server、TCP Client、UDP、RS485、RS232 五个通道；上电后从 IAP Flash 应用保存的 IP（`app_flash_iap_apply_net_cfg`）。本分支协议仅 IAP + RLS（LDI/AH_MQTT 已移出构建），`app_mqtt` 的 start 函数已定义但未被调用。
 
 ## 协议分发层 (`Application/Src/app_dispatch.c`)
 
@@ -633,8 +635,8 @@ app_render(&(render_cfg_t){
 
 | ch_id | 枚举 | 传输层 | 实现类 | 绑定文件 |
 |---|---|---|---|---|
-| 0 | `CH_ID_RS485` | UART (USART3) | `uart_channel_t` | `dev_rs485.c` |
-| 1 | `CH_ID_RS232` | UART (USART1) | `uart_channel_t` | `dev_rs232.c` |
+| 0 | `CH_ID_RS485` | UART (USART1) | `uart_channel_t` | `dev_rs485.c` |
+| 1 | `CH_ID_RS232` | UART (USART3) | `uart_channel_t` | `dev_rs232.c` |
 | 2 | `CH_ID_TCP_SERVER` | LwIP TCP | `tcp_server_channel_t` | `app_tcp_server.c` |
 | 3 | `CH_ID_TCP_CLIENT` | LwIP TCP | `tcp_client_channel_t` | `app_tcp_client.c` |
 | 4 | `CH_ID_UDP` | LwIP UDP | `udp_channel_t` | `app_udp.c` (端口 10011) |

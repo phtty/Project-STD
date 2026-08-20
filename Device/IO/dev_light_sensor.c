@@ -12,8 +12,9 @@
 
 void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display)
 {
-    dev->adc     = pl_adc_get_handle();
-    dev->display = display;
+    dev->adc                 = pl_adc_get_handle();
+    dev->display             = display;
+    dev->auto_adjust_enabled = true; /* 静态实例零初始化，必须显式置 true */
 }
 
 uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
@@ -40,6 +41,9 @@ uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
 
 void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
 {
+    if (!dev->auto_adjust_enabled)
+        return;
+
     static uint8_t old_light = 0;
     uint8_t new_light        = dev_light_sensor_read(dev);
 

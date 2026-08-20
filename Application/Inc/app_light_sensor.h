@@ -12,3 +12,6 @@ extern osThreadId_t g_light_sensor_task_handle;
 
 void app_light_sensor_init(void);
 void app_light_sensor_task(void *argument);
+
+/** @brief 使能/禁用环境光自动调光；enabled=true 时立即执行一次调光，无需等待下一周期 */
+void app_light_sensor_set_auto(bool enabled);

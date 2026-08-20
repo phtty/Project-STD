@@ -102,6 +102,8 @@ void ldi_ctx_init(ldi_ctx_t *self)
             memcpy(self->cfg.device_ip, g_config->net_cfg.ip, 4);
             memcpy(self->cfg.netmask, g_config->net_cfg.mask, 4);
             memcpy(self->cfg.gateway, g_config->net_cfg.gw, 4);
+            /* 应用到 LwIP（RLS set_ip 保存的 IP 经此路径重启后生效） */
+            pl_net_set_ip(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
         } else {
             /* IAP 也无有效配置，使用上电默认 IP */
             uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};

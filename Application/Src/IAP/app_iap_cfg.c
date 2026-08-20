@@ -13,6 +13,7 @@
 #include "app_iap_cfg.h"
 #include "dev_flash_int.h"
 #include "pl_crc.h"
+#include "pl_net.h"
 #include "initcall.h"
 
 #define IAP_SIZE 0x4000 /* 16KB */
@@ -119,3 +120,14 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
 
     app_flash_iap_edit_config(&info);
 }
+
+/** @brief 启动时应用 Flash 保存的网络配置到 LwIP（无有效配置时保持上电默认 IP）
+ *  自注册于 sw_app_initcall：执行于 sw_board_init，此时 dev_eth_start 已完成（netif 就绪） */
+void app_flash_iap_apply_net_cfg(void)
+{
+    if (!app_flash_iap_is_config_valid(g_config))
+        return;
+
+    pl_net_set_ip(g_config->net_cfg.ip, g_config->net_cfg.mask, g_config->net_cfg.gw);
+}
+sw_app_initcall(app_flash_iap_apply_net_cfg);

@@ -23,10 +23,10 @@ extern const ldi_cmd_handler_fn_t g_ldi_cmd_table[];
 //
 // 复合指令 (0BH/0DH/1AH/1BH/1CH/0CH) 的 DATA 域通用布局:
 //
-//   ┌────────────┬─────────────┬───────────────────────────────────┐
-//   │   head     │ device_num  │ module[0] | module[1] | ...        │
-//   │ (20 bytes) │  (1 byte)   │ (变长, 按 device_type 区分)         │
-//   └────────────┴─────────────┴───────────────────────────────────┘
+//   ┌────────────┬─────────────┬─────────────────────────────┐
+//   │   head     │ device_num  │ module[0] | module[1] | ... │
+//   │ (20 bytes) │  (1 byte)   │ (变长, 按 device_type 区分) │
+//   └────────────┴─────────────┴─────────────────────────────┘
 //
 // 每个 module 前 2 字节固定为 device_type + device_index,
 // 后续 payload 的结构和长度由 device_type 决定。

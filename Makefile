@@ -36,6 +36,7 @@ INC_DIRS = \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
+	-I Application/Inc/RLS \
 	-I Application/Inc/AH_MQTT \
 	-I Application/Inc/Channel \
 	-I Device/Inc \
@@ -242,7 +243,8 @@ SRC_KERNEL = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/bit_utils.c \
 	Kernel/Src/crc_utils.c \
-	Kernel/Src/text_cvt.c
+	Kernel/Src/text_cvt.c \
+	Kernel/Src/bcc_utils.c
 
 # Platform（仅含无冲突的文件，其他在 Phase 3 逐步加入）
 SRC_PLATFORM = \
@@ -290,12 +292,8 @@ SRC_APPLICATION = \
 	Application/Src/IAP/app_iap.c \
 	Application/Src/IAP/app_iap_cmd.c \
 	Application/Src/IAP/app_iap_cfg.c \
-	Application/Src/LDI/app_ldi.c \
-	Application/Src/LDI/app_ldi_cmd.c \
-	Application/Src/LDI/app_ldi_cfg.c \
-	Application/Src/LDI/app_vms_ctrl.c \
-	Application/Src/AH_MQTT/ah_mqtt.c \
-	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c \
 	Application/Src/Channel/app_udp.c \
 	Application/Src/Channel/app_tcp_server.c \
 	Application/Src/Channel/app_tcp_client.c \

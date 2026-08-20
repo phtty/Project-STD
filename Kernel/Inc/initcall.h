@@ -6,7 +6,10 @@
  *   hw: pre(0) → pl(1) → dev(2) → post(3)
  *   sw: pre(0) → pl(1) → dev(2) → app(3) → post(4)
  *   pl = Platform 层, dev = Device 层, app = Application 层
- *   同层内按符号名字母序排列
+ *
+ * 设计规则：同层内顺序不敏感。同层 entry 的 section 名相同，SORT 无法区分，
+ * 实际顺序 = 链接顺序（源文件在 Makefile SRC 列表中的顺序）。
+ * 有顺序依赖的初始化必须放到不同层。
  */
 
 #pragma once

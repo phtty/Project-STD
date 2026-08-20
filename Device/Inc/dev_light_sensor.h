@@ -11,6 +11,7 @@
 typedef struct {
     void *adc;
     dev_display_t *display;
+    volatile bool auto_adjust_enabled; /* 手动亮度模式下置 false，暂停自动调光 */
 } light_sensor_dev_t;
 
 void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display);

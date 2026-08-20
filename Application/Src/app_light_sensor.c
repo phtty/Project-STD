@@ -32,3 +32,10 @@ void app_light_sensor_init(void)
     g_light_sensor_task_handle = osThreadNew(app_light_sensor_task, NULL, &attr);
 }
 sw_app_initcall(app_light_sensor_init);
+
+void app_light_sensor_set_auto(bool enabled)
+{
+    s_sensor_dev.auto_adjust_enabled = enabled;
+    if (enabled)
+        dev_light_sensor_auto_adjust(&s_sensor_dev); /* 立即生效，消除 1s 周期延迟 */
+}

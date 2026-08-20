@@ -49,8 +49,11 @@ void app_flash_iap_edit_config(app_flash_iap_sys_info_t *info);
 int32_t app_flash_iap_erase_config(void);
 int32_t app_flash_iap_write_config(app_flash_iap_sys_info_t *info);
 
-/** @brief 同步设备IP/掩码/网关到内部Flash (LDI改IP时调用) */
+/** @brief 同步设备IP/掩码/网关到内部Flash (RLS SET_IP 命令调用) */
 void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4]);
+
+/** @brief 启动时应用 Flash 保存的网络配置到 LwIP（无有效配置时保持默认） */
+void app_flash_iap_apply_net_cfg(void);
 
 /** @brief 获取 IAP Flash 存储句柄（内部使用） */
 dev_storage_t *app_flash_iap_get_storage(void);
