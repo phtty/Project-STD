@@ -40,11 +40,17 @@ uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
 
 void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
 {
-    static uint8_t old_light = 0;
-    uint8_t new_light        = dev_light_sensor_read(dev);
+    static uint8_t last_light = 0; /* 上一次采样的亮度等级 (读取值域 1~7，0 表示尚未采样) */
+    static uint8_t stable_cnt = 0; /* 连续采样到相同等级的计数 */
 
-    if (new_light != old_light)
-        dev->display->light_level = new_light;
+    uint8_t new_light = dev_light_sensor_read(dev);
 
-    old_light = new_light;
+    if (new_light == last_light) {
+        /* 连续 3 次采样到同一等级才修改亮度，过滤 ADC 抖动，避免亮度来回跳 */
+        if (stable_cnt < 3 && ++stable_cnt == 3)
+            dev->display->light_level = new_light;
+    } else {
+        last_light = new_light;
+        stable_cnt = 1;
+    }
 }

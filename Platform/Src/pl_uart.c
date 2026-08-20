@@ -70,6 +70,13 @@ int32_t pl_uart_send(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_
     uart_ctx_t *ctx = (uart_ctx_t *)h;
     if (!ctx || !ctx->huart) return -1;
 
+    // 超时下限：按 8N1 ≈ 10 bit/字节 计算 len 字节在当前波特率下的物理发送时间 + 余量。
+    // 低波特率(9600)下 155B 同步帧需约 162ms，调用方的 50ms 超时会导致
+    // HAL_UART_Transmit 中途 HAL_TIMEOUT 截断帧 → 副卡收不到完整帧不显示
+    uint32_t min_timeout = (uint32_t)((len * 10U * 1000U) / ctx->huart->Init.BaudRate) + 50U;
+    if (timeout_ms < min_timeout)
+        timeout_ms = min_timeout;
+
     if (ctx->dir_cb) ctx->dir_cb(true);
     HAL_StatusTypeDef st = HAL_UART_Transmit(ctx->huart, (uint8_t *)buf, len, timeout_ms);
     if (ctx->dir_cb) ctx->dir_cb(false);

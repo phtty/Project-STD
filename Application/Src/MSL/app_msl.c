@@ -42,7 +42,8 @@ void msl_handle_task(void *argument)
 
     static uint8_t _msg_buf[MSL_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
-    g_msl_msg_queue  = osMessageQueueNew(1, MSL_MSG_SIZE, &s_msl_queue_attr);
+    // 深度 2：分发层 put 超时为 0，深度 1 时若处理上一帧期间新帧到达会静默丢帧
+    g_msl_msg_queue = osMessageQueueNew(2, MSL_MSG_SIZE, &s_msl_queue_attr);
     app_proto_set_frame_queue(s_msl_mask, g_msl_msg_queue);
 
     // 通过拨码开关检测
