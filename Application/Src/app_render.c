@@ -77,6 +77,16 @@ static const font_unit_t g_font_lib[] = {
     {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(32)},
 };
 
+/* 自适应字号的候选集合（从大到小尝试，索引 0 为 SELF_ADAPT 占位不参与选择） */
+static const font_size_t font_size_table[] = {
+    FONT_SELF_ADAPT,
+    FONT_14,
+    FONT_16,
+    FONT_20,
+    FONT_24,
+    FONT_32,
+};
+
 /* ---- 内部: bytes_per_char ---- */
 static inline uint16_t _glyph_bytes(font_key_t k)
 {
@@ -142,7 +152,7 @@ sw_app_initcall(_render_init);
 static inline void _render_text(const render_cfg_t *cfg)
 {
     // 入口参数检查
-    if (!cfg->text || !cfg->len || !cfg->font_size)
+    if (!cfg->text || !cfg->len)
         return;
     if (!cfg->w || !cfg->h)
         return;
@@ -163,6 +173,21 @@ static inline void _render_text(const render_cfg_t *cfg)
         uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);
         memcpy(text_buf, cfg->text, n);
         text_len = n;
+    }
+
+    /* 字号自适应：按文本长度与渲染区域容量，从最大字号开始选择能容纳的最大字号，默认最小字号 14 */
+    if (cfg->font_size == FONT_SELF_ADAPT) {
+        gbk_key.size = FONT_14;
+        asc_key.size = FONT_14;
+        for (int8_t i = (int8_t)(sizeof(font_size_table) / sizeof(font_size_table[0])) - 1; i >= 1; i--) {
+            uint16_t h_res = cfg->h / font_size_table[i];
+            uint16_t w_res = cfg->w / (font_size_table[i] / 2);
+            if (text_len <= h_res * w_res) {
+                gbk_key.size = font_size_table[i];
+                asc_key.size = font_size_table[i];
+                break;
+            }
+        }
     }
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
