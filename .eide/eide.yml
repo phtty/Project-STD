@@ -433,7 +433,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: JLink
+    uploader: probe-rs
   Release:
     cppPreprocessAttrs:
       defineList:
