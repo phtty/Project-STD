@@ -95,7 +95,7 @@ sw_dev_initcall(dev_display_start);
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color)
 {
     if (x < dev->screen_rows && y < dev->screen_cols) {
-        dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
+        dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color & 0x07; /* 颜色索引必须 0~7，防主机数据越界查 g_bsrr */
         dev->dirty                               = true;
     }
 }
@@ -111,8 +111,9 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
     if (x + w > dev->screen_rows) w = dev->screen_rows - x;
     if (y + h > dev->screen_cols) h = dev->screen_cols - y;
 
+    uint8_t c = (uint8_t)color & 0x07; /* 颜色索引必须 0~7，防主机数据越界查 g_bsrr */
     for (uint16_t row = 0; row < h; row++)
-        memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
+        memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], c, w);
     dev->dirty = true;
 }
 
@@ -124,7 +125,7 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
     for (uint16_t row = 0; row < h; row++) {
         for (uint16_t col = 0; col < w; col++) {
             if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
-                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
+                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color & 0x07;
         }
     }
     dev->dirty = true;

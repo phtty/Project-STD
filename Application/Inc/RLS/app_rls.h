@@ -20,8 +20,8 @@ typedef enum {
     RLS_CMD_DISPLAY_PIC  = 0x5344,
     RLS_CMD_INQUIRY      = 0x4b43,
     RLS_CMD_SET_IP       = 0x5049,
-    RLS_CMD_AQUIRY_IP    = 0x5453,
-    RLS_CMD_REPORT_IP    = 0x4252,
+    RLS_CMD_AQUIRY_IP    = 0x4353,
+    RLS_CMD_REPORT_IP    = 0x4252, /* 仅设备→主机上报方向（AQUIRY_IP 应答帧），不在接收分派表中 */
 } rls_cmd_type_t;
 
 extern osMessageQueueId_t g_rls_msg_queue;

@@ -15,9 +15,8 @@ static void cmd_display_pic(channel_t *ch, void *data);
 static void cmd_inquiry(channel_t *ch, void *data);
 static void cmd_set_ip(channel_t *ch, void *data);
 static void cmd_aquire_ip(channel_t *ch, void *data);
-static void cmd_report_ip(channel_t *ch, void *data);
 
-/* 顺序必须与 app_rls.c 的 cmd_index_table 一致 */
+/* 顺序必须与 app_rls.c 的 cmd_index_table 一致（REPORT_IP 仅设备→主机方向，不在接收分派中） */
 const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     cmd_test,
     cmd_display_sw,
@@ -27,7 +26,6 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     cmd_inquiry,
     cmd_set_ip,
     cmd_aquire_ip,
-    cmd_report_ip,
 };
 
 /* ======================================================================
@@ -35,19 +33,72 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
  * TODO: 待用户提供真实信号灯位图数据后替换
  * ====================================================================== */
 static const uint8_t s_rls_pic_0[32] = {
-    0xFF, 0xFF, /* 空心方框 */
-    0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01,
-    0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01,
-    0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x80, 0x01,
-    0x80, 0x01, 0x80, 0x01,
-    0xFF, 0xFF,
+    0xFF,
+    0xFF, /* 空心方框 */
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0x80,
+    0x01,
+    0xFF,
+    0xFF,
 };
 static const uint8_t s_rls_pic_1[32] = {
-    0x80, 0x01, /* 对角交叉 X */
-    0xC0, 0x03, 0x60, 0x06, 0x30, 0x0C,
-    0x18, 0x18, 0x0C, 0x30, 0x06, 0x60, 0x03, 0xC0,
-    0x03, 0xC0, 0x06, 0x60, 0x0C, 0x30, 0x18, 0x18,
-    0x30, 0x0C, 0x60, 0x06, 0xC0, 0x03, 0x80, 0x01,
+    0x80,
+    0x01, /* 对角交叉 X */
+    0xC0,
+    0x03,
+    0x60,
+    0x06,
+    0x30,
+    0x0C,
+    0x18,
+    0x18,
+    0x0C,
+    0x30,
+    0x06,
+    0x60,
+    0x03,
+    0xC0,
+    0x03,
+    0xC0,
+    0x06,
+    0x60,
+    0x0C,
+    0x30,
+    0x18,
+    0x18,
+    0x30,
+    0x0C,
+    0x60,
+    0x06,
+    0xC0,
+    0x03,
+    0x80,
+    0x01,
 };
 
 [[maybe_unused]] static void cmd_test(channel_t *ch, void *data)
@@ -56,32 +107,40 @@ static const uint8_t s_rls_pic_1[32] = {
     (void)data;
 }
 
-static void cmd_display_sw(channel_t *ch, void *data)
+/* DISPLAY_SW/TMP/SAVE/PIC 四个显示命令共用：应用 rls_dispaly_t.light_level 字段
+ * 0=关屏, 1-7=开屏+固定亮度（停用自动调光）, 255=开屏+恢复自动调光, 其他值忽略 */
+static void rls_apply_light_level(uint8_t light_level)
 {
-    (void)ch;
-    uint8_t sw = *(uint8_t *)data;
-
-    switch (sw) {
+    switch (light_level) {
         case 0: /* 关屏：必须同时停用自动调光，否则光感任务 1s 内把亮度写回 1~7 */
             app_light_sensor_set_auto(false);
             dev_display_set_brightness(dev_display_get(), 0);
             break;
         case 1 ... 7: /* 开屏 + 固定亮度（停用自动调光） */
             app_light_sensor_set_auto(false);
-            dev_display_set_brightness(dev_display_get(), sw);
+            dev_display_set_brightness(dev_display_get(), light_level);
             break;
         case 255: /* 开屏 + 恢复自动调光（内部立即调光一次） */
             app_light_sensor_set_auto(true);
             break;
-        default: /* 其他值忽略 */
+        default: /* 大于7小于255则使用等级7亮度 */
+            app_light_sensor_set_auto(false);
+            dev_display_set_brightness(dev_display_get(), 7);
             break;
     }
+}
+
+static void cmd_display_sw(channel_t *ch, void *data)
+{
+    (void)ch;
+    rls_apply_light_level(((rls_dispaly_t *)data)->light_level);
 }
 
 static void cmd_display_tmp(channel_t *ch, void *data)
 {
     (void)ch;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
+    rls_apply_light_level(display_ctx->light_level); /* 显示命令同步应用亮度 */
 
     // 显示前先清屏
     app_render(&(render_cfg_t){
@@ -107,6 +166,7 @@ static void cmd_display_save(channel_t *ch, void *data)
 {
     (void)ch;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
+    rls_apply_light_level(display_ctx->light_level); /* 显示命令同步应用亮度 */
 
     // 显示前先清屏
     app_render(&(render_cfg_t){
@@ -134,6 +194,7 @@ static void cmd_display_pic(channel_t *ch, void *data)
     (void)ch;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
     uint8_t pic_num            = (display_ctx->pic_num > 1) ? 0 : display_ctx->pic_num; /* 仅内置 2 张，越界回退 0 */
+    rls_apply_light_level(display_ctx->light_level);                                    /* 显示命令同步应用亮度 */
 
     // 显示前先清屏
     app_render(&(render_cfg_t){
@@ -180,12 +241,11 @@ static void cmd_aquire_ip(channel_t *ch, void *data)
     uint8_t *payload   = frame->data_bcc_tail;
     uint8_t ip[4], mask[4], gw[4];
 
-    frame->head[0]   = 0xFF;
-    frame->head[1]   = 0xFE;
-    frame->length[0] = 0x00;
-    frame->length[1] = 21; /* 帧全长 = 6 + 12 + BCC 1 + 尾 2，大端 */
-    frame->cmd[0]    = 0x42; /* RLS_CMD_REPORT_IP = 0x4252，线上小端（与探测端一致） */
-    frame->cmd[1]    = 0x52;
+    frame->head[0]                = 0xFF;
+    frame->head[1]                = 0xFE;
+    frame->length[0]              = 0x00;
+    frame->length[1]              = 21;                /* 帧全长 = 6 + 12 + BCC 1 + 尾 2，大端 */
+    *(rls_cmd_type_t *)frame->cmd = RLS_CMD_REPORT_IP; /* 上报方向命令码，线上小端（与探测端一致） */
 
     pl_net_get_ip(ip, mask, gw); /* 取当前实际生效的地址 */
     memcpy(payload, ip, 4);
@@ -198,11 +258,4 @@ static void cmd_aquire_ip(channel_t *ch, void *data)
     app_udp_broadcast(s_rls_tx_buf, 21); /* 向上位机广播本机 IP（255.255.255.255:10011） */
     if (ch->ch_id == CH_ID_RS485 || ch->ch_id == CH_ID_RS232 || ch->ch_id == CH_ID_RS232_1)
         channel_send(ch, s_rls_tx_buf, 21); /* UART 来源：原路再回一帧 */
-}
-
-static void cmd_report_ip(channel_t *ch, void *data)
-{
-    (void)ch;
-    (void)data;
-    /* 设备收到自己广播回环的 REPORT_IP 或他机上报时静默忽略，防死循环 */
 }

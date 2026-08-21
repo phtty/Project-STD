@@ -28,8 +28,7 @@ static const rls_cmd_type_t cmd_index_table[] = {
     RLS_CMD_INQUIRY,
     RLS_CMD_SET_IP,
     RLS_CMD_AQUIRY_IP,
-    RLS_CMD_REPORT_IP,
-};
+}; /* REPORT_IP 仅设备→主机上报方向，不作为接收命令分派 */
 
 static proto_mask_t s_rls_mask;
 
@@ -91,7 +90,10 @@ proto_probe_sta_t rls_probe_frame(const channel_t *ch, const ring_buffer_t *buff
 
     if (data_len < sizeof(rls_frame_t) + 3) /* 长度字段小于最小帧长 → 伪帧 */
         return PROTO_PROBE_FAKE;
-    if (data_len > avail) /* 帧未收全或长度字段损坏 → 继续等 */
+    if (data_len > sizeof(mem_pool)) /* 超过探测缓冲容量（合法帧 ≤521B）→ 必为伪帧，
+                                         返回 FAKE 让 dispatch 逐字节跳过以重新同步 */
+        return PROTO_PROBE_FAKE;
+    if (data_len > avail) /* 帧未收全 → 继续等 */
         return PROTO_PROBE_WAIT;
 
     if (memcmp(rls_tail, (uint8_t *)frame + data_len - 2, sizeof(rls_tail)))

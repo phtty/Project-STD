@@ -5,11 +5,13 @@
 #include "app_rls.h"
 #include "app_dispatch.h"
 
+/* DISPLAY_SW/TMP/SAVE/PIC 四命令通用载荷：
+ * TMP/SAVE 携带 bitmap[]，PIC 无 bitmap 内容（pic_num 选内置图） */
 typedef struct {
-    uint8_t light_level;
+    uint8_t light_level; /* 0=关屏, 1-7=开屏+固定亮度, 255=开屏+恢复自动调光 */
     uint8_t color;
     uint8_t style;
-    uint8_t pic_num;
+    uint8_t pic_num; /* 内置图片编号（PIC 命令） */
     uint8_t bitmap[];
 } rls_dispaly_t;
 
