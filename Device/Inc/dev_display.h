@@ -58,6 +58,7 @@ struct dev_display {
     uint8_t *hub75_buff;
 
     /* 运行时 */
+    const char *module_code; /* 模组编码字符串，由派生模组绑定 */
     volatile uint8_t light_level;
     volatile bool dirty;
 };
@@ -70,20 +71,39 @@ void dev_display_init(void);
 /** @brief 软件初始化 (sw_dev_initcall): 创建 scan_task + 启动 TIM3/4 */
 void dev_display_start(void);
 
-/** @brief 设置单个像素颜色，置脏标记 */
+/** @brief 设置单个像素颜色，置脏标记
+ *
+ *  坐标约定: x 为水平方向 (0..screen_rows-1), y 为垂直方向 (0..screen_cols-1)。
+ *  注意: screen_rows 是每行像素数(宽度), screen_cols 是每列像素数(高度)。
+ *  pixel_map 按行主序存储: pixel_map[y * screen_rows + x] */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
 
-/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记 */
+/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 置脏标记
+ *
+ *  坐标约定同 dev_display_set_pixel。
+ *  越界语义：起点在屏幕外（x>=rows 或 y>=cols）→ 整区域丢弃不绘制；
+ *  部分超出 → 截断到屏幕边界。 */
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color);
 
 /** @brief 叠加绘制位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color, bit=0不改变原像素。
- *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色 */
+ *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色
+ *
+ *  坐标约定同 dev_display_set_pixel */
 void dev_display_draw_bitmap(dev_display_t *dev,
                              uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                              const uint8_t *bitmap, display_color_t color);
 
-/** @brief 获取 P20 模组显示实例 */
-dev_display_t *dev_display_p20_get(void);
+/** @brief 获取 1-969 模组显示实例 */
+dev_display_t *dev_display_1_969_get(void);
+
+/** @brief 获取 1-260 模组显示实例 */
+dev_display_t *dev_display_1_260_get(void);
+
+/** @brief 获取 1-577 模组显示实例 */
+dev_display_t *dev_display_1_577_get(void);
+
+/** @brief 获取 1-263 模组显示实例（P6 32x32，1/8 扫，2 通道） */
+dev_display_t *dev_display_1_263_get(void);
 
 /** @brief 注册活动显示实例（由显示模组的 hw_dev_initcall 调用） */
 void dev_display_register(dev_display_t *dev);
@@ -91,5 +111,14 @@ void dev_display_register(dev_display_t *dev);
 /** @brief 获取当前活动显示实例 */
 dev_display_t *dev_display_get(void);
 
-/** @brief 设置亮度 (0=最暗/关闭, 7=最亮)，PWM 粒度 1/8 */
+extern volatile uint32_t g_dev_display_commit_count;
+extern volatile uint32_t g_dev_display_scan_count;
+
+/** @brief 将当前逻辑帧提交到扫描帧，供 scan_task 读取 */
+void dev_display_commit_frame(dev_display_t *dev);
+
+/** 硬件亮度上限：0=关闭，8=OE 100% 常亮（PWM 8 档，最亮） */
+#define DEV_DISPLAY_BRIGHTNESS_MAX 8U
+
+/** @brief 设置亮度 (0=最暗/关闭, 8=最亮)，PWM 粒度 1/8 */
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);

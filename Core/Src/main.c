@@ -6,28 +6,27 @@
  */
 
 #include "main.h"
+#include "app_boot.h"
 #include "initcall.h"
 #include "pl_sys.h"
 
-void app_boot(void);
+int main(void) {
+  SCB->VTOR = FLASH_BASE | 0x40000;
+  __enable_irq();
 
-int main(void)
-{
-    // SCB->VTOR = FLASH_BASE | 0x40000;
-    __enable_irq();
+  HAL_Init();
+  SystemClock_Config();
 
-    HAL_Init();
-    SystemClock_Config();
+  initcall_run(__hw_initcall_start, __hw_initcall_end);
 
-    initcall_run(__hw_initcall_start, __hw_initcall_end);
+  app_boot();
 
-    app_boot();
-
-    for (;;) {}
+  for (;;) {
+  }
 }
 
-void Error_Handler(void)
-{
-    __disable_irq();
-    while (1) {}
+void Error_Handler(void) {
+  __disable_irq();
+  while (1) {
+  }
 }

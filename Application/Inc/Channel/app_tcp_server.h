@@ -1,9 +1,10 @@
 /**
  * @file    app_tcp_server.h
- * @brief   TCP 服务器通道 — manage 任务 + conn 任务
+ * @brief   TCP 服务器通道 — 串行单客户端服务循环
  *
- * tcp_server_task: bind → listen → accept → 派生 conn 任务 → 等待断开 → 循环
- * tcp_server_conn_task: netconn_recv → app_channel_dispatch
+ * tcp_server_task: bind → listen → accept → 服务客户端（recv 循环）
+ * → 客户端断开 → 回 accept 下一客户端。通道实例为文件级 static 单实例
+ * （UAF 根治），app_channel_register/dispatch 协议不变。
  */
 
 #pragma once
@@ -25,7 +26,6 @@ extern osThreadId_t tcp_server_task_handle;
 extern const osThreadAttr_t tcp_server_task_attr;
 
 void tcp_server_task(void *argument);
-void tcp_server_conn_task(void *argument);
 
 static inline osThreadId_t app_tcp_server_start(void)
 {

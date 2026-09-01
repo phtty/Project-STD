@@ -124,6 +124,13 @@
 
 #define MQTT_REQ_MAX_IN_FLIGHT 16
 #define LWIP_SO_RCVTIMEO      1 /* UDP recv_timeout，用于探测通道可用性 */
+
+/* 网络通道资源池（2026-08-21 修复 LDI 搜索广播丢包）：
+ * dev 共存构建 baseline 4 netconn 已满（UDP 10011 + UDP 20103 + TCP Server
+ * listener + TCP Client），广播临时 netconn 必然 NULL 静默失败；
+ * 扩到 8 留余量（新增 UDP 端口协议时仍须随通道数核算，见 doc/06 预算） */
+#define MEMP_NUM_NETCONN 8
+#define MEMP_NUM_UDP_PCB 8
 /* USER CODE END 1 */
 
 #ifdef __cplusplus

@@ -3,7 +3,7 @@
  * @brief   IAP 固件升级协议处理
  *
  * 帧格式: 0x5A5A5A5A (4B) | seq (4B) | cmd (4B) | len (4B) | data | CRC32 (4B)
- * 承载于 RS485 + UDP，配置存储于 Flash 0x08004000。
+ * 仅承载于 UDP（RJ45 共享 RB）；IAP 不再使用 RS485。
  */
 
 #include "app_iap.h"
@@ -11,15 +11,18 @@
 #include "initcall.h"
 #include "pl_crc.h"
 #include "app_udp.h"
-#include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
+
+/* RJ45 物理通道 RB：与 LDI/MQTT 等同槽 weak 合并 */
+RB_PROVIDE_WEAK(rb_provide_rj45, RB_SIZE_RJ45);
 
 /* ---- proto_iap_queue 静态分配 ---- */
 #define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
-#define IAP_MSG_SIZE (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
+#define IAP_MSG_SIZE    (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
+#define IAP_QUEUE_DEPTH (2U)
 
 static StaticQueue_t s_iap_queue_cb;
-static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE];
+static uint8_t s_iap_queue_buf[IAP_QUEUE_DEPTH * IAP_MSG_SIZE];
 static const osMessageQueueAttr_t s_iap_queue_attr = {
     .name    = "proto_iap_queue",
     .cb_mem  = &s_iap_queue_cb,
@@ -28,23 +31,21 @@ static const osMessageQueueAttr_t s_iap_queue_attr = {
     .mq_size = sizeof(s_iap_queue_buf),
 };
 
-/* ---- 协议模块自注册 ---- */
-static proto_mask_t s_iap_mask;
+/* ---- 协议模块自注册（仅 UDP → RJ45 槽，与 LDI 链式共享） ---- */
+static proto_mask_t s_iap_mask_udp;
 
 [[maybe_unused]] static void iap_module_init(void)
 {
-    // 指定使用的环形缓冲区
-    ring_buffer_t *rb = app_proto_acquire_buf(0, 2048);
+    ring_buffer_t *rb = app_proto_acquire_buf(RB_SLOT_RJ45, RB_SIZE_RJ45);
+    if (rb == nullptr)
+        return;
 
-    // 注册协议到多通道多协议解析模块
-    s_iap_mask = app_proto_register(iap_probe_frame, rb);
-    if (s_iap_mask == 0) return;
+    s_iap_mask_udp = app_proto_register(iap_probe_frame, rb);
+    if (s_iap_mask_udp == 0)
+        return;
 
-    // 绑定协议使用到的通道
-    app_proto_bind_channel(s_iap_mask, CH_ID_RS485);
-    app_proto_bind_channel(s_iap_mask, CH_ID_UDP);
+    app_proto_bind_channel(s_iap_mask_udp, CH_ID_UDP);
 
-    // 创建协议处理任务
     g_iap_task_handle = osThreadNew(iap_handle_task, nullptr, &iap_task_attr);
 }
 sw_app_initcall(iap_module_init);
@@ -55,7 +56,7 @@ osMessageQueueId_t g_iap_msg_queue;
 osThreadId_t g_iap_task_handle;
 const osThreadAttr_t iap_task_attr = {
     .name       = "iap_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4, /* 帧缓冲为 static；原 2KB 偏大 */
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
@@ -66,10 +67,12 @@ const osThreadAttr_t iap_task_attr = {
 /** @brief IAP 协议处理任务：阻塞等待帧队列 → 按 cmd 字段查表分派到命令处理函数 */
 void iap_handle_task(void *argument)
 {
+    (void)argument;
     static uint8_t _msg_buf[IAP_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
-    g_iap_msg_queue = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
-    app_proto_set_frame_queue(s_iap_mask, g_iap_msg_queue);
+    g_iap_msg_queue = osMessageQueueNew(IAP_QUEUE_DEPTH, IAP_MSG_SIZE, &s_iap_queue_attr);
+    if (s_iap_mask_udp != 0)
+        app_proto_set_frame_queue(s_iap_mask_udp, g_iap_msg_queue);
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_iap_msg_queue, msg, NULL, osWaitForever))
@@ -77,6 +80,12 @@ void iap_handle_task(void *argument)
 
         iap_frame_t *frame_data = (iap_frame_t *)msg->data;
         uint8_t cmd             = (uint8_t)((frame_data->cmd) & 0xff);
+
+        /* 查表越界防护：cmd 为 uint8_t 可达 255，须先校验小于表元素个数（IAP_CMD_COUNT，
+         * 与 g_iap_cmd_table[] 定义处 static_assert 保持同步）。
+         * 越界帧静默丢弃——IAP 协议无错误应答约定，无法回 NACK。 */
+        if (cmd >= IAP_CMD_COUNT)
+            continue;
 
         g_iap_cmd_table[cmd](msg->ch, frame_data);
     }
@@ -95,8 +104,18 @@ proto_probe_sta_t iap_probe_frame(const channel_t *ch, const ring_buffer_t *buff
     uint32_t available = rb_avail(buff, nullptr);
     (void)ch;
 
-    /* min size check */
-    if (available < 4) return PROTO_PROBE_WAIT;
+    /* 首字节快速拒绝：IAP 帧头首字节固定 0x5A，禁止盲 WAIT 阻塞链式探测 */
+    if (available == 0)
+        return PROTO_PROBE_FAKE;
+
+    uint8_t first_byte;
+    rb_peek(buff, 0, &first_byte, 1, nullptr);
+    if (first_byte != 0x5A)
+        return PROTO_PROBE_FAKE;
+
+    /* 首字节已匹配，后续不足 4 字节 → 真正 WAIT */
+    if (available < 4)
+        return PROTO_PROBE_WAIT;
 
     /* frame header check */
     uint32_t head = 0;

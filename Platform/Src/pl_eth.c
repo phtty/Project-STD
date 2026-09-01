@@ -60,12 +60,14 @@ void pbuf_free_custom(struct pbuf *p);
 /** @brief ETH RX 完成回调：释放信号量通知 ethernetif_input 线程取包 */
 void HAL_ETH_RxCpltCallback(ETH_HandleTypeDef *handlerEth)
 {
+    (void)handlerEth;
     osSemaphoreRelease(RxPktSemaphore);
 }
 
 /** @brief ETH TX 完成回调：释放信号量通知发送完成 */
 void HAL_ETH_TxCpltCallback(ETH_HandleTypeDef *handlerEth)
 {
+    (void)handlerEth;
     osSemaphoreRelease(TxPktSemaphore);
 }
 
@@ -242,6 +244,7 @@ static void low_level_init(struct netif *netif)
  */
 static err_t low_level_output(struct netif *netif, struct pbuf *p)
 {
+    (void)netif;
     uint32_t i                                  = 0U;
     struct pbuf *q                              = NULL;
     err_t errval                                = ERR_OK;
@@ -301,6 +304,7 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
  */
 static struct pbuf *low_level_input(struct netif *netif)
 {
+    (void)netif;
     struct pbuf *p = NULL;
 
     if (RxAllocStatus == RX_ALLOC_OK) {

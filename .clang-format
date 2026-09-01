@@ -18,3 +18,4 @@ IndentCaseLabels: true
 SortIncludes: false
 AlignConsecutiveMacros: AcrossEmptyLines
 AlignConsecutiveAssignments: Consecutive
+BoolAcrossComments: true

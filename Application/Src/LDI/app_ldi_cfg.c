@@ -92,19 +92,21 @@ void app_flash_ldi_save_config(app_flash_ldi_cfg_info_t *info)
  */
 bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info)
 {
-    app_flash_ldi_record_t rec = {0};
-    dev_storage_t *w25         = app_flash_ldi_get_storage();
+    /* 静态 SRAM：禁止用任务栈缓冲做 SPI DMA 目的（CCM/栈均不可靠作 DMA 目的） */
+    static app_flash_ldi_record_t s_rec;
+    dev_storage_t *w25 = app_flash_ldi_get_storage();
 
-    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) < 0) {
+    memset(&s_rec, 0, sizeof(s_rec));
+    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&s_rec, sizeof(s_rec)) < 0) {
         memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
         return false;
     }
 
-    if (app_flash_ldi_is_config_empty(&rec) || !app_flash_ldi_is_config_valid(&rec)) {
+    if (app_flash_ldi_is_config_empty(&s_rec) || !app_flash_ldi_is_config_valid(&s_rec)) {
         memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
         return false;
     }
 
-    memcpy(info, &rec.cfg, sizeof(app_flash_ldi_cfg_info_t));
+    memcpy(info, &s_rec.cfg, sizeof(app_flash_ldi_cfg_info_t));
     return true;
 }

@@ -15,10 +15,10 @@
  *  P20 模组参数
  * ================================================================ */
 
-#define P20_MODULE_ROWS         (1U)  /* 每行模块数 */
-#define P20_MODULE_COLS         (1U)  /* 每列模块数 */
-#define P20_MODULE_PIXEL_ROW    (24U) /* 单模块像素行数 */
-#define P20_MODULE_PIXEL_COL    (12U) /* 单模块像素列数 */
+#define P20_MODULE_ROWS         (8U)  /* 每行模块数 */
+#define P20_MODULE_COLS         (4U)  /* 每列模块数 */
+#define P20_MODULE_PIXEL_ROW    (16U) /* 单模块像素行数 */
+#define P20_MODULE_PIXEL_COL    (8U)  /* 单模块像素列数 */
 #define P20_CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */
 #define P20_SCAN_LINES          (1U)  /* 静态扫描 */
 
@@ -92,7 +92,7 @@ static dev_display_p20_t g_p20 = {
         .buffer_size         = P20_BUFFER_SIZE,
         .pixel_map           = p20_pixel_map,
         .hub75_buff          = p20_hub75_buff,
-        .light_level         = 1,
+        .light_level         = DEV_DISPLAY_BRIGHTNESS_MAX,
     },
 };
 

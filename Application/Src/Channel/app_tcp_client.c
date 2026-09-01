@@ -1,6 +1,6 @@
 /**
  * @file    dev_tcp_client.c
- * @brief       TCP 客户端通道（连接 192.168.114.100:9529）
+ * @brief       TCP 客户端通道（连接 192.168.2.17:9529）
  */
 
 #include "app_tcp_client.h"
@@ -15,16 +15,16 @@ void tcp_client_conn_task(void *argument);
 __STATIC_INLINE void tcp_keepaliveinit(struct netconn *conn);
 
 /* ---- 连接任务属性 ---- */
-const osThreadAttr_t tcp_client_conn_attr = {
+static const osThreadAttr_t tcp_client_conn_attr = {
     .name       = "tcp_client_conn_task",
-    .stack_size = 256 * 4,
+    .stack_size = 256 * 4, /* 对齐 udp_connect；原 2KB 偏大 */
     .priority   = osPriorityNormal,
 };
 
 osThreadId_t tcp_client_task_handle;
 const osThreadAttr_t tcp_client_task_attr = {
     .name       = "tcp_client_task",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4, /* 对齐 tcp_server；原 2KB 偏大 */
     .priority   = osPriorityNormal,
 };
 
@@ -39,6 +39,12 @@ tcp_client_channel_t g_tcp_client = {
     .host_ip   = {192, 168, 2, 17},
     .host_port = 9529,
 };
+
+/* ---- 连接期通道实例：文件级 static 单实例（UAF 根治） ----
+ * 连接任务退出后栈上通道实例悬垂是历史 UAF 根源。实例提为文件级 static，
+ * ch 指针生命周期恒定；重连时复用同一实例（init 重新拷贝模板重置状态）。
+ * 已注销的旧通知由 dispatch 侧 app_channel_get 回验丢弃（app_dispatch.c）。 */
+static tcp_client_channel_t s_tcp_client_conn_ch;
 
 /* ---- 构造 ---- */
 void tcp_client_channel_init(tcp_client_channel_t *self, void *conn, channel_t *tmpl)
@@ -75,6 +81,7 @@ uint16_t app_tcp_client_get_host_port(void)
 
 void tcp_client_task(void *argument)
 {
+    (void)argument;
     if (client_disconnect_sem == NULL)
         client_disconnect_sem = osSemaphoreNew(1, 0, NULL);
 
@@ -132,10 +139,9 @@ void tcp_client_conn_task(void *argument)
 {
     struct netconn *conn = (struct netconn *)argument;
 
-    tcp_client_channel_t tcp;
-    tcp_client_channel_init(&tcp, conn, &g_tcp_client_channel_tmpl);
+    tcp_client_channel_init(&s_tcp_client_conn_ch, conn, &g_tcp_client_channel_tmpl);
 
-    channel_t *ch = &tcp.me;
+    channel_t *ch = &s_tcp_client_conn_ch.me;
     struct netbuf *buf;
     err_t err;
     void *data;
@@ -150,8 +156,8 @@ void tcp_client_conn_task(void *argument)
         netbuf_delete(buf);
     }
 
-    tcp.me.ops   = nullptr; /* 防止 send 路径访问即将释放的 netconn */
-    tcp.me.state = CH_STATE_DOWN;
+    s_tcp_client_conn_ch.me.ops   = nullptr; /* 防止 send 路径访问即将释放的 netconn */
+    s_tcp_client_conn_ch.me.state = CH_STATE_DOWN;
     app_channel_register(CH_ID_TCP_CLIENT, nullptr);
     osSemaphoreRelease(client_disconnect_sem);
     osThreadExit();

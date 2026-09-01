@@ -68,11 +68,13 @@ extern uint32_t SystemCoreClock;
 #define configTICK_RATE_HZ                      ((TickType_t)1000)
 #define configMAX_PRIORITIES                    (56)
 #define configMINIMAL_STACK_SIZE                ((uint16_t)128)
-#define configTOTAL_HEAP_SIZE                   ((size_t)32 * 1024)
+#define configTOTAL_HEAP_SIZE                   ((size_t)36 * 1024) /* heap_4 静态 ucHeap → SRAM .bss；栈压缩后试 36KB */
+#define configAPPLICATION_ALLOCATED_HEAP        0                   /* 0：heap_4 自带 static ucHeap，禁止再放 CCM */
 #define configMAX_TASK_NAME_LEN                 (16)
 #define configUSE_TRACE_FACILITY                1
 #define configUSE_16_BIT_TICKS                  0
 #define configUSE_MUTEXES                       1
+#define configUSE_MALLOC_FAILED_HOOK            1
 #define configQUEUE_REGISTRY_SIZE               8
 #define configUSE_RECURSIVE_MUTEXES             1
 #define configUSE_COUNTING_SEMAPHORES           1

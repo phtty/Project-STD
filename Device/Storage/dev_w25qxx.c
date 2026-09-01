@@ -88,6 +88,43 @@ static inline void _cs_high(void)
 static osEventFlagsId_t s_evt;
 static volatile bool s_ok;
 
+/* ---- SPI 互斥锁 ----
+ * 多协议任务并发 app_render 读字库会交错 SPI 帧（CS/命令/数据被打散）。
+ * _read/_write/_erase 全程持锁串行；s_ok/s_evt/s_dma_bounce 共享完成标志
+ * 随之串行。锁在 sw_dev_initcall（RTOS 后、协议任务创建前）创建：
+ * hw initcall 阶段 RTOS 未初始化无法创建互斥锁。
+ * 持锁为 NULL 时（sw_dev 早期、单线程 init 上下文）直接放行。 */
+static osMutexId_t s_w25_mutex;
+
+void dev_w25qxx_rtos_init(void)
+{
+    s_w25_mutex = osMutexNew(NULL);
+}
+sw_dev_initcall(dev_w25qxx_rtos_init);
+
+static inline void _w25_lock(void)
+{
+    if (s_w25_mutex)
+        osMutexAcquire(s_w25_mutex, osWaitForever);
+}
+
+static inline void _w25_unlock(void)
+{
+    if (s_w25_mutex)
+        osMutexRelease(s_w25_mutex);
+}
+
+/* CCM 不可被 DMA 寻址；禁止把 CCM/栈缓冲直接交给 SPI DMA（经 s_dma_bounce） */
+#define CCMRAM_BASE 0x10000000u
+#define CCMRAM_END  0x10010000u
+static uint8_t s_dma_bounce[256]; /* 必须落在 SRAM .bss */
+
+static bool _ptr_in_ccm(const void *p)
+{
+    uintptr_t a = (uintptr_t)p;
+    return (a >= CCMRAM_BASE) && (a < CCMRAM_END);
+}
+
 static void _dma_cb(void *ctx)
 {
     (void)ctx;
@@ -95,11 +132,23 @@ static void _dma_cb(void *ctx)
     osEventFlagsSet(s_evt, 0x01);
 }
 
+static int32_t _dma_recv(dev_w25qxx_t *self, uint8_t *dst, uint16_t len)
+{
+    s_ok = false;
+    if (pl_spi_receive_dma(self->spi, dst, len) != 0)
+        return -1;
+    while (!s_ok)
+        osDelay(1);
+    return 0;
+}
+
 /* ---- OPS 实现 ---- */
 static int32_t _init(dev_storage_t *dev)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     self->spi          = pl_spi_get_handle();
+    if (!self->spi)
+        return -1;
 
     /* 复位（阻塞，无需RTOS） */
     uint8_t rst[2] = {W25Q_RESET_ENABLE, W25Q_RESET_DEVICE};
@@ -127,9 +176,9 @@ static int32_t _init(dev_storage_t *dev)
     return 0;
 }
 
-static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+/* 内部：假设已持锁（_write 的读-改-写路径复用，避免自锁死锁） */
+static int32_t _read_locked(dev_w25qxx_t *self, uint32_t addr, uint8_t *buf, uint32_t len)
 {
-    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
 
     if (!s_evt) {
@@ -143,14 +192,40 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
     cmd[0] = W25Q_READ_CMD;
     _put_addr(cmd + 1, addr, self);
 
-    s_ok = false;
+    int32_t ret = -1;
     _cs_low();
-    pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
-    pl_spi_receive_dma(self->spi, buf, (uint16_t)len);
-    while (!s_ok)
-        osDelay(1);
+    if (pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1)) != 0)
+        goto out;
+
+    if (!_ptr_in_ccm(buf)) {
+        if (_dma_recv(self, buf, (uint16_t)len) != 0)
+            goto out;
+    } else {
+        /* 目的在 CCM（显存等）→ 经 SRAM bounce 再 memcpy */
+        uint32_t done = 0;
+        while (done < len) {
+            uint16_t chunk = (uint16_t)((len - done > sizeof(s_dma_bounce))
+                                            ? sizeof(s_dma_bounce)
+                                            : (len - done));
+            if (_dma_recv(self, s_dma_bounce, chunk) != 0)
+                goto out;
+            memcpy(buf + done, s_dma_bounce, chunk);
+            done += chunk;
+        }
+    }
+    ret = (int32_t)len;
+out:
     _cs_high();
-    return (int32_t)len;
+    return ret;
+}
+
+static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+{
+    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
+    _w25_lock();
+    int32_t r = _read_locked(self, addr, buf, len);
+    _w25_unlock();
+    return r;
 }
 
 static int32_t _write_enable(dev_w25qxx_t *self)
@@ -211,8 +286,11 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
 
-    static uint8_t sec[4096];
-    uint32_t w = 0;
+    static uint8_t sec[4096]; /* 共享缓冲，随锁串行 */
+
+    _w25_lock();
+    int32_t ret = -1;
+    uint32_t w  = 0;
 
     while (w < len) {
         uint32_t sa  = addr - (addr % 4096);
@@ -220,7 +298,9 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
         uint32_t ch  = 4096 - off;
         if (len - w < ch) ch = len - w;
 
-        _read(dev, sa, sec, 4096);
+        /* 持锁内调用内部无锁版本，避免自锁死锁 */
+        if (_read_locked(self, sa, sec, 4096) < 0)
+            goto out;
 
         bool need = false;
         for (uint16_t i = off; i < off + ch; i++)
@@ -243,11 +323,14 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
         }
 
         memcpy(sec + off, buf + w, ch);
-        if (_write_no_check(self, sa, sec, 4096) != 0) return -1;
+        if (_write_no_check(self, sa, sec, 4096) != 0) goto out;
         w += ch;
         addr += ch;
     }
-    return 0;
+    ret = 0;
+out:
+    _w25_unlock();
+    return ret;
 }
 
 static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
@@ -255,6 +338,7 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
     (void)len;
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
 
+    _w25_lock();
     _write_enable(self);
     uint8_t al = _addr_len(self);
     uint8_t cmd[5];
@@ -263,7 +347,9 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
     _cs_low();
     int32_t r = pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
     _cs_high();
-    return (r == 0) ? _wait_busy(self, 3000) : -1;
+    r = (r == 0) ? _wait_busy(self, 3000) : -1;
+    _w25_unlock();
+    return r;
 }
 
 static uint32_t _capacity(dev_storage_t *dev)
@@ -282,7 +368,7 @@ static const dev_storage_ops_t w25qxx_ops = {
 /* ---- 自动初始化 ---- */
 void dev_w25qxx_init(void)
 {
-    g_w25qxx.me.ops = &w25qxx_ops;
-    _init(&g_w25qxx.me);
+    if (_init(&g_w25qxx.me) == 0)
+        g_w25qxx.me.ops = &w25qxx_ops;
 }
 hw_dev_initcall(dev_w25qxx_init);

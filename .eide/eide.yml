@@ -11,12 +11,19 @@ virtualFolder:
     - name: Application
       files:
         - path: Application/Src/app_boot.c
+        - path: Application/Src/app_net_boot.c
+        - path: Application/Src/app_default_display.c
         - path: Application/Src/app_render.c
         - path: Application/Src/app_key.c
         - path: Application/Src/app_light_sensor.c
+        - path: Application/Src/app_uart_baud.c
         - path: Application/Src/app_test.c
         - path: Application/Src/app_factory_test.c
       folders:
+        - name: config
+          files:
+            - path: Application/Src/Config/app_board_net_cfg.c
+          folders: []
         - name: channel
           files:
             - path: Application/Src/Channel/app_mqtt.c
@@ -39,24 +46,72 @@ virtualFolder:
               files:
                 - path: Application/Src/IAP/app_iap_cmd.c
                 - path: Application/Src/IAP/app_iap.c
-                - path: Application/Src/IAP/app_iap_cfg.c
               folders: []
             - name: ldi
               files:
                 - path: Application/Src/LDI/app_ldi.c
                 - path: Application/Src/LDI/app_ldi_cmd.c
+                - path: Application/Src/LDI/app_ldi_device.c
                 - path: Application/Src/LDI/app_vms_ctrl.c
                 - path: Application/Src/LDI/app_ldi_cfg.c
+              folders: []
+            - name: ProtocolParser_QingHai
+              files:
+                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto.c
+                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_parse.c
+                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_cmd.c
+                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_voice.c
+              folders: []
+            - name: ProtocolParser_SiChuang_ETC
+              files:
+                - path: Application/Src/ProtocolParser_SiChuang_ETC/app_sc_etc_proto.c
+                - path: Application/Src/ProtocolParser_SiChuang_ETC/app_sc_etc_proto_parse.c
+                - path: Application/Src/ProtocolParser_SiChuang_ETC/app_sc_etc_proto_cmd.c
+              folders: []
+            - name: ProtocolParser_SiChuang_MTC
+              files:
+                - path: Application/Src/ProtocolParser_SiChuang_MTC/app_sc_mtc_proto.c
+                - path: Application/Src/ProtocolParser_SiChuang_MTC/app_sc_mtc_proto_parse.c
+                - path: Application/Src/ProtocolParser_SiChuang_MTC/app_sc_mtc_proto_cmd.c
+                - path: Application/Src/ProtocolParser_SiChuang_MTC/app_sc_mtc_proto_voice.c
+              folders: []
+            - name: ProtocolParser_SiChuang_Overload
+              files:
+                - path: Application/Src/ProtocolParser_SiChuang_Overload/app_sc_ol_proto.c
+                - path: Application/Src/ProtocolParser_SiChuang_Overload/app_sc_ol_proto_parse.c
+                - path: Application/Src/ProtocolParser_SiChuang_Overload/app_sc_ol_proto_cmd.c
+              folders: []
+            - name: ProtocolParser_ShanDong
+              files:
+                - path: Application/Src/ProtocolParser_ShanDong/app_sd_proto.c
+                - path: Application/Src/ProtocolParser_ShanDong/app_sd_proto_parse.c
+                - path: Application/Src/ProtocolParser_ShanDong/app_sd_proto_cmd.c
+                - path: Application/Src/ProtocolParser_ShanDong/app_sd_proto_default.c
+              folders: []
+            - name: ProtocolParser_GuiZhou
+              files:
+                - path: Application/Src/ProtocolParser_GuiZhou/app_gz_proto.c
+                - path: Application/Src/ProtocolParser_GuiZhou/app_gz_proto_parse.c
+                - path: Application/Src/ProtocolParser_GuiZhou/app_gz_proto_cmd.c
+                - path: Application/Src/ProtocolParser_GuiZhou/app_gz_proto_voice.c
+              folders: []
+            - name: ProtocolParser_YunNan
+              files:
+                - path: Application/Src/ProtocolParser_YunNan/app_yn_proto.c
+                - path: Application/Src/ProtocolParser_YunNan/app_yn_proto_parse.c
+                - path: Application/Src/ProtocolParser_YunNan/app_yn_proto_cmd.c
+                - path: Application/Src/ProtocolParser_YunNan/app_yn_proto_voice.c
+              folders: []
+            - name: ProtocolParser_ChongQing
+              files:
+                - path: Application/Src/ProtocolParser_ChongQing/app_cq_proto.c
+                - path: Application/Src/ProtocolParser_ChongQing/app_cq_proto_parse.c
+                - path: Application/Src/ProtocolParser_ChongQing/app_cq_proto_cmd.c
               folders: []
             - name: rls
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
-              folders: []
-            - name: msl
-              files:
-                - path: Application/Src/MSL/app_msl.c
-                - path: Application/Src/MSL/app_msl_cmd.c
               folders: []
     - name: Drivers
       files: []
@@ -224,6 +279,10 @@ virtualFolder:
             - path: Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_printf.c
             - path: Middlewares/Third_Party/SEGGER_RTT/SEGGER_RTT_Syscalls_GCC.c
           folders: []
+        - name: cJSON
+          files:
+            - path: Middlewares/Third_Party/cJSON/cJSON.c
+          folders: []
     - name: Compiler
       files:
         - path: Compiler/startup.c
@@ -235,6 +294,7 @@ virtualFolder:
           files:
             - path: Device/Comm/dev_rs232.c
             - path: Device/Comm/dev_rs485.c
+            - path: Device/Comm/dev_rs232_voice.c
           folders: []
         - name: Network
           files:
@@ -255,8 +315,10 @@ virtualFolder:
         - name: Display
           files:
             - path: Device/Display/dev_display.c
-            - path: Device/Display/dev_display_p20.c
-            - path: Device/Display/dev_display_old_p20.c
+            - path: Device/Display/dev_display_1_969.c
+            - path: Device/Display/dev_display_1_577.c
+            - path: Device/Display/dev_display_1_260.c
+            - path: Device/Display/dev_display_1_263.c
           folders: []
     - name: Platform
       files:
@@ -316,6 +378,7 @@ targets:
       defineList:
         - USE_HAL_DRIVER
         - STM32F407xx
+        - PROTO_CHONGQING
       incList:
         - Core/Inc
         - Drivers/CMSIS/Include
@@ -335,18 +398,33 @@ targets:
         - Application/Inc/Channel
         - Application/Inc/IAP
         - Application/Inc/LDI
+        - Application/Inc/Config
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
-        - Application/Inc/MSL
+        - Application/Inc/ProtocolParser_QingHai
+        - Application/Inc/ProtocolParser_SiChuang_ETC
+        - Application/Inc/ProtocolParser_SiChuang_MTC
+        - Application/Inc/ProtocolParser_SiChuang_Overload
+        - Application/Inc/ProtocolParser_ShanDong
+        - Application/Inc/ProtocolParser_GuiZhou
+        - Application/Inc/ProtocolParser_YunNan
+        - Application/Inc/ProtocolParser_ChongQing
+        - Middlewares/Third_Party/cJSON
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Device/Display/dev_display_p20.c
-      - <virtual_root>/Application/protocol/ah/ah_mqtt_cmd.c
-      - <virtual_root>/Application/protocol/ah/ah_mqtt.c
-      - <virtual_root>/Application/channel/app_mqtt.c
+      - <virtual_root>/Application/protocol/ah
+      - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/protocol/ProtocolParser_GuiZhou
+      - <virtual_root>/Application/protocol/ProtocolParser_ShanDong
+      - <virtual_root>/Application/protocol/ProtocolParser_QingHai
+      - <virtual_root>/Application/protocol/ProtocolParser_YunNan
+      - <virtual_root>/Device/Display/dev_display_1_260.c
+      - <virtual_root>/Device/Display/dev_display_1_969.c
+      - <virtual_root>/Application/protocol/ProtocolParser_ChongQing
+      - <virtual_root>/Device/Display/dev_display_1_577.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -361,11 +439,11 @@ targets:
           asm-compiler: {}
           beforeBuildTasks: []
           c/cpp-compiler:
-            language-c: c23
-            language-cpp: c++23
+            language-c: gnu23
+            language-cpp: gnu++23
             one-elf-section-per-data: true
             one-elf-section-per-function: true
-            optimization: level-0
+            optimization: level-3
             warnings: all-warnings
           global:
             $float-abi-type: hard
@@ -376,6 +454,8 @@ targets:
             stack-usage: true
             use-newlib-nano: true
           linker:
+            $outputTaskExcludes:
+              - .s19
             $toolName: auto
             LIB_FLAGS: -lm
             output-format: elf
@@ -420,8 +500,8 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${workspaceFolderBasename}.hex verify reset exit"
-        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+        commandLine: bash ./tool/flash_all.sh
+        eraseChipCommand: ""
       JLink:
         baseAddr: ""
         bin: ""
@@ -430,12 +510,22 @@ targets:
           vendor: ST
         otherCmds: ""
         proType: 1
-        speed: 8000
+        speed: 32000
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
         interface: cmsis-dap
         target: stm32f4x
+      STLink:
+        address: "0x08000000"
+        bin: ""
+        elFile: None
+        optionBytes: .eide/debug.st.option.bytes.ini
+        otherCmds: ""
+        proType: SWD
+        resetMode: default
+        runAfterProgram: true
+        speed: 4000
       probe-rs:
         allowEraseAll: false
         baseAddr: "0x08000000"
@@ -444,7 +534,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: probe-rs
+    uploader: Custom
   Release:
     cppPreprocessAttrs:
       defineList:
@@ -467,6 +557,8 @@ targets:
         - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
         - Middlewares/Third_Party/FreeRTOS/Source/include
         - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+        - Application/Inc/ProtocolParser_ChongQing
+        - Middlewares/Third_Party/cJSON
         - Compiler
         - Drivers/BSP/Display
         - Drivers/BSP/Key

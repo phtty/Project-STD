@@ -1,17 +1,46 @@
 CompileFlags:
-    Add:
-        - -isystem/usr/arm-none-eabi/include/c++/15.2.1
-        - -isystem/usr/arm-none-eabi/include/c++/15.2.1/arm-none-eabi/thumb/v7e-m+fp/hard
-        - -isystem/usr/arm-none-eabi/include/c++/15.2.1/backward
-        - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include
-        - -isystem/usr/lib/gcc/arm-none-eabi/15.2.1/include-fixed
-        - -isystem/usr/arm-none-eabi/include
-    Remove:
-        - -fcallgraph-info*
-        - -mthumb-interwork
-    CompilationDatabase: ./build/Debug
-    Compiler: /usr/bin/arm-none-eabi-gcc
+  Add:
+    - --target=arm-none-eabi
+    - -mcpu=cortex-m4
+    - -mthumb
+    - -mfpu=fpv4-sp-d16
+    - -mfloat-abi=hard
+    - -std=gnu23
+    - -DUSE_HAL_DRIVER
+    - -DSTM32F407xx
+    - -I${workspace}/Application/Inc
+    - -I${workspace}/Application/Inc/IAP
+    - -I${workspace}/Application/Inc/LDI
+    - -I${workspace}/Application/Inc/ProtocolParser_QingHai
+    - -I${workspace}/Application/Inc/AH_MQTT
+    - -I${workspace}/Application/Inc/RLS
+    - -I${workspace}/Application/Inc/Channel
+    - -I${workspace}/Device/Inc
+    - -I${workspace}/Platform/Inc
+    - -I${workspace}/Kernel/Inc
+    - -I${workspace}/Core/Inc
+    - -I${workspace}/Drivers/CMSIS/Include
+    - -I${workspace}/Drivers/CMSIS/Device/ST/STM32F4xx/Include
+    - -I${workspace}/Drivers/STM32F4xx_HAL_Driver/Inc
+    - -I${workspace}/Middlewares/Third_Party/SEGGER_RTT
+    - -I${workspace}/Middlewares/Third_Party/LwIP/src/include
+    - -I${workspace}/Middlewares/Third_Party/LwIP/system
+    - -I${workspace}/Middlewares/Third_Party/FreeRTOS/Source/include
+    - -I${workspace}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+    - -I${workspace}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+    - -I${workspace}/Compiler
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/arm-none-eabi/include/c++/15.2.1
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/arm-none-eabi/include/c++/15.2.1/arm-none-eabi/thumb/v7e-m+fp/hard
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/arm-none-eabi/include/c++/15.2.1/backward
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/lib/gcc/arm-none-eabi/15.2.1/include
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/lib/gcc/arm-none-eabi/15.2.1/include-fixed
+    - -isystem/home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/arm-none-eabi/include
+  Remove:
+    - -fcallgraph-info*
+    - -mthumb-interwork
+  Compiler: /home/yystation/EnvTools/embedded-toolchain/arm-gnu-toolchain/bin/arm-none-eabi-gcc
+  CompilationDatabase: ./build/Debug
 Diagnostics:
-    Suppress:
-        - unused-includes
-        - drv_unknown_argument
+  Suppress:
+    - unused-includes
+    - drv_unknown_argument

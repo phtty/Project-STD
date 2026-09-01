@@ -25,6 +25,26 @@
     static uint8_t name##_buf[sz]; \
     ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
 
+#define RB_DEFINE_CCM(name, sz)                                                 \
+    static uint8_t name##_buf[sz] __attribute__((section(".ccmram")));          \
+    ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
+
+/**
+ * @brief 协议 TU 提供通道 RB（weak getter；多协议同槽合并为单一静态体）
+ *
+ * 未编入任何 provide → 函数符号为 0，acquire 得 nullptr。
+ * 编入 ≥1 个 provide → 链接器保留其中一个 getter（及其 static 缓冲）。
+ *
+ * @note getter 须为裸标识符（如 rb_provide_rj45），勿传宏名（## 不二次展开）。
+ */
+#define RB_PROVIDE_WEAK(getter, sz)                                                                \
+    __attribute__((weak)) ring_buffer_t *getter(void)                                              \
+    {                                                                                              \
+        static uint8_t getter##_buf[sz];                                                           \
+        static ring_buffer_t getter##_rb = {.data = getter##_buf, .size = (sz), .mutex = nullptr}; \
+        return &getter##_rb;                                                                       \
+    }
+
 /** @brief 环形缓冲区结构体 */
 typedef struct {
     uint8_t *data;

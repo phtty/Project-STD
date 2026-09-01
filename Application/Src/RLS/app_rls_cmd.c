@@ -14,10 +14,13 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
 
 [[maybe_unused]] static void cmd_test(channel_t *ch, void *data)
 {
+    (void)ch;
+    (void)data;
 }
 
 static void cmd_display(channel_t *ch, void *data)
 {
+    (void)ch;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
     // 显示前先清屏
@@ -42,6 +45,7 @@ static void cmd_display(channel_t *ch, void *data)
 
 static void cmd_display_save(channel_t *ch, void *data)
 {
+    (void)ch;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
     // 显示前先清屏

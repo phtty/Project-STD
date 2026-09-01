@@ -31,10 +31,12 @@ uint32_t pl_rtc_bkup_read(pl_rtc_handle_t h, uint32_t reg)
 
 uint32_t pl_rtc_get_timestamp(pl_rtc_handle_t h)
 {
+    (void)h;
     return (uint32_t)RTC_GetUnixTimestamp();
 }
 
 bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
 {
+    (void)h;
     return RTC_Set_UnixTimeStamp((time_t)ts) == HAL_OK;
 }

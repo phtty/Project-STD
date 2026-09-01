@@ -3,12 +3,14 @@
 #include <time.h>
 
 #include "crc_utils.h"
+#include "pl_crc.h"
 #include "app_ldi_cfg.h"
-#include "app_iap_cfg.h"
+#include "app_board_net_cfg.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_sys.h"
 #include "app_vms_ctrl.h"
+#include "app_ldi_device.h"
 #include "app_udp.h"
 #include "app_tcp_server.h"
 
@@ -26,7 +28,8 @@
 /**
  * 网络配置信息 — set_ip / rep_ip_rsp 共用
  *
- * 共 67 字节，不含 head 和 error_code。
+ * 网络参数块共 65 字节，不含 20 字节通用 head 和 1 字节 ErrorCode。
+ * 请求 0AH: DATA offset 20 起；响应 D1H: DATA offset 21 起。
  */
 typedef struct [[gnu::packed]] {
     uint8_t host_ip[4];     // 上位机 IP1 (外设控制服务)
@@ -40,8 +43,17 @@ typedef struct [[gnu::packed]] {
     uint8_t reserve2[2];    // 保留字节
 } ldi_network_info_t;
 
+/* 4.1.1 request network block: DATA offset 20, length 65 bytes. */
+static_assert(sizeof(ldi_network_info_t) == 65, "LDI network block must be 65 bytes");
+static_assert(offsetof(ldi_network_info_t, ntp_ip) == 45, "NtpIP offset must be 45");
+static_assert(offsetof(ldi_network_info_t, device_ip) == 49, "DeviceIP offset must be 49");
+static_assert(offsetof(ldi_network_info_t, device_port) == 53, "DevicePort offset must be 53");
+static_assert(offsetof(ldi_network_info_t, gateway) == 55, "Gateway offset must be 55");
+static_assert(offsetof(ldi_network_info_t, netmask) == 59, "Netmask offset must be 59");
+static_assert(offsetof(ldi_network_info_t, reserve2) == 63, "D1H reserved offset must be 63");
+
 /**
- * 设备 IP 信息设置 (0AH) DATA 域 — 共 87 字节 (含 head)
+ * 设备 IP 信息设置 (0AH) DATA 域 — 共 85 字节 (含 head)
  * head(20B) + network_info(67B)
  */
 typedef struct [[gnu::packed]] {
@@ -307,6 +319,19 @@ static uint8_t ldi_next_rpt_seq(void)
     return (seq << 4) & 0xF0; /* 0x10, 0x20, ... 0xF0 */
 }
 
+/**
+ * @brief 从 DATA 域指针反推该帧的 DATA 域长度
+ *
+ * 命令处理函数只收到 data_crc 首字节指针；ldi_frame_t 的 LEN 字段（4 字节大端）
+ * 紧邻 data_crc 之前，且 probe 已保证完整帧落在队列缓冲内，故可安全反推，
+ * 供各命令做 data_len 下限 / 剩余帧长校验。
+ */
+static uint32_t _ldi_data_len(const void *data)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    return ((uint32_t)p[-4] << 24) | ((uint32_t)p[-3] << 16) | ((uint32_t)p[-2] << 8) | (uint32_t)p[-1];
+}
+
 /** 响应帧拼装工作缓冲区（所有 LDI 命令复用） */
 
 /**
@@ -319,6 +344,7 @@ static uint8_t ldi_next_rpt_seq(void)
  */
 static void ldi_send_response(channel_t *ch, uint8_t rsp_cmd, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
 {
+    (void)rsp_cmd;
     osMutexAcquire(g_ldi.tx_lock, osWaitForever);
 
     ldi_frame_t *frame = (ldi_frame_t *)g_ldi.tx_buf;
@@ -354,6 +380,23 @@ static void ldi_send_response(channel_t *ch, uint8_t rsp_cmd, uint8_t seq, const
 /** @brief 无 payload 响应（仅帧头，如简单 ACK） */
 #define LDI_RESPOND_EMPTY(ch, rsp_cmd, seq) \
     ldi_send_response(ch, rsp_cmd, seq, nullptr, 0)
+
+/** @brief 通用错误应答：标准 head + status=01H（与 0BH 既有错误应答约定一致） */
+static void _ldi_error_rsp(channel_t *ch, uint8_t rsp_cmd)
+{
+    ldi_status_rsp_t rsp = {.status = 0x01};
+    ldi_build_rsp_head(&rsp.head, rsp_cmd);
+    LDI_RESPOND(ch, rsp_cmd, g_ldi.rsp_seq, rsp);
+}
+
+/** @brief 1BH 整帧校验失败错误应答：B1H 头 + device_num=0（无逐模块状态可回） */
+static void _ldi_ctrl_error_rsp(channel_t *ch)
+{
+    ldi_ctrl_rsp_t rsp = {0};
+    ldi_build_ctrl_rsp_head(&rsp.head, LDI_CMD_CTRL_RSP);
+    rsp.device_num = 0;
+    LDI_RESPOND(ch, LDI_CMD_CTRL_RSP, g_ldi.rsp_seq, rsp);
+}
 
 // ============================================================================
 // 命令处理函数声明与分发表
@@ -398,13 +441,48 @@ const ldi_cmd_handler_fn_t g_ldi_cmd_table[] = {
 // ============================================================================
 
 /**
+ * @brief 保存 LDI 配置至 W25 并返回结果（0AH 如实应答用）
+ *
+ * 落盘字节与 app_ldi_cfg.c:app_flash_ldi_save_config 完全一致
+ * （magic + cfg + CRC32，CRC 覆盖 magic+cfg 即记录总长减 crc32 字段），
+ * 仅额外返回擦/写结果；save_config 为 void 且不在本次改动范围内，
+ * 故此处内联其逻辑以捕获返回值，两处需保持同构。
+ *
+ * @return 0 成功；<0 擦除/写入失败（dev_storage_erase/write 错误码）
+ */
+static int32_t _ldi_save_config_ret(app_flash_ldi_cfg_info_t *info)
+{
+    app_flash_ldi_record_t rec = {0};
+    rec.magic                  = APP_FLASH_LDI_MAGIC;
+    memcpy(&rec.cfg, info, sizeof(app_flash_ldi_cfg_info_t));
+    rec.crc32 = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)&rec, sizeof(rec) - sizeof(rec.crc32));
+
+    int32_t ret = app_flash_ldi_erase_config();
+    if (ret < 0)
+        return ret;
+    ret = app_flash_ldi_write_config(&rec);
+    return ret < 0 ? ret : 0;
+}
+
+/**
  * 处理 0AH 设备 IP 信息设置请求
  *
  * 上位机→设备, 用于出厂配置模式下设置设备网络参数.
  * data 指向 cmd_set_ip_t 结构.
+ *
+ * 应答错误码：00H=成功, 01H=失败（与 0BH 及 ldi_status_rsp_t 既有约定一致）。
+ * W25 保存或 Sector1 同步任一步失败即回 01H；固件侧不自动重试，
+ * 上位机收到 01H 后重发 0AH 即可恢复（两次写入均幂等）。
+ * 网络配置写入 W25+Sector1 后**重启生效**（运行时网口不即时变更，属既定策略）。
  */
 void cmd_set_ip(channel_t *ch, void *data)
 {
+    /* data_len 下限：cmd_set_ip_t 共 85 字节（head 20 + network 65），不足回错误应答 */
+    if (_ldi_data_len(data) < sizeof(cmd_set_ip_t)) {
+        _ldi_error_rsp(ch, LDI_CMD_SET_IP_RSP);
+        return;
+    }
+
     cmd_set_ip_t *info = data;
 
     memcpy(g_ldi.cfg.device_ip, info->net.device_ip, sizeof(g_ldi.cfg.device_ip));
@@ -415,10 +493,18 @@ void cmd_set_ip(channel_t *ch, void *data)
     memcpy(g_ldi.cfg.gateway, info->net.gateway, sizeof(g_ldi.cfg.gateway));
     g_ldi.cfg_valid = true;
 
-    app_flash_ldi_save_config(&g_ldi.cfg);
-    app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
+    /* 两步持久化：先 W25（LDI 完整配置），再板级网络配置（Sector1）。
+     * 任一失败即如实应答失败，不再静默回 00H。
+     * 方案 B（2026-08-21）：0AH 写 TCP 业务口（device_port），udp_port 保留现值
+     * （get 失败用出厂默认 20103）。 */
+    int32_t w25_ret    = _ldi_save_config_ret(&g_ldi.cfg);
+    app_board_net_cfg_t cur_cfg;
+    uint32_t udp_port = (app_board_net_cfg_get(&cur_cfg) == 0) ? cur_cfg.udp_port : 20103U;
+    int32_t board_ret  = app_board_net_cfg_update(g_ldi.cfg.device_ip, g_ldi.cfg.netmask,
+                                                  g_ldi.cfg.gateway, g_ldi.cfg.device_port,
+                                                  udp_port);
 
-    ldi_status_rsp_t rsp = {.status = 0x00};
+    ldi_status_rsp_t rsp = {.status = (w25_ret < 0 || board_ret < 0) ? 0x01 : 0x00};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);
     LDI_RESPOND(ch, LDI_CMD_SET_IP_RSP, g_ldi.rsp_seq, rsp);
 }
@@ -431,6 +517,14 @@ void cmd_set_ip(channel_t *ch, void *data)
  */
 static void cmd_set_config(channel_t *ch, void *data)
 {
+    uint32_t data_len = _ldi_data_len(data);
+
+    /* data_len 下限：至少 head(20B) + device_num(1B) */
+    if (data_len < sizeof(ldi_req_head_t) + 1) {
+        _ldi_error_rsp(ch, LDI_CMD_SET_PARA_RSP);
+        return;
+    }
+
     ldi_req_head_t *head = (ldi_req_head_t *)data;
     uint8_t *ptr         = (uint8_t *)data + sizeof(ldi_req_head_t);
     uint8_t device_num   = *ptr++;
@@ -449,10 +543,20 @@ static void cmd_set_config(channel_t *ch, void *data)
     /* 以编译期 cfg 中的 device_type 做键，匹配请求帧中的 module，同步 index 和 vendor */
     bool result = true;
     for (uint8_t i = 0; i < device_num; i++) {
+        /* 每 module 先查表取长度，读取公共头与 vendor 前均校验剩余帧长，防越界读 */
+        uint32_t consumed = (uint32_t)(ptr - (const uint8_t *)data);
+        if (consumed + sizeof(ldi_module_head_t) > data_len) {
+            result = false;
+            break;
+        }
         ldi_module_head_t *mod = (ldi_module_head_t *)ptr;
         uint8_t mod_size       = ldi_cfg_module_size((ldi_device_t)mod->device_type);
 
         if (mod_size == 0) {
+            result = false;
+            break;
+        }
+        if (consumed + mod_size > data_len) {
             result = false;
             break;
         }
@@ -513,6 +617,7 @@ static void cmd_reboot(channel_t *ch, void *data)
  */
 static void cmd_rep_ip(channel_t *ch, void *data)
 {
+    (void)data;
     uint8_t buf[sizeof(ldi_status_rsp_t) + sizeof(ldi_network_info_t)] = {0};
 
     ldi_status_rsp_t *rsp   = (ldi_status_rsp_t *)buf;
@@ -520,6 +625,7 @@ static void cmd_rep_ip(channel_t *ch, void *data)
 
     ldi_build_rsp_head(&rsp->head, LDI_CMD_GET_IP_RSP);
     rsp->status = 0x00;
+    /* D1H DATA = head(20) | ErrorCode(1) | network block(65). */
 
     memcpy(net->device_ip, g_ldi.cfg.device_ip, sizeof(net->device_ip));
     net->device_port[0] = (uint8_t)(g_ldi.cfg.device_port >> 8);
@@ -595,6 +701,11 @@ static void cmd_rsp_report(channel_t *ch, void *data)
 {
     (void)ch;
 
+    /* data_len 下限：C0H 是服务端对设备上报的应答，协议无再应答约定，
+     * 不足 head(20B) 时静默丢弃（无法回错误应答） */
+    if (_ldi_data_len(data) < sizeof(ldi_req_head_t))
+        return;
+
     /* C0H 是服务器对设备上报的应答，每 5 秒一次，携带服务器 Unix 时间戳，用于定期对钟 */
     ldi_req_head_t *head = (ldi_req_head_t *)data;
     uint32_t ts          = ((uint32_t)head->unix_timestamp[0] << 24) |
@@ -621,7 +732,7 @@ static void cmd_rsp_report(channel_t *ch, void *data)
  */
 void ldi_send_cert_req(channel_t *ch)
 {
-    uint8_t buf[sizeof(ldi_cert_req_t) + DEVICE_NUM * 2];
+    uint8_t buf[sizeof(ldi_cert_req_t) + APP_FLASH_LDI_MAX_MODULES * 2];
     ldi_cert_req_t *req = (ldi_cert_req_t *)buf;
 
     ldi_build_rsp_head(&req->head, LDI_CMD_CERT_REQ);
@@ -645,7 +756,7 @@ void ldi_send_cert_req(channel_t *ch)
  */
 void ldi_send_sta_rpt(channel_t *ch)
 {
-    uint8_t buf[sizeof(ldi_sta_rpt_t) + DEVICE_NUM * sizeof(ldi_device_info_t)];
+    uint8_t buf[sizeof(ldi_sta_rpt_t) + APP_FLASH_LDI_MAX_MODULES * sizeof(ldi_device_info_t)];
     ldi_sta_rpt_t *rpt = (ldi_sta_rpt_t *)buf;
 
     ldi_build_rsp_head(&rpt->head, LDI_CMD_STA_RPT_REQ);
@@ -679,6 +790,8 @@ void ldi_send_sta_rpt(channel_t *ch)
         rpt->devices[i].available_status = 0x00; /* 暂填可用 */
         rpt->devices[i].error_code       = 0x00;
         rpt->devices[i].running_status   = 0x01;
+        /* E6/E7/E8：用设备能力层真实状态覆盖默认值 */
+        (void)ldi_device_fill_sta(g_ldi.cfg.modules[i].device_type, &rpt->devices[i]);
         rpt->devices[i].vendor_code[0]   = '0'; /* 暂填默认厂商代码 */
         rpt->devices[i].vendor_code[1]   = '7';
         rpt->devices[i].model_code[0]    = '2'; /* 暂填默认型号代码 */
@@ -701,6 +814,11 @@ void ldi_send_sta_rpt(channel_t *ch)
 static void cmd_rsp_cert(channel_t *ch, void *data)
 {
     (void)ch;
+
+    /* data_len 下限：head(20B) + error_code(1B) 偏移读；
+     * E0H 同为服务端应答，无再应答约定，不足静默丢弃 */
+    if (_ldi_data_len(data) < sizeof(ldi_req_head_t) + 1)
+        return;
 
     /* E0H 响应：head(20B) + error_code(1B)，同步时间戳并检查认证结果 */
     ldi_req_head_t *head = (ldi_req_head_t *)data;
@@ -741,8 +859,23 @@ static void cmd_update(channel_t *ch, void *data)
  */
 static void cmd_init(channel_t *ch, void *data)
 {
+    uint32_t data_len = _ldi_data_len(data);
+
+    /* data_len 下限：至少 head(20B) + device_num(1B) */
+    if (data_len < sizeof(ldi_req_head_t) + 1) {
+        _ldi_error_rsp(ch, LDI_CMD_INIT_RSP);
+        return;
+    }
+
     uint8_t *ptr       = (uint8_t *)data + sizeof(ldi_req_head_t);
     uint8_t device_num = *ptr++;
+
+    /* device_num 钳制 ≤ 设备类型上限（LDI_DEV_TYPE_COUNT=13），超限视为非法帧回错误应答，
+     * 同时防止响应缓冲 VLA 尺寸被恶意 device_num 撑爆 */
+    if (device_num > LDI_DEV_TYPE_COUNT) {
+        _ldi_error_rsp(ch, LDI_CMD_INIT_RSP);
+        return;
+    }
 
     // 每个响应 module 定长 10 字节 (custom_init_len=0)
     uint8_t buf[sizeof(ldi_init_rsp_t) + device_num * sizeof(ldi_init_rsp_module_t)];
@@ -753,6 +886,12 @@ static void cmd_init(channel_t *ch, void *data)
     bool all_ok                    = true;
     ldi_init_rsp_module_t *dst_mod = (ldi_init_rsp_module_t *)rsp->modules;
     for (uint8_t i = 0; i < device_num; i++) {
+        /* 每请求 module 定长 5 字节：head(2) + protocol_version(2) + custom_init_len(1) */
+        uint32_t consumed = (uint32_t)(ptr - (const uint8_t *)data);
+        if (data_len - consumed < sizeof(ldi_module_head_t) + 2 + 1) {
+            _ldi_error_rsp(ch, LDI_CMD_INIT_RSP);
+            return;
+        }
         ldi_module_head_t *req_mod = (ldi_module_head_t *)ptr;
 
         // 响应 module 头部
@@ -770,17 +909,29 @@ static void cmd_init(channel_t *ch, void *data)
         dst_mod->status = found ? 0x00 : 0x01;
         if (!found) all_ok = false;
 
-        // 版本号（暂填默认值）
-        dst_mod->software_version[0] = 0x00;
+        // 从请求模块中读取 protocol_version (2字节) 和 custom_init_len (1字节)
+        uint8_t *mod_data = ptr + sizeof(ldi_module_head_t);
+        uint8_t protocol_version[2] = {mod_data[0], mod_data[1]};
+        uint8_t custom_init_len = mod_data[2];
+
+        /* custom_init_len 校验：不得超过剩余帧长（防 ptr 推进越出帧尾） */
+        uint32_t fixed_part = sizeof(ldi_module_head_t) + 2 + 1;
+        if (custom_init_len > data_len - consumed - fixed_part) {
+            _ldi_error_rsp(ch, LDI_CMD_INIT_RSP);
+            return;
+        }
+
+        // 版本号（从请求中读取）
+        dst_mod->software_version[0] = 0x00; // 暂填默认值
         dst_mod->software_version[1] = 0x01;
         dst_mod->firmware_version[0] = 0x00;
         dst_mod->firmware_version[1] = 0x01;
-        dst_mod->protocol_version[0] = 0x00;
-        dst_mod->protocol_version[1] = 0x00;
-        dst_mod->custom_init_len     = 0x00; // 当前无个性化内容
+        dst_mod->protocol_version[0] = protocol_version[0];
+        dst_mod->protocol_version[1] = protocol_version[1];
+        dst_mod->custom_init_len     = 0x00; // 当前无个性化内容，忽略请求中的 custom_init
 
-        // 推进: 请求帧 module (最小 3B) → 响应 module (10B)
-        ptr += sizeof(ldi_module_head_t) + 1;
+        // 推进: 请求帧 module (5字节 + custom_init_len) → 响应 module (10字节)
+        ptr += fixed_part + custom_init_len;
         dst_mod = (ldi_init_rsp_module_t *)((uint8_t *)dst_mod + sizeof(ldi_init_rsp_module_t));
     }
 
@@ -801,9 +952,31 @@ static void cmd_init(channel_t *ch, void *data)
  */
 static void cmd_ctrl(channel_t *ch, void *data)
 {
+    uint32_t data_len = _ldi_data_len(data);
+
+    /* data_len 下限：至少 ctrl_head(24B) + device_num(1B) */
+    if (data_len < sizeof(ldi_ctrl_head_t) + 1) {
+        _ldi_ctrl_error_rsp(ch);
+        return;
+    }
+
     // 1BH 使用 24 字节 ctrl_head (UnixTimestamp 8B)，不沿用 ldi_req_head_t
     uint8_t *ptr       = (uint8_t *)data + sizeof(ldi_ctrl_head_t);
     uint8_t device_num = *ptr++;
+
+    /* device_num 钳制 ≤ 设备类型上限（LDI_DEV_TYPE_COUNT=13），越界回错误应答，
+     * 同时防响应缓冲 VLA 尺寸被恶意 device_num 撑爆 */
+    if (device_num > LDI_DEV_TYPE_COUNT) {
+        _ldi_ctrl_error_rsp(ch);
+        return;
+    }
+
+    /* 响应总长防御钳制 ≤ tx_buf 容量（LDI_TX_BUF_SIZE=512），超限回错误应答。
+     * device_num 已钳制 ≤13，响应最长 25+13×4=77 字节恒不超限，保留防御 */
+    if (sizeof(ldi_ctrl_rsp_t) + (uint32_t)device_num * sizeof(ldi_ctrl_rsp_payload_t) > LDI_TX_BUF_SIZE) {
+        _ldi_ctrl_error_rsp(ch);
+        return;
+    }
 
     uint8_t buf[sizeof(ldi_ctrl_rsp_t) + device_num * sizeof(ldi_ctrl_rsp_payload_t)];
     ldi_ctrl_rsp_t *rsp = (ldi_ctrl_rsp_t *)buf;
@@ -811,9 +984,24 @@ static void cmd_ctrl(channel_t *ch, void *data)
     rsp->device_num = device_num;
 
     for (uint8_t i = 0; i < device_num; i++) {
+        uint32_t consumed = (uint32_t)(ptr - (const uint8_t *)data);
+
+        /* mod_len 读取需 2 字节，module 子帧必须完整落在帧内 */
+        if (consumed + 2 > data_len) {
+            _ldi_ctrl_error_rsp(ch);
+            return;
+        }
         // mod_len: module 子帧总长 (含 DeviceType + DeviceIndex + payload)，大端序
         uint16_t mod_len = ((uint16_t)ptr[0] << 8) | ptr[1];
         ptr += 2;
+        consumed += 2;
+
+        /* mod_len 至少含 module 公共头(2B) + DeviceFuncType(1B)，且不超过剩余帧长，
+         * 越界回错误应答（防 ptr 推进越出帧尾 / 后续读取越界） */
+        if (mod_len < sizeof(ldi_module_head_t) + 1 || consumed + mod_len > data_len) {
+            _ldi_ctrl_error_rsp(ch);
+            return;
+        }
 
         ldi_module_head_t *mod = (ldi_module_head_t *)ptr;
         uint8_t *payload       = ptr + sizeof(ldi_module_head_t);
@@ -846,22 +1034,37 @@ static void cmd_ctrl(channel_t *ch, void *data)
             }
             case LDI_DEV_TYPE_DISPLAY: { // E6H 显示控制(01H) / 清屏(02H)
                 ldi_ctrl_display_t *ctrl = (ldi_ctrl_display_t *)payload;
-                (void)ctrl; // TODO: dev_display_ctrl(ctrl)
+                uint16_t text_len = 0;
+                if (ctrl->device_func_type == 0x01) {
+                    /* mod_len 含 DeviceType+Index+定长头；text 为柔性尾部 */
+                    uint16_t fixed = sizeof(ldi_module_head_t) + sizeof(ldi_ctrl_display_t);
+                    text_len = (mod_len > fixed) ? (uint16_t)(mod_len - fixed) : 0;
+                }
+                if (ldi_device_display_ctrl(ctrl, text_len) != LDI_DEV_OK)
+                    rsp->modules[i].status = 0x01;
                 break;
             }
             case LDI_DEV_TYPE_LANE_SIGNAL: { // E7H 信号灯控制 (01H)
                 ldi_ctrl_signal_t *ctrl = (ldi_ctrl_signal_t *)payload;
-                (void)ctrl; // TODO: dev_signal_ctrl(ctrl->color)
+                if (ldi_device_lane_signal_ctrl(ctrl) != LDI_DEV_OK)
+                    rsp->modules[i].status = 0x01;
                 break;
             }
             case LDI_DEV_TYPE_ALARM: { // E8H 报警控制 (01H)
                 ldi_ctrl_alarm_t *ctrl = (ldi_ctrl_alarm_t *)payload;
-                (void)ctrl; // TODO: dev_alarm_ctrl(ctrl)
+                if (ldi_device_alarm_ctrl(ctrl) != LDI_DEV_OK)
+                    rsp->modules[i].status = 0x01;
                 break;
             }
             case LDI_DEV_TYPE_VMS: { // E9H → VMS (01H)
                 ldi_ctrl_vms_t *ctrl = (ldi_ctrl_vms_t *)payload;
-                vms_ctrl(ctrl, mod_len - sizeof(ldi_ctrl_vms_t) - sizeof(ldi_module_head_t));
+                /* mod_len 小于定长部分（head 2B + ldi_ctrl_vms_t 6B）时不再下溢相减
+                 * （uint16 回绕会向 vms_ctrl 传出巨值 text_len 越界读），直接标记失败 */
+                uint16_t fixed = sizeof(ldi_ctrl_vms_t) + sizeof(ldi_module_head_t);
+                if (mod_len < fixed)
+                    rsp->modules[i].status = 0x01;
+                else
+                    vms_ctrl(ctrl, (uint16_t)(mod_len - fixed));
                 break;
             }
             case LDI_DEV_TYPE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)
@@ -902,41 +1105,70 @@ static void cmd_rep_func(channel_t *ch, void *data)
 }
 
 /**
- * 处理 21H 设备搜索请求（UDP 广播）
+ * 处理 21H 设备搜索请求（创迪发现口，默认 UDP/10011）
  *
- * 广播回复 0x12: CmdType(1) + IP(4大端) + Port(2大端) + Gateway(4大端) + Mask(4大端) + ErrCode(1)
+ * 回复 12H: CmdType(1) + IP(4) + Port(2) + Gateway(4) + Mask(4) + ErrCode(1)
+ * 广播为主（2026-08-21：搜索应答面向广播工具，广播复用常驻通道 conn 不占
+ * netconn 池，是可靠路径），回源单播仅容错、失败静默——回源依赖通道级
+ * src 快照，多协议交错（10011 同口承载 LDI/IAP/CQ）下可能发错目标。
+ * 不承担业务控制；网络参数取自 g_ldi.cfg（无配置时回退 pl_net 当前值）。
  */
 static void cmd_search(channel_t *ch, void *data)
 {
     (void)data;
 
-    ldi_search_rsp_t rsp;
-    rsp.cmd_type = LDI_CMD_SEARCH_RSP;
-    rsp.err_code = 0x00;
+    ldi_search_rsp_t rsp = {
+        .cmd_type = LDI_CMD_SEARCH_RSP,
+        .err_code = 0x00,
+    };
 
-    memcpy(rsp.ip, g_ldi.cfg.device_ip, sizeof(rsp.ip));
-    rsp.port[0] = (uint8_t)(g_ldi.cfg.device_port >> 8);
-    rsp.port[1] = (uint8_t)(g_ldi.cfg.device_port);
-    memcpy(rsp.gateway, g_ldi.cfg.gateway, sizeof(rsp.gateway));
-    memcpy(rsp.mask, g_ldi.cfg.netmask, sizeof(rsp.mask));
+    uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
+    if (g_ldi.cfg_valid) {
+        memcpy(ip, g_ldi.cfg.device_ip, 4);
+        memcpy(mask, g_ldi.cfg.netmask, 4);
+        memcpy(gw, g_ldi.cfg.gateway, 4);
+    } else {
+        pl_net_get_ip(ip, mask, gw);
+    }
 
-    /* 构造 LDI 帧 + 广播发送 */
-    osMutexAcquire(g_ldi.tx_lock, osWaitForever);
-    ldi_frame_t *frame   = (ldi_frame_t *)g_ldi.tx_buf;
-    frame->stx[0]        = 0xFF;
-    frame->stx[1]        = 0xFF;
-    frame->ver           = 0x00;
-    frame->seq           = ldi_next_rpt_seq();
+    memcpy(rsp.ip, ip, sizeof(rsp.ip));
+    /* 12H 应答 Port 字段语义 = 设备「配置功能端口」（TCP 业务端口，出厂默认 9528，
+     * 协议文档 doc/02 附件2），非 UDP 发现口 10011。取 g_ldi.cfg 的 device_port，
+     * 未配置时回退出厂默认 9528——此前误用 LDI_DISCOVERY_PORT 导致上位机把 10011
+     * 当配置端口读回并写回，污染 Sector1/W25 后 TCP Server 错误改监听 10011。 */
+    uint16_t port = g_ldi.cfg_valid ? g_ldi.cfg.device_port : LDI_DEFAULT_CONFIG_PORT;
+    rsp.port[0]   = (uint8_t)(port >> 8);
+    rsp.port[1]   = (uint8_t)port;
+    memcpy(rsp.gateway, gw, sizeof(rsp.gateway));
+    memcpy(rsp.mask, mask, sizeof(rsp.mask));
+
     uint16_t payload_len = sizeof(ldi_search_rsp_t);
-    frame->len[0]        = (uint8_t)(payload_len >> 24);
-    frame->len[1]        = (uint8_t)(payload_len >> 16);
-    frame->len[2]        = (uint8_t)(payload_len >> 8);
-    frame->len[3]        = (uint8_t)payload_len;
+    uint16_t frame_len   = (uint16_t)(sizeof(ldi_frame_t) + payload_len + 2);
+
+    osMutexAcquire(g_ldi.tx_lock, osWaitForever);
+    ldi_frame_t *frame = (ldi_frame_t *)g_ldi.tx_buf;
+    frame->stx[0]      = 0xFF;
+    frame->stx[1]      = 0xFF;
+    frame->ver         = 0x00;
+    frame->seq         = ldi_next_rpt_seq();
+    frame->len[0]      = (uint8_t)(payload_len >> 24);
+    frame->len[1]      = (uint8_t)(payload_len >> 16);
+    frame->len[2]      = (uint8_t)(payload_len >> 8);
+    frame->len[3]      = (uint8_t)payload_len;
     memcpy(frame->data_crc, &rsp, payload_len);
     uint16_t crc                     = crc16_xmodem(&frame->ver, sizeof(*frame) - sizeof(frame->stx) + payload_len);
     frame->data_crc[payload_len]     = (uint8_t)(crc >> 8);
     frame->data_crc[payload_len + 1] = (uint8_t)(crc & 0xFF);
-    osMutexRelease(g_ldi.tx_lock);
 
-    app_udp_broadcast(g_ldi.tx_buf, sizeof(ldi_frame_t) + payload_len + 2);
+    /* 发送顺序：广播为主、回源为辅（2026-08-21）。
+     * 回源依赖通道 src 快照（s_udp_ch.src_ip/src_port），LDI 帧排队处理期间
+     * 10011 上后续 IAP/CQ 帧会覆盖快照 → 回源可能发错目标，故先发广播保证
+     * 搜索工具必达，回源仅容错且失败静默。帧级 src 快照（frame_msg_t 扩展）
+     * 属架构改造，本轮不做，留作已知限制（doc/07）。 */
+    app_udp_broadcast(g_ldi.tx_buf, frame_len);
+
+    if (ch != NULL && ch->ops != NULL && ch->ops->send != NULL)
+        (void)channel_send(ch, g_ldi.tx_buf, frame_len);
+
+    osMutexRelease(g_ldi.tx_lock);
 }

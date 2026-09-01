@@ -52,9 +52,9 @@ enum {
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
 
-// SRAM存储地址映射
+// SRAM����ַλ��ӳ��
 #define BITBAND_SRAM(address, bit) (*(volatile uint32_t *)(0x22000000 + ((uint32_t)(address) - 0x20000000) * 0x20 + (bit) * 0x04))
-// 外设地址映射
+// ��������ַλ��ӳ��
 #define BITBAND_PERIPH(address, bit) (*(volatile uint32_t *)(0x42000000 + ((uint32_t)(address) - 0x40000000) * 0x20 + (bit) * 0x04))
 
 /* USER CODE END EM */

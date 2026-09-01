@@ -417,6 +417,7 @@ int32_t dev_dp83848_it_disable(dev_dp83848_obj_t *obj, uint32_t interrupt)
  */
 int32_t dev_dp83848_it_clear(dev_dp83848_obj_t *obj, uint32_t interrupt)
 {
+    (void)interrupt;
     uint32_t readval = 0;
     int32_t status   = DP83848_STATUS_OK;
 

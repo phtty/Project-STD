@@ -92,7 +92,7 @@ Revision: $Rev: 24316 $
 #endif
 
 #ifndef BUFFER_SIZE_UP
-#define BUFFER_SIZE_UP (1024 * 4) // Size of the buffer for terminal output of target, up to host (Default: 1k)
+#define BUFFER_SIZE_UP (1024 * 2) // 4KB→2KB：给 ucHeap 回 SRAM 让出约 2KB（默认 1k）
 #endif
 
 #ifndef BUFFER_SIZE_DOWN

@@ -2,6 +2,12 @@
     "folders": [
         {
             "path": "."
+        },
+        {
+            "path": "../STM32F407-Bootloader-master"
+        },
+        {
+            "path": "../STM32F407-Recovery-master"
         }
     ],
     "settings": {
@@ -26,12 +32,12 @@
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
         },
-        "cortex-debug.variableUseNaturalFormat": false,
+        "cortex-debug.variableUseNaturalFormat": true,
         "makefile.configureOnOpen": false,
         "makefile.launchConfigurations": [
             {
-                "cwd": "/home/mqj/workspace/Project_STD/build/Debug",
-                "binaryPath": "/home/mqj/workspace/Project_STD/build/Debug/Project_STD.elf",
+                "cwd": "/home/mqj/workspace/Project-STD/build/Debug",
+                "binaryPath": "/home/mqj/workspace/Project-STD/build/Debug/Project_STD.elf",
                 "binaryArgs": []
             }
         ]

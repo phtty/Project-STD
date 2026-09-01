@@ -11,24 +11,24 @@
 #define MQTT_FRAME_MAX_LEN (21U + 512U)
 
 typedef struct [[gnu::packed]] topic_baseinfo {
-    char station_hex[8];
-    char lane_hex[2];
-    char device_type[2];
-    char device_id[2];
+    char station_hex[8] __attribute__((nonstring));
+    char lane_hex[2] __attribute__((nonstring));
+    char device_type[2] __attribute__((nonstring));
+    char device_id[2] __attribute__((nonstring));
 } topic_info_t;
 
 typedef struct [[gnu::packed]] notify_date {
-    char year[4];
-    char month[2];
-    char day[2];
-    char hour[2];
+    char year[4] __attribute__((nonstring));
+    char month[2] __attribute__((nonstring));
+    char day[2] __attribute__((nonstring));
+    char hour[2] __attribute__((nonstring));
 } notify_date_t;
 
 typedef struct [[gnu::packed]] notify_id {
     notify_date_t date_time;
-    char device_type[2];
-    char device_id[2];
-    char send_count[6];
+    char device_type[2] __attribute__((nonstring));
+    char device_id[2] __attribute__((nonstring));
+    char send_count[6] __attribute__((nonstring));
 } notify_id_t;
 
 // 设备状态
@@ -44,11 +44,11 @@ typedef struct [[gnu::packed]] sign_up {
     notify_id_t notify;
     char type;
     char work_sta;
-    char soft_ver[10];
-    char hard_ver[10];
-    char protocol_ver[10];
-    char company[10];
-    char device[10];
+    char soft_ver[10] __attribute__((nonstring));
+    char hard_ver[10] __attribute__((nonstring));
+    char protocol_ver[10] __attribute__((nonstring));
+    char company[10] __attribute__((nonstring));
+    char device[10] __attribute__((nonstring));
     char reserved[21];
 } sign_up_t;
 

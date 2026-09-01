@@ -40,7 +40,7 @@ mqtt_channel_t g_mqtt = {
 osThreadId_t mqtt_task_handle;
 const osThreadAttr_t mqtt_task_attr = {
     .name       = "mqtt_task",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4, /* 对齐其它网络通道；启用前须测水位 */
     .priority   = osPriorityNormal,
 };
 
@@ -141,6 +141,7 @@ void mqtt_connection(void)
 
 void mqtt_task(void *argument)
 {
+    (void)argument;
     mqtt_ctx_t *ctx = &g_mqtt.ctx;
 
     ctx->client = mqtt_client_new();

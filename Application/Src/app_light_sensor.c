@@ -7,56 +7,28 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
-#include "pl_uart.h"
-
-#include "app_key.h"
-#include "app_msl.h"
-#include "bcc_utils.h"
 
 static light_sensor_dev_t s_sensor_dev;
 osThreadId_t g_light_sensor_task_handle;
-
-static void send_light_adjust(uint8_t light_lev)
-{
-    uint8_t _buf[sizeof(msl_frame_t) + 2] = {0};
-    msl_frame_t *f                        = (msl_frame_t *)_buf;
-
-    f->head[0] = 0x5a;
-    f->head[1] = 0x5a;
-
-    f->addr = 0;
-
-    f->length[0] = 1;
-    f->length[1] = 0;
-
-    f->cmd = MSL_CMD_LIGHTLEVEL;
-
-    f->data_bcc[0] = light_lev;
-
-    // bcc校验
-    f->data_bcc[2] = bcc_calcu(&(f->addr), sizeof(msl_frame_t) - 1);
-
-    // 发送数据帧
-    pl_uart_send(pl_uart_get_handle(PL_UART1), _buf, sizeof(msl_frame_t) + 2, 50);
-}
 
 void app_light_sensor_task(void *argument)
 {
     (void)argument;
     for (;;) {
         dev_light_sensor_auto_adjust(&s_sensor_dev);
-        send_light_adjust(s_sensor_dev.display->light_level);
         osDelay(1000);
     }
 }
 
+void app_light_sensor_set_range(uint8_t min, uint8_t max)
+{
+    dev_light_sensor_set_range(&s_sensor_dev, min, max);
+}
+
 void app_light_sensor_init(void)
 {
-    // 若不是主卡则不开自动亮度
-    if (0 != (app_key_get_state(DEV_KEY_DIP1) | app_key_get_state(DEV_KEY_DIP2)))
-        return;
-
     dev_light_sensor_init(&s_sensor_dev, dev_display_get());
+    dev_light_sensor_set_range(&s_sensor_dev, LIGHT_SENSOR_MIN_LEVEL, LIGHT_SENSOR_MAX_LEVEL);
 
     const osThreadAttr_t attr = {
         .name       = "light_sensor_task",
@@ -66,8 +38,3 @@ void app_light_sensor_init(void)
     g_light_sensor_task_handle = osThreadNew(app_light_sensor_task, NULL, &attr);
 }
 sw_app_initcall(app_light_sensor_init);
-
-light_sensor_dev_t *app_light_sensor_get(void)
-{
-    return &s_sensor_dev;
-}

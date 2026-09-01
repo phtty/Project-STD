@@ -5,6 +5,8 @@
 #include "app_render.h"
 
 /* ---- VMS 定时清屏 ---- */
+#define VMS_LINE_SLOT_HEIGHT (16U)
+
 static uint32_t s_vms_clear_tick; /* 清屏时刻 (RTOS tick) */
 static bool     s_vms_timer_active; /* 定时器是否激活 */
 
@@ -87,30 +89,23 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     uint16_t render_y = 0;
     uint16_t render_h = screen_h;
     align_t  v_align  = ALIGN_CENTER;
-
-    /* font_line > 0: 将屏幕按字号划分为若干行，文字显示在指定行；
-       font_line == 0: 上下居中 (默认) */
+    bool line_selected = false;
     if (ctx->font_line > 0) {
-        /* 自适应字号时以 16 为基准计算行高 */
-        uint16_t line_height = (font_size == FONT_SELF_ADAPT) ? 16U : (uint16_t)font_size;
-        uint16_t total_lines = screen_h / line_height;
-
+        uint16_t total_lines = screen_h / VMS_LINE_SLOT_HEIGHT;
         if (total_lines > 0 && ctx->font_line <= total_lines) {
-            render_y = (ctx->font_line - 1) * line_height;
-            render_h = line_height;
-            v_align  = ALIGN_LEFT_UP; /* 单行内不居中 */
-
-            /* 强制使用具体字号，否则渲染器会自适应缩放 */
-            if (font_size == FONT_SELF_ADAPT) font_size = FONT_16;
+            render_y = (uint16_t)((ctx->font_line - 1U) * VMS_LINE_SLOT_HEIGHT);
+            render_h = VMS_LINE_SLOT_HEIGHT;
+            v_align = ALIGN_LEFT_UP;
+            line_selected = true;
         }
-        /* font_line 超出范围 → 回退到居中模式 */
     }
+
 
     /* ---- 构建渲染风格 ---- */
     render_style_t style = {
         .h_align   = h_align,
         .v_align   = v_align,
-        .word_wrap = false,
+        .word_wrap = (ctx->font_line == 0),
     };
 
     /* ---- LDI 协议 '_' → 换行 ---- */
@@ -119,7 +114,21 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
             ctx->text[i] = '\n';
 
     /* ---- 清屏 ---- */
-    vms_clear_screen();
+    if (line_selected) {
+        app_render(&(render_cfg_t){
+            .type  = RENDER_FILL,
+            .x     = 0,
+            .y     = render_y,
+            .w     = screen_w,
+            .h     = render_h,
+            .color = COLOR_BLACK,
+        });
+    } else {
+        vms_clear_screen();
+    }
+
+    if (line_selected && font_size > VMS_LINE_SLOT_HEIGHT)
+        font_size = FONT_16;
 
     /* ---- 渲染文字 ---- */
     app_render(&(render_cfg_t){

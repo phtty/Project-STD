@@ -9,7 +9,8 @@
 #include "pl_iwdg.h"
 #include "pl_sys.h"
 #include "app_udp.h"
-#include "pl_net_adapt.h"
+#include "app_board_net_cfg.h"
+#include <string.h>
 
 #define U8_LEN(x)  ((x) * sizeof(uint32_t))
 #define U32_LEN(y) ((y) / sizeof(uint32_t))
@@ -26,7 +27,7 @@ static void cmd_Restart_07(channel_t *ch, iap_frame_t *IAP_Data);
 /* ================================================================
  *  命令表（按 cmd 编号索引）
  * ================================================================ */
-const iap_cmd_handler_fn_t g_iap_cmd_table[] = {
+const iap_cmd_handler_fn_t g_iap_cmd_table[IAP_CMD_COUNT] = {
     cmd_Test_00,
     cmd_ReportIp_01,
     cmd_ForceModifyIP_02,
@@ -36,6 +37,10 @@ const iap_cmd_handler_fn_t g_iap_cmd_table[] = {
     cmd_EnterRecoveryMode_06,
     cmd_Restart_07,
 };
+
+/* 与 app_iap_cmd.h 的 IAP_CMD_COUNT 保持同步，防增删命令时查表越界 */
+static_assert(sizeof(g_iap_cmd_table) / sizeof(g_iap_cmd_table[0]) == IAP_CMD_COUNT,
+              "IAP 命令表条目数与 IAP_CMD_COUNT 不同步");
 
 /** @brief 构造 IAP 响应帧并发送 */
 /* ================================================================
@@ -65,20 +70,6 @@ static void cmd_SendReData(channel_t *ch, uint32_t ReSeq, uint32_t ReCmd, uint32
     channel_send(ch, (uint8_t *)pIAP_ReTmp, sizeof(iap_frame_t) + U8_LEN(ReLen) + sizeof(uint32_t));
 }
 
-typedef struct {
-    ip4_addr_t ip;
-    ip4_addr_t mask;
-    ip4_addr_t gw;
-    uint16_t port;
-} iap_ipconfig_t;
-
-/** @brief TCP/IP 线程回调：应用新 IP 配置到 netif */
-static void iap_update_ip(void *ctx)
-{
-    iap_ipconfig_t *config = (iap_ipconfig_t *)ctx;
-    netif_set_addr(netif_default, &config->ip, &config->mask, &config->gw);
-}
-
 /* ---- Command handlers (0x00 ~ 0x07) ---- */
 
 /** @brief 0x00: Test (no-op) */
@@ -91,7 +82,8 @@ static void cmd_Test_00(channel_t *ch, iap_frame_t *IAP_Data)
 /** @brief 0x01: Report current IP config */
 static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    app_board_sys_info_t config_info;
+    app_board_net_cfg_read(&config_info);
 
     uint32_t ReData[4] = {0};
     ReData[0]          = config_info.net_cfg.ip[0] << 24 | config_info.net_cfg.ip[1] << 16 | config_info.net_cfg.ip[2] << 8 | config_info.net_cfg.ip[3];
@@ -102,17 +94,13 @@ static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data)
     cmd_SendReData(ch, IAP_Data->seq, rtn_cmd01, U32_LEN(sizeof(ReData)), ReData);
 }
 
-static iap_ipconfig_t ipconfig = {0};
-
 /** @brief 0x02: Force modify IP and write to Flash */
 static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
-
     uint32_t TmpData[4] = {0};
     memcpy(TmpData, IAP_Data->data_crc, sizeof(TmpData));
 
-    app_flash_iap_net_cfg_t net_info = {0};
+    app_board_net_cfg_t net_info = {0};
     net_info.ip[0]       = (uint8_t)(TmpData[0] >> 24);
     net_info.ip[1]       = (uint8_t)(TmpData[0] >> 16);
     net_info.ip[2]       = (uint8_t)(TmpData[0] >> 8);
@@ -127,25 +115,45 @@ static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
     net_info.gw[3]       = (uint8_t)(TmpData[2]);
     net_info.port        = TmpData[3];
 
-    config_info.net_cfg = net_info;
-    IP4_ADDR(&ipconfig.ip, net_info.ip[0], net_info.ip[1], net_info.ip[2], net_info.ip[3]);
-    IP4_ADDR(&ipconfig.mask, net_info.mask[0], net_info.mask[1], net_info.mask[2], net_info.mask[3]);
-    IP4_ADDR(&ipconfig.gw, net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3]);
-    tcpip_callback(iap_update_ip, &ipconfig);
-
-    app_flash_iap_edit_config(&config_info);
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd02, 0, NULL);
+    /* 写入路径（见 app_board_net_cfg_update）：空/损坏扇区完整初始化，升级中间态仅放行
+     * net_cfg 更新（update_sta/app_info 保留），net_cfg 同值跳过擦写。所有改 IP 接口
+     * （LDI 0AH / IAP 4B02 / Recovery IAP）统一
+     * **重启生效**——此处仅持久化到 Sector1，不即时改 netif；上电由 Bootloader /
+     * Recovery MX_LWIP_Init / 主固件 ldi_ctx_init 从 Sector1 读取生效。
+     *
+     * 协议扩展（方案 2，2026-08-14）：应答帧由无载荷改为 1 word 结果码，
+     * 参照 4B04「准备升级」应答 0/1 先例——0x00000000 成功（含同值跳过）、
+     * 0x00000001 失败（擦写错误）。
+     * 兼容性风险：老上位机若按「B402 无载荷」解析，会多读到一个 word
+     * （被忽略还是报错取决于上位机实现），混合部署期需联调验证。 */
+    /* 方案 B（2026-08-21）：4B02 写 TCP 业务口（包内 port），udp_port 保留现值
+     * （get 失败用出厂默认 20103）。 */
+    app_board_net_cfg_t cur_cfg;
+    uint32_t udp_port = (app_board_net_cfg_get(&cur_cfg) == 0) ? cur_cfg.udp_port : 20103U;
+    int32_t ret = app_board_net_cfg_update(net_info.ip, net_info.mask, net_info.gw, net_info.port,
+                                           udp_port);
+    uint32_t result = ret < 0 ? 1 : 0;
+    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd02, 1, &result);
 }
 
 /** @brief 0x03: Report firmware version, size, CRC32, update status */
 static void cmd_ReportFirmwareStatus_03(channel_t *ch, iap_frame_t *IAP_Data)
 {
-    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    app_board_sys_info_t config_info;
+    app_board_net_cfg_read(&config_info);
 
     uint32_t ReData[11] = {0};
     ReData[0]           = config_info.app_info.size;
     ReData[1]           = config_info.app_info.crc32;
-    memcpy(ReData + 2, config_info.app_info.version, sizeof(config_info.app_info.version));
+    /* version 是 ASCII 字符串：按上位机 word 显示约定（大端字节序）逐 word 构造，
+     * 与 0x01 的 IP 构造同构；不能 memcpy（否则上位机按 4 字节一组反转显示） */
+    const char *ver = config_info.app_info.version;
+    for (uint32_t i = 0; i < sizeof(config_info.app_info.version) / sizeof(uint32_t); i++) {
+        ReData[2 + i] = (uint32_t)(uint8_t)ver[4 * i] << 24 |
+                        (uint32_t)(uint8_t)ver[4 * i + 1] << 16 |
+                        (uint32_t)(uint8_t)ver[4 * i + 2] << 8 |
+                        (uint32_t)(uint8_t)ver[4 * i + 3];
+    }
     ReData[10] = config_info.update_sta;
 
     cmd_SendReData(ch, IAP_Data->seq, rtn_cmd03, U32_LEN(sizeof(ReData)), ReData);

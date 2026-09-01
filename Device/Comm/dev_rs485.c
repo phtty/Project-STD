@@ -2,7 +2,7 @@
  * @file    dev_rs485.c
  * @brief   RS485 半双工收发器板级资源（USART1, RE=PA8）
  *
- * 仅提供 DMA 缓冲区 + RE 方向控制等板级静态资源。
+ * 仅提供 DMA 乒乓双缓冲 + RE 方向控制等板级静态资源。
  * 通道生命周期和任务循环由 Application 层 app_rs485 负责。
  */
 
@@ -12,9 +12,9 @@
 #include "pl_gpio.h"
 #include "initcall.h"
 
-#define RS485_BUF_SIZE (2048U)
-
-static uint8_t s_rs485_buf[RS485_BUF_SIZE];
+/* 乒乓双缓冲：2 × RS485_BUF_SIZE = 1280B（.bss 静态，SRAM 账见 doc/06）
+ * pl_uart circular DMA 覆盖整缓冲，HT/TC 各冲刷一块。 */
+static uint8_t s_rs485_buf[2 * RS485_BUF_SIZE];
 
 uint8_t *dev_rs485_get_buf(void)
 {

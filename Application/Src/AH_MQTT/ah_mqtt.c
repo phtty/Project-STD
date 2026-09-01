@@ -5,6 +5,10 @@
 #include "dev_display.h"
 #include "app_mqtt.h"
 #include "initcall.h"
+#include "app_dispatch.h"
+
+/* RJ45 物理通道 RB：与 IAP/LDI 等同槽 weak 合并（启用 MQTT 时才占体） */
+RB_PROVIDE_WEAK(rb_provide_rj45, RB_SIZE_RJ45);
 
 static proto_mask_t s_ah_mqtt_mask;
 
@@ -39,7 +43,7 @@ notify_id_t xNotifyID = {
 osThreadId_t g_ah_mqtt_task_handle;
 const osThreadAttr_t ProtocolTask_attributes = {
     .name       = "ah_mqtt_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4, /* 与其它协议任务对齐；启用前仍须测水位 */
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
@@ -63,11 +67,14 @@ static uint8_t handle_topic(const char topic[]);
 
 void ah_mqtt_handle_task(void *argument)
 {
+    (void)argument;
 #define AH_MQTT_PAYLOAD_MAX (533U) /* MQTT_FRAME_MAX_LEN */
-    static uint8_t _msg_buf[sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX];
+#define AH_MQTT_MSG_SIZE    (sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX)
+#define AH_MQTT_QUEUE_DEPTH (3U)
+    static uint8_t _msg_buf[AH_MQTT_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
     static StaticQueue_t s_ah_mqtt_queue_cb;
-    static uint8_t s_ah_mqtt_queue_buf[sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX];
+    static uint8_t s_ah_mqtt_queue_buf[AH_MQTT_QUEUE_DEPTH * AH_MQTT_MSG_SIZE];
     static const osMessageQueueAttr_t s_ah_mqtt_queue_attr = {
         .name    = "g_proto_ah_matt_queue",
         .cb_mem  = &s_ah_mqtt_queue_cb,
@@ -75,7 +82,7 @@ void ah_mqtt_handle_task(void *argument)
         .mq_mem  = s_ah_mqtt_queue_buf,
         .mq_size = sizeof(s_ah_mqtt_queue_buf),
     };
-    g_proto_ah_matt_queue = osMessageQueueNew(1, sizeof(frame_msg_t) + AH_MQTT_PAYLOAD_MAX, &s_ah_mqtt_queue_attr);
+    g_proto_ah_matt_queue = osMessageQueueNew(AH_MQTT_QUEUE_DEPTH, AH_MQTT_MSG_SIZE, &s_ah_mqtt_queue_attr);
     app_proto_set_frame_queue(s_ah_mqtt_mask, g_proto_ah_matt_queue);
 
     while (g_mqtt.state != MQTT_ST_READY) {
@@ -119,15 +126,19 @@ uint8_t handle_topic(const char topic[])
 
 proto_probe_sta_t ah_mqtt_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num)
 {
-    (void)buff;
-    *payload_len = container_of(ch, mqtt_channel_t, me)->payload_len;
-    *cmd_num     = handle_topic(container_of(ch, mqtt_channel_t, me)->topic);
+    /* MQTT 通道在 PUBLISH 完成后已将完整 payload 写入本通道 RB；按 RB 契约探测 */
+    uint32_t avail = rb_avail(buff, nullptr);
+    if (avail == 0)
+        return PROTO_PROBE_FAKE;
 
+    *payload_len = avail;
+    *cmd_num     = handle_topic(container_of(ch, mqtt_channel_t, me)->topic);
     return PROTO_PROBE_READY;
 }
 
 void ReportTask(void *argument)
 {
+    (void)argument;
     static char topic[64] = {0};
     snprintf(topic, 64, "%.8s/%.2s/%.2s/%.2s/Push/monitor/devstatus",
              topic_info.station_hex,
@@ -150,6 +161,7 @@ void ReportTask(void *argument)
 
 void SignUpTask(void *argument)
 {
+    (void)argument;
     static char topic[64] = {0};
     snprintf(topic, 64, "%.8s/%.2s/%.2s/%.2s/Push/monitor/sign",
              topic_info.station_hex,
@@ -181,13 +193,17 @@ void SignUpTask(void *argument)
 /* ---- 自注册到 app_dispatch ---- */
 [[maybe_unused]] static void ah_mqtt_module_init(void)
 {
-    ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
+    /* MQTT 走 RJ45 共享槽；probe 须首字节快拒后方可与 IAP/LDI 同链 */
+    ring_buffer_t *rb = app_proto_acquire_buf(RB_SLOT_RJ45, RB_SIZE_RJ45);
+    if (rb == nullptr)
+        return;
+
     s_ah_mqtt_mask = app_proto_register(ah_mqtt_probe_frame, rb);
-    if (s_ah_mqtt_mask == 0) return;
+    if (s_ah_mqtt_mask == 0)
+        return;
 
     app_proto_bind_channel(s_ah_mqtt_mask, CH_ID_MQTT);
 
-    // 创建协议处理任务
     g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
 }
-// sw_app_initcall(ah_mqtt_module_init);
+// sw_app_initcall(ah_mqtt_module_init); /* 产品未启用 MQTT 时保持注释 */
