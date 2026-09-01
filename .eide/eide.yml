@@ -52,6 +52,7 @@ virtualFolder:
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
+                - path: Application/Src/RLS/app_rls_pic.c
               folders: []
     - name: Drivers
       files: []
