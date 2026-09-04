@@ -197,7 +197,7 @@ static const dev_display_ops_t p20_ops = {
  *  预计算避免扫描热路径中的分支判断。
  * ================================================================ */
 
-void dev_display_p20_init(void)
+void dev_p20_16x8_2200001667_init(void)
 {
     g_p20.me.ops = &p20_ops;
     dev_display_register(&g_p20.me);
@@ -221,4 +221,4 @@ void dev_display_p20_init(void)
         }
     }
 }
-hw_dev_initcall(dev_display_p20_init);
+hw_dev_initcall(dev_p20_16x8_2200001667_init);

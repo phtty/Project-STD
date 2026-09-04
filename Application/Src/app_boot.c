@@ -99,13 +99,13 @@ static void init_task(void *argument)
     };
     osThreadNew(half_sec_task, NULL, &hst_attr);
 
-    app_tcp_server_start();
-    app_tcp_client_start();
-    app_udp_start();
-    app_rs485_start();
+    // app_tcp_server_start();
+    // app_tcp_client_start();
+    // app_udp_start();
+    // app_rs485_start();
 
-    // app_test_run();
-    app_default_display();
+    app_test_run();
+    // app_default_display();
 
     printf("\nInit Task Done\n");
 
