@@ -42,13 +42,18 @@ pl_tim_handle_t pl_tim_get_handle(uint8_t id)
 
 void pl_tim_start_it(pl_tim_handle_t h)
 {
-    if (h) HAL_TIM_Base_Start_IT((TIM_HandleTypeDef *)h);
+    if (h)
+        HAL_TIM_Base_Start_IT((TIM_HandleTypeDef *)h);
 }
 
 void pl_tim_irq_disable(uint8_t irq)
-{ NVIC_DisableIRQ(irq); }
+{
+    NVIC_DisableIRQ(irq);
+}
 void pl_tim_irq_enable(uint8_t irq)
-{ NVIC_EnableIRQ(irq); }
+{
+    NVIC_EnableIRQ(irq);
+}
 
 void pl_tim_dbg_freeze(pl_tim_handle_t h)
 {
@@ -59,10 +64,15 @@ void pl_tim_dbg_freeze(pl_tim_handle_t h)
 /* ---- HAL 周期回调（分派到注册的模块回调）---- */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM7) { HAL_IncTick(); return; }
+    if (htim->Instance == TIM7) {
+        HAL_IncTick();
+        return;
+    }
     for (uint8_t i = 0; i < PL_TIM_MAX; i++)
-        if ((TIM_HandleTypeDef *)g_tim_handle[i] == htim && g_period_cb[i])
-            { g_period_cb[i](); return; }
+        if ((TIM_HandleTypeDef *)g_tim_handle[i] == htim && g_period_cb[i]) {
+            g_period_cb[i]();
+            return;
+        }
 }
 
 /* ---- ISR ---- */

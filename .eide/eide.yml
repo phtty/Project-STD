@@ -253,6 +253,7 @@ virtualFolder:
             - path: Device/Display/dev_display.c
             - path: Device/Display/dev_p20_16x8_2200001667.c
             - path: Device/Display/dev_p20_16x16_1000001055.c
+            - path: Device/Display/dev_P10_32x16_2200001703.c
           folders: []
     - name: Platform
       files:
@@ -341,6 +342,7 @@ targets:
       - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
+      - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

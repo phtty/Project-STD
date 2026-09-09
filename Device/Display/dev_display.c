@@ -18,9 +18,15 @@ static osEventFlagsId_t s_scan_evt;
 static dev_display_t *s_active_display;
 
 /* ---- 实例注册（由派生模组的 hw_dev_initcall 调用）---- */
-void dev_display_register(dev_display_t *dev) { s_active_display = dev; }
+void dev_display_register(dev_display_t *dev)
+{
+    s_active_display = dev;
+}
 
-dev_display_t *dev_display_get(void) { return s_active_display; }
+dev_display_t *dev_display_get(void)
+{
+    return s_active_display;
+}
 
 /* ---- TIM 周期回调（前向声明，实现在文件末尾）---- */
 static void _on_tim3_period(void);
