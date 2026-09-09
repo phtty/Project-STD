@@ -52,7 +52,10 @@ virtualFolder:
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
-                - path: Application/Src/RLS/app_rls_pic.c
+              folders: []
+            - name: cq
+              files:
+                - path: Application/Src/CQ_P10/app_cq_p10.c
               folders: []
     - name: Drivers
       files: []
@@ -334,6 +337,7 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
+        - Application/Inc/CQ_P10
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
