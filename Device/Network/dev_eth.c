@@ -17,9 +17,9 @@
 #include "pl_dwt.h"
 #include "initcall.h"
 
-/* 板级默认网络配置: 192.168.1.100/24, 网关 192.168.1.1 */
-static const uint8_t g_default_ip[4] = {192, 168, 1, 100};
-// static const uint8_t g_default_ip[4]   = {192, 168, 2, 100};
+/* 板级默认网络配置: 192.168.1.10/24, 网关 192.168.1.1 (P10 状态屏协议文档) */
+static const uint8_t g_default_ip[4] = {192, 168, 1, 10};
+// static const uint8_t g_default_ip[4]   = {192, 168, 1, 100};
 static const uint8_t g_default_mask[4] = {255, 255, 255, 0};
 static const uint8_t g_default_gw[4]   = {192, 168, 1, 1};
 // static const uint8_t g_default_gw[4] = {192, 168, 2, 1};

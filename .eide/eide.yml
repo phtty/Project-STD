@@ -37,9 +37,9 @@ virtualFolder:
               folders: []
             - name: iap
               files:
-                - path: Application/Src/IAP/app_iap_cmd.c
                 - path: Application/Src/IAP/app_iap.c
                 - path: Application/Src/IAP/app_iap_cfg.c
+                - path: Application/Src/IAP/app_iap_cmd.c
               folders: []
             - name: ldi
               files:
@@ -347,6 +347,8 @@ targets:
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/protocol/iap
     settings:
       debugger: cortex-debug
     toolchain: GCC

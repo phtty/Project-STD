@@ -34,7 +34,8 @@
                 "binaryPath": "/home/mqj/workspace/Project-STD/build/Debug/Project_STD.elf",
                 "binaryArgs": []
             }
-        ]
+        ],
+        "commentTranslate.hover.enabled": false
     },
     "extensions": {
         "recommendations": [

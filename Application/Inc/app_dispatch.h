@@ -18,7 +18,7 @@
 
 /* ---- 常量 ---- */
 #define MAX_CHANNELS       (32U)
-#define FRAME_DATA_MAX_LEN (1044U)
+#define FRAME_DATA_MAX_LEN (1408U)
 #define PROTO_MAX_COUNT    (32U)
 #define RB_CNT_MAX         (4U)
 
@@ -82,7 +82,7 @@ typedef struct {
 } frame_msg_t;
 
 /* 分发任务缓冲区上限 (平台约束, 非协议知识) */
-#define FRAME_DATA_MAX_LEN (1044U)
+#define FRAME_DATA_MAX_LEN (1408U)
 
 typedef struct {
     void (*init)(void);

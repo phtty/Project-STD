@@ -101,10 +101,10 @@ static void init_task(void *argument)
 
     // app_tcp_server_start();
     // app_tcp_client_start();
-    // app_udp_start();
+    app_udp_start(); /* CQ_P10 JSON 协议通道 (端口由 cq_module_init 设置) */
     // app_rs485_start();
 
-    app_test_run();
+    // app_test_run();
     // app_default_display();
 
     printf("\nInit Task Done\n");

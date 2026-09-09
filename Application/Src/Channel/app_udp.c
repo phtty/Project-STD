@@ -1,6 +1,6 @@
 /**
  * @file    dev_udp.c
- * @brief       UDP 广播接收通道（监听端口 10011）
+ * @brief       UDP 接收通道（监听端口默认 20102，可由 CQ_P10 协议经 app_udp_set_port 覆盖）
  */
 
 #include "app_udp.h"
@@ -9,7 +9,7 @@
 #include "pl_net_adapt.h"
 
 /* ---- 配置 ---- */
-static uint16_t g_udp_port = 10011; /**< IAP 升级通道 */
+static uint16_t g_udp_port = 20102; /**< CQ_P10 JSON 协议通道 */
 
 void app_udp_set_port(uint16_t port)
 {
@@ -72,7 +72,9 @@ static int32_t udp_ch_send(channel_t *ch, const uint8_t *data, uint16_t len)
     struct netconn *conn = (struct netconn *)udp->conn;
     ip_addr_t addr;
     IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
-    err_t err = netconn_sendto(conn, nb, &addr, udp->src_port);
+    /* 回复目标端口 = 本通道监听端口 (CQ_P10 上位机收发异端口: 发送源端口随机,
+     * 接收固定 20102 → 设备须回 20102 而非收到包的源端口) */
+    err_t err = netconn_sendto(conn, nb, &addr, udp->listen_port);
     netbuf_delete(nb);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
