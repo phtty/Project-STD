@@ -615,6 +615,11 @@ static void cq_net_apply(void)
     s_cq_mutex = osMutexNew(NULL);
 
     cq_persist_load();
+
+    /* 上电默认显示: 第 0 号固化图存在则显示 (未固化则不动屏幕) */
+    if (s_cq.slot[0].color != 0xFF)
+        cq_pic_show(0);
+
     cq_net_apply();
 
     ring_buffer_t *rb = app_proto_acquire_buf(1, 2048);
