@@ -32,3 +32,15 @@ void app_light_sensor_init(void)
     g_light_sensor_task_handle = osThreadNew(app_light_sensor_task, NULL, &attr);
 }
 sw_app_initcall(app_light_sensor_init);
+
+void app_light_sensor_set_fixed(uint8_t level)
+{
+    s_sensor_dev.auto_adjust_enabled = false; /* 先停跟随, 防任务下个周期覆盖 */
+    dev_display_set_brightness(s_sensor_dev.display, level);
+}
+
+void app_light_sensor_resume(void)
+{
+    s_sensor_dev.auto_adjust_enabled = true;
+    dev_light_sensor_auto_adjust(&s_sensor_dev); /* 立即生效, 消除 1s 周期延迟 */
+}

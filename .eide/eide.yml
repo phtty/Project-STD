@@ -37,9 +37,9 @@ virtualFolder:
               folders: []
             - name: iap
               files:
-                - path: Application/Src/IAP/app_iap_cmd.c
                 - path: Application/Src/IAP/app_iap.c
                 - path: Application/Src/IAP/app_iap_cfg.c
+                - path: Application/Src/IAP/app_iap_cmd.c
               folders: []
             - name: ldi
               files:
@@ -52,7 +52,6 @@ virtualFolder:
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
-                - path: Application/Src/RLS/app_rls_pic.c
               folders: []
     - name: Drivers
       files: []
@@ -334,15 +333,15 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
+        - Application/Inc/CQ_P10
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
       - <virtual_root>/Application/protocol/ah
-      - <virtual_root>/Application/protocol/ldi
-      - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

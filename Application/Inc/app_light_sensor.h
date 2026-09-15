@@ -12,3 +12,9 @@ extern osThreadId_t g_light_sensor_task_handle;
 
 void app_light_sensor_init(void);
 void app_light_sensor_task(void *argument);
+
+/** @brief 停止环境光跟随, 使用指定亮度 (0=关屏, 1~7=固定亮度) */
+void app_light_sensor_set_fixed(uint8_t level);
+
+/** @brief 立即恢复环境光跟随 (马上调光一次, 无需等待 1s 周期) */
+void app_light_sensor_resume(void);

@@ -269,7 +269,7 @@ SRC_DEVICE = \
 	Device/IO/dev_io_ctrl.c \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
-	Device/Display/dev_display_p20.c \
+	Device/Display/dev_p20_16x8_2200001667.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
