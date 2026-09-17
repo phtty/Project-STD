@@ -92,10 +92,9 @@ cfg_rec_sta_t cfg_record_load(dev_storage_t *stor, uint32_t addr,
  * @param  scratch_cap scratch 容量
  * @return 0 成功 (含去重跳过); 负值失败
  *
- * @warning **不可并发调用**：去重读回用的是一个文件级静态缓冲，两个任务同时
- *          save 会让后到者覆写先到者的组包内容，落盘记录头/载荷互相混杂，
- *          下次上电校验失败、静默回落默认值。调用方必须自行串行化
- *          （app_cfg_sched_save 持锁后再调本函数，全工程的写路径都经它）。
+ * @note 本函数**可重入**：不持有任何文件级可变状态（去重读回是分块比对，
+ *       用栈上的小缓冲）。但底层存储设备未必可重入 —— 本工程 W25Qxx 驱动
+ *       自带串行化锁，故这一层不必再包。
  */
 int32_t cfg_record_save(dev_storage_t *stor, uint32_t addr,
                         const char *name, uint16_t version, cfg_record_crc_fn crc,

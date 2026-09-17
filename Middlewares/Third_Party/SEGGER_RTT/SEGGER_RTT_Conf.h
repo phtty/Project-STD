@@ -92,7 +92,9 @@ Revision: $Rev: 24316 $
 #endif
 
 #ifndef BUFFER_SIZE_UP
-#define BUFFER_SIZE_UP (1024 * 4) // Size of the buffer for terminal output of target, up to host (Default: 1k)
+// 调试通道，不需要 4KB：模式是 SEGGER_RTT_MODE_NO_BLOCK_SKIP，缓冲小只是
+// "主机读得慢时丢调试行"。取厂商默认值 1KB，省 3KB SRAM。
+#define BUFFER_SIZE_UP (1024) // Size of the buffer for terminal output of target, up to host (Default: 1k)
 #endif
 
 #ifndef BUFFER_SIZE_DOWN
