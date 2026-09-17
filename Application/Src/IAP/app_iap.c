@@ -79,7 +79,7 @@ osMessageQueueId_t g_iap_msg_queue;
 osThreadId_t g_iap_task_handle;
 const osThreadAttr_t iap_task_attr = {
     .name       = "iap_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 

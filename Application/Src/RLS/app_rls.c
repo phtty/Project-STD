@@ -31,7 +31,7 @@ osMessageQueueId_t g_rls_msg_queue;
 osThreadId_t g_rls_task_handle;
 const osThreadAttr_t rls_task_attr = {
     .name       = "rls_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 

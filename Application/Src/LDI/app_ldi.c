@@ -174,14 +174,14 @@ osMessageQueueId_t g_ldi_msg_queue;
 osThreadId_t g_ldi_task_handle;
 const osThreadAttr_t ldi_task_attr = {
     .name       = "ldi_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
 osThreadId_t g_ldi_timer_task_handle;
 const osThreadAttr_t ldi_timer_task_attr = {
     .name       = "ldi_timer_task",
-    .stack_size = 512 * 4,
+    .stack_size = 256 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
