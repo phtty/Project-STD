@@ -49,8 +49,22 @@ void app_flash_iap_edit_config(app_flash_iap_sys_info_t *info);
 int32_t app_flash_iap_erase_config(void);
 int32_t app_flash_iap_write_config(app_flash_iap_sys_info_t *info);
 
-/** @brief 同步设备IP/掩码/网关到内部Flash (LDI改IP时调用) */
-void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4]);
+/** @brief 同步设备网络配置到内部 Flash（读-改-net_cfg-写，不碰其他字段）
+ *
+ *  三种情形：空记录 → 以有效骨架初始化后覆盖（见下）；损坏记录 → 拒绝覆盖；
+ *  内容未变 → 跳过擦除。
+ *
+ *  **空记录那条是修过的 bug**：旧版对空记录直接走进来，把 `info`（整块 0xFF）
+ *  连同改过的 net_cfg 写回去，magic 仍为 0xFFFFFFFF —— 产出的是"非空但无效"的
+ *  记录，Bootloader 下次上电可能判定不进入主程序。全新设备收到一次 0AH 就会中招。 */
+void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
+                                  uint32_t port);
+
+/** @brief 镜像同步：把运行态的网络参数写进 IAP 记录（供 Recovery 上报）
+ *
+ *  IAP 记录 net_cfg 的唯一职责就是**镜像 main app 当前使用的网络参数**。
+ *  由 pl_net 的 IP 变更监听触发，以及上电对账一次。 */
+void app_flash_iap_sync_from_runtime(void);
 
 /** @brief 获取 IAP Flash 存储句柄（内部使用） */
 dev_storage_t *app_flash_iap_get_storage(void);

@@ -30,6 +30,18 @@ void pl_net_register_link_listener(pl_net_link_listener_t listener)
         }
 }
 
+/* IP 变更监听器（见 pl_net_set_ip 的回调；上电默认值不触发） */
+static pl_net_ip_listener_t g_ip_listeners[PL_NET_IP_LISTENER_MAX];
+
+void pl_net_register_ip_listener(pl_net_ip_listener_t listener)
+{
+    for (int i = 0; i < PL_NET_IP_LISTENER_MAX; i++)
+        if (g_ip_listeners[i] == nullptr) {
+            g_ip_listeners[i] = listener;
+            return;
+        }
+}
+
 /* ================================================================
  *  全局网络状态
  * ================================================================ */
@@ -113,6 +125,12 @@ void pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[
     memcpy(GATEWAY_ADDRESS, gw, 4);
 
     tcpip_callback(apply_ip_config, nullptr); /* 线程安全：投递到 TCP/IP 线程执行 */
+
+    /* 通知 IP 变更监听器（调用方任务上下文、同步回调）。
+       订阅方据此同步各自持有的镜像（如 IAP 记录里的 net_cfg）。 */
+    for (int i = 0; i < PL_NET_IP_LISTENER_MAX; i++)
+        if (g_ip_listeners[i])
+            g_ip_listeners[i](ip, mask, gw);
 }
 
 void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])

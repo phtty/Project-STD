@@ -24,9 +24,19 @@
 // 注: 这些 struct 仅用于描述帧结构, 实际解析时通过指针偏移遍历.
 
 /**
- * 网络配置信息 — set_ip / rep_ip_rsp 共用
+ * 网络配置信息 — 0AH 请求 / D1H 应答共用
  *
- * 共 67 字节，不含 head 和 error_code。
+ * 共 65 字节，不含 head 和 ErrorCode。
+ * 依据《附件3 车道设备接口规范》4.1.1(0AH) 与 4.4.2(D1H)：两张表的网络块
+ * 逐字段一致，但块**前面**的字节数不同 ——
+ *     0AH: head(20B)              + 网络块 → 整帧 85B
+ *     D1H: head(20B) + ErrorCode(1B) + 网络块 → 整帧 86B
+ * 这正是 ldi_status_rsp_t 把 status 放在 payload 之前的原因。
+ *
+ * 相对网络块起点的字段偏移（照规范逐项核对过）：
+ *   0 ServerIP1(4)  4 ServerPort1(2)  6 ServerIP2..MQTTQOS(39)
+ *   45 NtpIP(4)  49 DeviceIP(4)  53 DevicePort(2)
+ *   55 Gateway(4)  59 Netmask(4)  63 Reserved(2)
  */
 typedef struct [[gnu::packed]] {
     uint8_t host_ip[4];     // 上位机 IP1 (外设控制服务)
@@ -40,9 +50,11 @@ typedef struct [[gnu::packed]] {
     uint8_t reserve2[2];    // 保留字节
 } ldi_network_info_t;
 
+static_assert(sizeof(ldi_network_info_t) == 65, "与规范 4.1.1/4.4.2 的 65 字节不符");
+
 /**
- * 设备 IP 信息设置 (0AH) DATA 域 — 共 87 字节 (含 head)
- * head(20B) + network_info(67B)
+ * 设备 IP 信息设置 (0AH) DATA 域 — 共 85 字节 (含 head)
+ * head(20B) + network_info(65B)
  */
 typedef struct [[gnu::packed]] {
     ldi_req_head_t head;
@@ -418,7 +430,13 @@ void cmd_set_ip(ccb_t *ccb, void *data)
     /* 落盘结果要回报给上位机：此前保存接口是 void、状态字节恒为成功，
        现场表现是"设置返回成功、重启却变回旧值"，且无从查起。 */
     int32_t save_sta = app_flash_ldi_save_config(&g_ldi.cfg);
-    app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
+
+    /* 同步 IAP 记录里的 net_cfg 镜像。
+       本命令只落盘、不在运行态应用新 IP（新值下次上电生效），所以这里传的是
+       **刚存下的** g_ldi.cfg 而不是运行态 —— 端口同此。
+       注意这条路径**没有** pl_net_set_ip，因此不会经 IP 变更监听触发，必须显式调。 */
+    app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway,
+                                 g_ldi.cfg.device_port);
 
     ldi_status_rsp_t rsp = {.status = (save_sta == 0) ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);

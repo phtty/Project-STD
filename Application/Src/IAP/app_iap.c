@@ -15,7 +15,24 @@
 #include "app_udp.h"
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
+#include "pl_net.h"
 #include "pl_task.h"
+
+/* ---- IAP 记录镜像同步 ----
+ * IAP 记录里的 net_cfg 唯一职责 = 镜像 main app 当前使用的网络参数（供 Recovery 上报）。
+ * 触发有两条：pl_net 的 IP 变更监听（任何协议调 pl_net_set_ip 都会走到），
+ * 以及上电对账一次（兜底"本上电周期没有 set_ip 调用"的场景）。
+ *
+ * 实际写入**延迟到本任务里做**：内部 Flash 擦除会硬停总线，不该阻塞改 IP 的调用方。 */
+static volatile bool s_sync_pending = true; /* 初始 true：上电必须对账一次 */
+
+static void iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+{
+    (void)ip;
+    (void)mask;
+    (void)gw;
+    s_sync_pending = true;
+}
 #include "pl_mem.h"
 
 /* ---- proto_iap_queue 静态分配 ---- */
@@ -66,6 +83,9 @@ static_assert(IAP_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "IAP 最长帧超过框架�
     app_proto_bind(&s_iap_pcb, app_rs232_1_ccb());
     app_proto_bind(&s_iap_pcb, app_udp_ccb());
 
+    /* 注册 IP 变更监听：任何协议改 IP 都触发 IAP 记录的镜像同步 */
+    pl_net_register_ip_listener(iap_ip_change_cb);
+
     /* 创建协议处理任务 */
     g_iap_task_handle = pl_task_new(iap_handle_task, nullptr, &iap_task_attr);
 }
@@ -97,8 +117,14 @@ void iap_handle_task(void *argument)
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_iap_msg_queue, msg, NULL, osWaitForever))
+        /* 带超时地取帧：空闲窗口用来做 IAP 记录的镜像同步（延迟写，不阻塞改 IP 的调用方） */
+        if (osOK != osMessageQueueGet(g_iap_msg_queue, msg, NULL, 100)) {
+            if (s_sync_pending) {
+                s_sync_pending = false;
+                app_flash_iap_sync_from_runtime(); /* 内部内容去重，无变化零擦写 */
+            }
             continue;
+        }
 
         iap_frame_t *frame_data = (iap_frame_t *)msg->data;
 

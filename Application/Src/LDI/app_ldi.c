@@ -93,12 +93,11 @@ void ldi_ctx_init(ldi_ctx_t *self)
         }
         self->cfg_valid = true;
 
-        /* 同步 IP 到 IAP 内部 flash（仅当 IAP 已有有效配置且不一致时） */
-        if (app_flash_iap_is_config_valid(g_config)
-         && (memcmp(self->cfg.device_ip, g_config->net_cfg.ip, 4)
-          || memcmp(self->cfg.netmask, g_config->net_cfg.mask, 4)
-          || memcmp(self->cfg.gateway, g_config->net_cfg.gw, 4)))
-            app_flash_iap_update_net_cfg(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
+        /* 不再在这里显式同步 IAP 记录：上面第 81 行的 pl_net_set_ip 会触发 IP 变更
+           监听，IAP 侧据此做镜像同步（见 app_iap.c 的 iap_ip_change_cb）。
+           原先这里那段"仅当 IAP 已有有效配置且不一致时"的守卫，是为了绕开
+           update_net_cfg 对空记录会写出永久无效记录的老 bug —— 那个 bug 已在
+           app_flash_iap_update_net_cfg 里修掉，守卫连同调用一并去除。 */
 
     } else {
         /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
