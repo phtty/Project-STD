@@ -68,7 +68,15 @@ extern uint32_t SystemCoreClock;
 #define configTICK_RATE_HZ                      ((TickType_t)1000)
 #define configMAX_PRIORITIES                    (56)
 #define configMINIMAL_STACK_SIZE                ((uint16_t)128)
-#define configTOTAL_HEAP_SIZE                   ((size_t)32 * 1024)
+/* 32KB 曾不够：上板实测启动期有 4 个任务创建失败（app_diag 报出）。
+ * 启动期峰值 ≈ 28.2KB 任务栈（含 init_task 那 2KB，它要到最后才退出归还）
+ * + TCB ≈2.2KB + 内核对象 ≈1.5KB ≈ 31.9KB，只剩几百字节余量。
+ *
+ * 先从 32KB 提到 40KB 解掉失败；随后按 -fstack-usage 的静态调用链把四个过大的
+ * 任务栈收了 2.5KB（见各任务的 stack_size 注释），于是回落到 36KB ——
+ * 既留出约 9.8KB 的稳态堆余量（够连接期再建三个 1KB 任务），
+ * 又把 4KB 还给 SRAM。 */
+#define configTOTAL_HEAP_SIZE                   ((size_t)36 * 1024)
 #define configMAX_TASK_NAME_LEN                 (16)
 #define configUSE_TRACE_FACILITY                1
 #define configUSE_16_BIT_TICKS                  0

@@ -9,15 +9,19 @@
 #include "app_iap_cfg.h"
 #include "app_tcp_client.h"
 #include "app_tcp_server.h"
+#include "app_udp.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
+#include "pl_task.h"
+#include "pl_mem.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
-#define LDI_PAYLOAD_MAX (512U) /* 与探头 mem_pool 容量一致 */
-#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_PAYLOAD_MAX)
+#define LDI_DATA_MAX  (512U)                                     /**< DATA 域最大长度 */
+#define LDI_FRAME_MAX (sizeof(ldi_frame_t) + LDI_DATA_MAX + 2U)  /**< 8 + 512 + 2 = 522 */
+#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_FRAME_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
-static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE];
+static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE] PL_CCMRAM;
 static const osMessageQueueAttr_t s_ldi_queue_attr = {
     .name    = "proto_ldi_queue",
     .cb_mem  = &s_ldi_queue_cb,
@@ -29,7 +33,7 @@ static const osMessageQueueAttr_t s_ldi_queue_attr = {
 static_assert(sizeof(ldi_device_t) == 1, "ldi_device_t must be 1 byte");
 static_assert(sizeof(ldi_cmd_type_t) == 1, "ldi_cmd_type_t must be 1 byte");
 
-const static ldi_cmd_type_t cmd_index_table[] = {
+static const ldi_cmd_type_t cmd_index_table[] = {
     LDI_CMD_SET_IP_REQ,
     LDI_CMD_SET_PARA_REQ,
     LDI_CMD_REBOOT_REQ,
@@ -119,23 +123,38 @@ void ldi_ctx_init(ldi_ctx_t *self)
     }
 }
 
-/* ---- 协议自注册 ---- */
-static proto_mask_t s_ldi_mask;
+/* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
+ * RB 容量取「2 × 最长帧」与「传输层单次最大写入 + 1」的较大者：app_ccb_dispatch 一次
+ * 投递的是传输层一整段读数（TCP 单段 ≤1460、UDP ≤1472），比它小的 RB 会被 rb_write 截断。
+ * **+1 是必须的**：ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），
+ * 容量取成与单次写入相等时，恰好满的那一次会静默丢掉最后一个字节。 */
+RB_DEFINE_ATTR(s_ldi_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 522, 单次最大写入 2048 + 1) */
 
+static const pcb_ops_t s_ldi_ops = {.probe = ldi_probe_frame};
+
+static pcb_t s_ldi_pcb = {
+    .name        = "ldi",
+    .ops         = &s_ldi_ops,
+    .rb          = &s_ldi_rb,
+    .payload_max = LDI_FRAME_MAX,
+};
+
+static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂存上限");
+
+/* ---- 协议自注册 ---- */
 [[maybe_unused]] static void ldi_module_init(void)
 {
-    // 指定协议使用的环形缓冲区
-    ring_buffer_t *rb = app_proto_acquire_buf(1, 512);
+    rb_init(&s_ldi_rb, "ldi");
 
-    // 注册协议到多通道多协议解析模块
-    s_ldi_mask = app_proto_register(ldi_probe_frame, rb);
-    if (s_ldi_mask == 0)
-        return;
+    /* 队列在 initcall 内建好：通道任务可能早于协议任务首次运行就投递帧，
+       晚建会留下"向空队列投递"的窗口 */
+    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
+    s_ldi_pcb.queue = g_ldi_msg_queue;
 
     // 绑定协议使用到的通道
-    app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_SERVER);
-    app_proto_bind_channel(s_ldi_mask, CH_ID_TCP_CLIENT);
-    app_proto_bind_channel(s_ldi_mask, CH_ID_UDP);
+    app_proto_bind(&s_ldi_pcb, app_tcp_server_ccb());
+    app_proto_bind(&s_ldi_pcb, app_tcp_client_ccb());
+    app_proto_bind(&s_ldi_pcb, app_udp_ccb());
 
     /* 上下文初始化必须在创建任务之前，保证 IP/端口在通道任务启动前就绪 */
     ldi_ctx_init(&g_ldi);
@@ -145,23 +164,30 @@ static proto_mask_t s_ldi_mask;
     g_ldi.tx_lock                    = osMutexNew(&tx_lock_attr);
 
     // 创建协议相关处理任务
-    g_ldi_task_handle       = osThreadNew(ldi_handle_task, nullptr, &ldi_task_attr);
-    g_ldi_timer_task_handle = osThreadNew(ldi_timer_task, nullptr, &ldi_timer_task_attr);
+    g_ldi_task_handle       = pl_task_new(ldi_handle_task, nullptr, &ldi_task_attr);
+    g_ldi_timer_task_handle = pl_task_new(ldi_timer_task, nullptr, &ldi_timer_task_attr);
 }
-sw_app_initcall(ldi_module_init);
+/* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
+   同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */
+sw_post_initcall(ldi_module_init);
 
 osMessageQueueId_t g_ldi_msg_queue;
 osThreadId_t g_ldi_task_handle;
 const osThreadAttr_t ldi_task_attr = {
     .name       = "ldi_handle_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
 osThreadId_t g_ldi_timer_task_handle;
 const osThreadAttr_t ldi_timer_task_attr = {
-    .name       = "ldi_timer_task",
-    .stack_size = 512 * 4,
+    .name = "ldi_timer_task",
+    /* 1536：实测峰值 768 字节（app_diag 的栈水位），留 2 倍余量。
+       曾按 -fstack-usage 的函数帧估成 ~310 而收窄到 1024，实测只剩 256 字节 ——
+       那次估算漏了 LwIP 那段（ccb_send → netconn_write 走 mailbox，栈消耗不小）
+       与 vms_timer_poll → app_render → draw_bitmap 的渲染链。
+       教训：函数帧累加低估库调用，以实测水位为准。 */
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
@@ -247,10 +273,10 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
 
 void ldi_handle_task(void *argument)
 {
+    (void)argument;
+
     static uint8_t _msg_buf[LDI_MSG_SIZE];
     frame_msg_t *msg = (frame_msg_t *)_msg_buf;
-    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
-    app_proto_set_frame_queue(s_ldi_mask, g_ldi_msg_queue);
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_ldi_msg_queue, msg, NULL, osWaitForever))
@@ -258,6 +284,11 @@ void ldi_handle_task(void *argument)
 
         ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg->data;
         ldi_req_head_t *req_head = (ldi_req_head_t *)ldi_frame->data_crc;
+
+        /* 序号回显的来源。必须在**本任务内**、于分派之前取：探针不能写它（一次排空里
+           会被反复调用），而本任务逐帧串行处理，处理完当前帧才会取下一帧，
+           因此不会被后续帧覆盖。 */
+        g_ldi.rsp_seq = ldi_frame->seq;
 
         /* 状态门禁 */
         if (!ldi_cmd_allowed(g_ldi.state, req_head->cmd_type))
@@ -270,7 +301,7 @@ void ldi_handle_task(void *argument)
                 idx = i;
 
         if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_ldi_cmd_table[idx](msg->ch, ldi_frame->data_crc);
+            g_ldi_cmd_table[idx](msg->ccb, ldi_frame->data_crc);
     }
 }
 
@@ -278,31 +309,71 @@ void ldi_handle_task(void *argument)
  *  帧探测
  * ================================================================ */
 
-const static uint8_t ldi_stx[2] = {0xFF, 0xFF};
+static const uint8_t ldi_stx[2] = {0xFF, 0xFF};
 
-proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *total_len, uint8_t *aux)
+/**
+ * @brief LDI 帧探测（pcb_ops.probe）
+ *
+ * **只窥视、不写全局**：序号回显所需的 seq 由处理任务从帧里取（见 ldi_handle_task）。
+ * 探针在一次排空里会被反复调用（FAKE 时逐字节重试），在此写全局状态会让后续帧
+ * 覆盖前一帧的取值，而前一帧可能还排在队列里没被处理。
+ *
+ * 窥视一律经 rb_peek_capped —— 它按暂存区容量夹紧。此前用 rb_peek(buff, 0, mem_pool,
+ * avail, nullptr) 配一个 512 字节的 mem_pool，而 rb 有 2048 字节，avail 超过 512 时
+ * 就会写穿栈数组（TCP 合并分段时是常态）。
+ */
+pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                uint8_t *aux)
 {
+    (void)src; /* 本协议不区分来源 */
+    (void)ccb;
+    const ring_buffer_t *buff = self->rb;
+
     uint32_t avail = rb_avail(buff, nullptr);
     if (avail < sizeof(ldi_frame_t) + sizeof(ldi_req_head_t) + 2)
-        return PROTO_PROBE_WAIT;
+        return PCB_PROBE_WAIT;
 
-    static uint8_t mem_pool[512] = {0};
-    memset(mem_pool, 0, sizeof(mem_pool));
-    rb_peek(buff, 0, mem_pool, avail, nullptr);
-    ldi_frame_t *frame = (ldi_frame_t *)mem_pool;
+    /* 先窥视帧头（含 4 字节长度域），据此判断整帧是否已到齐。
+       rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。 */
+    if (rb_peek_capped(buff, 0, scratch, scratch_size, nullptr) < sizeof(ldi_frame_t))
+        return PCB_PROBE_SKIP;
+    ldi_frame_t *frame = (ldi_frame_t *)scratch;
 
     if (memcmp(ldi_stx, frame->stx, sizeof(ldi_stx)))
-        return PROTO_PROBE_FAKE;
+        return PCB_PROBE_FAKE;
     if (frame->ver != 0x00)
-        return PROTO_PROBE_FAKE;
+        return PCB_PROBE_FAKE;
 
-    g_ldi.rsp_seq = frame->seq; /* 保存序号用于响应回显 */
+    uint32_t data_len = ((uint32_t)frame->len[0] << 24) | ((uint32_t)frame->len[1] << 16) |
+                        ((uint32_t)frame->len[2] << 8) | (uint32_t)frame->len[3];
 
-    uint32_t data_len  = (frame->len[3] & 0xFF) | (frame->len[2] << 8 & 0xFF00) | (frame->len[1] << 16 & 0xFF0000) | (frame->len[0] << 24 & 0xFF000000);
-    uint16_t frame_crc = (frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1];
-    uint16_t calc_crc  = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
+    /* 长度域上界校验：DATA 域最大 LDI_DATA_MAX，超限即伪帧。
+       必须在用 data_len 索引之前校验 —— 否则下面的 data_crc[data_len] 会越界读
+       （data_len 是帧内取来的 32 位值，最远可索引到暂存区之外）。 */
+    if (data_len > LDI_DATA_MAX)
+        return PCB_PROBE_FAKE;
+
+    uint32_t full_len = (uint32_t)sizeof(ldi_frame_t) + data_len + 2U;
+
+    if (avail < full_len)
+        return PCB_PROBE_WAIT;
+
+    if (full_len > scratch_size) {
+        *total_len = full_len; /* 暂存区装不下 → 无法校验，整帧丢弃 */
+        return PCB_PROBE_SKIP;
+    }
+
+    /* 取整帧到暂存区（上面已保证 full_len ≤ scratch_size）。
+       身份校验最多读到 data_crc[21]，而顶部已保证 avail ≥ 8+20+2 = 30，
+       故这些字节必在本次拷入的范围内。 */
+    rb_peek_capped(buff, 0, scratch, scratch_size, nullptr);
+
+    uint16_t frame_crc =
+        (uint16_t)((frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1]);
+    uint16_t calc_crc = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
     if (frame_crc != calc_crc)
-        return PROTO_PROBE_FAKE;
+        return PCB_PROBE_FAKE;
 
     /* 配置指令 (0AH/0BH/0DH/1DH/1EH) 不校验 lane_code/cert_info，
        直接放行；其余指令需匹配设备身份 */
@@ -325,15 +396,15 @@ proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff
             /* 帧结构合法但车道/设备不匹配 → SKIP 整帧 */
             if (memcmp(g_ldi.cfg.lane_hex, frame->data_crc + lane_off, sizeof(g_ldi.cfg.lane_hex)) ||
                 memcmp(g_ldi.cfg.cert, frame->data_crc + cert_off, sizeof(g_ldi.cfg.cert))) {
-                *total_len = (uint32_t)(sizeof(ldi_frame_t) + data_len + 2);
-                return PROTO_PROBE_SKIP;
+                *total_len = full_len;
+                return PCB_PROBE_SKIP;
             }
         }
     }
 
     *aux       = cmd;
-    *total_len = sizeof(ldi_frame_t) + data_len + 2;
-    return PROTO_PROBE_READY;
+    *total_len = full_len;
+    return PCB_PROBE_READY;
 }
 
 /* ================================================================
@@ -354,9 +425,11 @@ void ldi_timer_task(void *argument)
 
         vms_timer_poll(); /* VMS 定时清屏 — 不受通道状态影响 */
 
-        channel_t *ch = app_channel_get(CH_ID_TCP_CLIENT);
+        /* 主动上报固定走 TCP 客户端通道。控制块是静态对象、永不悬空，
+           断线只置 state，所以这里可以直接持有指针而不必每次重新查找。 */
+        ccb_t *ccb = app_tcp_client_ccb();
 
-        if (ch == nullptr || ch->state != CH_STATE_UP) {
+        if (ccb == nullptr || ccb->state != CCB_STATE_UP) {
             g_ldi.state = LDI_ST_UNINIT;
             continue;
         }
@@ -365,14 +438,14 @@ void ldi_timer_task(void *argument)
 
         if (g_ldi.state == LDI_ST_UNINIT) {
             if (now - g_ldi.last_cert_tick >= 3000) {
-                ldi_send_cert_req(ch);
+                ldi_send_cert_req(ccb);
                 g_ldi.last_cert_tick = now;
             }
         }
 
         if (g_ldi.state == LDI_ST_AUTHED || g_ldi.state == LDI_ST_READY) {
             if (now - g_ldi.last_rpt_tick >= 5000) {
-                ldi_send_sta_rpt(ch);
+                ldi_send_sta_rpt(ccb);
                 g_ldi.last_rpt_tick = now;
             }
         }

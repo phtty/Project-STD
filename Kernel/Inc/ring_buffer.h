@@ -17,13 +17,24 @@
 #include <stddef.h>
 
 /**
+ * @brief 编译期静态声明一个环形缓冲区实例，可指定数据区的段属性
+ * @param name  实例名
+ * @param sz    容量（字节），应为 2 的幂以优化取模
+ * @param attr  数据区的属性（如平台提供的 PL_CCMRAM）；无则留空
+ *
+ * 数据区与属性分开传，是为了让本文件保持平台无关 —— 段名是链接脚本的事，
+ * 不该由 Kernel 层规定。
+ */
+#define RB_DEFINE_ATTR(name, sz, attr) \
+    static uint8_t name##_buf[sz] attr; \
+    ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
+
+/**
  * @brief 编译期静态声明一个环形缓冲区实例
  * @param name  实例名
  * @param sz    容量（字节），应为 2 的幂以优化取模
  */
-#define RB_DEFINE(name, sz)        \
-    static uint8_t name##_buf[sz]; \
-    ring_buffer_t name = {.data = name##_buf, .size = sz, .mutex = nullptr}
+#define RB_DEFINE(name, sz) RB_DEFINE_ATTR(name, sz, )
 
 /** @brief 环形缓冲区结构体 */
 typedef struct {
@@ -61,6 +72,20 @@ bool rb_getc(ring_buffer_t *rb, uint8_t *byte, void *mutex);
 uint16_t rb_read(ring_buffer_t *rb, uint8_t *data, uint16_t len, void *mutex);
 
 /* 窥视（不移动读指针） */
+
+/**
+ * @brief 窥视至多 dest_cap 字节到 dest，返回实际拷出的字节数
+ *
+ * 与 rb_peek 的区别：rb_peek 的 len 是"想要的字节数"，只按缓冲区自身容量夹紧，
+ * **不感知 dest 有多大** —— 调用方若拿一个小于缓冲区的栈数组当 dest，就会越界写。
+ * 本函数把 dest_cap 当作硬上限，装不下就只拷贝 dest_cap 字节（返回值即拷出量）。
+ *
+ * 帧探测必须用本函数：帧长超过暂存区时，调用方据返回值判定"装不下"并整帧丢弃，
+ * 而不是让拷贝写穿暂存区。
+ */
+uint16_t rb_peek_capped(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t dest_cap,
+                        void *mutex);
+
 bool rb_peekc(const ring_buffer_t *rb, uint16_t offset, uint8_t *byte, void *mutex);
 uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex);
 

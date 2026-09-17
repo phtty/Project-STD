@@ -12,15 +12,22 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_tim.h"
+#include "pl_task.h"
 
 /* ---- 扫描任务事件 ---- */
 static osEventFlagsId_t s_scan_evt;
 static dev_display_t *s_active_display;
 
 /* ---- 实例注册（由派生模组的 hw_dev_initcall 调用）---- */
-void dev_display_register(dev_display_t *dev) { s_active_display = dev; }
+void dev_display_register(dev_display_t *dev)
+{
+    s_active_display = dev;
+}
 
-dev_display_t *dev_display_get(void) { return s_active_display; }
+dev_display_t *dev_display_get(void)
+{
+    return s_active_display;
+}
 
 /* ---- TIM 周期回调（前向声明，实现在文件末尾）---- */
 static void _on_tim3_period(void);
@@ -87,7 +94,7 @@ void dev_display_start(void)
         .stack_size = 512,
         .priority   = osPriorityRealtime,
     };
-    osThreadNew(scan_task, dev, &attr);
+    pl_task_new(scan_task, dev, &attr);
 }
 sw_dev_initcall(dev_display_start);
 

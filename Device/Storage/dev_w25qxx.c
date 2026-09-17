@@ -35,21 +35,20 @@ typedef struct {
 /* ---- 全局实例 ---- */
 static dev_w25qxx_t g_w25qxx = {.page_size = 256, .sector_size = 4096};
 
-/* JEDEC ID → 容量 */
+/* JEDEC ID → 容量
+ *
+ * 容量字节本身就是二进制指数：0x15→2^21=2MB, 0x18→2^24=16MB, 0x19→2^25=32MB。
+ * 原实现把 default 当作 W25Q256+ 返回 32MB，于是**未响应/未识别的器件
+ * （ID 读回 0x00 或 0xFF）也会被报成 32MB** —— 上层据此算出配置区地址并擦写，
+ * 把"存储不可用"伪装成"存储可用"。这里只接受合法指数区间，其余返回 0。 */
 static uint32_t _jedec_capacity(uint16_t id)
 {
-    switch (id & 0xFF) { /* 只用容量字节判断 */
-        case 0x15:
-            return 2 * 1024 * 1024; /* W25Q16   */
-        case 0x16:
-            return 4 * 1024 * 1024; /* W25Q32   */
-        case 0x17:
-            return 8 * 1024 * 1024; /* W25Q64   */
-        case 0x18:
-            return 16 * 1024 * 1024; /* W25Q128  */
-        default:
-            return 32 * 1024 * 1024; /* W25Q256+ */
-    }
+    uint8_t cap_byte = (uint8_t)(id & 0xFF);
+
+    if (cap_byte < 0x15U || cap_byte > 0x1FU)
+        return 0; /* 未识别或器件未响应 */
+
+    return 1UL << cap_byte;
 }
 
 /* 容量字节 >= 0x19 → >128Mb → 需 4 字节地址 */
@@ -95,11 +94,52 @@ static void _dma_cb(void *ctx)
     osEventFlagsSet(s_evt, 0x01);
 }
 
+/* ---- 访问串行化 ----
+ *
+ * 本驱动**不可重入**，三处共享状态：
+ *   - s_ok 是全局的 DMA 完成标志：两个并发读会互相"吃掉"完成事件，先发起的一方
+ *     会带着半满的缓冲返回（它看到的是对方置的标志）；
+ *   - _write 的读-改-写用共享的 static sec[4096]；
+ *   - _cs_high() 由一方调用会打断另一方正在进行的传输。
+ *
+ * 而调用方确实来自不同任务：app_render 读字库（LDI 任务与 RLS 任务都会调），
+ * 配置落盘同样来自这两个任务。表现为偶发字模乱码 / 配置读取出错，且在台面上
+ * 极难复现。
+ *
+ * 故在三个虚表入口统一持锁，内部实现一律走 _unlocked 版本（_write_unlocked
+ * 内部要读扇区，若调加锁版会自死锁——osMutexNew 建的是非递归锁）。
+ *
+ * 锁在 **sw_dev_initcall** 里创建，不能在 _init（hw_dev_initcall）里创建：
+ *   FreeRTOS 的内核对象要从堆上分配（pvPortMalloc），而 heap_4 的 pvPortMalloc
+ *   内部用 vTaskSuspendAll/xTaskResumeAll，后者进临界区（taskENTER/EXIT_CRITICAL）。
+ *   调度器启动前 uxCriticalNesting 的初值是 0xaaaaaaaa（哨兵），只在
+ *   xPortStartScheduler() 里被置 0；此前进一次临界区，退出时递减成 0xaaaaaaa9
+ *   ≠ 0，portENABLE_INTERRUPTS() 就永远不会被调用 —— 中断从此永久关闭，
+ *   TIM7 不再产生 HAL 时基，HAL_Delay 死等。
+ *   （实测症状：卡在 dev_w25qxx_init → _init → pl_delay_ms。）
+ * sw_dev(2) 在 RTOS 启动之后、且早于 sw_app(3) 的配置加载遍（那才是首次访问），
+ * 因此既安全又无竞态。 */
+static osMutexId_t s_lock;
+
+static void _lock(void)
+{
+    if (s_lock) osMutexAcquire(s_lock, osWaitForever);
+}
+
+static void _unlock(void)
+{
+    if (s_lock) osMutexRelease(s_lock);
+}
+
 /* ---- OPS 实现 ---- */
 static int32_t _init(dev_storage_t *dev)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     self->spi          = pl_spi_get_handle();
+
+    /* 注意：这里**不能**创建访问锁。RTOS 尚未启动，而创建内核对象要从堆上分配，
+       会把中断永久关掉（原因见文件上方 s_lock 的说明）。锁在下面的 sw_dev
+       initcall 里创建。 */
 
     /* 复位（阻塞，无需RTOS） */
     uint8_t rst[2] = {W25Q_RESET_ENABLE, W25Q_RESET_DEVICE};
@@ -127,7 +167,8 @@ static int32_t _init(dev_storage_t *dev)
     return 0;
 }
 
-static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+/** @brief 读扇区数据（调用者已持锁；_write 的读-改-写也走这里） */
+static int32_t _read_unlocked(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
@@ -150,7 +191,15 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
     while (!s_ok)
         osDelay(1);
     _cs_high();
-    return (int32_t)len;
+    return 0; /* 约定: 0 = 成功（不返回字节数） */
+}
+
+static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+{
+    _lock();
+    int32_t r = _read_unlocked(dev, addr, buf, len);
+    _unlock();
+    return r;
 }
 
 static int32_t _write_enable(dev_w25qxx_t *self)
@@ -206,7 +255,8 @@ static int32_t _write_no_check(dev_w25qxx_t *self, uint32_t addr, const uint8_t 
     return 0;
 }
 
-static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
+/** @brief 读-改-写（调用者已持锁） */
+static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
@@ -220,7 +270,7 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
         uint32_t ch  = 4096 - off;
         if (len - w < ch) ch = len - w;
 
-        _read(dev, sa, sec, 4096);
+        _read_unlocked(dev, sa, sec, 4096);
 
         bool need = false;
         for (uint16_t i = off; i < off + ch; i++)
@@ -250,7 +300,16 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
     return 0;
 }
 
-static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
+static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
+{
+    _lock();
+    int32_t r = _write_unlocked(dev, addr, buf, len);
+    _unlock();
+    return r;
+}
+
+/** @brief 擦除一个扇区（调用者已持锁） */
+static int32_t _erase_unlocked(dev_storage_t *dev, uint32_t addr, uint32_t len)
 {
     (void)len;
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
@@ -264,6 +323,14 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
     int32_t r = pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
     _cs_high();
     return (r == 0) ? _wait_busy(self, 3000) : -1;
+}
+
+static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
+{
+    _lock();
+    int32_t r = _erase_unlocked(dev, addr, len);
+    _unlock();
+    return r;
 }
 
 static uint32_t _capacity(dev_storage_t *dev)
@@ -286,3 +353,20 @@ void dev_w25qxx_init(void)
     _init(&g_w25qxx.me);
 }
 hw_dev_initcall(dev_w25qxx_init);
+
+/**
+ * @brief 创建访问锁 —— 必须在 RTOS 启动之后
+ *
+ * 见文件上方 s_lock 的说明：创建内核对象要从堆上分配，而 heap_4 的 pvPortMalloc
+ * 会进临界区；调度器启动前 uxCriticalNesting 是哨兵值 0xaaaaaaaa，进一次临界区
+ * 就会把中断永久关掉（TIM7 停摆 → HAL_Delay 死等）。
+ *
+ * sw_dev(2) 早于 sw_app(3) 的配置加载遍 —— 那才是本驱动的首次访问，
+ * 所以到这里为止 s_lock 还是 NULL 是安全的（_lock 会跳过）。
+ */
+static void _w25qxx_lock_init(void)
+{
+    const osMutexAttr_t attr = {.name = "w25qxx", .attr_bits = osMutexPrioInherit};
+    s_lock                   = osMutexNew(&attr);
+}
+sw_dev_initcall(_w25qxx_lock_init);

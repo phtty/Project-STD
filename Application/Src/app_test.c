@@ -17,7 +17,7 @@
 
 void app_test_pixel_scan(void)
 {
-    dev_display_t *dsp = dev_display_p20_get();
+    dev_display_t *dsp = dev_display_get();
 
     for (;;) {
         for (int i = 0; i < (int)dsp->buffer_size; i++) {
@@ -29,7 +29,7 @@ void app_test_pixel_scan(void)
             dev_display_set_pixel(dsp,
                                   i % dsp->screen_rows,
                                   i / dsp->screen_rows,
-                                  COLOR_BLACK);
+                                  COLOR_RED);
         }
     }
 }
@@ -50,11 +50,11 @@ void app_test_render_text(void)
             .h_align = ALIGN_CENTER,
             .v_align = ALIGN_CENTER,
         },
-        .color     = COLOR_RED,
-        .text      = "车道关闭",
-        .len       = strlen("车道关闭"),
-        .font_size = FONT_32,
-        .font_type = FONT_ST,
+        .color     = COLOR_GREEN,
+        .text      = "测试",
+        .len       = strlen("测试"),
+        .font_size = FONT_16,
+        .font_type = FONT_HT,
         .text_enc  = FONT_ENC_UTF8,
     });
 }
@@ -84,25 +84,27 @@ void app_test_io_output(void)
 
 void app_test_led_mapping(void)
 {
-    dev_display_t *dsp = dev_display_p20_get();
+    dev_display_t *dsp = dev_display_get();
 
     /* 清空 hub75_buff，确保 prepare 不会覆盖（dirty=false） */
     memset(dsp->hub75_buff, 0, dsp->buffer_size);
     dsp->dirty = false;
 
-    for (uint8_t ch = 0; ch < dsp->total_channels; ch++) {
-        for (uint16_t px = 0; px < dsp->channel_pixels; px++) {
-            uint16_t pos = px + ch * dsp->channel_pixels; /* hub75_buff 线性位置 */
+    for (;;) {
+        for (uint8_t ch = 0; ch < dsp->total_channels; ch++) {
+            for (uint16_t px = 0; px < dsp->channel_pixels; px++) {
+                uint16_t pos = px + ch * dsp->channel_pixels; /* hub75_buff 线性位置 */
 
-            /* 点亮当前像素（红色醒目） */
-            dsp->hub75_buff[pos] = COLOR_RED;
-            osDelay(200);
+                /* 点亮当前像素*/
+                dsp->hub75_buff[pos] = COLOR_GREEN;
+                osDelay(200);
+            }
+            /* 通道切换停顿，方便标记 */
+            osDelay(500);
         }
-        /* 通道切换停顿，方便标记 */
-        osDelay(500);
-    }
 
-    for (;;); // 暂停运行
+        memset(dsp->hub75_buff, 0, dsp->buffer_size);
+    }
 }
 
 /* ================================================================

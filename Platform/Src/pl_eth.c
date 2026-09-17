@@ -3,6 +3,7 @@
 #include "pl_eth.h"
 #include <string.h>
 #include "cmsis_os.h"
+#include "pl_task.h"
 
 /* ---- 宏定义 ---- */
 #define TIME_WAITING_FOR_INPUT (portMAX_DELAY)  /**< 等待接收数据的超时时间 */
@@ -183,7 +184,7 @@ static void low_level_init(struct netif *netif)
     attributes.name       = "EthIf";
     attributes.stack_size = INTERFACE_THREAD_STACK_SIZE;
     attributes.priority   = osPriorityRealtime;
-    osThreadNew(ethernetif_input, netif, &attributes);
+    pl_task_new(ethernetif_input, netif, &attributes);
 
     /* PHY 已在 pl_eth_mac_hw_init() 初始化，此处仅检测链路状态 */
     {

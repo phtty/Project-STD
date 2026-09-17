@@ -16,6 +16,8 @@ virtualFolder:
         - path: Application/Src/app_light_sensor.c
         - path: Application/Src/app_test.c
         - path: Application/Src/app_factory_test.c
+        - path: Application/Src/app_cfg_sched.c
+        - path: Application/Src/app_diag.c
       folders:
         - name: channel
           files:
@@ -37,9 +39,9 @@ virtualFolder:
               folders: []
             - name: iap
               files:
-                - path: Application/Src/IAP/app_iap_cmd.c
                 - path: Application/Src/IAP/app_iap.c
                 - path: Application/Src/IAP/app_iap_cfg.c
+                - path: Application/Src/IAP/app_iap_cmd.c
               folders: []
             - name: ldi
               files:
@@ -240,6 +242,7 @@ virtualFolder:
           files:
             - path: Device/Storage/dev_flash_int.c
             - path: Device/Storage/dev_w25qxx.c
+            - path: Device/Storage/cfg_record.c
           folders: []
         - name: IO
           files:
@@ -250,12 +253,15 @@ virtualFolder:
         - name: Display
           files:
             - path: Device/Display/dev_display.c
-            - path: Device/Display/dev_display_p20.c
+            - path: Device/Display/dev_p20_16x8_2200001667.c
+            - path: Device/Display/dev_p20_16x16_1000001055.c
+            - path: Device/Display/dev_P10_32x16_2200001703.c
           folders: []
     - name: Platform
       files:
         - path: Platform/Src/pl_gpio.c
         - path: Platform/Src/pl_rtt.c
+        - path: Platform/Src/pl_task.c
         - path: Platform/Src/pl_net.c
         - path: Platform/Src/pl_eth.c
         - path: Platform/Src/pl_crc.c
@@ -331,11 +337,15 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
+        - Application/Inc/CQ_P10
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
+      - <virtual_root>/Application/protocol/ah
+      - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -433,7 +443,7 @@ targets:
         protocol: swd
         speed: 10000
         target: STM32F407ZG
-    uploader: JLink
+    uploader: Custom
   Release:
     cppPreprocessAttrs:
       defineList:

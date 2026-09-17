@@ -5,12 +5,18 @@
  * 参照 tcp_client 模式:
  *   tcp_server_task       bind→listen→accept→派生conn→等待断开→循环
  *   tcp_server_conn_task  netconn_recv→dispatch，断开时释放信号量
+ *
+ * 通道控制块是静态对象，连接信息（conn）挂在它上面：断线只清 conn、置 state，
+ * 控制块本身始终有效，因此协议侧保存的 ccb_t* 永不悬空。
+ *
+ * 容器：typedef struct { ccb_t base; void *conn; } tcp_ccb_t;
  */
 
 #include "app_tcp_server.h"
 
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
+#include "pl_task.h"
 
 #define TCP_SERVER_PORT 9528
 
@@ -25,20 +31,28 @@ const osThreadAttr_t tcp_server_conn_attr = {
 };
 
 /* ---- TCP 通道虚表：send = netconn_write ---- */
-static int32_t tcp_send(channel_t *ch, const uint8_t *data, uint16_t len)
+static int32_t tcp_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
-    tcp_server_channel_t *tcp = container_of(ch, tcp_server_channel_t, me);
-    err_t err                 = netconn_write((struct netconn *)tcp->conn, data, len, NETCONN_COPY);
+    (void)dst; /* 点对点连接：目的地恒为本连接的对端，寻址请求一律忽略 */
+    tcp_ccb_t *tcp = container_of(ccb, tcp_ccb_t, base);
+    /* 未连接：对端已断开，conn 可能即将释放，丢弃 */
+    if (tcp->base.state != CCB_STATE_UP || tcp->conn == nullptr)
+        return -1;
+    err_t err = netconn_write((struct netconn *)tcp->conn, data, len, NETCONN_COPY);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
 
-const ch_ops_t tcp_ch_ops = {.send = tcp_send};
+const ccb_ops_t tcp_ccb_ops = {.send = tcp_send};
 
-/* ---- 通道元数据模板（每连接 copy） ---- */
-channel_t g_tcp_server_channel_tmpl = {
-    .ch_id = CH_ID_TCP_SERVER,
-    .ops   = &tcp_ch_ops,
+/* ---- 通道控制块（静态持有：协议绑定期即存在，断线也不失效） ---- */
+static tcp_ccb_t g_tcp_server = {
+    .base = {.name = "tcp_server", .ops = &tcp_ccb_ops},
 };
+
+ccb_t *app_tcp_server_ccb(void)
+{
+    return &g_tcp_server.base;
+}
 
 /* ---- 配置接口 ---- */
 static uint16_t g_port = TCP_SERVER_PORT;
@@ -57,15 +71,6 @@ const osThreadAttr_t tcp_server_task_attr = {
 
 /* ---- 调试变量 ---- */
 volatile int g_tcp_server_connected;
-
-/* ---- 通道生命周期 ---- */
-static void tcp_channel_init(tcp_server_channel_t *self, void *conn, channel_t *tmpl)
-{
-    self->me       = *tmpl;
-    self->me.state = CH_STATE_UP;
-    self->conn     = conn;
-    app_channel_register(CH_ID_TCP_SERVER, &self->me);
-}
 
 /* ================================================================
  *  manage 任务: bind → listen → accept → 派生 conn → 等待断开 → 循环
@@ -105,7 +110,7 @@ void tcp_server_task(void *argument)
 
         /* 派生 conn 任务 */
         while (osSemaphoreAcquire(s_disconnect_sem, 0) == osOK);
-        osThreadId_t tid = osThreadNew(tcp_server_conn_task, newconn, &tcp_server_conn_attr);
+        osThreadId_t tid = pl_task_new(tcp_server_conn_task, newconn, &tcp_server_conn_attr);
 
         if (tid != NULL) {
             osSemaphoreAcquire(s_disconnect_sem, osWaitForever);
@@ -120,16 +125,19 @@ void tcp_server_task(void *argument)
 
 /* ================================================================
  *  conn 任务: netconn_recv → dispatch，断开时释放信号量
+ *
+ *  manage 任务在 accept 下一个连接前会等待断开信号量，因此同一时刻
+ *  只有一个连接任务在跑，静态控制块不会出现两个连接争用。
  * ================================================================ */
 
 void tcp_server_conn_task(void *argument)
 {
     struct netconn *conn = (struct netconn *)argument;
 
-    tcp_server_channel_t tcp;
-    tcp_channel_init(&tcp, conn, &g_tcp_server_channel_tmpl);
-
-    channel_t *ch          = &tcp.me;
+    /* 只把本连接的 conn 挂到静态控制块上，控制块本身不被连接生灭牵动 */
+    tcp_ccb_t *tcp         = &g_tcp_server;
+    tcp->conn              = conn;
+    tcp->base.state        = CCB_STATE_UP;
     g_tcp_server_connected = 1;
 
     struct netbuf *buf;
@@ -140,15 +148,15 @@ void tcp_server_conn_task(void *argument)
         do {
             netbuf_data(buf, &data, &len);
             if (len > 1)
-                app_channel_dispatch(ch, (uint8_t *)data, len);
+                app_ccb_dispatch(&tcp->base, nullptr, (uint8_t *)data, len);
         } while (netbuf_next(buf) >= 0);
         netbuf_delete(buf);
     }
 
+    /* 先置 DOWN 再清 conn：send 路径据此拒绝访问即将释放的 netconn */
     g_tcp_server_connected = 0;
-    tcp.me.ops             = nullptr;
-    tcp.me.state           = CH_STATE_DOWN;
-    app_channel_register(CH_ID_TCP_SERVER, nullptr);
+    tcp->base.state        = CCB_STATE_DOWN;
+    tcp->conn              = nullptr;
     netconn_close(conn);
     netconn_delete(conn);
     osSemaphoreRelease(s_disconnect_sem);

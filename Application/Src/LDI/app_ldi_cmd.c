@@ -311,13 +311,13 @@ static uint8_t ldi_next_rpt_seq(void)
 
 /**
  * @brief 构造并发送 LDI 响应帧
- * @param ch         回复目标通道
+ * @param ccb        回复目标通道（本帧来源）
  * @param rsp_cmd    响应命令码（如 LDI_CMD_SET_IP_RSP = 0xA0）
  * @param seq        帧序号（回显请求帧的 seq）
  * @param payload    响应 DATA 域内容（可为 nullptr）
  * @param payload_len DATA 域长度（字节）
  */
-static void ldi_send_response(channel_t *ch, uint8_t rsp_cmd, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
+static void ldi_send_response(ccb_t *ccb, uint8_t rsp_cmd, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
 {
     osMutexAcquire(g_ldi.tx_lock, osWaitForever);
 
@@ -339,38 +339,38 @@ static void ldi_send_response(channel_t *ch, uint8_t rsp_cmd, uint8_t seq, const
     frame->data_crc[payload_len]     = (uint8_t)(crc >> 8);
     frame->data_crc[payload_len + 1] = (uint8_t)(crc & 0xFF);
 
-    channel_send(ch, g_ldi.tx_buf, sizeof(*frame) + payload_len + 2);
+    ccb_send(ccb, g_ldi.tx_buf, sizeof(*frame) + payload_len + 2);
     osMutexRelease(g_ldi.tx_lock);
 }
 
 /** @brief 定长 payload 响应（编译期 sizeof，类型安全） */
-#define LDI_RESPOND(ch, rsp_cmd, seq, payload) \
-    ldi_send_response(ch, rsp_cmd, seq, (const uint8_t *)&(payload), sizeof(payload))
+#define LDI_RESPOND(ccb, rsp_cmd, seq, payload) \
+    ldi_send_response(ccb, rsp_cmd, seq, (const uint8_t *)&(payload), sizeof(payload))
 
 /** @brief 变长 payload 响应（调用方显式传额外长度） */
-#define LDI_RESPOND_EX(ch, rsp_cmd, seq, payload, extra_len) \
-    ldi_send_response(ch, rsp_cmd, seq, (const uint8_t *)&(payload), sizeof(payload) + (extra_len))
+#define LDI_RESPOND_EX(ccb, rsp_cmd, seq, payload, extra_len) \
+    ldi_send_response(ccb, rsp_cmd, seq, (const uint8_t *)&(payload), sizeof(payload) + (extra_len))
 
 /** @brief 无 payload 响应（仅帧头，如简单 ACK） */
-#define LDI_RESPOND_EMPTY(ch, rsp_cmd, seq) \
-    ldi_send_response(ch, rsp_cmd, seq, nullptr, 0)
+#define LDI_RESPOND_EMPTY(ccb, rsp_cmd, seq) \
+    ldi_send_response(ccb, rsp_cmd, seq, nullptr, 0)
 
 // ============================================================================
 // 命令处理函数声明与分发表
 // ============================================================================
 
-static void cmd_set_ip(channel_t *ch, void *data);
-static void cmd_set_config(channel_t *ch, void *data);
-static void cmd_reboot(channel_t *ch, void *data);
-static void cmd_rep_ip(channel_t *ch, void *data);
-static void cmd_rep_config(channel_t *ch, void *data);
-static void cmd_rsp_report(channel_t *ch, void *data);
-static void cmd_rsp_cert(channel_t *ch, void *data);
-static void cmd_update(channel_t *ch, void *data);
-static void cmd_init(channel_t *ch, void *data);
-static void cmd_ctrl(channel_t *ch, void *data);
-static void cmd_rep_func(channel_t *ch, void *data);
-static void cmd_search(channel_t *ch, void *data);
+static void cmd_set_ip(ccb_t *ccb, void *data);
+static void cmd_set_config(ccb_t *ccb, void *data);
+static void cmd_reboot(ccb_t *ccb, void *data);
+static void cmd_rep_ip(ccb_t *ccb, void *data);
+static void cmd_rep_config(ccb_t *ccb, void *data);
+static void cmd_rsp_report(ccb_t *ccb, void *data);
+static void cmd_rsp_cert(ccb_t *ccb, void *data);
+static void cmd_update(ccb_t *ccb, void *data);
+static void cmd_init(ccb_t *ccb, void *data);
+static void cmd_ctrl(ccb_t *ccb, void *data);
+static void cmd_rep_func(ccb_t *ccb, void *data);
+static void cmd_search(ccb_t *ccb, void *data);
 
 /**
  * LDI 命令处理函数分发表
@@ -403,7 +403,7 @@ const ldi_cmd_handler_fn_t g_ldi_cmd_table[] = {
  * 上位机→设备, 用于出厂配置模式下设置设备网络参数.
  * data 指向 cmd_set_ip_t 结构.
  */
-void cmd_set_ip(channel_t *ch, void *data)
+void cmd_set_ip(ccb_t *ccb, void *data)
 {
     cmd_set_ip_t *info = data;
 
@@ -415,12 +415,14 @@ void cmd_set_ip(channel_t *ch, void *data)
     memcpy(g_ldi.cfg.gateway, info->net.gateway, sizeof(g_ldi.cfg.gateway));
     g_ldi.cfg_valid = true;
 
-    app_flash_ldi_save_config(&g_ldi.cfg);
+    /* 落盘结果要回报给上位机：此前保存接口是 void、状态字节恒为成功，
+       现场表现是"设置返回成功、重启却变回旧值"，且无从查起。 */
+    int32_t save_sta = app_flash_ldi_save_config(&g_ldi.cfg);
     app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
 
-    ldi_status_rsp_t rsp = {.status = 0x00};
+    ldi_status_rsp_t rsp = {.status = (save_sta == 0) ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);
-    LDI_RESPOND(ch, LDI_CMD_SET_IP_RSP, g_ldi.rsp_seq, rsp);
+    LDI_RESPOND(ccb, LDI_CMD_SET_IP_RSP, g_ldi.rsp_seq, rsp);
 }
 
 /**
@@ -429,7 +431,7 @@ void cmd_set_ip(channel_t *ch, void *data)
  * 上位机→设备, 解析复合指令的 module 序列，
  * 将每个模块的 device_type + device_index + vendor[10] 写入 Flash.
  */
-static void cmd_set_config(channel_t *ch, void *data)
+static void cmd_set_config(ccb_t *ccb, void *data)
 {
     ldi_req_head_t *head = (ldi_req_head_t *)data;
     uint8_t *ptr         = (uint8_t *)data + sizeof(ldi_req_head_t);
@@ -442,7 +444,7 @@ static void cmd_set_config(channel_t *ch, void *data)
     if (device_num == 0 || device_num > g_ldi.cfg.module_count) {
         ldi_status_rsp_t rsp = {.status = 0x01};
         ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_PARA_RSP);
-        LDI_RESPOND(ch, LDI_CMD_SET_PARA_RSP, g_ldi.rsp_seq, rsp);
+        LDI_RESPOND(ccb, LDI_CMD_SET_PARA_RSP, g_ldi.rsp_seq, rsp);
         return;
     }
 
@@ -478,12 +480,14 @@ static void cmd_set_config(channel_t *ch, void *data)
         ptr += mod_size;
     }
 
+    /* 解析成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效 */
+    int32_t save_sta = 0;
     if (result)
-        app_flash_ldi_save_config(&g_ldi.cfg);
+        save_sta = app_flash_ldi_save_config(&g_ldi.cfg);
 
-    ldi_status_rsp_t rsp = {.status = result ? 0x00 : 0x01};
+    ldi_status_rsp_t rsp = {.status = (result && save_sta == 0) ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_PARA_RSP);
-    LDI_RESPOND(ch, LDI_CMD_SET_PARA_RSP, g_ldi.rsp_seq, rsp);
+    LDI_RESPOND(ccb, LDI_CMD_SET_PARA_RSP, g_ldi.rsp_seq, rsp);
 }
 
 /**
@@ -492,14 +496,14 @@ static void cmd_set_config(channel_t *ch, void *data)
  * 上位机→设备, 可按模块指定重启范围.
  * 本 MCU 不支持部分重启，发送响应帧后执行整机软件复位.
  */
-static void cmd_reboot(channel_t *ch, void *data)
+static void cmd_reboot(ccb_t *ccb, void *data)
 {
     (void)data;
 
     /* D0H 响应: head(20B) + ErrorCode(1B), 简单 ACK */
     ldi_status_rsp_t rsp = {.status = 0x00};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_REBOOT_RSP);
-    LDI_RESPOND(ch, LDI_CMD_REBOOT_RSP, g_ldi.rsp_seq, rsp);
+    LDI_RESPOND(ccb, LDI_CMD_REBOOT_RSP, g_ldi.rsp_seq, rsp);
 
     osDelay(100);      // 等待以太网发送完成
     pl_system_reset(); // 整机软件复位
@@ -511,7 +515,7 @@ static void cmd_reboot(channel_t *ch, void *data)
  * 上位机→设备, DATA 域仅含通用头部, 无额外字段.
  * 设备收到后应回复当前设备的网络配置 (D1H).
  */
-static void cmd_rep_ip(channel_t *ch, void *data)
+static void cmd_rep_ip(ccb_t *ccb, void *data)
 {
     uint8_t buf[sizeof(ldi_status_rsp_t) + sizeof(ldi_network_info_t)] = {0};
 
@@ -530,7 +534,7 @@ static void cmd_rep_ip(channel_t *ch, void *data)
     net->host_port[0] = (uint8_t)(g_ldi.cfg.host_port >> 8);
     net->host_port[1] = (uint8_t)(g_ldi.cfg.host_port);
 
-    LDI_RESPOND_EX(ch, LDI_CMD_GET_IP_RSP, g_ldi.rsp_seq, *rsp, sizeof(ldi_network_info_t));
+    LDI_RESPOND_EX(ccb,LDI_CMD_GET_IP_RSP, g_ldi.rsp_seq, *rsp, sizeof(ldi_network_info_t));
 }
 
 /**
@@ -542,7 +546,7 @@ static void cmd_rep_ip(channel_t *ch, void *data)
  * 各设备 module 结构与 0BH 设置时一致, vendor 长度为 2~10 字节不等,
  * 通过 ldi_cfg_module_size() 查表确定.
  */
-static void cmd_rep_config(channel_t *ch, void *data)
+static void cmd_rep_config(ccb_t *ccb, void *data)
 {
     (void)data;
 
@@ -583,7 +587,7 @@ static void cmd_rep_config(channel_t *ch, void *data)
         dst += vendor_len;
     }
 
-    LDI_RESPOND_EX(ch, LDI_CMD_GET_PARA_RSP, g_ldi.rsp_seq, *rsp, modules_len);
+    LDI_RESPOND_EX(ccb,LDI_CMD_GET_PARA_RSP, g_ldi.rsp_seq, *rsp, modules_len);
 }
 
 /**
@@ -591,9 +595,9 @@ static void cmd_rep_config(channel_t *ch, void *data)
  *
  * 设备确认上位机收到的上报
  */
-static void cmd_rsp_report(channel_t *ch, void *data)
+static void cmd_rsp_report(ccb_t *ccb, void *data)
 {
-    (void)ch;
+    (void)ccb;
 
     /* C0H 是服务器对设备上报的应答，每 5 秒一次，携带服务器 Unix 时间戳，用于定期对钟 */
     ldi_req_head_t *head = (ldi_req_head_t *)data;
@@ -619,7 +623,7 @@ static void cmd_rsp_report(channel_t *ch, void *data)
  * 上电后每 3 秒发送一次，直到收到 E0H 认证成功。
  * server 根据 lane_code/cert_info 和设备列表验证设备身份。
  */
-void ldi_send_cert_req(channel_t *ch)
+void ldi_send_cert_req(ccb_t *ccb)
 {
     uint8_t buf[sizeof(ldi_cert_req_t) + DEVICE_NUM * 2];
     ldi_cert_req_t *req = (ldi_cert_req_t *)buf;
@@ -634,7 +638,7 @@ void ldi_send_cert_req(channel_t *ch)
 
     uint16_t payload_len = sizeof(ldi_cert_req_t) + g_ldi.cfg.module_count * 2;
     uint8_t seq          = ldi_next_rpt_seq();
-    ldi_send_response(ch, LDI_CMD_CERT_REQ, seq, (const uint8_t *)req, payload_len);
+    ldi_send_response(ccb, LDI_CMD_CERT_REQ, seq, (const uint8_t *)req, payload_len);
 }
 
 /**
@@ -643,7 +647,7 @@ void ldi_send_cert_req(channel_t *ch)
  * DATA = head(20B) + RunningTime(4B) + RunningStatus(1B) + ConnectStatus(1B) + DeviceNum(1B) + DeviceInfo[N×17B]
  * 认证成功后每 5 秒发送一次。
  */
-void ldi_send_sta_rpt(channel_t *ch)
+void ldi_send_sta_rpt(ccb_t *ccb)
 {
     uint8_t buf[sizeof(ldi_sta_rpt_t) + DEVICE_NUM * sizeof(ldi_device_info_t)];
     ldi_sta_rpt_t *rpt = (ldi_sta_rpt_t *)buf;
@@ -690,7 +694,7 @@ void ldi_send_sta_rpt(channel_t *ch)
 
     uint16_t payload_len = sizeof(ldi_sta_rpt_t) + g_ldi.cfg.module_count * sizeof(ldi_device_info_t);
     uint8_t seq          = ldi_next_rpt_seq();
-    ldi_send_response(ch, LDI_CMD_STA_RPT_REQ, seq, (const uint8_t *)rpt, payload_len);
+    ldi_send_response(ccb, LDI_CMD_STA_RPT_REQ, seq, (const uint8_t *)rpt, payload_len);
 }
 
 /**
@@ -698,9 +702,9 @@ void ldi_send_sta_rpt(channel_t *ch)
  *
  * 设备收到上位机回复的验证结果
  */
-static void cmd_rsp_cert(channel_t *ch, void *data)
+static void cmd_rsp_cert(ccb_t *ccb, void *data)
 {
-    (void)ch;
+    (void)ccb;
 
     /* E0H 响应：head(20B) + error_code(1B)，同步时间戳并检查认证结果 */
     ldi_req_head_t *head = (ldi_req_head_t *)data;
@@ -720,9 +724,9 @@ static void cmd_rsp_cert(channel_t *ch, void *data)
  *
  * 升级不在本协议中实现，这里只定义桩函数
  */
-static void cmd_update(channel_t *ch, void *data)
+static void cmd_update(ccb_t *ccb, void *data)
 {
-    (void)ch;
+    (void)ccb;
     (void)data;
 }
 
@@ -739,7 +743,7 @@ static void cmd_update(channel_t *ch, void *data)
  *
  * 当前无个性化初始化内容, 每个响应 module 固定 5 字节.
  */
-static void cmd_init(channel_t *ch, void *data)
+static void cmd_init(ccb_t *ccb, void *data)
 {
     uint8_t *ptr       = (uint8_t *)data + sizeof(ldi_req_head_t);
     uint8_t device_num = *ptr++;
@@ -785,7 +789,7 @@ static void cmd_init(channel_t *ch, void *data)
     }
 
     uint16_t modules_len = (uint16_t)((uint8_t *)dst_mod - rsp->modules);
-    LDI_RESPOND_EX(ch, LDI_CMD_INIT_RSP, g_ldi.rsp_seq, *rsp, modules_len);
+    LDI_RESPOND_EX(ccb,LDI_CMD_INIT_RSP, g_ldi.rsp_seq, *rsp, modules_len);
 
     if (all_ok)
         g_ldi.state = LDI_ST_READY;
@@ -799,7 +803,7 @@ static void cmd_init(channel_t *ch, void *data)
  * 每个 mod 子帧 = DeviceType | DeviceIndex | DeviceFuncType | 功能payload
  * 响应 B1H: ctrl_head(24B) | device_num(1B) | N × ldi_ctrl_rsp_payload_t(4B)
  */
-static void cmd_ctrl(channel_t *ch, void *data)
+static void cmd_ctrl(ccb_t *ccb, void *data)
 {
     // 1BH 使用 24 字节 ctrl_head (UnixTimestamp 8B)，不沿用 ldi_req_head_t
     uint8_t *ptr       = (uint8_t *)data + sizeof(ldi_ctrl_head_t);
@@ -886,7 +890,7 @@ static void cmd_ctrl(channel_t *ch, void *data)
         ptr += mod_len;
     }
 
-    LDI_RESPOND_EX(ch, LDI_CMD_CTRL_RSP, g_ldi.rsp_seq, *rsp, device_num * sizeof(ldi_ctrl_rsp_payload_t));
+    LDI_RESPOND_EX(ccb,LDI_CMD_CTRL_RSP, g_ldi.rsp_seq, *rsp, device_num * sizeof(ldi_ctrl_rsp_payload_t));
 }
 
 /**
@@ -895,9 +899,9 @@ static void cmd_ctrl(channel_t *ch, void *data)
  * 设备→上位机, 主动上报含 N 个功能模块信息的数据帧.
  * 上位机处理完成后回复 C1H (上报确认).
  */
-static void cmd_rep_func(channel_t *ch, void *data)
+static void cmd_rep_func(ccb_t *ccb, void *data)
 {
-    (void)ch;
+    (void)ccb;
     (void)data;
 }
 
@@ -906,7 +910,7 @@ static void cmd_rep_func(channel_t *ch, void *data)
  *
  * 广播回复 0x12: CmdType(1) + IP(4大端) + Port(2大端) + Gateway(4大端) + Mask(4大端) + ErrCode(1)
  */
-static void cmd_search(channel_t *ch, void *data)
+static void cmd_search(ccb_t *ccb, void *data)
 {
     (void)data;
 

@@ -3,6 +3,7 @@
 #include "string.h"
 
 #include "app_render.h"
+#include "app_light_sensor.h"
 
 /* ---- VMS 定时清屏 ---- */
 static uint32_t s_vms_clear_tick; /* 清屏时刻 (RTOS tick) */
@@ -75,6 +76,9 @@ static const display_color_t s_clear_color_map[] = {
 
 static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
+    /* 文字显示: 恢复自动亮度跟随 */
+    app_light_sensor_resume();
+
     display_color_t color     = MAP(s_color_map, ctx->font_color, COLOR_BLACK);
     align_t         h_align   = MAP(s_align_map, ctx->format, ALIGN_CENTER);
     font_size_t     font_size = MAP(s_font_size_map, ctx->font_size, FONT_16);
@@ -155,6 +159,9 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 
 static void vms_clean_ctrl(ldi_ctrl_vms_t *ctx)
 {
+    /* 全屏点亮/清屏: 停止自动亮度跟随, 固定最大亮度 (非黑屏) */
+    app_light_sensor_set_fixed(7);
+
     display_color_t color = MAP(s_clear_color_map, ctx->clear_type, COLOR_BLACK);
 
     app_render(&(render_cfg_t){

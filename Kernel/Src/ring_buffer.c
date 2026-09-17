@@ -183,16 +183,20 @@ bool rb_peekc(const ring_buffer_t *rb, uint16_t offset, uint8_t *byte, void *mut
     return true;
 }
 
-uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex)
+uint16_t rb_peek_capped(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t dest_cap,
+                        void *mutex)
 {
     if (mutex) osMutexAcquire(mutex, osWaitForever);
     uint16_t avail = rb_avail(rb, nullptr);
-    if (offset >= avail) {
+    if (offset >= avail || dest_cap == 0) {
         if (mutex) osMutexRelease(mutex);
         return 0;
     }
-    if (len > avail - offset) len = avail - offset;
-    if (len > rb->size) len = rb->size; /* 防御：len 绝不应超过缓冲区容量 */
+
+    /* 两重夹紧：可窥视量（avail - offset）与目标缓冲容量（dest_cap）。
+     * 少了后一条就是越界写 —— 目标缓冲通常远小于 rb->size。 */
+    uint16_t len = avail - offset;
+    if (len > dest_cap) len = dest_cap;
 
     uint16_t start      = (rb->read_index + offset) % rb->size;
     uint16_t contiguous = rb->size - start;
@@ -205,6 +209,14 @@ uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16
     }
     if (mutex) osMutexRelease(mutex);
     return len;
+}
+
+uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex)
+{
+    /* len 是"想要的字节数"，按缓冲区容量防御性夹紧后委托给带目标容量上限的实现。
+     * 两处夹紧逻辑只有一份，不会再分叉。 */
+    if (len > rb->size) len = rb->size; /* 防御：len 绝不应超过缓冲区容量 */
+    return rb_peek_capped(rb, offset, dest, len, mutex);
 }
 
 /* ---- 工具 ---- */

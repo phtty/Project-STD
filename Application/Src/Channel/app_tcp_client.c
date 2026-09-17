@@ -1,11 +1,18 @@
 /**
  * @file    dev_tcp_client.c
  * @brief       TCP 客户端通道（连接 192.168.114.100:9529）
+ *
+ * 通道控制块是静态对象，连接信息（conn）挂在它上面：断线只清 conn、置 state，
+ * 控制块本身始终有效，因此协议侧保存的 ccb_t* 永不悬空。
+ * 远端地址属于模块配置而非通道身份，故放文件级静态变量。
+ *
+ * 容器：typedef struct { ccb_t base; void *conn; } tcp_ccb_t;（与 server 共用）
  */
 
 #include "app_tcp_client.h"
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
+#include "pl_task.h"
 
 /* ---- 信号量 ---- */
 osSemaphoreId_t client_disconnect_sem;
@@ -28,45 +35,38 @@ const osThreadAttr_t tcp_client_task_attr = {
     .priority   = osPriorityNormal,
 };
 
-/* ---- 通道元数据模板（每连接 copy） ---- */
-channel_t g_tcp_client_channel_tmpl = {
-    .ch_id = CH_ID_TCP_CLIENT,
-    .ops   = &tcp_ch_ops,
+/* ---- 通道控制块（静态持有：协议绑定期即存在，断线也不失效） ---- */
+static tcp_ccb_t g_tcp_client = {
+    .base = {.name = "tcp_client", .ops = &tcp_ccb_ops},
 };
 
-/* ---- 通道实例（单例，持远端配置） ---- */
-tcp_client_channel_t g_tcp_client = {
-    .host_ip   = {192, 168, 2, 17},
-    .host_port = 9529,
-};
-
-/* ---- 构造 ---- */
-void tcp_client_channel_init(tcp_client_channel_t *self, void *conn, channel_t *tmpl)
+ccb_t *app_tcp_client_ccb(void)
 {
-    self->me       = *tmpl;
-    self->me.state = CH_STATE_UP;
-    self->conn     = conn;
-    tcp_keepaliveinit(conn);
-    app_channel_register(CH_ID_TCP_CLIENT, &self->me);
+    return &g_tcp_client.base;
 }
+
+/* ---- 远端配置（属模块配置，不是通道身份，故不放进控制块） ---- */
+static uint8_t s_host_ip[4] = {192, 168, 2, 17};
+static uint16_t s_host_port = 9529;
 
 /* ---- 配置接口 ---- */
 __attribute__((used)) void app_tcp_client_set_remote(const uint8_t ip[4], uint16_t port)
 {
-    memcpy(g_tcp_client.host_ip, ip, 4);
-    g_tcp_client.host_port = port;
+    memcpy(s_host_ip, ip, 4);
+    s_host_port = port;
+    /* 配置变更即打断当前连接，让主任务用新地址重连 */
     if (client_disconnect_sem != nullptr)
         osSemaphoreRelease(client_disconnect_sem);
 }
 
 uint8_t *app_tcp_client_get_host_ip(void)
 {
-    return g_tcp_client.host_ip;
+    return s_host_ip;
 }
 
 uint16_t app_tcp_client_get_host_port(void)
 {
-    return g_tcp_client.host_port;
+    return s_host_port;
 }
 
 /* ================================================================
@@ -75,6 +75,7 @@ uint16_t app_tcp_client_get_host_port(void)
 
 void tcp_client_task(void *argument)
 {
+    (void)argument;
     if (client_disconnect_sem == NULL)
         client_disconnect_sem = osSemaphoreNew(1, 0, NULL);
 
@@ -86,12 +87,11 @@ void tcp_client_task(void *argument)
         }
 
         ip_addr_t server_addr;
-        IP4_ADDR(&server_addr, g_tcp_client.host_ip[0], g_tcp_client.host_ip[1],
-                 g_tcp_client.host_ip[2], g_tcp_client.host_ip[3]);
+        IP4_ADDR(&server_addr, s_host_ip[0], s_host_ip[1], s_host_ip[2], s_host_ip[3]);
 
         /* 非阻塞 connect：避免 netconn_connect 在无服务器时永久阻塞 */
         netconn_set_nonblocking(conn, 1);
-        err_t err = netconn_connect(conn, &server_addr, g_tcp_client.host_port);
+        err_t err = netconn_connect(conn, &server_addr, s_host_port);
 
         if (err == ERR_OK || err == ERR_INPROGRESS) {
             /* 轮询等待连接完成（15 秒超时） */
@@ -111,7 +111,7 @@ void tcp_client_task(void *argument)
 
                 while (osSemaphoreAcquire(client_disconnect_sem, 0) == osOK);
 
-                osThreadId_t tid = osThreadNew(tcp_client_conn_task, conn, &tcp_client_conn_attr);
+                osThreadId_t tid = pl_task_new(tcp_client_conn_task, conn, &tcp_client_conn_attr);
                 if (tid != NULL)
                     osSemaphoreAcquire(client_disconnect_sem, osWaitForever);
 
@@ -132,10 +132,12 @@ void tcp_client_conn_task(void *argument)
 {
     struct netconn *conn = (struct netconn *)argument;
 
-    tcp_client_channel_t tcp;
-    tcp_client_channel_init(&tcp, conn, &g_tcp_client_channel_tmpl);
+    /* 只把本连接的 conn 挂到静态控制块上，控制块本身不被连接生灭牵动 */
+    tcp_ccb_t *tcp  = &g_tcp_client;
+    tcp->conn       = conn;
+    tcp->base.state = CCB_STATE_UP;
+    tcp_keepaliveinit(conn);
 
-    channel_t *ch = &tcp.me;
     struct netbuf *buf;
     err_t err;
     void *data;
@@ -145,14 +147,14 @@ void tcp_client_conn_task(void *argument)
         do {
             netbuf_data(buf, &data, &len);
             if (len > 1)
-                app_channel_dispatch(ch, (uint8_t *)data, len);
+                app_ccb_dispatch(&tcp->base, nullptr, (uint8_t *)data, len);
         } while (netbuf_next(buf) >= 0);
         netbuf_delete(buf);
     }
 
-    tcp.me.ops   = nullptr; /* 防止 send 路径访问即将释放的 netconn */
-    tcp.me.state = CH_STATE_DOWN;
-    app_channel_register(CH_ID_TCP_CLIENT, nullptr);
+    /* 先置 DOWN 再清 conn：send 路径据此拒绝访问即将释放的 netconn */
+    tcp->base.state = CCB_STATE_DOWN;
+    tcp->conn       = nullptr;
     osSemaphoreRelease(client_disconnect_sem);
     osThreadExit();
 }

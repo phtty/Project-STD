@@ -13,6 +13,7 @@
 #include "app_render.h"
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
+#include "pl_task.h"
 
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
 #define PROGRAM_CODE "9210209C41"
@@ -39,6 +40,11 @@ static const font_type_t s_aging_types[] = {
 #define AGING_TYPE_COUNT (sizeof(s_aging_types) / sizeof(s_aging_types[0]))
 
 osThreadId_t g_factory_test;
+
+/** 工厂测试是否正在进行（IDLE 之外的所有阶段）。
+ *  置位/清零都在 factory_monitor_task 内，app_factory_mode_interrupt 只读它 ——
+ *  用它把"每收一包数据"的路径挡在 osThreadTerminate 之外。 */
+static volatile bool s_factory_active;
 
 /* ---- 老化辅助 ---- */
 static void _aging_fill_screen(font_size_t size, font_type_t type, const char *ch_utf8, uint8_t ch_len)
@@ -95,6 +101,8 @@ static void factory_monitor_task(void *argument)
         /* IDLE: 等待 TEST 激活 */
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
+        s_factory_active = true;
+
         /* ===== SHOW_CODE ===== */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
         app_render(&(render_cfg_t){
@@ -128,6 +136,13 @@ static void factory_monitor_task(void *argument)
         /* ===== AGING ===== */
         osThreadResume(g_light_sensor_task_handle);
 
+        /* 进衰老轮播前排空残留的信号量令牌。
+           上面 DEAD_PIXEL 段用的是 osWaitForever，若那几次按键有抖动多释放了一次
+           （信号量上限 1，去抖在 dev_key 的 EXTI 回调里，但历史遗留的窗口仍在），
+           余下的令牌会被下面第一次 wait_press(…, 3000) 立刻消费 —— 表现为
+           "只显示第一个字就退出轮播并清屏"。这里做最后一道保险。 */
+        while (dev_key_wait_press(DEV_KEY_TST, 0)) {}
+
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
             for (uint8_t size_idx = 0; size_idx < AGING_SIZE_COUNT; size_idx++) {
@@ -154,6 +169,7 @@ static void factory_monitor_task(void *argument)
         }
 
         /* 退出工厂模式 */
+        s_factory_active = false;
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
     }
 }
@@ -166,14 +182,35 @@ static void _factory_test_init(void)
         .stack_size = 512 * 4,
         .priority   = osPriorityBelowNormal,
     };
-    g_factory_test = osThreadNew(factory_monitor_task, NULL, &attr);
+    g_factory_test = pl_task_new(factory_monitor_task, NULL, &attr);
 }
-sw_app_initcall(_factory_test_init);
 
-// 对外提供一个终止工厂测试模式的接口
+static void _factory_module_init(void)
+{
+    /* 框架不再直接认识本模块 —— 收到数据就退出工厂模式这件事，
+       由本模块自己注册监听（见 app_dispatch_register_rx_listener）。 */
+    app_dispatch_register_rx_listener(app_factory_mode_interrupt);
+    _factory_test_init();
+}
+sw_app_initcall(_factory_module_init);
+
+/**
+ * @brief 退出工厂测试模式，回到 IDLE
+ *
+ * **仅在测试进行中才动线程**。此前无条件 osThreadTerminate + osThreadNew，
+ * 而本函数被挂在"每收到一包数据"的路径上 —— 有持续 TCP 流量时就是每包一次的
+ * 线程创建销毁，对 32KB 的 heap_4 持续碎片化。
+ */
 void app_factory_mode_interrupt(void)
 {
-    // dev_display_fill(dev_display_get(), 0, 0, dev_display_get()->screen_rows, dev_display_get()->screen_cols, COLOR_BLACK);
+    if (!s_factory_active) return; /* 已在 IDLE：无可中断 */
+
+    s_factory_active = false;
     osThreadTerminate(g_factory_test);
+
+    /* 终止点可能正好落在"挂起光传感器任务"与"恢复"之间（见 DEAD_PIXEL 段），
+       那样光传感器就永久挂起了。补一次恢复 —— 对未挂起的线程是空操作。 */
+    osThreadResume(g_light_sensor_task_handle);
+
     _factory_test_init();
 }

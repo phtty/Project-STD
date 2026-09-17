@@ -67,10 +67,21 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define LWIP_DEBUG            LWIP_DBG_ON
-#define SOCKETS_DEBUG         LWIP_DBG_ON
-#define TCP_DEBUG             LWIP_DBG_ON
-#define LWIP_DBG_MIN_LEVEL    LWIP_DBG_LEVEL_ALL
+
+/* ---- LwIP 调试输出：关闭 ----
+ *
+ * 这四行是移植时放错了位置 —— 本该属于 lwipopts.h，却落到了"屏体引脚"段开头。
+ * 打开时 LwIP 经 printf → RTT 持续刷屏（RTT 上行缓冲只有 1KB，会把真正要看
+ * 的诊断输出挤掉）。
+ *
+ * **整行注释，而不是改成 LWIP_DBG_OFF**：那几处用的是 `#ifdef LWIP_DEBUG`，
+ * 只要宏还存在就成立，调试代码与格式串照样编进固件（实测 text 差 3.7KB）。
+ * 要恢复调试时把这几行取消注释即可。 */
+// #define LWIP_DEBUG            LWIP_DBG_ON
+// #define SOCKETS_DEBUG         LWIP_DBG_ON
+// #define TCP_DEBUG             LWIP_DBG_ON
+// #define LWIP_DBG_MIN_LEVEL    LWIP_DBG_LEVEL_ALL
+
 #define HUB75_G4_Pin          GPIO_PIN_2
 #define HUB75_G4_GPIO_Port    GPIOE
 #define HUB75_B4_Pin          GPIO_PIN_3

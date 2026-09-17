@@ -24,7 +24,7 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
 {
     dev_flash_int_t *self = (dev_flash_int_t *)dev;
     memcpy(buf, (void *)(self->base_addr + addr), len);
-    return (int32_t)len;
+    return 0; /* 约定: 0 = 成功（不返回字节数） */
 }
 
 static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
@@ -33,6 +33,7 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
     uint32_t abs_addr     = self->base_addr + addr;
     uint32_t word_cnt     = (len + 3) / 4;
     uint32_t tmp[word_cnt];
+    int32_t r = 0;
 
     memset(tmp, 0xFF, word_cnt * 4);
     memcpy(tmp, buf, len);
@@ -40,9 +41,10 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
     pl_flash_unlock();
     pl_flash_clear_errors();
     for (uint32_t i = 0; i < word_cnt; i++)
-        pl_flash_program_word(abs_addr + i * 4, tmp[i]);
+        if (pl_flash_program_word(abs_addr + i * 4, tmp[i]) != 0)
+            r = -1; /* 编程失败必须上报：调用方据此判定配置未落盘 */
     pl_flash_lock();
-    return (int32_t)len;
+    return r;
 }
 
 static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)

@@ -9,11 +9,15 @@
 
 #include "app_render.h"
 
+#include <stdio.h>
 #include <string.h>
+#include "cmsis_os2.h"
 #include "text_cvt.h"
 #include "initcall.h"
 #include "crc_utils.h"
 #include "dev_w25qxx.h"
+#include "cfg_record.h"   /* CFG_REC_OK */
+#include "app_cfg_sched.h" /* 显存持久化走调度器 */
 
 /* ---- 字库单元描述 ---- */
 typedef struct {
@@ -21,12 +25,8 @@ typedef struct {
     uint32_t unit_size; /* 该三元组的总字节数 */
 } font_unit_t;
 
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
-
-/* 字库单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
-#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
-#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+/* 字库规模宏（N_ASC_CHARS / N_GBK_CHARS / ASC_UNIT / GBK_UNIT / FONT_LIB_TOTAL_BYTES）
+ * 定义于 app_render.h —— 持久化区要靠 FONT_LIB_TOTAL_BYTES 做容量契约。 */
 
 /* 字库描述表 — 顺序必须与 Flash 中字库单元的排列一致 */
 static const font_unit_t g_font_lib[] = {
@@ -75,6 +75,16 @@ static const font_unit_t g_font_lib[] = {
     {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(32)},
     {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(32)},
     {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(32)},
+};
+
+/* 自适应字号的候选集合（从大到小尝试，索引 0 为 SELF_ADAPT 占位不参与选择） */
+static const font_size_t font_size_table[] = {
+    FONT_SELF_ADAPT,
+    FONT_14,
+    FONT_16,
+    FONT_20,
+    FONT_24,
+    FONT_32,
 };
 
 /* ---- 内部: bytes_per_char ---- */
@@ -126,14 +136,54 @@ static bool _is_gbk(uint8_t high, uint8_t low)
 /* ---- 注册的句柄 ---- */
 static dev_display_t *s_render_display;
 static dev_storage_t *s_render_font;
-static uint32_t s_persist_addr;
+
+/* 显存持久化的调度器句柄（地址/归属/CRC/去重都由调度器管） */
+static uint8_t s_persist_id = 0xFF;
+
+/* 保护载荷组装缓冲（s_persist_buf，定义见文件末尾的持久化段）。
+   放在这里是因为 _render_init 要创建它，而那在文件前部。 */
+static osMutexId_t s_persist_lock;
+
+static const cfg_sched_desc_t s_render_persist_desc = {
+    .name    = "render_persist",
+    .version = RENDER_PERSIST_VERSION,
+    /* 不在启动加载遍里恢复显示：上电该显示什么由 app_boot 的 app_default_display
+       决定（先试 restore，失败再画默认内容）。调度器只负责存取。 */
+    .load = NULL,
+};
+
+static void _render_persist_register(void)
+{
+    s_persist_id = app_cfg_sched_register(&s_render_persist_desc);
+    if (s_persist_id == 0xFF)
+        printf("[render] 显存持久化注册失败，本次上电不落盘\n");
+}
+/* sw_dev(2)：注册只需早于 sw_app(3) 的启动加载遍，以及早于任何 save。 */
+sw_dev_initcall(_render_persist_register);
 
 /* ---- 模块自注册，依赖storage和display模块）---- */
 static void _render_init(void)
 {
     s_render_display = dev_display_get();
     s_render_font    = dev_w25qxx_get();
-    s_persist_addr   = dev_storage_capacity(s_render_font) - 4096 * 2;
+
+    /* 运行期交叉校验：描述表实际求和必须等于编译期常量。
+     * app_render.h 的 _Static_assert 只能验公式，挡不住"g_font_lib[] 被手改一行"
+     * （例如某条硬编码了字节数、或加了字号却漏改 FONT_LIB_TOTAL_BYTES）——
+     * 那会让其后每个单元的 Flash 偏移整体错位，字库取到乱码。 */
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < sizeof(g_font_lib) / sizeof(g_font_lib[0]); i++)
+        sum += g_font_lib[i].unit_size;
+    if (sum != FONT_LIB_TOTAL_BYTES)
+        printf("[render] 字库描述表求和 %u != 编译期常量 %u，字库偏移已错位\n", (unsigned)sum,
+               (unsigned)FONT_LIB_TOTAL_BYTES);
+
+    /* 持久化区的地址/容量门槛不再由本模块计算 —— 配置调度器统一管
+     * （见 app_cfg_sched.c 的 s_ready：要求"字库之后还放得下整个配置区"）。 */
+
+    /* 载荷组装锁。在本层创建：RTOS 已启动，且早于任何协议任务可能触发的 save。 */
+    const osMutexAttr_t persist_attr = {.name = "render_persist", .attr_bits = osMutexPrioInherit};
+    s_persist_lock                   = osMutexNew(&persist_attr);
 }
 sw_app_initcall(_render_init);
 
@@ -142,7 +192,7 @@ sw_app_initcall(_render_init);
 static inline void _render_text(const render_cfg_t *cfg)
 {
     // 入口参数检查
-    if (!cfg->text || !cfg->len || !cfg->font_size)
+    if (!cfg->text || !cfg->len)
         return;
     if (!cfg->w || !cfg->h)
         return;
@@ -163,6 +213,21 @@ static inline void _render_text(const render_cfg_t *cfg)
         uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);
         memcpy(text_buf, cfg->text, n);
         text_len = n;
+    }
+
+    /* 字号自适应：按文本长度与渲染区域容量，从最大字号开始选择能容纳的最大字号，默认最小字号 14 */
+    if (cfg->font_size == FONT_SELF_ADAPT) {
+        gbk_key.size = FONT_14;
+        asc_key.size = FONT_14;
+        for (int8_t i = (int8_t)(sizeof(font_size_table) / sizeof(font_size_table[0])) - 1; i >= 1; i--) {
+            uint16_t h_res = cfg->h / font_size_table[i];
+            uint16_t w_res = cfg->w / (font_size_table[i] / 2);
+            if (text_len <= h_res * w_res) {
+                gbk_key.size = font_size_table[i];
+                asc_key.size = font_size_table[i];
+                break;
+            }
+        }
     }
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
@@ -349,22 +414,61 @@ void app_render(const render_cfg_t *cfg)
  *
  *  pixel_map (逐像素颜色) → bitmap (1bit/pixel + 单色)，大幅压缩闪存占用。
  *  恢复阶段 fill(BLACK) + draw_bitmap(color) 重建 pixel_map。
+ *
+ *  载荷的归属/版本/长度/CRC 由配置调度器统一管（记录名 "render_persist"），
+ *  本模块不再自带头内魔数与 CRC，也不再自己算 Flash 地址。
  * ================================================================ */
 
-#define PERSIST_BUF_SIZE (sizeof(render_persist_t) + 512) /* 容纳 64×64 像素位图 */
+/** 位图区按"全工程最大模组"定长，故载荷缓冲也按它定长（见 app_render.h） */
+static uint8_t s_persist_buf[RENDER_PERSIST_PAYLOAD_MAX];
+
+/* s_persist_buf 由 s_persist_lock 保护（声明见文件前部的句柄段）：
+   save 会来自**不同任务**（RLS 任务经 app_rls_cmd、LDI 任务经 app_vms_ctrl），
+   而载荷是"先组装进这个缓冲、再交给调度器落盘"。调度器自己的锁只覆盖落盘那一步，
+   覆盖不到组装阶段 —— 两个任务同时组装的话，先到者的缓冲会在落盘前被后到者改写，
+   存下去的是两张屏的混合体。嵌套顺序固定为"先本锁、后调度器锁"，无反向获取故不会死锁。 */
+
+/** @brief 组装/解析载荷期间持锁；锁不可用时退化为不锁（启动早期尚无竞争） */
+static void _persist_lock(void)
+{
+    if (s_persist_lock) osMutexAcquire(s_persist_lock, osWaitForever);
+}
+
+static void _persist_unlock(void)
+{
+    if (s_persist_lock) osMutexRelease(s_persist_lock);
+}
+
+/** @brief 本屏的位图字节数；同时做上界检查。越界返回 0。 */
+static uint16_t _persist_bm_bytes(const dev_display_t *d)
+{
+    uint32_t row_bytes = ((uint32_t)d->screen_rows + 7U) / 8U;
+    uint32_t bm_bytes  = (uint32_t)d->screen_cols * row_bytes;
+
+    /* 本工程真 dev_display.h 没有编译期几何宏，位图区只能按"全工程最大模组"定长。
+     * 换上更大的模组时在这里拦下 —— 拒绝保存而不是越界写。 */
+    if (bm_bytes > RENDER_PERSIST_BITMAP_MAX) {
+        printf("[render] 本屏位图 %u 字节超过持久化上限 %u，已跳过\n", (unsigned)bm_bytes,
+               (unsigned)RENDER_PERSIST_BITMAP_MAX);
+        return 0;
+    }
+    return (uint16_t)bm_bytes;
+}
 
 void app_render_save(void)
 {
     dev_display_t *d = s_render_display;
-    if (!d || !s_render_font) return;
+    if (!d || s_persist_id == 0xFF) return;
 
-    uint16_t rows      = d->screen_rows;
-    uint16_t cols      = d->screen_cols;
+    uint16_t rows     = d->screen_rows;
+    uint16_t cols     = d->screen_cols;
+    uint16_t bm_bytes = _persist_bm_bytes(d);
+    if (!bm_bytes) return;
     uint16_t row_bytes = (rows + 7) / 8;
-    uint16_t bm_bytes  = cols * row_bytes;
 
-    static uint8_t buf[PERSIST_BUF_SIZE];
-    render_persist_t *r = (render_persist_t *)buf;
+    _persist_lock(); /* 直到落盘返回前都持有：组装缓冲不能被另一个任务改写 */
+
+    render_persist_t *r = (render_persist_t *)s_persist_buf;
     memset(r->bitmap, 0, bm_bytes);
 
     uint8_t color = COLOR_BLACK;
@@ -378,41 +482,53 @@ void app_render_save(void)
         }
     }
 
-    r->magic       = RENDER_PERSIST_MAGIC;
     r->screen_rows = rows;
     r->screen_cols = cols;
     r->color       = color;
-    r->crc32       = crc32_calc(r->bitmap, bm_bytes);
 
-    dev_storage_write(s_render_font, s_persist_addr, buf,
-                      sizeof(render_persist_t) + bm_bytes);
+    /* 落盘失败必须可见：此前调用方一律忽略返回值，现场只表现为
+     * "改了显示、重启回到旧内容"，无从查起。 */
+    uint32_t len = (uint32_t)sizeof(render_persist_t) + bm_bytes;
+    if (app_cfg_sched_save(s_persist_id, s_persist_buf, (uint16_t)len) != 0)
+        printf("[render] 显存持久化失败（%u 字节）\n", (unsigned)len);
+
+    _persist_unlock();
 }
 
 bool app_render_restore(void)
 {
     dev_display_t *d = s_render_display;
-    if (!d || !s_render_font)
+    if (!d || s_persist_id == 0xFF)
         return false;
 
-    uint16_t rows      = d->screen_rows;
-    uint16_t cols      = d->screen_cols;
-    uint16_t row_bytes = (rows + 7) / 8;
-    uint16_t bm_bytes  = cols * row_bytes;
+    uint16_t rows     = d->screen_rows;
+    uint16_t cols     = d->screen_cols;
+    uint16_t bm_bytes = _persist_bm_bytes(d);
+    if (!bm_bytes) return false;
 
-    static uint8_t buf[PERSIST_BUF_SIZE];
-    if (dev_storage_read(s_render_font, s_persist_addr, buf,
-                         sizeof(render_persist_t) + bm_bytes) < 0)
-        return false;
+    /* 传入的容量取"本屏实际需要"：记录里的 len 与之不符会被 cfg_record_load
+     * 判为 INVALID —— 这正是我们要的（换了模组则旧显存不适用）。 */
+    uint16_t payload_cap = (uint16_t)(sizeof(render_persist_t) + bm_bytes);
+    uint16_t rec_len     = 0;
 
-    render_persist_t *r = (render_persist_t *)buf;
-    if (r->magic != RENDER_PERSIST_MAGIC)
-        return false;
-    if (r->screen_rows != rows || r->screen_cols != cols)
-        return false;
-    if (r->crc32 != crc32_calc(r->bitmap, bm_bytes))
-        return false;
+    /* 与 save 共用同一个组装缓冲，故同样要持锁 */
+    _persist_lock();
+
+    if (app_cfg_sched_load(s_persist_id, s_persist_buf, payload_cap, &rec_len) != CFG_REC_OK)
+        goto fail;
+    if (rec_len != payload_cap) goto fail;
+
+    render_persist_t *r = (render_persist_t *)s_persist_buf;
+    /* 几何已由 len 比对隐含校验（len 由本屏几何算出），这里再核一次字段，
+     * 防止"长度碰巧相同但内容不是本屏"的情况。 */
+    if (r->screen_rows != rows || r->screen_cols != cols) goto fail;
 
     dev_display_fill(d, 0, 0, rows, cols, COLOR_BLACK);
     dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
+    _persist_unlock();
     return true;
+
+fail:
+    _persist_unlock();
+    return false;
 }

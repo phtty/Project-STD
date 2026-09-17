@@ -19,9 +19,11 @@
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
 #include "app_rs485.h"
+#include "app_rs232.h"
 #include "app_test.h"
 #include "app_key.h"
 #include "app_render.h"
+#include "pl_task.h"
 
 static void init_task(void *argument);
 
@@ -57,7 +59,7 @@ void app_boot(void)
     };
 
     osKernelInitialize();
-    osThreadNew(init_task, NULL, &attr);
+    pl_task_new(init_task, NULL, &attr);
     osKernelStart();
 }
 
@@ -97,12 +99,14 @@ static void init_task(void *argument)
         .stack_size = 128 * 4,
         .priority   = osPriorityLow,
     };
-    osThreadNew(half_sec_task, NULL, &hst_attr);
+    pl_task_new(half_sec_task, NULL, &hst_attr);
 
     app_tcp_server_start();
     app_tcp_client_start();
     app_udp_start();
     app_rs485_start();
+    app_rs232_start();   /* USART3 端点 */
+    app_rs232_1_start(); /* USART6 端点 */
 
     // app_test_run();
     app_default_display();
