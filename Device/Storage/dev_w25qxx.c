@@ -94,11 +94,44 @@ static void _dma_cb(void *ctx)
     osEventFlagsSet(s_evt, 0x01);
 }
 
+/* ---- 访问串行化 ----
+ *
+ * 本驱动**不可重入**，三处共享状态：
+ *   - s_ok 是全局的 DMA 完成标志：两个并发读会互相"吃掉"完成事件，先发起的一方
+ *     会带着半满的缓冲返回（它看到的是对方置的标志）；
+ *   - _write 的读-改-写用共享的 static sec[4096]；
+ *   - _cs_high() 由一方调用会打断另一方正在进行的传输。
+ *
+ * 而调用方确实来自不同任务：app_render 读字库（LDI 任务与 RLS 任务都会调），
+ * 配置落盘同样来自这两个任务。表现为偶发字模乱码 / 配置读取出错，且在台面上
+ * 极难复现。
+ *
+ * 故在三个虚表入口统一持锁，内部实现一律走 _unlocked 版本（_write_unlocked
+ * 内部要读扇区，若调加锁版会自死锁——osMutexNew 建的是非递归锁）。
+ *
+ * 锁在 _init 里创建：它在 hw_dev_initcall 跑，RTOS 尚未启动，但 FreeRTOS 允许
+ * 在 vTaskStartScheduler 之前创建内核对象。这样避免"懒创建"的竞态。 */
+static osMutexId_t s_lock;
+
+static void _lock(void)
+{
+    if (s_lock) osMutexAcquire(s_lock, osWaitForever);
+}
+
+static void _unlock(void)
+{
+    if (s_lock) osMutexRelease(s_lock);
+}
+
 /* ---- OPS 实现 ---- */
 static int32_t _init(dev_storage_t *dev)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     self->spi          = pl_spi_get_handle();
+
+    /* 访问锁（见上面的说明：RTOS 前创建内核对象是允许的） */
+    const osMutexAttr_t lock_attr = {.name = "w25qxx", .attr_bits = osMutexPrioInherit};
+    s_lock                        = osMutexNew(&lock_attr);
 
     /* 复位（阻塞，无需RTOS） */
     uint8_t rst[2] = {W25Q_RESET_ENABLE, W25Q_RESET_DEVICE};
@@ -126,7 +159,8 @@ static int32_t _init(dev_storage_t *dev)
     return 0;
 }
 
-static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+/** @brief 读扇区数据（调用者已持锁；_write 的读-改-写也走这里） */
+static int32_t _read_unlocked(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
@@ -150,6 +184,14 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
         osDelay(1);
     _cs_high();
     return 0; /* 约定: 0 = 成功（不返回字节数） */
+}
+
+static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
+{
+    _lock();
+    int32_t r = _read_unlocked(dev, addr, buf, len);
+    _unlock();
+    return r;
 }
 
 static int32_t _write_enable(dev_w25qxx_t *self)
@@ -205,7 +247,8 @@ static int32_t _write_no_check(dev_w25qxx_t *self, uint32_t addr, const uint8_t 
     return 0;
 }
 
-static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
+/** @brief 读-改-写（调用者已持锁） */
+static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     if (!buf || len == 0) return -1;
@@ -219,7 +262,7 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
         uint32_t ch  = 4096 - off;
         if (len - w < ch) ch = len - w;
 
-        _read(dev, sa, sec, 4096);
+        _read_unlocked(dev, sa, sec, 4096);
 
         bool need = false;
         for (uint16_t i = off; i < off + ch; i++)
@@ -249,7 +292,16 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
     return 0;
 }
 
-static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
+static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
+{
+    _lock();
+    int32_t r = _write_unlocked(dev, addr, buf, len);
+    _unlock();
+    return r;
+}
+
+/** @brief 擦除一个扇区（调用者已持锁） */
+static int32_t _erase_unlocked(dev_storage_t *dev, uint32_t addr, uint32_t len)
 {
     (void)len;
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
@@ -263,6 +315,14 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
     int32_t r = pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
     _cs_high();
     return (r == 0) ? _wait_busy(self, 3000) : -1;
+}
+
+static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
+{
+    _lock();
+    int32_t r = _erase_unlocked(dev, addr, len);
+    _unlock();
+    return r;
 }
 
 static uint32_t _capacity(dev_storage_t *dev)
