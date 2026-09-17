@@ -45,16 +45,8 @@ virtualFolder:
               files:
                 - path: Application/Src/LDI/app_ldi.c
                 - path: Application/Src/LDI/app_ldi_cmd.c
-                - path: Application/Src/LDI/app_ldi_device.c
                 - path: Application/Src/LDI/app_vms_ctrl.c
                 - path: Application/Src/LDI/app_ldi_cfg.c
-              folders: []
-            - name: ProtocolParser_QingHai
-              files:
-                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto.c
-                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_parse.c
-                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_cmd.c
-                - path: Application/Src/ProtocolParser_QingHai/app_qh_proto_voice.c
               folders: []
             - name: rls
               files:
@@ -238,7 +230,6 @@ virtualFolder:
           files:
             - path: Device/Comm/dev_rs232.c
             - path: Device/Comm/dev_rs485.c
-            - path: Device/Comm/dev_rs232_voice.c
           folders: []
         - name: Network
           files:
@@ -259,9 +250,7 @@ virtualFolder:
         - name: Display
           files:
             - path: Device/Display/dev_display.c
-            - path: Device/Display/dev_display_1_969.c
-            - path: Device/Display/dev_display_1_577.c
-            - path: Device/Display/dev_display_1_260.c
+            - path: Device/Display/dev_display_p20.c
           folders: []
     - name: Platform
       files:
@@ -342,15 +331,11 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
-        - Application/Inc/ProtocolParser_QingHai
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Device/Display/dev_display_1_260.c
-      - <virtual_root>/Device/Display/dev_display_1_969.c
-      - <virtual_root>/Application/protocol/ProtocolParser_QingHai
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -369,7 +354,7 @@ targets:
             language-cpp: c++23
             one-elf-section-per-data: true
             one-elf-section-per-function: true
-            optimization: level-3
+            optimization: level-debug
             warnings: all-warnings
           global:
             $float-abi-type: hard
@@ -434,7 +419,7 @@ targets:
           vendor: ST
         otherCmds: ""
         proType: 1
-        speed: 32000
+        speed: 8000
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
@@ -454,7 +439,6 @@ targets:
       defineList:
         - USE_HAL_DRIVER
         - STM32F407xx
-        - APP_PROTOCOL=1
       incList:
         - Core/Inc
         - Drivers/CMSIS/Include

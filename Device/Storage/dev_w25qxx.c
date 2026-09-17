@@ -100,8 +100,6 @@ static int32_t _init(dev_storage_t *dev)
 {
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     self->spi          = pl_spi_get_handle();
-    if (!self->spi)
-        return -1;
 
     /* 复位（阻塞，无需RTOS） */
     uint8_t rst[2] = {W25Q_RESET_ENABLE, W25Q_RESET_DEVICE};
@@ -284,7 +282,7 @@ static const dev_storage_ops_t w25qxx_ops = {
 /* ---- 自动初始化 ---- */
 void dev_w25qxx_init(void)
 {
-    if (_init(&g_w25qxx.me) == 0)
-        g_w25qxx.me.ops = &w25qxx_ops;
+    g_w25qxx.me.ops = &w25qxx_ops;
+    _init(&g_w25qxx.me);
 }
 hw_dev_initcall(dev_w25qxx_init);
