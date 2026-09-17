@@ -121,8 +121,11 @@ pcb_probe_sta_t rls_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
     return PCB_PROBE_READY;
 }
 
-/* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ---- */
-RB_DEFINE(s_rls_rb, 2048); /**< max(2 × 最长帧 530, 单次最大写入 2048) */
+/* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
+ * 承载 RS485（DMA 单次可达 2048）。容量须**严格大于**单次最大写入：
+ * ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），取相等值时
+ * 恰好满的那一次会静默截掉最后一个字节。 */
+RB_DEFINE(s_rls_rb, 2112); /**< max(2 × 最长帧 530, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_rls_ops = {.probe = rls_probe_frame};
 

@@ -30,8 +30,12 @@ static const osMessageQueueAttr_t s_iap_queue_attr = {
     .mq_size = sizeof(s_iap_queue_buf),
 };
 
-/* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ---- */
-RB_DEFINE(s_iap_rb, 2048); /**< 2 × 最长帧 (1044) */
+/* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
+ * RB 容量必须**严格大于**传输层单次最大写入：ring buffer 保留一个空槽来区分满/空
+ * （rb_space = size - avail - 1），所以装下 N 字节需要 size ≥ N+1。取相等的值会
+ * 让 rb_write 静默截掉尾巴那一字节，帧尾被切 → CRC 失败 → 整帧丢。
+ * 本协议承载 RS485/RS232（DMA 单次可达 2048）与 UDP，故取 2112 = 2048 + 余量。 */
+RB_DEFINE(s_iap_rb, 2112); /**< max(2 × 最长帧 1044, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_iap_ops = {.probe = iap_probe_frame};
 

@@ -122,10 +122,11 @@ void ldi_ctx_init(ldi_ctx_t *self)
 }
 
 /* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
- * RB 容量取「2 × 最长帧」与「传输层单次最大写入」的较大者：app_ccb_dispatch 一次投递的
- * 是传输层一整段读数（RS485 DMA 缓冲 2048、TCP 单段 ≤1460、UDP ≤1472），比它小的 RB
- * 会被 rb_write 截断，一次就丢帧。 */
-RB_DEFINE(s_ldi_rb, 2048); /**< max(2 × 最长帧 522, 单次最大写入 2048) */
+ * RB 容量取「2 × 最长帧」与「传输层单次最大写入 + 1」的较大者：app_ccb_dispatch 一次
+ * 投递的是传输层一整段读数（TCP 单段 ≤1460、UDP ≤1472），比它小的 RB 会被 rb_write 截断。
+ * **+1 是必须的**：ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），
+ * 容量取成与单次写入相等时，恰好满的那一次会静默丢掉最后一个字节。 */
+RB_DEFINE(s_ldi_rb, 2112); /**< max(2 × 最长帧 522, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_ldi_ops = {.probe = ldi_probe_frame};
 
