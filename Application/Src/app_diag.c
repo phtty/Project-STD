@@ -42,17 +42,19 @@ static void _diag_dump(void)
 {
     UBaseType_t n = uxTaskGetSystemState(s_tasks, APP_DIAG_TASK_MAX, NULL);
 
-    printf("\n[diag] 堆余量 %u 字节 | 任务创建失败 %u 次\n", (unsigned)xPortGetFreeHeapSize(),
+    /* 输出刻意紧凑：RTT 上行缓冲只有 1KB（SEGGER_RTT_Conf.h），而模式是
+       NO_BLOCK_SKIP —— 一次打印超过缓冲容量就会被**截尾**，上一版就是这样
+       在最后几个任务处断掉的。当前约 700 字节，留足余量。
+       水位单位是 StackType_t（=4 字节），余量越小越危险；接近 0 就该加栈。 */
+    printf("\n[diag] heap=%u fail=%u  (rem: words, x4=bytes)\n", (unsigned)xPortGetFreeHeapSize(),
            (unsigned)pl_task_fail_count());
-    printf("[diag] %-20s %5s %10s %10s\n", "task", "prio", "watermark", "bytes");
+    printf("[diag] %-16s %3s %4s\n", "task", "pri", "rem");
 
     for (UBaseType_t i = 0; i < n; i++) {
         if (s_tasks[i].pcTaskName == NULL) continue;
-        /* usStackHighWaterMark 是"历史最小剩余量"，单位 StackType_t。
-           余量越小越危险；接近 0 就说明该加栈了。 */
-        printf("[diag] %-20s %5u %10u %10u\n", s_tasks[i].pcTaskName,
-               (unsigned)s_tasks[i].uxCurrentPriority, (unsigned)s_tasks[i].usStackHighWaterMark,
-               (unsigned)s_tasks[i].usStackHighWaterMark * sizeof(StackType_t));
+        printf("[diag] %-16s %3u %4u\n", s_tasks[i].pcTaskName,
+               (unsigned)s_tasks[i].uxCurrentPriority,
+               (unsigned)s_tasks[i].usStackHighWaterMark);
     }
 }
 
