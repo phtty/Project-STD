@@ -23,6 +23,13 @@ SIZE    = arm-none-eabi-size
 CONFIG    ?= Debug
 BUILD_DIR  = build/$(CONFIG)
 
+# ---- 板级变体 ----
+# 同一套 Kernel/Platform/Device/Application 共享代码，配不同板子编译。
+# 该板专属的源与头都在 boards/$(BOARD)/ 下（CubeMX 产物、显示模组、板级外设、
+# 板级通道）。新增一块板 = 复制一份 boards/<名字>/ 并改这一行。
+BOARD     ?= std_a
+BOARD_DIR  = boards/$(BOARD)
+
 # ---- MCU Flags ----
 CPU       = -mcpu=cortex-m4
 FPU       = -mfpu=fpv4-sp-d16
@@ -33,6 +40,7 @@ MCU_FLAGS = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)
 DEFINES = -DUSE_HAL_DRIVER -DSTM32F407xx
 
 INC_DIRS = \
+	-I $(BOARD_DIR)/Inc \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
@@ -42,7 +50,7 @@ INC_DIRS = \
 	-I Device/Inc \
 	-I Platform/Inc \
 	-I Kernel/Inc \
-	-I Core/Inc \
+	-I $(BOARD_DIR)/Core/Inc \
 	-I Drivers/CMSIS/Include \
 	-I Drivers/CMSIS/Device/ST/STM32F4xx/Include \
 	-I Drivers/STM32F4xx_HAL_Driver/Inc \
@@ -76,24 +84,24 @@ LDFLAGS += -u _printf_float
 LDFLAGS += -lm
 
 # ---- Source Files ----
-# Core/Application
+# CubeMX 产物（属板级：外设集、引脚、时钟、中断向量都随板子变）
 SRC_CORE = \
-	Core/Src/main.c \
-	Core/Src/stm32f4xx_it.c \
-	Core/Src/syscalls.c \
-	Core/Src/sysmem.c \
-	Core/Src/adc.c \
-	Core/Src/dma.c \
-	Core/Src/gpio.c \
-	Core/Src/iwdg.c \
-	Core/Src/rtc.c \
-	Core/Src/spi.c \
-	Core/Src/stm32f4xx_hal_msp.c \
-	Core/Src/stm32f4xx_hal_timebase_tim.c \
-	Core/Src/system_stm32f4xx.c \
-	Core/Src/tim.c \
-	Core/Src/usart.c \
-	Core/Src/crc.c \
+	$(BOARD_DIR)/Core/Src/main.c \
+	$(BOARD_DIR)/Core/Src/stm32f4xx_it.c \
+	$(BOARD_DIR)/Core/Src/syscalls.c \
+	$(BOARD_DIR)/Core/Src/sysmem.c \
+	$(BOARD_DIR)/Core/Src/adc.c \
+	$(BOARD_DIR)/Core/Src/dma.c \
+	$(BOARD_DIR)/Core/Src/gpio.c \
+	$(BOARD_DIR)/Core/Src/iwdg.c \
+	$(BOARD_DIR)/Core/Src/rtc.c \
+	$(BOARD_DIR)/Core/Src/spi.c \
+	$(BOARD_DIR)/Core/Src/stm32f4xx_hal_msp.c \
+	$(BOARD_DIR)/Core/Src/stm32f4xx_hal_timebase_tim.c \
+	$(BOARD_DIR)/Core/Src/system_stm32f4xx.c \
+	$(BOARD_DIR)/Core/Src/tim.c \
+	$(BOARD_DIR)/Core/Src/usart.c \
+	$(BOARD_DIR)/Core/Src/crc.c \
 
 # LWIP
 # STM32 HAL Driver
@@ -268,20 +276,31 @@ SRC_PLATFORM = \
 	Platform/Src/pl_spi.c \
 	Platform/Src/pl_uart.c
 
+# ---- 板级源（由 BOARD 选择，见 boards/$(BOARD)/）----
+# 该板专属的一切：显示模组、板级外设、板级通道。
+# 新增一块板 = 复制一份 boards/<名字>/ 并改顶部的 BOARD 变量。
+#
+# 显示模组**同时只能编一个**：每个驱动自带一份 CCMRAM 帧缓冲（pixel_map +
+# hub75_buff），多编一份直接把 CCMRAM 顶爆（多两份 → 超 588B）。同目录下的
+# dev_P10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
+# 换屏时在此换掉这一行，而不是追加。
+SRC_BOARD = \
+	$(BOARD_DIR)/Src/dev_rs232.c \
+	$(BOARD_DIR)/Src/dev_rs485.c \
+	$(BOARD_DIR)/Src/dev_io_ctrl.c \
+	$(BOARD_DIR)/Src/app_rs232.c \
+	$(BOARD_DIR)/Src/dev_p20_16x8_2200001667.c
+
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \
-	Device/IO/dev_io_ctrl.c \
 	Device/IO/dev_key.c \
 	Device/Display/dev_display.c \
-	Device/Display/dev_p20_16x8_2200001667.c \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
 	Device/Storage/cfg_record.c \
 	Device/Network/dev_dp83848.c \
-	Device/Network/dev_eth.c \
-	Device/Comm/dev_rs485.c \
-	Device/Comm/dev_rs232.c
+	Device/Network/dev_eth.c
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
@@ -309,7 +328,6 @@ SRC_APPLICATION = \
 	Application/Src/Channel/app_tcp_server.c \
 	Application/Src/Channel/app_tcp_client.c \
 	Application/Src/Channel/app_mqtt.c \
-	Application/Src/Channel/app_rs232.c \
 	Application/Src/Channel/app_rs485.c
 
 # ---- All Sources ----
@@ -317,6 +335,7 @@ SRC_ALL = \
 	$(SRC_KERNEL) \
 	$(SRC_PLATFORM) \
 	$(SRC_DEVICE) \
+	$(SRC_BOARD) \
 	$(SRC_APPLICATION) \
 	$(SRC_CORE) \
 	$(SRC_HAL) \
