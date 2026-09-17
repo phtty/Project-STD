@@ -35,21 +35,20 @@ typedef struct {
 /* ---- 全局实例 ---- */
 static dev_w25qxx_t g_w25qxx = {.page_size = 256, .sector_size = 4096};
 
-/* JEDEC ID → 容量 */
+/* JEDEC ID → 容量
+ *
+ * 容量字节本身就是二进制指数：0x15→2^21=2MB, 0x18→2^24=16MB, 0x19→2^25=32MB。
+ * 原实现把 default 当作 W25Q256+ 返回 32MB，于是**未响应/未识别的器件
+ * （ID 读回 0x00 或 0xFF）也会被报成 32MB** —— 上层据此算出配置区地址并擦写，
+ * 把"存储不可用"伪装成"存储可用"。这里只接受合法指数区间，其余返回 0。 */
 static uint32_t _jedec_capacity(uint16_t id)
 {
-    switch (id & 0xFF) { /* 只用容量字节判断 */
-        case 0x15:
-            return 2 * 1024 * 1024; /* W25Q16   */
-        case 0x16:
-            return 4 * 1024 * 1024; /* W25Q32   */
-        case 0x17:
-            return 8 * 1024 * 1024; /* W25Q64   */
-        case 0x18:
-            return 16 * 1024 * 1024; /* W25Q128  */
-        default:
-            return 32 * 1024 * 1024; /* W25Q256+ */
-    }
+    uint8_t cap_byte = (uint8_t)(id & 0xFF);
+
+    if (cap_byte < 0x15U || cap_byte > 0x1FU)
+        return 0; /* 未识别或器件未响应 */
+
+    return 1UL << cap_byte;
 }
 
 /* 容量字节 >= 0x19 → >128Mb → 需 4 字节地址 */
@@ -150,7 +149,7 @@ static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t l
     while (!s_ok)
         osDelay(1);
     _cs_high();
-    return (int32_t)len;
+    return 0; /* 约定: 0 = 成功（不返回字节数） */
 }
 
 static int32_t _write_enable(dev_w25qxx_t *self)

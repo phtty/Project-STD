@@ -46,6 +46,28 @@ typedef struct {
     font_type_t type;   /* 字型 */
 } font_key_t;
 
+/* ---- 字库规模 ----
+ * 字库在 W25Qxx 中从地址 0 起顺序排列，共 5 字号 × 2 编码 × 4 字型 = 40 个单元。
+ * 这几个宏是 app_render.c 里 g_font_lib[] 的编译期等价物：ASC_UNIT/GBK_UNIT 给出
+ * 单个单元的字节数，FONT_LIB_TOTAL_BYTES 给出全部。
+ *
+ * 放在头文件里的原因：字库占据 Flash 头部，任何排在它之后的持久化区都要靠
+ * FONT_LIB_TOTAL_BYTES 做容量契约（见 app_cfg_sched.h 的 _Static_assert）。 */
+#define N_ASC_CHARS (96U)
+#define N_GBK_CHARS (23940U)
+
+/* 单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
+#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
+#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+
+/* 全部 40 个单元之和。新增/删除字号或字型时必须同步改这里与 g_font_lib[]，
+ * 两者不一致会被 _render_init 里的运行期交叉校验挡下。 */
+#define FONT_LIB_TOTAL_BYTES                                                                       \
+    (4U * (ASC_UNIT(14) + GBK_UNIT(14) + ASC_UNIT(16) + GBK_UNIT(16) + ASC_UNIT(20) +              \
+           GBK_UNIT(20) + ASC_UNIT(24) + GBK_UNIT(24) + ASC_UNIT(32) + GBK_UNIT(32)))
+
+_Static_assert(FONT_LIB_TOTAL_BYTES == 30713088U, "字库总量变化：请核对 g_font_lib[] 与 Flash 布局");
+
 /* ---- 水平/垂直对齐 ---- */
 typedef enum {
     ALIGN_LEFT_UP    = 0, /* 左对齐 / 上对齐 */

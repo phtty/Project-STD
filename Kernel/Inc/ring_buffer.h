@@ -61,6 +61,20 @@ bool rb_getc(ring_buffer_t *rb, uint8_t *byte, void *mutex);
 uint16_t rb_read(ring_buffer_t *rb, uint8_t *data, uint16_t len, void *mutex);
 
 /* 窥视（不移动读指针） */
+
+/**
+ * @brief 窥视至多 dest_cap 字节到 dest，返回实际拷出的字节数
+ *
+ * 与 rb_peek 的区别：rb_peek 的 len 是"想要的字节数"，只按缓冲区自身容量夹紧，
+ * **不感知 dest 有多大** —— 调用方若拿一个小于缓冲区的栈数组当 dest，就会越界写。
+ * 本函数把 dest_cap 当作硬上限，装不下就只拷贝 dest_cap 字节（返回值即拷出量）。
+ *
+ * 帧探测必须用本函数：帧长超过暂存区时，调用方据返回值判定"装不下"并整帧丢弃，
+ * 而不是让拷贝写穿暂存区。
+ */
+uint16_t rb_peek_capped(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t dest_cap,
+                        void *mutex);
+
 bool rb_peekc(const ring_buffer_t *rb, uint16_t offset, uint8_t *byte, void *mutex);
 uint16_t rb_peek(const ring_buffer_t *rb, uint16_t offset, uint8_t *dest, uint16_t len, void *mutex);
 

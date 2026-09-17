@@ -62,6 +62,7 @@ CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-common
 CFLAGS += -fno-exceptions
 CFLAGS += -fshort-enums
+CFLAGS += -MMD -MP   # emit <obj>.d header deps (consumed by -include at EOF)
 
 # ---- LDFLAGS ----
 LDSCRIPT  = Compiler/STM32F407XX_FLASH.ld
@@ -320,7 +321,9 @@ SRC_ALL = \
 OBJ_ALL = $(addprefix $(BUILD_DIR)/,$(SRC_ALL:.c=.o))
 
 # ---- Targets ----
-.PHONY: all clean
+# 注意: test 必须列为 .PHONY —— 工程里已有一个同名 test/ 目录，
+# 不加声明会被 make 当成"已存在且比依赖新"的文件而跳过配方。
+.PHONY: all clean test
 
 all: $(BUILD_DIR)/Project_STD.elf $(BUILD_DIR)/Project_STD.hex $(BUILD_DIR)/Project_STD.bin
 	@echo "==== Build complete ===="
@@ -345,3 +348,25 @@ $(BUILD_DIR)/%.o: %.c
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# ---- Host Unit Tests ----
+# 用 test/stubs 下的 cmsis_os2 替身，让生产源码（不替换、不改写）原样在 host 上编译。
+# ASan/UBSan 常开：缓冲区越界、未对齐访问这类缺陷在硬件上极难构造，在这里是必现的。
+HOSTCC      = cc
+TEST_CFLAGS = -std=gnu23 -g -O1 -Wall -Wextra -fsanitize=address,undefined \
+              -fno-omit-frame-pointer -I Kernel/Inc -I test/stubs
+TEST_BUILD  = build/test
+
+test: $(TEST_BUILD)/test_ring_buffer
+	@echo "---- run test_ring_buffer ----"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
+
+$(TEST_BUILD)/test_ring_buffer: Kernel/Src/ring_buffer.c test/test_ring_buffer.c test/stubs/os_stub.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^
+
+# ---- Header Dependencies ----
+# -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
+# header does not break the build. Without this, editing a header does not
+# trigger recompilation and "it builds" refers to a stale binary.
+-include $(OBJ_ALL:.o=.d)

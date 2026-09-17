@@ -9,6 +9,7 @@
 
 #include "app_render.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "text_cvt.h"
 #include "initcall.h"
@@ -21,12 +22,8 @@ typedef struct {
     uint32_t unit_size; /* 该三元组的总字节数 */
 } font_unit_t;
 
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
-
-/* 字库单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
-#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
-#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+/* 字库规模宏（N_ASC_CHARS / N_GBK_CHARS / ASC_UNIT / GBK_UNIT / FONT_LIB_TOTAL_BYTES）
+ * 定义于 app_render.h —— 持久化区要靠 FONT_LIB_TOTAL_BYTES 做容量契约。 */
 
 /* 字库描述表 — 顺序必须与 Flash 中字库单元的排列一致 */
 static const font_unit_t g_font_lib[] = {
@@ -137,13 +134,32 @@ static bool _is_gbk(uint8_t high, uint8_t low)
 static dev_display_t *s_render_display;
 static dev_storage_t *s_render_font;
 static uint32_t s_persist_addr;
+static bool     s_persist_ok; /**< 存储容量有效；false 时显存持久化整体禁用 */
 
 /* ---- 模块自注册，依赖storage和display模块）---- */
 static void _render_init(void)
 {
     s_render_display = dev_display_get();
     s_render_font    = dev_w25qxx_get();
-    s_persist_addr   = dev_storage_capacity(s_render_font) - 4096 * 2;
+
+    /* 运行期交叉校验：描述表实际求和必须等于编译期常量。
+     * app_render.h 的 _Static_assert 只能验公式，挡不住"g_font_lib[] 被手改一行"
+     * （例如某条硬编码了字节数、或加了字号却漏改 FONT_LIB_TOTAL_BYTES）——
+     * 那会让其后每个单元的 Flash 偏移整体错位，字库取到乱码。 */
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < sizeof(g_font_lib) / sizeof(g_font_lib[0]); i++)
+        sum += g_font_lib[i].unit_size;
+    if (sum != FONT_LIB_TOTAL_BYTES)
+        printf("[render] 字库描述表求和 %u != 编译期常量 %u，字库偏移已错位\n", (unsigned)sum,
+               (unsigned)FONT_LIB_TOTAL_BYTES);
+
+    /* 持久化区排在字库之后。容量 0 = 器件未识别或未响应（见 dev_w25qxx._jedec_capacity），
+     * 此时不能照常计算：0 - 8192 会回绕成 0xFFFFE000，读写落到器件地址空间之外。
+     * 容量不足以容纳字库时同理必须禁用——否则持久化区落在字库内部，首次擦写就毁掉字库。
+     * 地址 0 是字库区，不能拿来当"无效"哨兵，故另用标志位。 */
+    uint32_t cap   = dev_storage_capacity(s_render_font);
+    s_persist_ok   = (cap >= FONT_LIB_TOTAL_BYTES + 4096 * 2);
+    s_persist_addr = s_persist_ok ? (cap - 4096 * 2) : 0;
 }
 sw_app_initcall(_render_init);
 
@@ -381,7 +397,7 @@ void app_render(const render_cfg_t *cfg)
 void app_render_save(void)
 {
     dev_display_t *d = s_render_display;
-    if (!d || !s_render_font) return;
+    if (!d || !s_render_font || !s_persist_ok) return;
 
     uint16_t rows      = d->screen_rows;
     uint16_t cols      = d->screen_cols;
@@ -416,7 +432,7 @@ void app_render_save(void)
 bool app_render_restore(void)
 {
     dev_display_t *d = s_render_display;
-    if (!d || !s_render_font)
+    if (!d || !s_render_font || !s_persist_ok)
         return false;
 
     uint16_t rows      = d->screen_rows;
@@ -426,7 +442,7 @@ bool app_render_restore(void)
 
     static uint8_t buf[PERSIST_BUF_SIZE];
     if (dev_storage_read(s_render_font, s_persist_addr, buf,
-                         sizeof(render_persist_t) + bm_bytes) < 0)
+                         sizeof(render_persist_t) + bm_bytes) != 0)
         return false;
 
     render_persist_t *r = (render_persist_t *)buf;

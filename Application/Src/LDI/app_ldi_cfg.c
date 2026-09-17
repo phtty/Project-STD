@@ -7,12 +7,18 @@
 
 /* ---- LDI 配置在 W25Qxx 的存储地址（最后一个 4KB 扇区，避免与字库冲突） ---- */
 static uint32_t s_ldi_base;
+static bool     s_ldi_ok; /**< 存储容量有效；false 时所有访问返回失败 */
 
 /* ---- 初始化（sw_dev_initcall: 确保 dev_w25qxx 已初始化） ---- */
 static void _app_flash_ldi_storage_init(void)
 {
     dev_storage_t *w25 = dev_w25qxx_get();
-    s_ldi_base         = dev_storage_capacity(w25) - 4096;
+
+    /* 容量 0 = 器件未识别或未响应（见 dev_w25qxx._jedec_capacity）。
+     * 此时不能照常计算：0 - 4096 会回绕成 0xFFFFF000，读写落到器件地址空间之外。 */
+    uint32_t cap = dev_storage_capacity(w25);
+    s_ldi_ok     = (cap > 4096);
+    s_ldi_base   = s_ldi_ok ? (cap - 4096) : 0;
 }
 sw_dev_initcall(_app_flash_ldi_storage_init);
 
@@ -59,6 +65,7 @@ bool app_flash_ldi_is_config_valid(volatile const app_flash_ldi_record_t *rec)
  */
 int32_t app_flash_ldi_erase_config(void)
 {
+    if (!s_ldi_ok) return -1;
     return dev_storage_erase(app_flash_ldi_get_storage(), s_ldi_base, 4096);
 }
 
@@ -67,6 +74,7 @@ int32_t app_flash_ldi_erase_config(void)
  */
 int32_t app_flash_ldi_write_config(app_flash_ldi_record_t *rec)
 {
+    if (!s_ldi_ok) return -1;
     return dev_storage_write(app_flash_ldi_get_storage(), s_ldi_base, (uint8_t *)rec, sizeof(*rec));
 }
 
@@ -95,7 +103,12 @@ bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info)
     app_flash_ldi_record_t rec = {0};
     dev_storage_t *w25         = app_flash_ldi_get_storage();
 
-    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) < 0) {
+    if (!s_ldi_ok) {
+        memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
+        return false;
+    }
+
+    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) != 0) {
         memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
         return false;
     }
