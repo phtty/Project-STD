@@ -17,6 +17,7 @@
 #include "initcall.h"
 
 #include <string.h>
+#include "pl_task.h"
 
 #define AH_MQTT_PAYLOAD_MAX (533U) /* MQTT_FRAME_MAX_LEN */
 
@@ -127,8 +128,8 @@ void ah_mqtt_handle_task(void *argument)
     while (g_mqtt.state != MQTT_ST_READY) {
         osDelay(100);
     }
-    SignUpHandle = osThreadNew(SignUpTask, NULL, &SignUpTask_attributes);
-    ReportHandle = osThreadNew(ReportTask, NULL, &ReportTask_attributes);
+    SignUpHandle = pl_task_new(SignUpTask, NULL, &SignUpTask_attributes);
+    ReportHandle = pl_task_new(ReportTask, NULL, &ReportTask_attributes);
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_proto_ah_matt_queue, msg, NULL, osWaitForever)) {
@@ -253,7 +254,7 @@ void SignUpTask(void *argument)
     app_proto_bind(&s_ah_mqtt.base, app_mqtt_ccb());
 
     // 创建协议处理任务
-    g_ah_mqtt_task_handle = osThreadNew(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
+    g_ah_mqtt_task_handle = pl_task_new(ah_mqtt_handle_task, NULL, &ProtocolTask_attributes);
 }
 /* 保持注释：本模块当前不启用（app_mqtt_start 亦无调用者，MQTT 链路未激活）。 */
 // sw_app_initcall(ah_mqtt_module_init);

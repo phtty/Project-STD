@@ -16,6 +16,7 @@
 #include "pl_uart.h"
 #include "dev_rs232.h"
 #include "app_dispatch.h"
+#include "pl_task.h"
 
 #define RS232_BUF_SIZE (2048U)
 
@@ -131,7 +132,7 @@ static osThreadId_t rs232_start(rs232_ccb_t *self, pl_uart_handle_t uart, uint8_
     self->rx_buf      = dev_rs232_get_buf(buf_index);
     self->rx_buf_size = RS232_BUF_SIZE;
     self->rx_attr     = rx_attr;
-    return osThreadNew(rs232_task, self, attr);
+    return pl_task_new(rs232_task, self, attr);
 }
 
 osThreadId_t app_rs232_start(void)

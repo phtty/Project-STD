@@ -15,6 +15,7 @@
 #include "app_udp.h"
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
+#include "pl_task.h"
 
 /* ---- proto_iap_queue 静态分配 ---- */
 #define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
@@ -65,7 +66,7 @@ static_assert(IAP_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "IAP 最长帧超过框架�
     app_proto_bind(&s_iap_pcb, app_udp_ccb());
 
     /* 创建协议处理任务 */
-    g_iap_task_handle = osThreadNew(iap_handle_task, nullptr, &iap_task_attr);
+    g_iap_task_handle = pl_task_new(iap_handle_task, nullptr, &iap_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，移动源文件即改变，

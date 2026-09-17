@@ -17,6 +17,7 @@ virtualFolder:
         - path: Application/Src/app_test.c
         - path: Application/Src/app_factory_test.c
         - path: Application/Src/app_cfg_sched.c
+        - path: Application/Src/app_diag.c
       folders:
         - name: channel
           files:
@@ -260,6 +261,7 @@ virtualFolder:
       files:
         - path: Platform/Src/pl_gpio.c
         - path: Platform/Src/pl_rtt.c
+        - path: Platform/Src/pl_task.c
         - path: Platform/Src/pl_net.c
         - path: Platform/Src/pl_eth.c
         - path: Platform/Src/pl_crc.c

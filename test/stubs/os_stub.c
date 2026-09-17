@@ -257,3 +257,12 @@ uint32_t osKernelGetTickCount(void)
 {
     return (uint32_t)now_ms();
 }
+
+/* ---- FreeRTOS 侧 ---- */
+
+/** 真机返回 heap_4 的可用字节数（pl_task.c 在任务创建失败时打进日志）。
+ *  host 上没有堆管理器，返回一个固定值 —— 被测逻辑只把它当数字打出来。 */
+size_t xPortGetFreeHeapSize(void)
+{
+    return 32768U;
+}

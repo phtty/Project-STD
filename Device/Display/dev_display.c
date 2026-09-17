@@ -12,6 +12,7 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_tim.h"
+#include "pl_task.h"
 
 /* ---- 扫描任务事件 ---- */
 static osEventFlagsId_t s_scan_evt;
@@ -93,7 +94,7 @@ void dev_display_start(void)
         .stack_size = 512,
         .priority   = osPriorityRealtime,
     };
-    osThreadNew(scan_task, dev, &attr);
+    pl_task_new(scan_task, dev, &attr);
 }
 sw_dev_initcall(dev_display_start);
 

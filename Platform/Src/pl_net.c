@@ -13,6 +13,7 @@
 #include "pl_net_adapt.h"
 #include "pl_eth.h"
 #include <string.h>
+#include "pl_task.h"
 
 /* ================================================================
  *  链路状态监听器列表 — 上层注册，链路变化时遍历通知
@@ -72,7 +73,7 @@ void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gatew
     attributes.name       = "EthLink";
     attributes.stack_size = INTERFACE_THREAD_STACK_SIZE;
     attributes.priority   = osPriorityBelowNormal;
-    osThreadNew(ethernet_link_thread, &gnetif, &attributes);
+    pl_task_new(ethernet_link_thread, &gnetif, &attributes);
 }
 
 /* ================================================================

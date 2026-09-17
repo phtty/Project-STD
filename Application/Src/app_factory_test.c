@@ -13,6 +13,7 @@
 #include "app_render.h"
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
+#include "pl_task.h"
 
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
 #define PROGRAM_CODE "9210209C41"
@@ -174,7 +175,7 @@ static void _factory_test_init(void)
         .stack_size = 512 * 4,
         .priority   = osPriorityBelowNormal,
     };
-    g_factory_test = osThreadNew(factory_monitor_task, NULL, &attr);
+    g_factory_test = pl_task_new(factory_monitor_task, NULL, &attr);
 }
 
 static void _factory_module_init(void)

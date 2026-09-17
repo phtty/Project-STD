@@ -5,6 +5,7 @@
 #include "bcc_utils.h"
 #include "app_rls_cmd.h"
 #include "app_rs485.h"
+#include "pl_task.h"
 
 /* ---- proto_rls_queue 静态分配 ---- */
 #define RLS_PAYLOAD_MAX (530U) /* 帧头(6B) + bitmap(512B) + BCC(1B) + 尾(2B) + 余量 */
@@ -148,7 +149,7 @@ static_assert(RLS_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "RLS 最长帧超过框架�
 
     app_proto_bind(&s_rls_pcb, app_rs485_ccb());
 
-    g_rls_task_handle = osThreadNew(rls_handle_task, nullptr, &rls_task_attr);
+    g_rls_task_handle = pl_task_new(rls_handle_task, nullptr, &rls_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */

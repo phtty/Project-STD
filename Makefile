@@ -244,12 +244,14 @@ SRC_KERNEL = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/bit_utils.c \
 	Kernel/Src/crc_utils.c \
+	Kernel/Src/bcc_utils.c \
 	Kernel/Src/text_cvt.c
 
 # Platform（仅含无冲突的文件，其他在 Phase 3 逐步加入）
 SRC_PLATFORM = \
 	Platform/Src/pl_gpio.c \
 	Platform/Src/pl_rtt.c \
+	Platform/Src/pl_task.c \
 	Platform/Src/pl_exti.c \
 	Platform/Src/pl_net.c \
 	Platform/Src/pl_eth.c \
@@ -289,6 +291,7 @@ SRC_APPLICATION = \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_render.c \
 	Application/Src/app_cfg_sched.c \
+	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
 	Application/Src/IAP/app_iap.c \
@@ -397,6 +400,7 @@ TEST_DISPATCH_SRCS = \
 	test/stubs/os_stub.c \
 	test/test_dispatch.c \
 	Application/Src/app_dispatch.c \
+	Platform/Src/pl_task.c \
 	Kernel/Src/ring_buffer.c
 
 # 套件三：协议探针（IAP / LDI / RLS 真探针，各自独立 TU）
@@ -404,6 +408,7 @@ TEST_PROBES_SRCS = \
 	test/stubs/os_stub.c \
 	test/stubs/pl_crc_stub.c \
 	test/test_probes.c \
+	Platform/Src/pl_task.c \
 	Application/Src/IAP/app_iap.c \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/RLS/app_rls.c \

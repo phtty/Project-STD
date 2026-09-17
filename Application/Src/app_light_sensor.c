@@ -7,6 +7,7 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
+#include "pl_task.h"
 
 static light_sensor_dev_t s_sensor_dev;
 osThreadId_t g_light_sensor_task_handle;
@@ -29,7 +30,7 @@ void app_light_sensor_init(void)
         .stack_size = 128 * 4,
         .priority   = osPriorityLow,
     };
-    g_light_sensor_task_handle = osThreadNew(app_light_sensor_task, NULL, &attr);
+    g_light_sensor_task_handle = pl_task_new(app_light_sensor_task, NULL, &attr);
 }
 sw_app_initcall(app_light_sensor_init);
 

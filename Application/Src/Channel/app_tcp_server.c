@@ -16,6 +16,7 @@
 
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
+#include "pl_task.h"
 
 #define TCP_SERVER_PORT 9528
 
@@ -109,7 +110,7 @@ void tcp_server_task(void *argument)
 
         /* 派生 conn 任务 */
         while (osSemaphoreAcquire(s_disconnect_sem, 0) == osOK);
-        osThreadId_t tid = osThreadNew(tcp_server_conn_task, newconn, &tcp_server_conn_attr);
+        osThreadId_t tid = pl_task_new(tcp_server_conn_task, newconn, &tcp_server_conn_attr);
 
         if (tid != NULL) {
             osSemaphoreAcquire(s_disconnect_sem, osWaitForever);

@@ -12,6 +12,7 @@
 #include "app_udp.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
+#include "pl_task.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
 #define LDI_DATA_MAX  (512U)                                     /**< DATA 域最大长度 */
@@ -162,8 +163,8 @@ static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂
     g_ldi.tx_lock                    = osMutexNew(&tx_lock_attr);
 
     // 创建协议相关处理任务
-    g_ldi_task_handle       = osThreadNew(ldi_handle_task, nullptr, &ldi_task_attr);
-    g_ldi_timer_task_handle = osThreadNew(ldi_timer_task, nullptr, &ldi_timer_task_attr);
+    g_ldi_task_handle       = pl_task_new(ldi_handle_task, nullptr, &ldi_task_attr);
+    g_ldi_timer_task_handle = pl_task_new(ldi_timer_task, nullptr, &ldi_timer_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */

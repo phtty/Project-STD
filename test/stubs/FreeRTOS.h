@@ -40,6 +40,10 @@ typedef int BaseType_t;
 typedef unsigned int UBaseType_t;
 typedef unsigned int TickType_t;
 
+/** pl_task.c 在创建失败时把它打进日志（真机是 FreeRTOS 的可用堆字节数）。
+ *  host 上返回一个固定值即可 —— 测试不依赖它的具体数值，只要求符号存在。 */
+size_t xPortGetFreeHeapSize(void);
+
 #define pdTRUE  ((BaseType_t)1)
 #define pdFALSE ((BaseType_t)0)
 #define pdPASS  pdTRUE

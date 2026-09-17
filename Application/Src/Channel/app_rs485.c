@@ -15,6 +15,7 @@
 #include "pl_uart.h"
 #include "dev_rs485.h"
 #include "app_dispatch.h"
+#include "pl_task.h"
 
 #define RS485_BUF_SIZE (2048U)
 
@@ -105,5 +106,5 @@ osThreadId_t app_rs485_start(void)
         .stack_size = 256 * 4,
         .priority   = osPriorityNormal,
     };
-    return osThreadNew(rs485_task, self, &rs485_task_attr);
+    return pl_task_new(rs485_task, self, &rs485_task_attr);
 }

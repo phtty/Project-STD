@@ -20,6 +20,7 @@
 #include "initcall.h"
 
 #include <string.h>
+#include "pl_task.h"
 
 /* frame_msg_t 的 data 必须 4 字节对齐：探针会把 scratch 直接 cast 成
  * uint32 字段的帧结构体（如 IAP）访问。 */
@@ -119,7 +120,7 @@ void app_dispatch_init(void)
         .stack_size = 256 * 4,
         .priority   = osPriorityNormal,
     };
-    g_dispatch_task_handle = osThreadNew(frame_dispatch_task, nullptr, &frame_dispatch_task_attr);
+    g_dispatch_task_handle = pl_task_new(frame_dispatch_task, nullptr, &frame_dispatch_task_attr);
 }
 sw_app_initcall(app_dispatch_init);
 

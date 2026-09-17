@@ -23,6 +23,7 @@
 #include "app_test.h"
 #include "app_key.h"
 #include "app_render.h"
+#include "pl_task.h"
 
 static void init_task(void *argument);
 
@@ -58,7 +59,7 @@ void app_boot(void)
     };
 
     osKernelInitialize();
-    osThreadNew(init_task, NULL, &attr);
+    pl_task_new(init_task, NULL, &attr);
     osKernelStart();
 }
 
@@ -98,7 +99,7 @@ static void init_task(void *argument)
         .stack_size = 128 * 4,
         .priority   = osPriorityLow,
     };
-    osThreadNew(half_sec_task, NULL, &hst_attr);
+    pl_task_new(half_sec_task, NULL, &hst_attr);
 
     app_tcp_server_start();
     app_tcp_client_start();

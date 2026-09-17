@@ -12,6 +12,7 @@
 #include "app_tcp_client.h"
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
+#include "pl_task.h"
 
 /* ---- 信号量 ---- */
 osSemaphoreId_t client_disconnect_sem;
@@ -110,7 +111,7 @@ void tcp_client_task(void *argument)
 
                 while (osSemaphoreAcquire(client_disconnect_sem, 0) == osOK);
 
-                osThreadId_t tid = osThreadNew(tcp_client_conn_task, conn, &tcp_client_conn_attr);
+                osThreadId_t tid = pl_task_new(tcp_client_conn_task, conn, &tcp_client_conn_attr);
                 if (tid != NULL)
                     osSemaphoreAcquire(client_disconnect_sem, osWaitForever);
 

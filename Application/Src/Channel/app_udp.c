@@ -12,6 +12,7 @@
 #include "app_dispatch.h"
 #include "pl_net.h"
 #include "pl_net_adapt.h"
+#include "pl_task.h"
 
 /* ---- 配置 ---- */
 static uint16_t g_udp_port = 10011; /**< IAP 升级通道 */
@@ -137,7 +138,7 @@ void udp_task(void *argument)
         if (err == ERR_OK) {
             while (osSemaphoreAcquire(udp_disconnect_sem, 0) == osOK);
 
-            osThreadId_t tid = osThreadNew(udp_connect_task, conn, &udp_connect_attr);
+            osThreadId_t tid = pl_task_new(udp_connect_task, conn, &udp_connect_attr);
             if (tid != NULL)
                 osSemaphoreAcquire(udp_disconnect_sem, osWaitForever);
         }
