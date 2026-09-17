@@ -6,13 +6,14 @@
 #include "app_rls_cmd.h"
 #include "app_rs485.h"
 #include "pl_task.h"
+#include "pl_mem.h"
 
 /* ---- proto_rls_queue 静态分配 ---- */
 #define RLS_PAYLOAD_MAX (530U) /* 帧头(6B) + bitmap(512B) + BCC(1B) + 尾(2B) + 余量 */
 #define RLS_MSG_SIZE    (sizeof(frame_msg_t) + RLS_PAYLOAD_MAX)
 
 static StaticQueue_t s_rls_queue_cb;
-static uint8_t s_rls_queue_buf[2 * RLS_MSG_SIZE];
+static uint8_t s_rls_queue_buf[2 * RLS_MSG_SIZE] PL_CCMRAM;
 static const osMessageQueueAttr_t s_rls_queue_attr = {
     .name    = "proto_rls_queue",
     .cb_mem  = &s_rls_queue_cb,
@@ -126,7 +127,7 @@ pcb_probe_sta_t rls_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
  * 承载 RS485（DMA 单次可达 2048）。容量须**严格大于**单次最大写入：
  * ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），取相等值时
  * 恰好满的那一次会静默截掉最后一个字节。 */
-RB_DEFINE(s_rls_rb, 2112); /**< max(2 × 最长帧 530, 单次最大写入 2048 + 1) */
+RB_DEFINE_ATTR(s_rls_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 530, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_rls_ops = {.probe = rls_probe_frame};
 

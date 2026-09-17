@@ -16,13 +16,14 @@
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
 #include "pl_task.h"
+#include "pl_mem.h"
 
 /* ---- proto_iap_queue 静态分配 ---- */
 #define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
 #define IAP_MSG_SIZE (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
 
 static StaticQueue_t s_iap_queue_cb;
-static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE];
+static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE] PL_CCMRAM;
 static const osMessageQueueAttr_t s_iap_queue_attr = {
     .name    = "proto_iap_queue",
     .cb_mem  = &s_iap_queue_cb,
@@ -36,7 +37,7 @@ static const osMessageQueueAttr_t s_iap_queue_attr = {
  * （rb_space = size - avail - 1），所以装下 N 字节需要 size ≥ N+1。取相等的值会
  * 让 rb_write 静默截掉尾巴那一字节，帧尾被切 → CRC 失败 → 整帧丢。
  * 本协议承载 RS485/RS232（DMA 单次可达 2048）与 UDP，故取 2112 = 2048 + 余量。 */
-RB_DEFINE(s_iap_rb, 2112); /**< max(2 × 最长帧 1044, 单次最大写入 2048 + 1) */
+RB_DEFINE_ATTR(s_iap_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 1044, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_iap_ops = {.probe = iap_probe_frame};
 

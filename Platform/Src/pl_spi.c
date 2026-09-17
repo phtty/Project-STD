@@ -6,6 +6,8 @@
 #include "pl_spi.h"
 #include "spi.h"
 #include "initcall.h"
+#include <stdio.h>
+#include "pl_mem.h"
 
 typedef struct {
     SPI_HandleTypeDef *hspi;
@@ -71,6 +73,14 @@ int32_t pl_spi_receive_dma(pl_spi_handle_t h, uint8_t *data, uint16_t size)
 {
     spi_ctx_t *ctx = (spi_ctx_t *)h;
     if (!ctx || !ctx->hspi) return -1;
+
+    /* DMA 够不到 CCMRAM：放进去不会报错，只是收到的数据不对，而且往往很久以后
+       才被发现。这里当场拦下 —— 见 pl_mem.h。 */
+    if (!pl_mem_is_dma_capable(data, size)) {
+        printf("[pl_spi] DMA 目标落在 CCMRAM，DMA 不可达（buf=%p len=%u）\n", (void *)data,
+               (unsigned)size);
+        return -1;
+    }
     return (HAL_SPI_Receive_DMA(ctx->hspi, data, size) == HAL_OK) ? 0 : -1;
 }
 

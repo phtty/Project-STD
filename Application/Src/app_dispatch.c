@@ -18,6 +18,7 @@
 #include "task.h" /* configASSERT 用到 taskDISABLE_INTERRUPTS */
 #include "cmsis_os2.h"
 #include "initcall.h"
+#include "pl_mem.h"
 
 #include <string.h>
 #include "pl_task.h"
@@ -64,7 +65,7 @@ static const osMessageQueueAttr_t s_ccb_queue_attr = {
  * ================================================================ */
 
 static uint8_t _msg_dispatch_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN]
-    __attribute__((aligned(4)));
+    __attribute__((aligned(4))) PL_CCMRAM;
 
 /* ================================================================
  *  调度上下文

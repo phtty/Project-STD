@@ -11,6 +11,8 @@
 #include "usart.h"
 #include "dma.h"
 #include "initcall.h"
+#include "pl_mem.h"
+#include <stdio.h>
 #include <string.h>
 
 /* DMA 句柄（定义在 Core/Src/dma.c） */
@@ -95,6 +97,14 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
 {
     uart_ctx_t *ctx = (uart_ctx_t *)h;
     if (!ctx || !ctx->huart) return -1;
+
+    /* DMA 够不到 CCMRAM（见 pl_mem.h）：放进去不会报错，只是收到的数据不对。
+       这里当场拦下。 */
+    if (!pl_mem_is_dma_capable(buf, len)) {
+        printf("[pl_uart] DMA 接收缓冲落在 CCMRAM，DMA 不可达（buf=%p len=%u）\n",
+               (void *)buf, (unsigned)len);
+        return -1;
+    }
 
     ctx->rx_buf      = buf;
     ctx->rx_buf_size = len;

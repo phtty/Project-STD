@@ -30,13 +30,14 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_task.h"
+#include "pl_mem.h"
 
 #define APP_DIAG_INTERVAL_S (30U) /**< 打印周期（秒）*/
 #define APP_DIAG_TASK_MAX   (24U) /**< 最多列出多少个任务 */
 
 /* 放静态而不是栈上：诊断任务不该为了这份数组占 2KB 栈，
    否则它自己的栈高水位反而失去参考价值。 */
-static TaskStatus_t s_tasks[APP_DIAG_TASK_MAX];
+static TaskStatus_t s_tasks[APP_DIAG_TASK_MAX] PL_CCMRAM;
 
 static void _diag_dump(void)
 {

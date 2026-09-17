@@ -13,6 +13,7 @@
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_task.h"
+#include "pl_mem.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
 #define LDI_DATA_MAX  (512U)                                     /**< DATA 域最大长度 */
@@ -20,7 +21,7 @@
 #define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_FRAME_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
-static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE];
+static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE] PL_CCMRAM;
 static const osMessageQueueAttr_t s_ldi_queue_attr = {
     .name    = "proto_ldi_queue",
     .cb_mem  = &s_ldi_queue_cb,
@@ -127,7 +128,7 @@ void ldi_ctx_init(ldi_ctx_t *self)
  * 投递的是传输层一整段读数（TCP 单段 ≤1460、UDP ≤1472），比它小的 RB 会被 rb_write 截断。
  * **+1 是必须的**：ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），
  * 容量取成与单次写入相等时，恰好满的那一次会静默丢掉最后一个字节。 */
-RB_DEFINE(s_ldi_rb, 2112); /**< max(2 × 最长帧 522, 单次最大写入 2048 + 1) */
+RB_DEFINE_ATTR(s_ldi_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 522, 单次最大写入 2048 + 1) */
 
 static const pcb_ops_t s_ldi_ops = {.probe = ldi_probe_frame};
 
