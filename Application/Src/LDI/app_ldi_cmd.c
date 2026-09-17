@@ -415,10 +415,12 @@ void cmd_set_ip(ccb_t *ccb, void *data)
     memcpy(g_ldi.cfg.gateway, info->net.gateway, sizeof(g_ldi.cfg.gateway));
     g_ldi.cfg_valid = true;
 
-    app_flash_ldi_save_config(&g_ldi.cfg);
+    /* 落盘结果要回报给上位机：此前保存接口是 void、状态字节恒为成功，
+       现场表现是"设置返回成功、重启却变回旧值"，且无从查起。 */
+    int32_t save_sta = app_flash_ldi_save_config(&g_ldi.cfg);
     app_flash_iap_update_net_cfg(g_ldi.cfg.device_ip, g_ldi.cfg.netmask, g_ldi.cfg.gateway);
 
-    ldi_status_rsp_t rsp = {.status = 0x00};
+    ldi_status_rsp_t rsp = {.status = (save_sta == 0) ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_IP_RSP);
     LDI_RESPOND(ccb, LDI_CMD_SET_IP_RSP, g_ldi.rsp_seq, rsp);
 }
@@ -478,10 +480,12 @@ static void cmd_set_config(ccb_t *ccb, void *data)
         ptr += mod_size;
     }
 
+    /* 解析成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效 */
+    int32_t save_sta = 0;
     if (result)
-        app_flash_ldi_save_config(&g_ldi.cfg);
+        save_sta = app_flash_ldi_save_config(&g_ldi.cfg);
 
-    ldi_status_rsp_t rsp = {.status = result ? 0x00 : 0x01};
+    ldi_status_rsp_t rsp = {.status = (result && save_sta == 0) ? 0x00 : 0x01};
     ldi_build_rsp_head(&rsp.head, LDI_CMD_SET_PARA_RSP);
     LDI_RESPOND(ccb, LDI_CMD_SET_PARA_RSP, g_ldi.rsp_seq, rsp);
 }

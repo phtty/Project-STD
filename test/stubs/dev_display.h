@@ -19,8 +19,8 @@
  * 填成：
  *     P20_SCREEN_ROWS = P20_MODULE_ROWS(8) * P20_MODULE_PIXEL_ROW(16) = 128
  *     P20_SCREEN_COLS = P20_MODULE_COLS(4) * P20_MODULE_PIXEL_COL(8)  = 32
- * **该文件宏旁的 `/* 16 *​/` 类注释是过期的，别照抄注释** —— 以 `.screen_rows =`
- * 的实际赋值为准（本工程正是 128 × 32）。
+ * **该文件里宏定义旁边的过期注释不要照抄**（例如把 SCREEN_ROWS 注释成 16，
+ *   实际是 8 × 16 = 128）—— 以 `.screen_rows =` 的实际赋值为准（本工程是 128 × 32）。
  */
 
 #pragma once

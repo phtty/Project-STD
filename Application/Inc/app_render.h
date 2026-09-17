@@ -120,18 +120,36 @@ typedef struct {
 /** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现 */
 void app_render(const render_cfg_t *cfg);
 
-/* ---- 持久化显示 ---- */
-
-#define RENDER_PERSIST_MAGIC (0x0d000721U)
+/* ---- 持久化显示 ----
+ *
+ * 归属（注册名 "render_persist"）、格式版本、长度、CRC32 由配置记录头统一管理
+ * （见 Device/Inc/cfg_record.h），本结构只承载"渲染状态"本身。 */
 
 typedef struct [[gnu::packed]] {
-    uint32_t magic;
     uint16_t screen_rows;
     uint16_t screen_cols;
-    uint8_t  color;         /* 非黑像素颜色 (display_color_t) */
-    uint32_t crc32;         /* bitmap 数据的 CRC32 */
-    uint8_t  bitmap[];      /* ((rows*cols+7)/8) 字节, MSB first per row */
+    uint8_t  color;    /* 非黑像素颜色 (display_color_t) */
+    uint8_t  bitmap[]; /* (cols × ((rows+7)/8)) 字节, MSB first per row */
 } render_persist_t;
+
+/** 记录格式版本。布局变更时 +1 —— 版本不符会被判为记录失效、回落默认，
+ *  而不是让记录搬家（见 app_cfg_sched.c 的扫描认领）。 */
+#define RENDER_PERSIST_VERSION (1U)
+
+/**
+ * @brief 位图区上限（字节）—— 本工程树内最大显示模组的 1bpp 位图
+ *
+ * P10 2200001703（10×4 个 32×16 模组 → screen_rows=320, screen_cols=64）:
+ *   ((320 + 7) / 8) × 64 = 40 × 64 = 2560
+ *
+ * 本工程的真 dev_display.h 里**没有**编译期几何宏（尺寸是运行期从 dev_display_t 读的），
+ * 所以这里只能取"全工程最大值"这个常量，由 app_render_save 在写入前按运行期几何
+ * 检查来兜底。新增更大的模组时这里与 CFG_RECORD_MAX_IMAGE 都要跟着调 ——
+ * 两者的一致性由 app_cfg_sched.h 的 _Static_assert 守住。 */
+#define RENDER_PERSIST_BITMAP_MAX (2560U)
+
+/** @brief 显存持久化载荷上限 = 位图上限 + 头部(5B) */
+#define RENDER_PERSIST_PAYLOAD_MAX (sizeof(render_persist_t) + RENDER_PERSIST_BITMAP_MAX)
 
 /** @brief 将当前显存写入存储设备持久化扇区 */
 void app_render_save(void);

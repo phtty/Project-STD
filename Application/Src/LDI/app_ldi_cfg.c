@@ -1,123 +1,99 @@
+/**
+ * @file    app_ldi_cfg.c
+ * @brief   LDI 配置持久化 — W25Qxx 尾部配置区（由配置调度器管理）
+ *
+ * 记录格式：cfg_record 24B 头 {name[16], version, len, crc32} + 46B 载荷。
+ * 归属/地址/组包/去重/擦写都由调度器处理，本模块只关心载荷语义。
+ *
+ * 协议边界：本模块只操作 LDI 自己的配置，不引用、不读写其他协议的任何存储。
+ */
+
+#include <stdio.h>
 #include <string.h>
+
 #include "app_ldi_cfg.h"
 
-#include "pl_crc.h"
-#include "dev_w25qxx.h"
+#include "cfg_record.h"
+#include "app_cfg_sched.h"
 #include "initcall.h"
 
-/* ---- LDI 配置在 W25Qxx 的存储地址（最后一个 4KB 扇区，避免与字库冲突） ---- */
-static uint32_t s_ldi_base;
-static bool     s_ldi_ok; /**< 存储容量有效；false 时所有访问返回失败 */
-
-/* ---- 初始化（sw_dev_initcall: 确保 dev_w25qxx 已初始化） ---- */
-static void _app_flash_ldi_storage_init(void)
-{
-    dev_storage_t *w25 = dev_w25qxx_get();
-
-    /* 容量 0 = 器件未识别或未响应（见 dev_w25qxx._jedec_capacity）。
-     * 此时不能照常计算：0 - 4096 会回绕成 0xFFFFF000，读写落到器件地址空间之外。 */
-    uint32_t cap = dev_storage_capacity(w25);
-    s_ldi_ok     = (cap > 4096);
-    s_ldi_base   = s_ldi_ok ? (cap - 4096) : 0;
-}
-sw_dev_initcall(_app_flash_ldi_storage_init);
-
-dev_storage_t *app_flash_ldi_get_storage(void)
-{
-    return dev_w25qxx_get();
-}
-
-// app_flash_ldi_record_t: magic(4) + cfg(106) + padding(2) + crc32(4) = 116 byte = 29 words
-#define FLASH_WORD_COUNT ((sizeof(app_flash_ldi_record_t) + 3) / 4)
-
 /* ================================================================
- *  实现
+ *  加载
  * ================================================================ */
 
-/**
- * @brief 判断 Flash 配置项是否为空（或 0xFF 默认值）
- */
-bool app_flash_ldi_is_config_empty(volatile const app_flash_ldi_record_t *rec)
+static uint8_t s_cfg_id = 0xFF; /* 调度器注册句柄 */
+static app_flash_ldi_cfg_info_t s_loaded_cfg;
+static bool s_loaded_valid;
+static bool s_load_done;
+
+static void _ldi_cfg_load(void)
 {
-    if (rec->magic == 0xFFFFFFFF && rec->crc32 == 0xFFFFFFFF)
-        return true;
-    return false;
+    /* 两个入口都会走到这里：本模块被首次用到时的按需加载，以及调度器的启动
+       加载遍。谁先到谁生效，后到的直接返回——避免白读一遍 Flash（24B 头 +
+       46B 载荷外加一次 CRC）。两条路径都保留，是为了让 LDI 不依赖加载遍的时机：
+       本模块的调用方在 sw_post(4)，而加载遍在 sw_app(3)，二者顺序其实有保证，
+       但同层 initcall 的顺序取决于链接顺序，不该被依赖（见 initcall.h）。 */
+    if (s_load_done) return;
+
+    /* 注册失败（重名/满员）是本次上电的确定状态，重试没有意义 */
+    if (s_cfg_id == 0xFF) {
+        s_load_done = true;
+        return;
+    }
+
+    s_loaded_valid = false;
+    memset(&s_loaded_cfg, 0, sizeof(s_loaded_cfg));
+
+    uint16_t      rec_len = 0;
+    cfg_rec_sta_t sta     = app_cfg_sched_load(s_cfg_id, (uint8_t *)&s_loaded_cfg,
+                                               sizeof(s_loaded_cfg), &rec_len);
+
+    /* **只在"问到了答案"时置位**：IO_ERR 表示这次没读到（器件未识别、调度器
+     * 尚未就绪），那不是"配置不存在"。把它一起缓存会让本上电周期内永远返回默认
+     * 值且再无重试机会。EMPTY/INVALID 是确定性的判断，可以缓存。 */
+    if (sta != CFG_REC_IO_ERR) s_load_done = true;
+
+    if (sta == CFG_REC_OK && rec_len == sizeof(s_loaded_cfg)) s_loaded_valid = true;
 }
 
-/**
- * @brief 验证 Flash 配置校验值 (magic + CRC32)
- */
-bool app_flash_ldi_is_config_valid(volatile const app_flash_ldi_record_t *rec)
-{
-    if (rec->magic != APP_FLASH_LDI_MAGIC)
-        return false;
-
-    /* CRC 校验覆盖 magic + 配置，不包含 crc32 自身 */
-    uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)rec, (FLASH_WORD_COUNT - 1) * 4);
-    if (rec->crc32 != crc)
-        return false;
-
-    return true;
-}
-
-/**
- * @brief 擦除 W25Qxx 中 LDI 配置所在扇区（最后一个 4KB 扇区）
- */
-int32_t app_flash_ldi_erase_config(void)
-{
-    if (!s_ldi_ok) return -1;
-    return dev_storage_erase(app_flash_ldi_get_storage(), s_ldi_base, 4096);
-}
-
-/**
- * @brief 将 app_flash_ldi_record_t 写入 W25Qxx
- */
-int32_t app_flash_ldi_write_config(app_flash_ldi_record_t *rec)
-{
-    if (!s_ldi_ok) return -1;
-    return dev_storage_write(app_flash_ldi_get_storage(), s_ldi_base, (uint8_t *)rec, sizeof(*rec));
-}
-
-/**
- * @brief 保存 LDI 配置信息至 Flash（用于出厂时预置）
- */
-void app_flash_ldi_save_config(app_flash_ldi_cfg_info_t *info)
-{
-    app_flash_ldi_record_t rec = {0};
-    rec.magic                  = APP_FLASH_LDI_MAGIC;
-    memcpy(&rec.cfg, info, sizeof(app_flash_ldi_cfg_info_t));
-    rec.crc32 = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)&rec, (FLASH_WORD_COUNT - 1) * 4);
-
-    app_flash_ldi_erase_config();
-    app_flash_ldi_write_config(&rec);
-}
-
-/**
- * @brief 从 W25Qxx 加载 LDI 配置信息
- * @param info  输出参数，有效配置写入此处
- * @return true  读取到有效配置
- * @return false 配置为空/校验失败/读取错误
- */
 bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info)
 {
-    app_flash_ldi_record_t rec = {0};
-    dev_storage_t *w25         = app_flash_ldi_get_storage();
+    if (!s_load_done) _ldi_cfg_load();
 
-    if (!s_ldi_ok) {
+    if (!s_loaded_valid) {
         memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
         return false;
     }
-
-    if (dev_storage_read(w25, s_ldi_base, (uint8_t *)&rec, sizeof(rec)) != 0) {
-        memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
-        return false;
-    }
-
-    if (app_flash_ldi_is_config_empty(&rec) || !app_flash_ldi_is_config_valid(&rec)) {
-        memset(info, 0, sizeof(app_flash_ldi_cfg_info_t));
-        return false;
-    }
-
-    memcpy(info, &rec.cfg, sizeof(app_flash_ldi_cfg_info_t));
+    memcpy(info, &s_loaded_cfg, sizeof(app_flash_ldi_cfg_info_t));
     return true;
 }
+
+/* ================================================================
+ *  保存
+ * ================================================================ */
+
+int32_t app_flash_ldi_save_config(const app_flash_ldi_cfg_info_t *info)
+{
+    int32_t sta = app_cfg_sched_save(s_cfg_id, (const uint8_t *)info, sizeof(*info));
+    if (sta != 0)
+        printf("[ldi_cfg] 保存失败（%u 字节）\n", (unsigned)sizeof(*info));
+    return sta;
+}
+
+/* ================================================================
+ *  调度器自注册（sw_dev：早于 sw_app(3) 的启动加载遍）
+ * ================================================================ */
+
+static const cfg_sched_desc_t s_ldi_cfg_desc = {
+    .name    = "ldi_cfg",
+    .version = APP_FLASH_LDI_VERSION,
+    .load    = _ldi_cfg_load,
+};
+
+static void _app_flash_ldi_cfg_register(void)
+{
+    s_cfg_id = app_cfg_sched_register(&s_ldi_cfg_desc);
+    if (s_cfg_id == 0xFF)
+        printf("[ldi_cfg] 配置所有者注册失败，本次上电配置不生效\n");
+}
+sw_dev_initcall(_app_flash_ldi_cfg_register);

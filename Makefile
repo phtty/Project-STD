@@ -275,6 +275,7 @@ SRC_DEVICE = \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
+	Device/Storage/cfg_record.c \
 	Device/Network/dev_dp83848.c \
 	Device/Network/dev_eth.c \
 	Device/Comm/dev_rs485.c \
@@ -287,6 +288,7 @@ SRC_APPLICATION = \
 	Application/Src/app_boot.c \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_render.c \
+	Application/Src/app_cfg_sched.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
 	Application/Src/IAP/app_iap.c \
@@ -408,7 +410,22 @@ TEST_PROBES_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
-test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes
+# 套件四：配置调度器（记录读写 + W25Qxx 尾部配置区的块位扫描）
+# os_stub 提供 osMutexNew/Acquire/Release（调度器里那把串行化 save 的锁；host 上
+# _cfg_sched_init 未被执行，s_lock 为 NULL，调用点都带空守卫）。
+# dev_w25qxx_get() 的桩与假 Flash 在测试文件里。
+# 注意：**不要**把 Application/Src/LDI/app_ldi_cfg.c 列进来 —— 测试文件直接
+# include 了它的实现 TU（为了触达 static 的注册入口，见测试文件顶部说明），
+# 重复编译会符号重定义。
+TEST_CFG_SCHED_SRCS = \
+	test/stubs/os_stub.c \
+	test/test_cfg_sched.c \
+	Device/Storage/cfg_record.c \
+	Application/Src/app_cfg_sched.c \
+	Kernel/Src/crc_utils.c
+
+test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
+      $(TEST_BUILD)/test_cfg_sched
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -417,6 +434,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 协议探针 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_probes
+	@echo ""
+	@echo "──── 配置调度器 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cfg_sched
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -427,6 +447,10 @@ $(TEST_BUILD)/test_dispatch: $(TEST_DISPATCH_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_probes: $(TEST_PROBES_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cfg_sched: $(TEST_CFG_SCHED_SRCS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
 

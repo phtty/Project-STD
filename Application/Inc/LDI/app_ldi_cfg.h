@@ -1,12 +1,18 @@
 #pragma once
 
 #include <stdint.h>
-#include "dev_storage.h"
 
-// Flash Sector 11 (0x080E0000~0x080FFFFF, 128KB) 已释放。
-// LDI 配置现已迁移至 W25Qxx 最后一个 4KB 扇区，通过 dev_storage_ops 访问。
-#define APP_FLASH_LDI_MAGIC    0x0D001B00
-#define APP_FLASH_LDI_MAX_MODULES (6U) // Flash 最大可存储的功能模块数量
+/* LDI 配置持久化 — 存在 W25Qxx 尾部的配置区内，由配置调度器统一管理
+ * （记录名 "ldi_cfg"）。归属/地址/版本/长度/CRC32 都在记录头里，本模块只管载荷语义。
+ *
+ * 历史：曾自行定义 magic + cfg + crc32 的 116 字节记录并写死在"容量−4KB"扇区；
+ * 迁移到调度器后那些字段与地址计算都由框架接管。 */
+
+/** 记录格式版本。载荷布局变更时 +1 —— 版本不符会被判为记录失效、回落默认值，
+ *  而不是让记录搬家（见 app_cfg_sched.c 的扫描认领）。 */
+#define APP_FLASH_LDI_VERSION (1U)
+
+#define APP_FLASH_LDI_MAX_MODULES (6U) // 可存储的功能模块数量上限
 
 /**
  * 单功能模块配置信息（从 0BH 命令下发，共 12 字节）
@@ -23,7 +29,7 @@ typedef struct {
 static_assert(sizeof(app_flash_ldi_module_cfg_t) == 12);
 
 /**
- * LDI 车道设备配置信息 (共 46 字节)
+ * LDI 车道设备配置信息（共 46 字节）
  *
  * 存储 0AH 指令下发的全部网络参数 + 0BH 下发的模块配置。
  * 设备上电后从中加载配置。
@@ -41,23 +47,12 @@ typedef struct {
     app_flash_ldi_module_cfg_t modules[APP_FLASH_LDI_MAX_MODULES]; // N <= MAX_MODULES
 } app_flash_ldi_cfg_info_t;
 
-/**
- * Flash 存储记录 = magic + 配置 + CRC32 校验
- * 总长 116 字节 (含编译器对齐 padding), 按 word 写入 Flash
- */
-typedef struct {
-    uint32_t magic;
-    app_flash_ldi_cfg_info_t cfg;
-    uint32_t crc32;
-} app_flash_ldi_record_t;
-
-bool app_flash_ldi_is_config_empty(volatile const app_flash_ldi_record_t *rec);
-bool app_flash_ldi_is_config_valid(volatile const app_flash_ldi_record_t *rec);
-int32_t app_flash_ldi_erase_config(void);
-int32_t app_flash_ldi_write_config(app_flash_ldi_record_t *rec);
-void app_flash_ldi_save_config(app_flash_ldi_cfg_info_t *info);
-/** @brief 从 W25Qxx 加载 LDI 配置，返回 true 表示读取到有效配置 */
+/** @brief 从配置区加载 LDI 配置，返回 true 表示读到有效配置
+ *  @note  首次调用会触发一次读取，之后走缓存（见 .c 里的幂等说明） */
 bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info);
 
-/** @brief 获取 LDI Flash 存储句柄（内部使用） */
-dev_storage_t *app_flash_ldi_get_storage(void);
+/** @brief 保存 LDI 配置到配置区
+ *  @return 0 成功（含内容未变而去重跳过）；负值失败
+ *  @note  返回值必须检查：此前是 void，保存失败在现场只表现为
+ *         "配好了、重启又变回去"，无从查起 */
+int32_t app_flash_ldi_save_config(const app_flash_ldi_cfg_info_t *info);
