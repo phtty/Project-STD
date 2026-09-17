@@ -181,8 +181,13 @@ const osThreadAttr_t ldi_task_attr = {
 
 osThreadId_t g_ldi_timer_task_handle;
 const osThreadAttr_t ldi_timer_task_attr = {
-    .name       = "ldi_timer_task",
-    .stack_size = 256 * 4,
+    .name = "ldi_timer_task",
+    /* 1536：实测峰值 768 字节（app_diag 的栈水位），留 2 倍余量。
+       曾按 -fstack-usage 的函数帧估成 ~310 而收窄到 1024，实测只剩 256 字节 ——
+       那次估算漏了 LwIP 那段（ccb_send → netconn_write 走 mailbox，栈消耗不小）
+       与 vms_timer_poll → app_render → draw_bitmap 的渲染链。
+       教训：函数帧累加低估库调用，以实测水位为准。 */
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
