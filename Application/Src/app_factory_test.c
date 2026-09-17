@@ -136,6 +136,13 @@ static void factory_monitor_task(void *argument)
         /* ===== AGING ===== */
         osThreadResume(g_light_sensor_task_handle);
 
+        /* 进衰老轮播前排空残留的信号量令牌。
+           上面 DEAD_PIXEL 段用的是 osWaitForever，若那几次按键有抖动多释放了一次
+           （信号量上限 1，去抖在 dev_key 的 EXTI 回调里，但历史遗留的窗口仍在），
+           余下的令牌会被下面第一次 wait_press(…, 3000) 立刻消费 —— 表现为
+           "只显示第一个字就退出轮播并清屏"。这里做最后一道保险。 */
+        while (dev_key_wait_press(DEV_KEY_TST, 0)) {}
+
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
             for (uint8_t size_idx = 0; size_idx < AGING_SIZE_COUNT; size_idx++) {

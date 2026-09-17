@@ -21,6 +21,18 @@ typedef struct {
     dev_key_t me;
 } exti_key_t;
 
+/** 去抖窗口（毫秒）。
+ *
+ * 机械按键一次按下会产生多个下降沿，而 EXTI 回调是**每个边沿都释放一次**信号量；
+ * 信号量上限为 1，多出来的那次就变成"残留令牌"，会被后续某次
+ * `dev_key_wait_press(..., timeout)` 立刻消费掉。
+ *
+ * 实测后果：工厂测试的衰老轮播在显示第一个字之后，第一次带超时的等待返回 true，
+ * 于是立刻退出轮播并清屏 —— 表现为"只显示第一个字就黑屏"。
+ *
+ * 在源头去抖，比在每个调用点做防御干净。 */
+#define KEY_DEBOUNCE_MS (50U)
+
 static bool _exti_get_state(dev_key_t *key)
 {
     return !pl_gpio_read(key->port, key->pin);
@@ -85,7 +97,13 @@ static void _exti_cb(uint16_t pin, void *ctx)
         uint16_t k_pin_mask = (uint16_t)(1U << k->pin);
 
         if (pin == k_pin_mask && k->press_sem) {
-            osSemaphoreRelease(k->press_sem);
+            /* 软件去抖：抖动产生的重复边沿不再各释放一次。
+               osKernelGetTickCount 在 ISR 上下文可用。 */
+            uint32_t now = osKernelGetTickCount();
+            if (now - k->last_edge_ms >= KEY_DEBOUNCE_MS) {
+                k->last_edge_ms = now;
+                osSemaphoreRelease(k->press_sem);
+            }
             break;
         }
     }

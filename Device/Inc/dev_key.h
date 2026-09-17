@@ -43,7 +43,8 @@ struct dev_key {
     pl_port_t port;
     uint8_t    pin;
     bool       active_low;
-    osSemaphoreId_t press_sem; /* EXTI 释放，wait_press 获取 */
+    osSemaphoreId_t press_sem;    /* EXTI 释放，wait_press 获取 */
+    uint32_t        last_edge_ms; /* 上次被采纳的边沿时刻，EXTI 回调据此软件去抖 */
 };
 
 /* ---- 初始化 ---- */
