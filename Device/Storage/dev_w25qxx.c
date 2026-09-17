@@ -109,8 +109,16 @@ static void _dma_cb(void *ctx)
  * 故在三个虚表入口统一持锁，内部实现一律走 _unlocked 版本（_write_unlocked
  * 内部要读扇区，若调加锁版会自死锁——osMutexNew 建的是非递归锁）。
  *
- * 锁在 _init 里创建：它在 hw_dev_initcall 跑，RTOS 尚未启动，但 FreeRTOS 允许
- * 在 vTaskStartScheduler 之前创建内核对象。这样避免"懒创建"的竞态。 */
+ * 锁在 **sw_dev_initcall** 里创建，不能在 _init（hw_dev_initcall）里创建：
+ *   FreeRTOS 的内核对象要从堆上分配（pvPortMalloc），而 heap_4 的 pvPortMalloc
+ *   内部用 vTaskSuspendAll/xTaskResumeAll，后者进临界区（taskENTER/EXIT_CRITICAL）。
+ *   调度器启动前 uxCriticalNesting 的初值是 0xaaaaaaaa（哨兵），只在
+ *   xPortStartScheduler() 里被置 0；此前进一次临界区，退出时递减成 0xaaaaaaa9
+ *   ≠ 0，portENABLE_INTERRUPTS() 就永远不会被调用 —— 中断从此永久关闭，
+ *   TIM7 不再产生 HAL 时基，HAL_Delay 死等。
+ *   （实测症状：卡在 dev_w25qxx_init → _init → pl_delay_ms。）
+ * sw_dev(2) 在 RTOS 启动之后、且早于 sw_app(3) 的配置加载遍（那才是首次访问），
+ * 因此既安全又无竞态。 */
 static osMutexId_t s_lock;
 
 static void _lock(void)
@@ -129,9 +137,9 @@ static int32_t _init(dev_storage_t *dev)
     dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
     self->spi          = pl_spi_get_handle();
 
-    /* 访问锁（见上面的说明：RTOS 前创建内核对象是允许的） */
-    const osMutexAttr_t lock_attr = {.name = "w25qxx", .attr_bits = osMutexPrioInherit};
-    s_lock                        = osMutexNew(&lock_attr);
+    /* 注意：这里**不能**创建访问锁。RTOS 尚未启动，而创建内核对象要从堆上分配，
+       会把中断永久关掉（原因见文件上方 s_lock 的说明）。锁在下面的 sw_dev
+       initcall 里创建。 */
 
     /* 复位（阻塞，无需RTOS） */
     uint8_t rst[2] = {W25Q_RESET_ENABLE, W25Q_RESET_DEVICE};
@@ -345,3 +353,20 @@ void dev_w25qxx_init(void)
     _init(&g_w25qxx.me);
 }
 hw_dev_initcall(dev_w25qxx_init);
+
+/**
+ * @brief 创建访问锁 —— 必须在 RTOS 启动之后
+ *
+ * 见文件上方 s_lock 的说明：创建内核对象要从堆上分配，而 heap_4 的 pvPortMalloc
+ * 会进临界区；调度器启动前 uxCriticalNesting 是哨兵值 0xaaaaaaaa，进一次临界区
+ * 就会把中断永久关掉（TIM7 停摆 → HAL_Delay 死等）。
+ *
+ * sw_dev(2) 早于 sw_app(3) 的配置加载遍 —— 那才是本驱动的首次访问，
+ * 所以到这里为止 s_lock 还是 NULL 是安全的（_lock 会跳过）。
+ */
+static void _w25qxx_lock_init(void)
+{
+    const osMutexAttr_t attr = {.name = "w25qxx", .attr_bits = osMutexPrioInherit};
+    s_lock                   = osMutexNew(&attr);
+}
+sw_dev_initcall(_w25qxx_lock_init);
