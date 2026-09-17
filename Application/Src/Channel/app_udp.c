@@ -1,6 +1,11 @@
 /**
  * @file    dev_udp.c
  * @brief       UDP 广播接收通道（监听端口 10011）
+ *
+ * 通道控制块是静态对象，连接信息（conn）挂在它上面：链路断开只清 conn、
+ * 置 state，控制块本身始终有效，因此协议侧保存的 ccb_t* 永不悬空。
+ *
+ * 容器：typedef struct { ccb_t base; void *conn; ... } udp_ccb_t;
  */
 
 #include "app_udp.h"
@@ -60,10 +65,14 @@ const osThreadAttr_t udp_connect_attr = {
 };
 
 /* ---- UDP 通道 ops （注意：不能命名为 udp_send，与 LwIP 内部符号冲突）---- */
-static int32_t udp_ch_send(channel_t *ch, const uint8_t *data, uint16_t len)
+static int32_t udp_ccb_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
-    udp_channel_t *udp = container_of(ch, udp_channel_t, me);
-    struct netbuf *nb  = netbuf_new();
+    udp_ccb_t *udp = container_of(ccb, udp_ccb_t, base);
+    /* 未连接：conn 可能是即将释放的 netconn，交给接收路径清理，这里直接丢弃 */
+    if (udp->base.state != CCB_STATE_UP || udp->conn == nullptr)
+        return -1;
+
+    struct netbuf *nb = netbuf_new();
     if (!nb)
         return -1;
 
@@ -71,21 +80,32 @@ static int32_t udp_ch_send(channel_t *ch, const uint8_t *data, uint16_t len)
     /* 从字节数组重建 ip_addr_t，隔离 middleware 类型 */
     struct netconn *conn = (struct netconn *)udp->conn;
     ip_addr_t addr;
-    IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
+    /* 寻址意图由协议给出，通道负责翻译：
+     *   dst == nullptr      → 回复到本帧来源（源地址在接收路径上刷新）；
+     *   dst->broadcast      → 255.255.255.255（如 IAP 的 cmd01/cmd02 应答）；
+     *   其余                → 退化为回复本帧来源。 */
+    if (dst != nullptr && dst->broadcast)
+        IP4_ADDR(&addr, 255, 255, 255, 255);
+    else
+        IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
     err_t err = netconn_sendto(conn, nb, &addr, udp->src_port);
     netbuf_delete(nb);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
 
-const ch_ops_t udp_ch_ops = {
-    .send = udp_ch_send,
+const ccb_ops_t udp_ccb_ops = {
+    .send = udp_ccb_send,
 };
 
-/* ---- 通道元数据模板（ch_id 由 Application 层设置，每 bind 后 copy 并填入 handle） ---- */
-channel_t g_udp_channel_tmpl = {
-    .ch_id = CH_ID_UDP,
-    .ops   = &udp_ch_ops,
+/* ---- 通道控制块（静态持有：协议绑定期即存在，断线也不失效） ---- */
+static udp_ccb_t g_udp = {
+    .base = {.name = "udp", .ops = &udp_ccb_ops},
 };
+
+ccb_t *app_udp_ccb(void)
+{
+    return &g_udp.base;
+}
 
 osThreadId_t udp_task_handle;
 const osThreadAttr_t udp_task_attr = {
@@ -99,6 +119,7 @@ const osThreadAttr_t udp_task_attr = {
  * ================================================================ */
 void udp_task(void *argument)
 {
+    (void)argument;
     if (udp_disconnect_sem == NULL)
         udp_disconnect_sem = osSemaphoreNew(1, 0, NULL);
     pl_net_register_link_listener(udp_link_listener);
@@ -126,31 +147,16 @@ void udp_task(void *argument)
     }
 }
 
-/* ---- 构造 / 析构 ---- */
-static void udp_channel_init(udp_channel_t *self, struct netconn *conn, channel_t *tmpl)
-{
-    self->me          = *tmpl;
-    self->me.state    = CH_STATE_UP;
-    self->conn        = conn;
-    self->listen_port = g_udp_port;
-    app_channel_register(CH_ID_UDP, &self->me);
-}
-
-static void udp_channel_deinit(udp_channel_t *self)
-{
-    self->me.ops   = nullptr;
-    self->me.state = CH_STATE_DOWN;
-    app_channel_register(CH_ID_UDP, nullptr);
-}
-
+/* ---- 连接生命周期：控制块始终有效，只有 conn / state 随连接生灭 ---- */
 void udp_connect_task(void *argument)
 {
     struct netconn *conn = (struct netconn *)argument;
 
-    udp_channel_t udp;
-    udp_channel_init(&udp, conn, &g_udp_channel_tmpl);
+    udp_ccb_t *udp   = &g_udp;
+    udp->conn        = conn;
+    udp->listen_port = g_udp_port;
+    udp->base.state  = CCB_STATE_UP;
 
-    channel_t *ch = &udp.me;
     struct netbuf *buf;
     err_t err;
 
@@ -160,19 +166,22 @@ void udp_connect_task(void *argument)
         do {
             netbuf_data(buf, &data, &len);
             if (len > 0) {
+                /* 先记下本帧来源：send(NULL dst) 的回包目标就是它 */
                 const ip_addr_t *addr = netbuf_fromaddr(buf);
-                udp.src_ip[0]         = ip4_addr1((const ip4_addr_t *)addr);
-                udp.src_ip[1]         = ip4_addr2((const ip4_addr_t *)addr);
-                udp.src_ip[2]         = ip4_addr3((const ip4_addr_t *)addr);
-                udp.src_ip[3]         = ip4_addr4((const ip4_addr_t *)addr);
-                udp.src_port          = netbuf_fromport(buf);
-                app_channel_dispatch(ch, (uint8_t *)data, len);
+                udp->src_ip[0]        = ip4_addr1((const ip4_addr_t *)addr);
+                udp->src_ip[1]        = ip4_addr2((const ip4_addr_t *)addr);
+                udp->src_ip[2]        = ip4_addr3((const ip4_addr_t *)addr);
+                udp->src_ip[3]        = ip4_addr4((const ip4_addr_t *)addr);
+                udp->src_port         = netbuf_fromport(buf);
+                app_ccb_dispatch(&udp->base, nullptr, (uint8_t *)data, len);
             }
         } while (netbuf_next(buf) >= 0);
         netbuf_delete(buf);
     }
 
-    udp_channel_deinit(&udp);
+    /* 先置 DOWN 再清 conn：send 路径据此拒绝访问即将释放的 netconn */
+    udp->base.state = CCB_STATE_DOWN;
+    udp->conn       = nullptr;
     osSemaphoreRelease(udp_disconnect_sem);
     osThreadExit();
 }

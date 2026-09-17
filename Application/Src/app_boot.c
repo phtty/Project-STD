@@ -19,6 +19,7 @@
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
 #include "app_rs485.h"
+#include "app_rs232.h"
 #include "app_test.h"
 #include "app_key.h"
 #include "app_render.h"
@@ -103,6 +104,8 @@ static void init_task(void *argument)
     app_tcp_client_start();
     app_udp_start();
     app_rs485_start();
+    app_rs232_start();   /* USART3 端点 */
+    app_rs232_1_start(); /* USART6 端点 */
 
     // app_test_run();
     app_default_display();

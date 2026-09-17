@@ -134,7 +134,7 @@ typedef enum {
 
 typedef struct {
     ldi_state_t state;
-    uint8_t rsp_seq; // 响应序号（探头保存，回显 host 请求帧）
+    uint8_t rsp_seq; // 响应序号（ldi_handle_task 在处理每帧前从帧里取，回显 host 请求帧）
     uint8_t rpt_seq; // 主动上报序号计数器（→ 0x10, 0x20...）
 
     app_flash_ldi_cfg_info_t cfg; // RAM 镜像 — 唯一配置真源
@@ -161,7 +161,10 @@ extern const osThreadAttr_t ldi_timer_task_attr;
 
 void ldi_handle_task(void *argument);
 void ldi_timer_task(void *argument);
-proto_probe_sta_t ldi_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *total_len, uint8_t *aux);
+/** @brief LDI 帧探测（pcb_ops.probe）—— 契约见 app_dispatch.h 的 pcb_probe_fn_t */
+pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                uint8_t *aux);
 uint8_t ldi_get_device_index(ldi_device_t device_type);
 void ldi_set_device_index(ldi_device_t device_type, uint8_t device_index);
 

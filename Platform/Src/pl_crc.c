@@ -34,6 +34,10 @@ uint32_t pl_crc32_calc(pl_crc_handle_t h, const uint8_t *data, size_t len)
     /* 非对齐输入：拷贝到临时 buffer 对齐后计算 */
     uint32_t buf[64];
     if (word_cnt > 64) word_cnt = 64;
+    /* len 必须与 word_cnt 一起夹紧 —— 只夹 word_cnt 的话 memcpy 会写穿 buf。
+       两者不同步的后果是"CRC 值算错"还是"栈被破坏"，取决于调用方，
+       而这里离调用方很远。 */
+    if (len > word_cnt * 4U) len = word_cnt * 4U;
     memset(buf, 0, word_cnt * 4);
     memcpy(buf, data, len);
     return HAL_CRC_Calculate(&hcrc, buf, word_cnt);

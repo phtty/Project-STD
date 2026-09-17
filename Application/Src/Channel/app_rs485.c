@@ -1,9 +1,12 @@
 /**
  * @file    app_rs485.c
- * @brief   RS485 半双工通道（USART1, RE 方向由 dev_rs485 注入）
+ * @brief   RS485 半双工通道（USART1/PL_UART1, RE 方向由 dev_rs485 注入）
  *
  * 板级资源（DMA 缓冲区、RE 方向控制）由 Device 层 dev_rs485 提供，
  * 通道生命周期和收发任务循环全部在 Application 层实现。
+ *
+ * 通道控制块为静态对象，与连接状态无关：协议绑定期间即有效，
+ * 任务启动只填连接相关字段。
  */
 
 #include "app_rs485.h"
@@ -13,15 +16,38 @@
 #include "dev_rs485.h"
 #include "app_dispatch.h"
 
+#define RS485_BUF_SIZE (2048U)
+
 typedef struct {
-    channel_t me;
+    ccb_t base; /**< 第一个成员：container_of 还原 */
     pl_uart_handle_t uart;
     osMessageQueueId_t rx_queue;
     uint8_t *rx_buf;
     uint16_t rx_buf_size;
-} rs485_ch_t;
+} rs485_ccb_t;
 
-#define RS485_BUF_SIZE (2048U)
+/* ---- ops ---- */
+static int32_t rs485_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+{
+    (void)dst; /* 半双工总线：目的地恒为总线对端，无广播/寻址概念，请求一律忽略 */
+    rs485_ccb_t *self = container_of(ccb, rs485_ccb_t, base);
+    /* state 置 UP 的唯一位置在任务里、UART 与 DMA 接收就绪之后，
+       因此它同时表达了"uart 已绑定"，无需再单独判空 */
+    if (self->base.state != CCB_STATE_UP) return -1;
+    return pl_uart_send(self->uart, data, len, 100);
+}
+
+static const ccb_ops_t rs485_ccb_ops = {.send = rs485_send};
+
+/* ---- 通道控制块（静态，协议绑定期间即可用） ---- */
+static rs485_ccb_t g_rs485 = {
+    .base = {.name = "rs485", .ops = &rs485_ccb_ops},
+};
+
+ccb_t *app_rs485_ccb(void)
+{
+    return &g_rs485.base;
+}
 
 /* ---- rs485_rx_queue 静态分配 ---- */
 static StaticQueue_t s_rs485_rx_cb;
@@ -34,45 +60,33 @@ static const osMessageQueueAttr_t s_rs485_rx_attr = {
     .mq_size = sizeof(s_rs485_rx_buf),
 };
 
-/* ---- 实例 ---- */
-static rs485_ch_t g_rs485 = {.me = {.ch_id = CH_ID_RS485}};
-
-/* ---- ops ---- */
-static int32_t rs485_send(channel_t *ch, const uint8_t *data, uint16_t len)
-{
-    rs485_ch_t *self = container_of(ch, rs485_ch_t, me);
-    return pl_uart_send(self->uart, data, len, 100);
-}
-
-static const ch_ops_t rs485_ops = {.send = rs485_send};
-
 /* ---- ISR → 任务通知 ---- */
 static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 {
     (void)data;
-    rs485_ch_t *self = (rs485_ch_t *)ctx;
+    rs485_ccb_t *self = (rs485_ccb_t *)ctx;
     osMessageQueuePut(self->rx_queue, &len, 0, 0);
 }
 
 /* ---- 任务循环 ---- */
 static void rs485_task(void *argument)
 {
-    rs485_ch_t *self = (rs485_ch_t *)argument;
+    rs485_ccb_t *self = (rs485_ccb_t *)argument;
 
     self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), &s_rs485_rx_attr);
     if (self->rx_queue == NULL) {
         osThreadExit();
         return;
     }
-    app_channel_register(self->me.ch_id, &self->me);
 
     pl_uart_set_rx_cb(self->uart, rs485_isr_cb, self);
     pl_uart_start_rx(self->uart, self->rx_buf, self->rx_buf_size);
+    self->base.state = CCB_STATE_UP;
 
     for (;;) {
         uint16_t rx_len = 0;
         if (osMessageQueueGet(self->rx_queue, &rx_len, 0, osWaitForever) == osOK) {
-            app_channel_dispatch(&self->me, self->rx_buf, rx_len);
+            app_ccb_dispatch(&self->base, nullptr, self->rx_buf, rx_len);
         }
     }
 }
@@ -81,8 +95,7 @@ static void rs485_task(void *argument)
 
 osThreadId_t app_rs485_start(void)
 {
-    rs485_ch_t *self  = &g_rs485;
-    self->me.ops      = &rs485_ops;
+    rs485_ccb_t *self  = &g_rs485;
     self->uart        = pl_uart_get_handle(PL_UART1);
     self->rx_buf      = dev_rs485_get_buf();
     self->rx_buf_size = RS485_BUF_SIZE;

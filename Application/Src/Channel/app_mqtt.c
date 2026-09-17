@@ -1,10 +1,10 @@
 /**
- * @file    dev_mqtt.c
- * @brief   MQTT 客户端通道（Device 层）
+ * @file    app_mqtt.c
+ * @brief   MQTT 客户端通道（Application 层）
  *
- * 连接 MQTT Broker，订阅配置主题，接收数据通过 app_channel_dispatch 写入调度框架。
+ * 连接 MQTT Broker，订阅配置主题，接收数据通过 app_ccb_dispatch 写入调度框架。
  * 默认 Broker: 120.46.136.199:6000, Client ID: "CD_ZTP"
- * 当前状态：任务未创建（InitTask 中注释）
+ * 当前状态：app_mqtt_start() 无调用者，链路未激活。
  */
 
 #include "app_mqtt.h"
@@ -13,29 +13,34 @@
 #include <string.h>
 
 /* ---- MQTT 通道 ops ---- */
-static int32_t mqtt_send(channel_t *ch, const uint8_t *data, uint16_t len)
+static int32_t mqtt_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
-    mqtt_channel_t *mqtt = container_of(ch, mqtt_channel_t, me);
-    mqtt_send_data(mqtt->topic, (char *)data);
-    return len;
+    mqtt_ccb_t *mqtt = container_of(ccb, mqtt_ccb_t, base);
+    if (mqtt->base.state != CCB_STATE_UP) return -1;
+
+    /* 目的地：协议显式给的 topic 优先，否则回落到本帧来源主题 */
+    const char *topic = (dst != nullptr && dst->topic != nullptr) ? dst->topic : mqtt->topic;
+
+    mqtt_send_data(topic, data, len); /* len 透传，不再内部 strlen */
+    return (int32_t)len;
 }
 
-const ch_ops_t mqtt_ch_ops = { .send = mqtt_send };
+const ccb_ops_t mqtt_ccb_ops = { .send = mqtt_send };
 
-/* ---- 通道元数据模板 ---- */
-channel_t g_mqtt_channel_tmpl = {
-    .ch_id = CH_ID_MQTT,
-    .ops   = &mqtt_ch_ops,
-};
-
-mqtt_channel_t g_mqtt = {
-    .me = { .ch_id = CH_ID_MQTT },
+/* ---- 通道控制块（静态，协议绑定期间即可用） ---- */
+mqtt_ccb_t g_mqtt = {
+    .base = { .name = "mqtt", .ops = &mqtt_ccb_ops },
     .ctx.broker_ip     = {120, 46, 136, 199},
     .ctx.broker_port   = 6000,
     .ctx.client_id     = "CD_ZTP",
     .ctx.client_user   = "pxh",
     .ctx.client_pass   = "",
 };
+
+ccb_t *app_mqtt_ccb(void)
+{
+    return &g_mqtt.base;
+}
 
 osThreadId_t mqtt_task_handle;
 const osThreadAttr_t mqtt_task_attr = {
@@ -44,19 +49,35 @@ const osThreadAttr_t mqtt_task_attr = {
     .priority   = osPriorityNormal,
 };
 
+/* ---- 订阅登记 ----
+ * 订阅哪些主题是协议知识，通道只知道"如何订一个主题"。协议登记一次，
+ * 通道在每次连接就绪时施加（含重连）。 */
+#define MQTT_SUB_MAX (16U)
+
+static const char *s_subs[MQTT_SUB_MAX];
+static uint8_t     s_sub_cnt;
+
+int32_t app_mqtt_subscribe(const char *const *topics, uint8_t count)
+{
+    if (topics == nullptr || count == 0) return -1;
+    if (s_sub_cnt + count > MQTT_SUB_MAX) return -1;
+
+    int32_t base = (int32_t)s_sub_cnt;
+    for (uint8_t i = 0; i < count; i++)
+        s_subs[s_sub_cnt++] = topics[i];
+    return base;
+}
+
 /* ---- 通道生命周期 ---- */
 
 static void mqtt_channel_init(void)
 {
-    g_mqtt.me = g_mqtt_channel_tmpl;
-    g_mqtt.me.state = CH_STATE_UP;
-    app_channel_register(CH_ID_MQTT, &g_mqtt.me);
+    g_mqtt.base.state = CCB_STATE_UP;
 }
 
 static void mqtt_channel_deinit(void)
 {
-    g_mqtt.me.state = CH_STATE_DOWN;
-    app_channel_register(CH_ID_MQTT, nullptr);
+    g_mqtt.base.state = CCB_STATE_DOWN;
 }
 
 /* ---- LwIP MQTT 回调 ---- */
@@ -66,7 +87,10 @@ static void mqtt_incoming_publish_cb(void *arg, const char *topic, uint32_t tot_
     (void)arg;
     (void)tot_len;
     g_mqtt.ctx.payload_offset = 0;
-    strcpy(g_mqtt.topic, topic);
+
+    /* 有界拷贝：topic 长度由 broker 控制，直接 strcpy 会写穿 topic[] */
+    strncpy(g_mqtt.topic, topic, sizeof(g_mqtt.topic) - 1);
+    g_mqtt.topic[sizeof(g_mqtt.topic) - 1] = '\0';
 }
 
 static void mqtt_sub_request_cb(void *arg, err_t result)
@@ -96,13 +120,20 @@ static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, 
     }
 
     if (flags & MQTT_DATA_FLAG_LAST) {
-        if (ctx->payload_offset < sizeof(ctx->rcv_buf)) {
-            ctx->rcv_buf[ctx->payload_offset] = '\0';
-            len++;
-        }
+        /* 以 NUL 结尾（协议侧按字符串处理），长度含该 NUL。
+           长度按累计的 payload_offset 算，不能用本回调最后一次分片的 len ——
+           分片投递时后者只是尾巴，会让整条消息被截断。 */
+        uint16_t total = ctx->payload_offset;
+        if (total >= sizeof(ctx->rcv_buf)) total = sizeof(ctx->rcv_buf) - 1;
+        ctx->rcv_buf[total] = '\0';
 
-        channel_t *ch = (channel_t *)arg;
-        app_channel_dispatch(ch, ctx->rcv_buf, len);
+        /* 来源随通知交给框架：探针据此分类。
+           帧长不必由通道给出 —— 探针按结尾 NUL 自行定界，连续两条消息
+           同处缓冲区时也能各自成帧。
+           src 只需在本次调用期间有效：框架把主题内容拷进自己的通知元素。 */
+        const ccb_src_t src = {.topic = g_mqtt.topic};
+        ccb_t *ccb      = (ccb_t *)arg;
+        app_ccb_dispatch(ccb, &src, ctx->rcv_buf, (uint16_t)(total + 1));
     }
 }
 
@@ -126,7 +157,8 @@ void mqtt_connection(void)
                                     mqtt_connection_cb, NULL, &mqtt_client_info);
     UNLOCK_TCPIP_CORE();
 
-    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&g_mqtt.me);
+    /* 回调上下文取基类指针：接收回调据此直接派发，不必再回查全局 */
+    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&g_mqtt.base);
 
     if (err == ERR_OK) {
         g_mqtt.state = MQTT_ST_CONNECTING;
@@ -141,6 +173,7 @@ void mqtt_connection(void)
 
 void mqtt_task(void *argument)
 {
+    (void)argument; /* 单例通道：上下文取自静态控制块，不用任务参数 */
     mqtt_ctx_t *ctx = &g_mqtt.ctx;
 
     ctx->client = mqtt_client_new();
@@ -171,10 +204,9 @@ void mqtt_task(void *argument)
 
         case MQTT_ST_CONNECTED:
             mqtt_channel_init();
-            mqtt_subscribe((mqtt_client_t *)ctx->client, "ASK/board/NULL",    0, mqtt_sub_request_cb, NULL);
-            mqtt_subscribe((mqtt_client_t *)ctx->client, "ASK/display/clean", 0, mqtt_sub_request_cb, NULL);
-            mqtt_subscribe((mqtt_client_t *)ctx->client, "ASK/op/restart",    0, mqtt_sub_request_cb, NULL);
-            mqtt_subscribe((mqtt_client_t *)ctx->client, "ASK/op/checktime",  0, mqtt_sub_request_cb, NULL);
+            /* 协议登记、通道施加：每次连接（含重连）统一重订，主题表在协议侧 */
+            for (uint8_t i = 0; i < s_sub_cnt; i++)
+                mqtt_subscribe((mqtt_client_t *)ctx->client, s_subs[i], 0, mqtt_sub_request_cb, NULL);
             g_mqtt.state = MQTT_ST_READY;
             break;
 
@@ -185,13 +217,13 @@ void mqtt_task(void *argument)
     }
 }
 
-void mqtt_send_data(const char *topic, const char *message)
+void mqtt_send_data(const char *topic, const void *data, uint16_t len)
 {
     mqtt_ctx_t *ctx = &g_mqtt.ctx;
 
     if (ctx->client != NULL && g_mqtt.state == MQTT_ST_READY) {
         LOCK_TCPIP_CORE();
-        mqtt_publish((mqtt_client_t *)ctx->client, topic, message, strlen(message), 0, 0, NULL, NULL);
+        mqtt_publish((mqtt_client_t *)ctx->client, topic, data, len, 0, 0, NULL, NULL);
         UNLOCK_TCPIP_CORE();
     }
 }

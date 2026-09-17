@@ -14,14 +14,14 @@
 #define U8_LEN(x)  ((x) * sizeof(uint32_t))
 #define U32_LEN(y) ((y) / sizeof(uint32_t))
 
-static void cmd_Test_00(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_ReportFirmwareStatus_03(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_PrepareUpgrade_04(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_SendUpgradePackage_05(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_EnterRecoveryMode_06(channel_t *ch, iap_frame_t *IAP_Data);
-static void cmd_Restart_07(channel_t *ch, iap_frame_t *IAP_Data);
+static void cmd_Test_00(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_ReportIp_01(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_ForceModifyIP_02(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_ReportFirmwareStatus_03(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_PrepareUpgrade_04(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_SendUpgradePackage_05(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_EnterRecoveryMode_06(ccb_t *ccb, iap_frame_t *IAP_Data);
+static void cmd_Restart_07(ccb_t *ccb, iap_frame_t *IAP_Data);
 
 /* ================================================================
  *  命令表（按 cmd 编号索引）
@@ -41,7 +41,8 @@ const iap_cmd_handler_fn_t g_iap_cmd_table[] = {
 /* ================================================================
  *  命令实现
  * ================================================================ */
-static void cmd_SendReData(channel_t *ch, uint32_t ReSeq, uint32_t ReCmd, uint32_t ReLen, uint32_t *ReData)
+static void cmd_SendReData(ccb_t *ccb, uint32_t ReSeq, uint32_t ReCmd, uint32_t ReLen,
+                           uint32_t *ReData)
 {
     static uint32_t ReBuff[FRAME_MAX_LEN] = {0};
 
@@ -56,13 +57,15 @@ static void cmd_SendReData(channel_t *ch, uint32_t ReSeq, uint32_t ReCmd, uint32
 
     pIAP_ReTmp->data_crc[ReLen] = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)pIAP_ReTmp, sizeof(iap_frame_t) + U8_LEN(ReLen));
 
-    /* cmd01/cmd02 reply via broadcast */
-    if (ReCmd == rtn_cmd01 || ReCmd == rtn_cmd02) {
-        udp_channel_t *udp = container_of(ch, udp_channel_t, me);
-        memset(udp->src_ip, 0xFF, 4); /* 255.255.255.255 广播 */
-    }
+    /* cmd01/cmd02 回包走广播：以"目的地意图"表达，由通道各自翻译 ——
+       UDP 译为 255.255.255.255，RS485/RS232/TCP 无广播概念则忽略该字段、退化为点对点。
+       协议侧因此不必认识具体通道类型（此前是向下转型改 UDP 内部字段 src_ip，
+       加一种广播型通道就得回来改这里）。 */
+    ccb_dst_t dst = {.broadcast = true};
+    bool is_bcast = (ReCmd == rtn_cmd01 || ReCmd == rtn_cmd02);
 
-    channel_send(ch, (uint8_t *)pIAP_ReTmp, sizeof(iap_frame_t) + U8_LEN(ReLen) + sizeof(uint32_t));
+    ccb_send_to(ccb, is_bcast ? &dst : NULL, (uint8_t *)pIAP_ReTmp,
+                sizeof(iap_frame_t) + U8_LEN(ReLen) + sizeof(uint32_t));
 }
 
 typedef struct {
@@ -82,14 +85,14 @@ static void iap_update_ip(void *ctx)
 /* ---- Command handlers (0x00 ~ 0x07) ---- */
 
 /** @brief 0x00: Test (no-op) */
-static void cmd_Test_00(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_Test_00(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
-    (void)ch;
+    (void)ccb;
     (void)IAP_Data;
 }
 
 /** @brief 0x01: Report current IP config */
-static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_ReportIp_01(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
     app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
@@ -99,13 +102,13 @@ static void cmd_ReportIp_01(channel_t *ch, iap_frame_t *IAP_Data)
     ReData[2]          = config_info.net_cfg.gw[0] << 24 | config_info.net_cfg.gw[1] << 16 | config_info.net_cfg.gw[2] << 8 | config_info.net_cfg.gw[3];
     ReData[3]          = config_info.net_cfg.port;
 
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd01, U32_LEN(sizeof(ReData)), ReData);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd01, U32_LEN(sizeof(ReData)), ReData);
 }
 
 static iap_ipconfig_t ipconfig = {0};
 
 /** @brief 0x02: Force modify IP and write to Flash */
-static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_ForceModifyIP_02(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
     app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
@@ -134,11 +137,11 @@ static void cmd_ForceModifyIP_02(channel_t *ch, iap_frame_t *IAP_Data)
     tcpip_callback(iap_update_ip, &ipconfig);
 
     app_flash_iap_edit_config(&config_info);
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd02, 0, NULL);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd02, 0, NULL);
 }
 
 /** @brief 0x03: Report firmware version, size, CRC32, update status */
-static void cmd_ReportFirmwareStatus_03(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_ReportFirmwareStatus_03(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
     app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
@@ -148,32 +151,32 @@ static void cmd_ReportFirmwareStatus_03(channel_t *ch, iap_frame_t *IAP_Data)
     memcpy(ReData + 2, config_info.app_info.version, sizeof(config_info.app_info.version));
     ReData[10] = config_info.update_sta;
 
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd03, U32_LEN(sizeof(ReData)), ReData);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd03, U32_LEN(sizeof(ReData)), ReData);
 }
 
 /** @brief 0x04: Prepare for firmware upgrade (main app responsibility) */
-static void cmd_PrepareUpgrade_04(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_PrepareUpgrade_04(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd04, 0, NULL);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd04, 0, NULL);
 }
 
 /** @brief 0x05: Send upgrade package (main app responsibility) */
-static void cmd_SendUpgradePackage_05(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_SendUpgradePackage_05(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd05, 0, NULL);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd05, 0, NULL);
 }
 
 /** @brief 0x06: Enter recovery mode (set flag in RTC backup register then reboot) */
-static void cmd_EnterRecoveryMode_06(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_EnterRecoveryMode_06(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
     pl_rtc_bkup_write(pl_rtc_get_handle(), 0 /* RTC 备份寄存器 0 */, FLAG_FORCE_UPDATE);
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd06, 0, NULL);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd06, 0, NULL);
 }
 
 /** @brief 0x07: Soft reset */
-static void cmd_Restart_07(channel_t *ch, iap_frame_t *IAP_Data)
+static void cmd_Restart_07(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
-    cmd_SendReData(ch, IAP_Data->seq, rtn_cmd07, 0, NULL);
+    cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd07, 0, NULL);
     pl_iwdg_refresh(pl_iwdg_get_handle());
     pl_system_reset();
 }

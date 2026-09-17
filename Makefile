@@ -36,6 +36,7 @@ INC_DIRS = \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
+	-I Application/Inc/RLS \
 	-I Application/Inc/AH_MQTT \
 	-I Application/Inc/Channel \
 	-I Device/Inc \
@@ -295,6 +296,8 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_ldi_cmd.c \
 	Application/Src/LDI/app_ldi_cfg.c \
 	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c \
 	Application/Src/AH_MQTT/ah_mqtt.c \
 	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
 	Application/Src/Channel/app_udp.c \
@@ -350,20 +353,82 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 # ---- Host Unit Tests ----
-# 用 test/stubs 下的 cmsis_os2 替身，让生产源码（不替换、不改写）原样在 host 上编译。
+# 用 test/stubs 下的替身（cmsis_os2 用 pthread 实现、FreeRTOS.h/main.h/dev_display.h
+# 只给形状），让生产源码**不替换、不改写**原样在 host 上编译运行。
 # ASan/UBSan 常开：缓冲区越界、未对齐访问这类缺陷在硬件上极难构造，在这里是必现的。
-HOSTCC      = cc
-TEST_CFLAGS = -std=gnu23 -g -O1 -Wall -Wextra -fsanitize=address,undefined \
-              -fno-omit-frame-pointer -I Kernel/Inc -I test/stubs
-TEST_BUILD  = build/test
+#
+# -I test/stubs 排在最前：FreeRTOS.h / main.h / dev_display.h 靠它遮蔽真头文件
+# （真头文件会拉进 HAL、LwIP、ARM 移植层，host 编不了）。
+# cmsis_os2.h 不设替身 —— 直接用工程自带的 CMSIS-RTOS V2 头（纯声明，host 可编译），
+# 测试因此与固件看到的是同一份 API；替身只实现被引用到的原语，其余在链接期失败。
+#
+# --gc-sections 是关键：协议源文件整份编译，但只有探针真正被引用，任务 / initcall
+# 等未引用段会被丢弃，因此不必为它们准备桩。
+HOSTCC       = cc
+TEST_BUILD   = build/test
+TEST_INC     = \
+	-I test/stubs \
+	-I Application/Inc \
+	-I Application/Inc/IAP \
+	-I Application/Inc/LDI \
+	-I Application/Inc/RLS \
+	-I Application/Inc/Channel \
+	-I Kernel/Inc \
+	-I Platform/Inc \
+	-I Device/Inc \
+	-I Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
 
-test: $(TEST_BUILD)/test_ring_buffer
-	@echo "---- run test_ring_buffer ----"
+TEST_CFLAGS  = -std=gnu23 -g -O1 -Wall -Wextra -fno-omit-frame-pointer \
+               -ffunction-sections -fdata-sections \
+               -fsanitize=address,undefined $(TEST_INC)
+
+TEST_LDFLAGS = -fsanitize=address,undefined -lpthread -Wl,--gc-sections
+
+# 套件一：ring_buffer（窥视路径的容量夹紧）
+TEST_RB_SRCS = \
+	Kernel/Src/ring_buffer.c \
+	test/test_ring_buffer.c \
+	test/stubs/os_stub.c
+
+# 套件二：协议/通道分发引擎（真实 frame_dispatch_task 跑在 pthread 上）
+TEST_DISPATCH_SRCS = \
+	test/stubs/os_stub.c \
+	test/test_dispatch.c \
+	Application/Src/app_dispatch.c \
+	Kernel/Src/ring_buffer.c
+
+# 套件三：协议探针（IAP / LDI / RLS 真探针，各自独立 TU）
+TEST_PROBES_SRCS = \
+	test/stubs/os_stub.c \
+	test/stubs/pl_crc_stub.c \
+	test/test_probes.c \
+	Application/Src/IAP/app_iap.c \
+	Application/Src/LDI/app_ldi.c \
+	Application/Src/RLS/app_rls.c \
+	Kernel/Src/ring_buffer.c \
+	Kernel/Src/crc_utils.c
+
+test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes
+	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
+	@echo ""
+	@echo "──── 分发引擎 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_dispatch
+	@echo ""
+	@echo "──── 协议探针 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_probes
 
-$(TEST_BUILD)/test_ring_buffer: Kernel/Src/ring_buffer.c test/test_ring_buffer.c test/stubs/os_stub.c
+$(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_dispatch: $(TEST_DISPATCH_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_probes: $(TEST_PROBES_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

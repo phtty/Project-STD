@@ -21,3 +21,10 @@ typedef enum {
 extern osMessageQueueId_t g_rls_msg_queue;
 extern osThreadId_t g_rls_task_handle;
 extern const osThreadAttr_t rls_task_attr;
+
+void rls_handle_task(void *argument);
+
+/** @brief RLS 帧探测（pcb_ops.probe）—— 契约见 app_dispatch.h 的 pcb_probe_fn_t */
+pcb_probe_sta_t rls_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                uint8_t *aux);

@@ -2,9 +2,9 @@
 
 #include "app_render.h"
 
-static void cmd_test(channel_t *ch, void *data);
-static void cmd_display(channel_t *ch, void *data);
-static void cmd_display_save(channel_t *ch, void *data);
+static void cmd_test(ccb_t *ccb, void *data);
+static void cmd_display(ccb_t *ccb, void *data);
+static void cmd_display_save(ccb_t *ccb, void *data);
 
 const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     cmd_test,
@@ -12,11 +12,11 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     cmd_display_save,
 };
 
-[[maybe_unused]] static void cmd_test(channel_t *ch, void *data)
+[[maybe_unused]] static void cmd_test(ccb_t *ccb, void *data)
 {
 }
 
-static void cmd_display(channel_t *ch, void *data)
+static void cmd_display(ccb_t *ccb, void *data)
 {
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
@@ -40,7 +40,7 @@ static void cmd_display(channel_t *ch, void *data)
     });
 }
 
-static void cmd_display_save(channel_t *ch, void *data)
+static void cmd_display_save(ccb_t *ccb, void *data)
 {
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 

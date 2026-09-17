@@ -52,13 +52,24 @@ typedef struct [[gnu::packed]] sign_up {
     char reserved[21];
 } sign_up_t;
 
-extern topic_info_t topic_info;
-extern notify_date_t notify_date;
-extern notify_id_t xNotifyID;
+/**
+ * @brief AH_MQTT 协议子类
+ *
+ * base 必须是第一个成员（container_of 偏移 0）。协议自有状态收在这里，不再散落成
+ * 文件级全局 —— 探针、任务与命令处理都经 base 取回，多实例也因此成为可能。
+ */
+typedef struct {
+    pcb_t        base;
+    topic_info_t topic_info;      /**< 设备标识，用于拼接主题 */
+    notify_id_t  notify_id;       /**< 上报帧携带的通知号（对时命令会更新） */
+    char         reply_topic[64]; /**< 本次回复的目的主题，随消息交给通道 */
+} ah_mqtt_proto_t;
 
 extern osMessageQueueId_t g_proto_ah_matt_queue;
 extern osThreadId_t g_ah_mqtt_task_handle;
 extern const osThreadAttr_t ProtocolTask_attributes;
 
 void ah_mqtt_handle_task(void *argument);
-proto_probe_sta_t ah_mqtt_probe_frame(const channel_t *ch, const ring_buffer_t *buff, uint32_t *payload_len, uint8_t *cmd_num);
+pcb_probe_sta_t ah_mqtt_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+                                    uint8_t *scratch, uint16_t scratch_size,
+                                    uint32_t *total_len, uint8_t *aux);

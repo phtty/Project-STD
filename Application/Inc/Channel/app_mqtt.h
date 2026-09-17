@@ -1,10 +1,18 @@
 /**
- * @file    dev_mqtt.h
- * @brief   MQTT 客户端通道（Device 层）
+ * @file    app_mqtt.h
+ * @brief   MQTT 客户端通道（Application 层）
  *
- * 连接 MQTT Broker，订阅配置主题，接收数据通过 app_channel_dispatch 写入调度框架。
+ * 连接 MQTT Broker，订阅协议登记的主题，接收数据通过 app_ccb_dispatch 写入调度框架。
  * 默认 Broker: 120.46.136.199:6000, Client ID: "CD_ZTP"
- * 当前状态：任务未创建（InitTask 中注释）
+ *
+ * 容器约定：
+ *   - mqtt_ccb_t 为静态对象，base 是第一个成员（偏移 0），container_of 零开销还原；
+ *   - 断线只销毁"连接"（ctx.client）并置 base.state = DOWN，控制块本身始终有效，
+ *     协议侧保存的 ccb_t* 永不悬空，重连复用同一控制块；
+ *   - 协议侧通过 app_mqtt_ccb() 取控制块（绑定用）；g_mqtt 仍对外可见，
+ *     AH 协议侧据其 state 判断何时可以签到/上报。
+ *
+ * 当前状态：app_mqtt_start() 无调用者，链路未激活。
  */
 
 #pragma once
@@ -34,18 +42,18 @@ typedef struct {
     uint32_t payload_offset;     /**< rcv_buf 写入偏移 */
 } mqtt_ctx_t;
 
-/** @brief MQTT 通道子类（单例，channel_t 为第一个成员） */
+/** @brief MQTT 通道子类（单例，ccb_t 为第一个成员） */
 typedef struct {
-    channel_t me;
+    ccb_t base;       /**< 第一个成员：container_of 还原 */
     mqtt_state_t state; /**< MQTT 连接状态机 */
     mqtt_ctx_t ctx;     /**< 运行时上下文 */
-    char topic[64];
-    uint16_t payload_len; /**< 当前帧 payload 长度（probe 函数使用） */
-} mqtt_channel_t;
+    char topic[CCB_SRC_TOPIC_MAX]; /**< 最近一次收到的主题；作为 ccb_dst_t.topic 缺省值 */
+    /* 注：这里不再有 payload_len —— 帧长属于每条消息，寄存在通道对象上会被
+       突发消息覆盖；改由探针按结尾 NUL 自行定界。 */
+} mqtt_ccb_t;
 
-extern const ch_ops_t mqtt_ch_ops;
-extern channel_t g_mqtt_channel_tmpl;
-extern mqtt_channel_t g_mqtt;
+extern const ccb_ops_t mqtt_ccb_ops;
+extern mqtt_ccb_t g_mqtt;
 extern osThreadId_t mqtt_task_handle;
 extern const osThreadAttr_t mqtt_task_attr;
 
@@ -57,7 +65,21 @@ static inline osThreadId_t app_mqtt_start(void)
 }
 
 void mqtt_connection(void);
-void mqtt_send_data(const char *topic, const char *message);
+void mqtt_send_data(const char *topic, const void *data, uint16_t len);
+
+/**
+ * @brief 登记要订阅的主题（协议侧调用）
+ *
+ * 主题表由协议持有（须为静态存储期，通道长期持有指针，不拷贝）。连接建立与
+ * 每次重连后由通道统一订阅；未连接时仅登记，待连接就绪再订 —— 重连由通道负责，
+ * 协议不必关心时机。可多次调用追加（如认证完成后追加订阅）。
+ *
+ * @param topics 主题字符串数组
+ * @param count  主题个数
+ * @return 首个主题在订阅表中的索引（协议据此把来源主题映射回自身的命令号），
+ *         失败返回 -1
+ */
+int32_t app_mqtt_subscribe(const char *const *topics, uint8_t count);
 
 /**
  * @brief   设置 MQTT Broker 地址
@@ -67,3 +89,6 @@ void mqtt_send_data(const char *topic, const char *message);
  */
 void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port);
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass);
+
+/** @brief 暴露本通道控制块（协议绑定时使用）*/
+ccb_t *app_mqtt_ccb(void);

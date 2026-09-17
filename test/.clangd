@@ -1,0 +1,46 @@
+# test/ 下的文件用 host 参数编译（见 Makefile 的 test 目标），与工程主体的 ARM
+# 编译命令是两套。它们不在 EIDE / bear 生成的编译数据库里，clangd 会"就近推断"——
+# 实测它拿 Application/Src/Channel/app_mqtt.c 的 ARM 命令去套 test_probes.c，
+# 于是 -std=c23（没有 nullptr）、-Itest/stubs 缺失，对 test/ 下文件刷满假诊断。
+#
+# 单个 .clangd 里的 CompilationDatabase 键不生效（该键由最外层 .clangd 决定，
+# 就近覆盖无效，已实测）；CompileFlags 才是就近合并的，所以走它。
+#
+# 三处实测踩坑，改动前留意：
+#   1. 列表项不可写成 "-I foo" —— 那是**一个** token，会原样传给 clang
+#      并报 unknown argument。必须写成无空格的 "-Ifoo"。
+#   2. 必须摘掉 -I*：Add 是追加在末尾的，留着 ARM 的
+#      -IMiddlewares/.../FreeRTOS/Source/include，FreeRTOS.h 就会解析到真头文件
+#      而不是 test/stubs 里的替身，clangd 看到的就不是 host 构建的实际情况。
+#   3. 必须摘掉 -isystem*：外层 .clangd 注入的 /usr/arm-none-eabi/include 排在
+#      /usr/include **之前**，ARM 的 newlib 头会遮住 glibc 的，导致 pthread.h
+#      一类的标准头解析失败（os_stub.c 曾因此报 21 个错）。
+
+CompileFlags:
+    Remove:
+        - -mcpu=*
+        - -mfpu=*
+        - -mfloat-abi=*
+        - -mthumb
+        - -std=c23
+        - --specs=*
+        - -MMD
+        - -fstack-usage
+        - -I*
+        - -isystem*
+    Add:
+        # 覆盖编译数据库里的 --target=arm-none-eabi（追加在末尾者胜）
+        - --target=x86_64-unknown-linux-gnu
+        - -std=gnu23
+        - -Itest/stubs
+        - -IApplication/Inc
+        - -IApplication/Inc/IAP
+        - -IApplication/Inc/LDI
+        - -IApplication/Inc/RLS
+        - -IApplication/Inc/Channel
+        - -IKernel/Inc
+        - -IPlatform/Inc
+        - -IDevice/Inc
+        # cmsis_os2.h 不设替身：直接用工程自带的 CMSIS-RTOS V2 头（与固件同一份 API）
+        - -IMiddlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+        - -fsanitize=address,undefined
