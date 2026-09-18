@@ -2,6 +2,16 @@
 #include "pl_net_adapt.h"
 #include "pl_eth.h"
 #include "net_diag.h"
+
+/* ---- ETH 帧级诊断 ----
+ * "上位机 ping 不通"这类问题的延迟可能卡在三处：帧没到、到了没回、回了没发出去。
+ * 记下每一帧的以太类型就能把它们按顺序排出来：
+ *   0x0806 = ARP，0x0800 = IPv4（ping 走这里）
+ * 只听不解析载荷，够用且不会被 IP 头结构影响。 */
+static uint16_t _eth_type(const uint8_t *frame)
+{
+    return (uint16_t)((frame[12] << 8) | frame[13]);
+}
 #include <string.h>
 #include "cmsis_os.h"
 #include "pl_task.h"
@@ -249,6 +259,10 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
     err_t errval                                = ERR_OK;
     ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT] = {0};
 
+    if (p != NULL && p->len >= 14)
+        NET_DIAG("ETH TX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
+                 (unsigned)p->tot_len);
+
     memset(Txbuffer, 0, ETH_TX_DESC_CNT * sizeof(ETH_BufferTypeDef));
 
     /* 遍历 pbuf 链，填充 DMA 发送缓冲区描述符 */
@@ -332,6 +346,9 @@ void ethernetif_input(void *argument)
         if (osSemaphoreAcquire(RxPktSemaphore, TIME_WAITING_FOR_INPUT) == osOK) {
             do {
                 p = low_level_input(netif);
+                if (p != NULL && p->len >= 14)
+                    NET_DIAG("ETH RX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
+                             (unsigned)p->tot_len);
                 if (p != NULL) {
                     if (netif->input(p, netif) != ERR_OK) {
                         pbuf_free(p);
