@@ -1,15 +1,15 @@
 /**
  * @file    pl_tim_board.c
- * @brief   5005048 的定时器板级表
+ * @brief   5006048 的定时器板级表
  *
  * 共享的 Platform/Src/pl_tim.c 只认 g_pl_tim_board[]，本文件是它对这块板的答案。
  *
- * 5005048 用 TIM2 做行地址、TIM3 做行同步扫描、TIM7 做 HAL 时基。
+ * 5006048 用 TIM2 做行地址、TIM3 做行同步扫描、TIM7 做 HAL 时基。
  * **没有 TIM4** —— 与 3833024 不同，故 PL_TIM4 这项留空（枚举跨板稳定，
  * 共享代码按名字引用 PL_TIM4 的地方在 B 上拿到 NULL，不会编译不过）。
  *
  * 注意"哪个定时器干哪种活"与 3833024 也不同：B 的扫描是 TIM2、亮度 PWM 是 TIM3，
- * 见 boards/5005048/Inc/board.h 的 BOARD_DISPLAY_*_TIM。
+ * 见 boards/5006048/Inc/board.h 的 BOARD_DISPLAY_*_TIM。
  */
 
 #include "pl_tim.h"

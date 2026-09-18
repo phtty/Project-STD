@@ -314,34 +314,34 @@ virtualFolder:
                 - path: boards/3833024/Core/Src/tim.c
                 - path: boards/3833024/Core/Src/usart.c
               folders: []
-        - name: "5005048"
+        - name: "5006048"
           files:
-            - path: boards/5005048/Src/dev_key_board.c
-            - path: boards/5005048/Src/dev_p10_112x10_1000000661.c
-            - path: boards/5005048/Src/dev_rs485.c
-            - path: boards/5005048/Src/pl_exti_board.c
-            - path: boards/5005048/Src/pl_hub75_board.c
-            - path: boards/5005048/Src/pl_tim_board.c
-            - path: boards/5005048/Src/pl_uart_board.c
+            - path: boards/5006048/Src/dev_key_board.c
+            - path: boards/5006048/Src/dev_p10_112x10_1000000661.c
+            - path: boards/5006048/Src/dev_rs485.c
+            - path: boards/5006048/Src/pl_exti_board.c
+            - path: boards/5006048/Src/pl_hub75_board.c
+            - path: boards/5006048/Src/pl_tim_board.c
+            - path: boards/5006048/Src/pl_uart_board.c
           folders:
             - name: Core
               files:
-                - path: boards/5005048/Core/Src/adc.c
-                - path: boards/5005048/Core/Src/crc.c
-                - path: boards/5005048/Core/Src/dma.c
-                - path: boards/5005048/Core/Src/gpio.c
-                - path: boards/5005048/Core/Src/iwdg.c
-                - path: boards/5005048/Core/Src/main.c
-                - path: boards/5005048/Core/Src/rtc.c
-                - path: boards/5005048/Core/Src/spi.c
-                - path: boards/5005048/Core/Src/stm32f4xx_hal_msp.c
-                - path: boards/5005048/Core/Src/stm32f4xx_hal_timebase_tim.c
-                - path: boards/5005048/Core/Src/stm32f4xx_it.c
-                - path: boards/5005048/Core/Src/syscalls.c
-                - path: boards/5005048/Core/Src/sysmem.c
-                - path: boards/5005048/Core/Src/system_stm32f4xx.c
-                - path: boards/5005048/Core/Src/tim.c
-                - path: boards/5005048/Core/Src/usart.c
+                - path: boards/5006048/Core/Src/adc.c
+                - path: boards/5006048/Core/Src/crc.c
+                - path: boards/5006048/Core/Src/dma.c
+                - path: boards/5006048/Core/Src/gpio.c
+                - path: boards/5006048/Core/Src/iwdg.c
+                - path: boards/5006048/Core/Src/main.c
+                - path: boards/5006048/Core/Src/rtc.c
+                - path: boards/5006048/Core/Src/spi.c
+                - path: boards/5006048/Core/Src/stm32f4xx_hal_msp.c
+                - path: boards/5006048/Core/Src/stm32f4xx_hal_timebase_tim.c
+                - path: boards/5006048/Core/Src/stm32f4xx_it.c
+                - path: boards/5006048/Core/Src/syscalls.c
+                - path: boards/5006048/Core/Src/sysmem.c
+                - path: boards/5006048/Core/Src/system_stm32f4xx.c
+                - path: boards/5006048/Core/Src/tim.c
+                - path: boards/5006048/Core/Src/usart.c
               folders: []
 dependenceList: []
 outDir: build
@@ -399,7 +399,7 @@ targets:
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_P10_32x16_2200001703.c
-      - <virtual_root>/boards/5005048
+      - <virtual_root>/boards/5006048
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -498,7 +498,7 @@ targets:
         speed: 10000
         target: STM32F407ZG
     uploader: Custom
-  "5005048":
+  "5006048":
     cppPreprocessAttrs:
       defineList:
         - USE_HAL_DRIVER
@@ -525,8 +525,8 @@ targets:
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
-        - boards/5005048/Inc
-        - boards/5005048/Core/Inc
+        - boards/5006048/Inc
+        - boards/5006048/Core/Inc
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -580,7 +580,7 @@ targets:
             output-format: elf
             remove-unused-input-sections: true
             use-float-printf: true
-        scatterFilePath: boards/5005048/STM32F407XX_FLASH.ld
+        scatterFilePath: boards/5006048/STM32F407XX_FLASH.ld
         storageLayout:
           RAM: []
           ROM: []

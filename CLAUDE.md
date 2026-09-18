@@ -37,7 +37,7 @@ STM32F407ZGTx 嵌入式项目，工具链 `arm-none-eabi-gcc`，C23 标准。
 ## 内存布局
 
 链接脚本：`boards/<板>/STM32F407XX_FLASH.ld`（板级入口，两行 FLASH 常量 + `INCLUDE Compiler/sections.ld`）。
-共享段定义在 `Compiler/sections.ld`；构建目录为 `build/<板>/<配置>`，用 `make BOARD=5005048` 换板。
+共享段定义在 `Compiler/sections.ld`；构建目录为 `build/<板>/<配置>`，用 `make BOARD=5006048` 换板。
 
 ```
 Flash (1024KB, 起始 0x08000000)
