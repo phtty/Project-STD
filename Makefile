@@ -287,6 +287,7 @@ SRC_PLATFORM = \
 # 换屏时改 board.mk 里那一行，而不是追加。
 include $(BOARD_DIR)/board.mk
 
+
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \
 	Device/IO/dev_key.c \
@@ -341,6 +342,12 @@ SRC_ALL = \
 	$(SRC_STARTUP)
 
 # ---- Object Files ----
+# board.mk 可选：本板不参与编译的**共享源**（板级源直接不写进 SRC_BOARD 即可）。
+# 用 filter-out 而非让各板复制清单：排除项是少数、共享清单是多数，反过来的话
+# 每加一个共享文件都要改每一块板。
+# 必须放在 SRC_ALL **之后**：放前面的话 := 当场展开，那时 SRC_ALL 还是空的。
+SRC_ALL := $(filter-out $(SRC_EXCLUDE),$(SRC_ALL))
+
 OBJ_ALL = $(addprefix $(BUILD_DIR)/,$(SRC_ALL:.c=.o))
 
 # ---- Targets ----
