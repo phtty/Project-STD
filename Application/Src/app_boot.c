@@ -100,17 +100,17 @@ static void init_task(void *argument)
     };
     pl_task_new(half_sec_task, NULL, &hst_attr);
 
-    app_tcp_server_start();
-    app_tcp_client_start();
-    app_udp_start();
-    app_rs485_start();
+    // app_tcp_server_start();
+    // app_tcp_client_start();
+    // app_udp_start();
+    // app_rs485_start();
     /* 板级特有的通道由各板自己用 initcall 启动（如 3833024 的两路 RS232），
        不在这里点名——否则共享文件要认识每块板的外设。 */
 
-    // app_test_run();
-    app_default_display();
+    app_test_run();
+    // app_default_display();
 
-    printf("\nInit Task Done\n");
+    printf("\n[init] Init Task Done\n");
 
     osThreadExit();
 }

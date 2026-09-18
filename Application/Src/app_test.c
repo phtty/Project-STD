@@ -62,7 +62,6 @@ void app_test_render_text(void)
  *  IO 输出测试
  * ================================================================ */
 
-
 /* ================================================================
  *  LED 灯序映射测试
  *
@@ -103,7 +102,7 @@ void app_test_led_mapping(void)
 void app_test_run(void)
 {
     // app_test_led_mapping(); /* 新模组灯序确认时启用 */
-    // app_test_pixel_scan();
-    app_test_render_text();
+    app_test_pixel_scan();
+    // app_test_render_text();
     // board_test_io_output(); /* 板级测试，见 boards/<板>/Src/app_test_board.c */
 }
