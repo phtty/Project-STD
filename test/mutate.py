@@ -12,6 +12,9 @@
   2. **每个变异体都重编** —— 否则测的是上一个变异体的二进制
   3. **异常也还原** —— 脚本被信号打断时源文件会停在变异状态（本仓库就发生过一次，
      VSCode 崩溃后 app_iap_cfg.c 里少了一行 memcpy）。finally + 信号处理都要有。
+  4. **还原后 touch 源文件** —— 还原回来的 mtime 早于"用变异源码编出来的二进制"，
+     make 会认为目标最新而不重编，之后所有运行跑的都是变异版本。
+     防住了"还原"不等于防住了"重编"。
 
 另外：**"存活"不等于测试有缺口**，也可能是等价变异体（语义与原代码相同）。
 本文件里就写错过一个 —— 注入 `else if (0) { } else if (...)` 与原链完全等价。
@@ -67,6 +70,12 @@ def restore():
     for f in (TARGET, TARGET2):
         if os.path.exists(f + ".mutbak"):
             shutil.move(f + ".mutbak", f)
+            # **必须 touch**：还原回来的 mtime 是"做备份那一刻"，早于用它编译出的
+            # 那个二进制 —— make 会认为目标是最新的，不重编，于是后面所有运行
+            # （包括 make test）跑的都是**变异后的二进制**。
+            # 这个坑让本仓库的 test_iap_cfg 在"内容未变→不擦写"用例上无故变红，
+            # 排查了一圈才发现是二进制陈旧，不是回归。
+            os.utime(f, None)
 
 signal.signal(signal.SIGTERM, lambda *a: (restore(), sys.exit(3)))
 signal.signal(signal.SIGINT,  lambda *a: (restore(), sys.exit(3)))

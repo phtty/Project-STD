@@ -488,8 +488,23 @@ TEST_IAP_CFG_SRCS = \
 # 目前两处：test_cfg_sched ← app_ldi_cfg.c、test_iap_cfg ← app_iap_cfg.c，
 # 各自的依赖行分别写在对应的规则下面。
 
+# 套件六：LDI 0AH 跨两条记录的交互
+# 三个实现 TU 由测试文件直接 include（static 注册/锁初始化从外部够不到），
+# 故这里都不列；依赖行在下面单独挂。
+TEST_LDI_0AH_SRCS = \
+	test/stubs/os_stub.c \
+	test/stubs/pl_crc_stub.c \
+	test/stubs/pl_flash_stub.c \
+	test/test_ldi_0ah.c \
+	Device/Storage/dev_flash_int.c \
+	Device/Storage/cfg_record.c \
+	Application/Src/app_cfg_sched.c \
+	Application/Src/LDI/app_ldi.c \
+	Kernel/Src/crc_utils.c \
+	Kernel/Src/ring_buffer.c
+
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
-      $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg
+      $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -504,6 +519,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── IAP 记录 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_iap_cfg
+	@echo ""
+	@echo "──── LDI 0AH 跨记录 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ldi_0ah
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -534,3 +552,10 @@ $(TEST_BUILD)/test_iap_cfg: $(TEST_IAP_CFG_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_IAP_CFG_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_iap_cfg: Application/Src/IAP/app_iap_cfg.c
+
+$(TEST_BUILD)/test_ldi_0ah: $(TEST_LDI_0AH_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_LDI_0AH_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_ldi_0ah: Application/Src/LDI/app_ldi_cfg.c Application/Src/IAP/app_iap_cfg.c \
+                           Application/Src/LDI/app_ldi_cmd.c
