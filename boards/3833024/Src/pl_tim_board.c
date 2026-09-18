@@ -5,8 +5,15 @@
  * 共享的 Platform/Src/pl_tim.c 只认 g_pl_tim_board[]，本文件是它对这块板的答案：
  * 有哪些定时器、各自怎么初始化、句柄是谁、IRQ 号是多少。
  *
- * 3833024 用 TIM2 做行地址、TIM3 做行同步扫描、TIM4 做亮度 PWM、TIM7 做 HAL 时基。
- * 换板时改这张表，不要去改 pl_tim.c。
+ * **角色映射不在这里，在 boards/3833024/Inc/board.h 的 BOARD_DISPLAY_*_TIM**
+ * （扫描 = TIM3，亮度 PWM = TIM4）。本表只回答"有哪些定时器、怎么初始化、句柄是谁"，
+ * 不回答"谁干什么" —— 两块板的角色是错位的（5006048 是扫描 TIM2 / PWM TIM3），
+ * 光看这张表会误判。
+ *
+ * TIM2 本板配了但**没有任何消费者**（不 start_it、不注册回调）—— 疑似历史遗留。
+ * 行地址不是定时器做的，是 pl_hub75_set_row() 直接用 GPIO。
+ *
+ * 换板时改这张表与 board.h，不要去改 pl_tim.c。
  */
 
 #include "pl_tim.h"
