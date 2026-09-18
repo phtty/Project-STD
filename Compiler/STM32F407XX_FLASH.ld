@@ -58,13 +58,19 @@ _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
 _Min_Stack_Size = 0x800; /* required amount of stack */
 
+/* ---- 板级 FLASH 布局 ----
+ * 带 IAP bootloader 的板子主固件从 0x08040000 起（前 4 个扇区留给 bootloader），
+ * 直烧的板子从 0x08000000 起、整片 1024K 可用。起始地址同时决定 VTOR
+ * （见各板 Core/Src/main.c），两处必须一致。
+ * 由 -L $(BOARD_DIR) + boards/<板>/board.ld 提供，换板只改那个文件。 */
+INCLUDE board.ld
+
 /* Specify the memory areas */
 MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
 CCMRAM (xrw)      : ORIGIN = 0x10000000, LENGTH = 64K
-/* FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 1024K */
-FLASH (rx)      : ORIGIN = 0x08040000, LENGTH = 768K
+FLASH (rx)      : ORIGIN = FLASH_ORIGIN, LENGTH = FLASH_LENGTH
 }
 
 /* Define output sections */

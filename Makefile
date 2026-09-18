@@ -77,6 +77,7 @@ CFLAGS += -MMD -MP   # emit <obj>.d header deps (consumed by -include at EOF)
 LDSCRIPT  = Compiler/STM32F407XX_FLASH.ld
 LDFLAGS  = $(MCU_FLAGS)
 LDFLAGS += -T $(LDSCRIPT)
+LDFLAGS += -L $(BOARD_DIR)   # 供 .ld 里的 INCLUDE board.ld
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/Project_STD.map,--cref
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += $(SPECS)

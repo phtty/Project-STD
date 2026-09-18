@@ -11,6 +11,7 @@
  */
 
 #include "app_rs232.h"
+#include "initcall.h"
 
 #include "FreeRTOS.h"
 #include "pl_uart.h"
@@ -146,3 +147,24 @@ osThreadId_t app_rs232_1_start(void)
     return rs232_start(&g_rs232_1, pl_uart_get_handle(PL_UART6), 1, &s_rs232_1_attr,
                        &s_rs232_1_rx_attr);
 }
+
+/* ---- 自注册启动 ----
+ * 这一路是 std_a 独有的（B 板没有 RS232），所以启动调用点留在本文件里，
+ * 由 initcall 自动挂上；共享的 app_boot.c 因此不需要知道 RS232 存在，
+ * 也就不需要条件编译。用 sw_post(4)：让 app_dispatch_init（sw_app=3）
+ * 先建好框架，通道任务再往里投帧。
+ *
+ * 对照：RS485 的 app_rs485_start() 仍由 app_boot.c 直接调用 —— 它在两块板上
+ * 都有（app_rs485.c 是共享通道），不属于板级差异。
+ *
+ * 同层顺序说明：本函数与 iap_module_init 同在 sw_post(4)，而两者先后取决于链接
+ * 顺序（实测本函数排在前）。这里恰好安全，但**不是**因为顺序对：本函数只负责
+ * 建任务，而 rs232_task 是 Normal 优先级、init_task 是 High，新建的下级任务不会
+ * 抢占 init_task，因此整个 sw_board_init（含 iap_module_init 的 app_proto_bind）
+ * 必定先跑完，rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
+static void rs232_channels_start(void)
+{
+    app_rs232_start();
+    app_rs232_1_start();
+}
+sw_post_initcall(rs232_channels_start);
