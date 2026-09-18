@@ -48,12 +48,10 @@ void app_udp_broadcast(const uint8_t *data, uint16_t len)
 /* ---- 信号量资源 ---- */
 static osSemaphoreId_t udp_disconnect_sem;
 
-/* ---- 链路监听器：物理链路断开时释放信号量，udp_task 收到后设 ch.state=DOWN ---- */
-static void udp_link_listener(bool link_up)
-{
-    if (!link_up && udp_disconnect_sem)
-        osSemaphoreRelease(udp_disconnect_sem);
-}
+/* 这里曾注册一个链路监听器，在物理链路断开时释放 udp_disconnect_sem。
+ * 它与 Platform 侧的通知机制一起删掉了 —— 理由见 Platform/Src/pl_net.c 顶部那段：
+ * 通知本身从来没生效过，而且**不需要**：socket 一直绑着、netconn_recv 一直阻塞，
+ * 实测拔插网线自愈。这个信号量留给 udp_task 自己重连用（bind 失败等场景）。 */
 
 /* ---- 前向声明 ---- */
 void udp_connect_task(void *argument);
@@ -123,7 +121,6 @@ void udp_task(void *argument)
     (void)argument;
     if (udp_disconnect_sem == NULL)
         udp_disconnect_sem = osSemaphoreNew(1, 0, NULL);
-    pl_net_register_link_listener(udp_link_listener);
 
     struct netconn *conn = netconn_new(NETCONN_UDP);
     if (conn == NULL) {

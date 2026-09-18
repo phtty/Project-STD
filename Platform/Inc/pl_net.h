@@ -11,17 +11,12 @@
 
 #include <stdint.h>
 
-#define PL_NET_LINK_LISTENER_MAX 8
 #define PL_NET_IP_LISTENER_MAX   4
-
-/** @brief 链路状态监听器，link_up=true 链路恢复，false 链路断开 */
-typedef void (*pl_net_link_listener_t)(bool link_up);
 
 /** @brief IP 变更监听器：pl_net_set_ip 成功后以新值同步回调（调用方任务上下文） */
 typedef void (*pl_net_ip_listener_t)(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4]);
 
 void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gateway[4]);
-void pl_net_register_link_listener(pl_net_link_listener_t listener);
 
 /** @brief 注册 IP 变更监听器（如 IAP 记录镜像同步）
  *

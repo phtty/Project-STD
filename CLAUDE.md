@@ -300,13 +300,13 @@ UART 空闲中断   ──→  osMessageQueuePut       ──→  uart_channel_t
                                                                              ──→ 协议处理任务
 SPI DMA 完成   ──→  volatile s_ok=true       ──→  dev_w25qxx _read 轮询 (osDelay 轮询)
 ETH 收包       ──→  osSemaphoreRelease       ──→  ethernetif_input
-ETH 链路状态   ──→  pl_net_link_listener     ──→  UDP/TCP/MQTT 通道任务重建连接
+ETH 链路状态   ──→  （无通知机制；各通道自己感知：UDP socket 自愈、TCP 靠 recv 返错重连）
 ```
 
 **关键模式**：
 - **Event Flags**：`scan_task` 用 `osEventFlagsWait` 等待 TIM3 行同步触发。ISR 中使用 `osEventFlagsSet`（`configUSE_OS2_EVENTFLAGS_FROM_ISR=1` 使能 ISR 安全调用）
 - **Message Queue**：`uart_channel_task`、`frame_dispatch_task`、协议处理任务逐级通过队列传递数据指针
-- **Semaphore**：UDP/TCP 通道用信号量协调连接/断开生命周期（链路断开→信号量释放→任务重建连接）
+- **Semaphore**：UDP/TCP 通道用信号量协调连接/断开生命周期。**注意链路状态不会通知过来** —— Platform 侧的链路监听器已删除（见 `pl_net.c` 的说明），断开靠各通道自己感知
 - **volatile 轮询**：W25Qxx SPI 半双工 DMA 读使用 `while(!s_ok) osDelay(1)` 轮询（历史原因：RTOS 未完全就绪时无法使用 event flags）
 
 ## RTOS 配置

@@ -5,8 +5,11 @@
  * 启动流程：
  *   pl_net_init() → tcpip_init → IP4_ADDR + netif_add(ethernetif_init) → netif_set_up → EthLink 线程
  *
- * 链路状态通过回调通知上层（DIP：Platform 不直接依赖 Device）。
  * IP 配置通过 tcpip_callback 投递到 TCP/IP 线程安全执行。
+ *
+ * 注意：**没有链路状态通知机制**（原有的那套 2026-09-18 删除，理由见 pl_net_init 里
+ * 那段说明）。链路断开由各通道自己感知 —— UDP socket 一直绑着自愈，TCP 靠
+ * netconn_recv 返错退出循环重连。
  */
 
 #include "pl_net.h"
@@ -16,19 +19,9 @@
 #include "pl_task.h"
 
 /* ================================================================
- *  链路状态监听器列表 — 上层注册，链路变化时遍历通知
+ *  IP 变更监听器列表 — 上层注册，set_ip 时遍历通知
+ * （链路状态监听器已删除，见 pl_net_init 的说明）
  * ================================================================ */
-
-static pl_net_link_listener_t g_link_listeners[PL_NET_LINK_LISTENER_MAX];
-
-void pl_net_register_link_listener(pl_net_link_listener_t listener)
-{
-    for (int i = 0; i < PL_NET_LINK_LISTENER_MAX; i++)
-        if (g_link_listeners[i] == nullptr) {
-            g_link_listeners[i] = listener;
-            return;
-        }
-}
 
 /* IP 变更监听器（见 pl_net_set_ip 的回调；上电默认值不触发） */
 static pl_net_ip_listener_t g_ip_listeners[PL_NET_IP_LISTENER_MAX];
@@ -46,7 +39,6 @@ void pl_net_register_ip_listener(pl_net_ip_listener_t listener)
  *  全局网络状态
  * ================================================================ */
 
-static void ethernet_link_status_updated(struct netif *netif);
 void Error_Handler(void);
 
 struct netif gnetif;            /* 网络接口（全局，供 IP 配置 API 使用） */
@@ -78,7 +70,17 @@ void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gatew
     netif_add(&gnetif, &ipaddr, &netmask, &gw, nullptr, &ethernetif_init, &tcpip_input);
     netif_set_default(&gnetif);
     netif_set_up(&gnetif);
-    netif_set_link_callback(&gnetif, ethernet_link_status_updated); /* 链路变化通知 */
+    /* 这里曾注册 netif_set_link_callback 做链路状态通知，2026-09-18 删除。
+       两个理由：其一，它从来没生效过 —— 回调里判 netif_is_up && netif_is_link_up，
+       而链路线程在断开时先 netif_set_down 再 netif_set_link_down，回调进来时
+       netif_is_up 已是 false，通知永远发不出去；唯一的使用者 udp_link_listener
+       只在 link_up 为 false 时动作，那段是死代码。
+       其二，也是更关键的：**它要保护的东西不需要保护**。UDP socket 一直绑着、
+       netconn_recv 一直阻塞，实测拔插网线自愈；TCP 通道压根没注册监听器，
+       靠 netconn_recv 返回非 OK 退出循环、外层重连。
+       而"照原样修好通知"反而更糟：udp_task 的断开路径带 osDelay(2000) 才重新 bind，
+       链路短暂抖动会变成 2 秒不听包的盲窗，今天反而是连续的。
+       将来真要"断开时主动重建"（例如上报断线状态）再加回来，但必须同时去掉那个盲窗。 */
 
     /* 启动 EthLink 线程（每 100ms 轮询 PHY 链路状态） */
     memset(&attributes, 0x0, sizeof(osThreadAttr_t));
@@ -86,20 +88,6 @@ void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gatew
     attributes.stack_size = INTERFACE_THREAD_STACK_SIZE;
     attributes.priority   = osPriorityBelowNormal;
     pl_task_new(ethernet_link_thread, &gnetif, &attributes);
-}
-
-/* ================================================================
- *  链路状态回调 — link up 时通知所有监听器
- * ================================================================ */
-
-static void ethernet_link_status_updated(struct netif *netif)
-{
-    if (netif_is_up(netif) && netif_is_link_up(netif)) {
-        bool link_up = netif_is_up(netif) && netif_is_link_up(netif);
-        for (int i = 0; i < PL_NET_LINK_LISTENER_MAX; i++)
-            if (g_link_listeners[i])
-                g_link_listeners[i](link_up);
-    }
 }
 
 /* ================================================================
