@@ -12,6 +12,24 @@ static uint16_t _eth_type(const uint8_t *frame)
 {
     return (uint16_t)((frame[12] << 8) | frame[13]);
 }
+
+/** @brief 把 ARP 帧的"谁问谁"打出来
+ *
+ *  只看以太类型（0x0806）分不出两种完全不同的情况：
+ *    · 别人家的 ARP 被交换机泛洪过来  → 与本次故障无关
+ *    · 有人在问**本机**的 MAC 而本机没回 → VM 的 ARP 表项失效，正是间歇丢包的成因
+ *  两者的对策完全相反，所以必须解析载荷。
+ *
+ *  以太帧 14 字节头之后是 ARP：htype(2) ptype(2) hlen(1) plen(1) oper(2)
+ *  sha(6) spa(4) tha(6) tpa(4)，故 oper 在 +6、发方 IP 在 +14、目标 IP 在 +24。 */
+static void _eth_dump_arp(const uint8_t *frame, uint16_t tot_len)
+{
+    if (tot_len < 42) return; /* 14 + 28，短于此不是完整 ARP */
+    const uint8_t *a  = frame + 14;
+    uint16_t       op = (uint16_t)((a[6] << 8) | a[7]);
+    NET_DIAG("      ARP %s：%u.%u.%u.%u 问 %u.%u.%u.%u", op == 1 ? "请求" : (op == 2 ? "应答" : "其他"),
+             a[14], a[15], a[16], a[17], a[24], a[25], a[26], a[27]);
+}
 #include <string.h>
 #include "cmsis_os.h"
 #include "pl_task.h"
@@ -259,9 +277,12 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
     err_t errval                                = ERR_OK;
     ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT] = {0};
 
-    if (p != NULL && p->len >= 14)
+    if (p != NULL && p->len >= 14) {
         NET_DIAG("ETH TX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
                  (unsigned)p->tot_len);
+        if (_eth_type((const uint8_t *)p->payload) == 0x0806)
+            _eth_dump_arp((const uint8_t *)p->payload, (uint16_t)p->tot_len);
+    }
 
     memset(Txbuffer, 0, ETH_TX_DESC_CNT * sizeof(ETH_BufferTypeDef));
 
@@ -346,9 +367,12 @@ void ethernetif_input(void *argument)
         if (osSemaphoreAcquire(RxPktSemaphore, TIME_WAITING_FOR_INPUT) == osOK) {
             do {
                 p = low_level_input(netif);
-                if (p != NULL && p->len >= 14)
+                if (p != NULL && p->len >= 14) {
                     NET_DIAG("ETH RX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
                              (unsigned)p->tot_len);
+                    if (_eth_type((const uint8_t *)p->payload) == 0x0806)
+                        _eth_dump_arp((const uint8_t *)p->payload, (uint16_t)p->tot_len);
+                }
                 if (p != NULL) {
                     if (netif->input(p, netif) != ERR_OK) {
                         pbuf_free(p);
