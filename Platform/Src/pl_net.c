@@ -17,6 +17,7 @@
 #include "pl_eth.h"
 #include <string.h>
 #include "pl_task.h"
+#include "net_diag.h"
 
 /* ================================================================
  *  IP 变更监听器列表 — 上层注册，set_ip 时遍历通知
@@ -88,6 +89,9 @@ void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gatew
     attributes.stack_size = INTERFACE_THREAD_STACK_SIZE;
     attributes.priority   = osPriorityBelowNormal;
     pl_task_new(ethernet_link_thread, &gnetif, &attributes);
+
+    NET_DIAG("netif 就绪 ip=%u.%u.%u.%u（此刻链路状态由下面的 PHY 日志给出）", ip[0], ip[1], ip[2],
+             ip[3]);
 }
 
 /* ================================================================

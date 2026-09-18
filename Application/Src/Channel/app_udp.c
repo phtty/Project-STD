@@ -13,6 +13,7 @@
 #include "pl_net.h"
 #include "pl_net_adapt.h"
 #include "pl_task.h"
+#include "net_diag.h"
 
 /* ---- 配置 ---- */
 static uint16_t g_udp_port = 10011; /**< IAP 升级通道 */
@@ -88,6 +89,8 @@ static int32_t udp_ccb_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *dat
     else
         IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
     err_t err = netconn_sendto(conn, nb, &addr, udp->src_port);
+    NET_DIAG("TX  -> %s len=%u err=%s", (dst != nullptr && dst->broadcast) ? "广播" : "本帧来源",
+             (unsigned)len, err == ERR_OK ? "ok" : lwip_strerr(err));
     netbuf_delete(nb);
     return (err == ERR_OK) ? (int32_t)len : -1;
 }
@@ -132,6 +135,8 @@ void udp_task(void *argument)
         ip_set_option(conn->pcb.udp, SOF_BROADCAST);
         err_t err = netconn_bind(conn, IP_ADDR_ANY, g_udp_port);
 
+        NET_DIAG("udp bind :%u -> %s", (unsigned)g_udp_port, err == ERR_OK ? "ok" : lwip_strerr(err));
+
         if (err == ERR_OK) {
             while (osSemaphoreAcquire(udp_disconnect_sem, 0) == osOK);
 
@@ -171,6 +176,8 @@ void udp_connect_task(void *argument)
                 udp->src_ip[2]        = ip4_addr3((const ip4_addr_t *)addr);
                 udp->src_ip[3]        = ip4_addr4((const ip4_addr_t *)addr);
                 udp->src_port         = netbuf_fromport(buf);
+                NET_DIAG("RX  <- %u.%u.%u.%u:%u len=%u", udp->src_ip[0], udp->src_ip[1],
+                         udp->src_ip[2], udp->src_ip[3], (unsigned)udp->src_port, (unsigned)len);
                 app_ccb_dispatch(&udp->base, nullptr, (uint8_t *)data, len);
             }
         } while (netbuf_next(buf) >= 0);

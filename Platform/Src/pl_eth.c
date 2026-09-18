@@ -1,6 +1,7 @@
 #include "main.h"
 #include "pl_net_adapt.h"
 #include "pl_eth.h"
+#include "net_diag.h"
 #include <string.h>
 #include "cmsis_os.h"
 #include "pl_task.h"
@@ -552,11 +553,19 @@ void ethernet_link_thread(void *argument)
 
     struct netif *netif = (struct netif *)argument;
 
+    int32_t s_last_phy = -1; /* 诊断：只在 PHY 状态变化时打，避免每 100ms 刷屏 */
+
     for (;;) {
         PHYLinkState = g_phy_get_link();
 
+        if (PHYLinkState != s_last_phy) {
+            NET_DIAG("PHY 状态 %d -> %d", (int)s_last_phy, (int)PHYLinkState);
+            s_last_phy = PHYLinkState;
+        }
+
         if (netif_is_link_up(netif) && (PHYLinkState == PL_ETH_LINK_DOWN)) {
             /* 链路断开 */
+            NET_DIAG("链路 DOWN");
             HAL_ETH_Stop_IT(&heth);
             netif_set_down(netif);
             netif_set_link_down(netif);
@@ -588,6 +597,8 @@ void ethernet_link_thread(void *argument)
             }
 
             if (linkchanged) {
+                NET_DIAG("链路 UP：%sMbps %s", speed == ETH_SPEED_100M ? "100" : "10",
+                         duplex == ETH_FULLDUPLEX_MODE ? "全双工" : "半双工");
                 HAL_ETH_GetMACConfig(&heth, &MACConf);
                 MACConf.DuplexMode = duplex;
                 MACConf.Speed      = speed;
