@@ -312,6 +312,76 @@ static void case_concurrent_writes_are_serialized(void)
     CHECK(pl_flash_stub_erase_count() >= 1);
 }
 
+
+/* ================================================================
+ *  ⑦ magic 检查：CRC 自洽但 magic 不是本协议 —— 必须判为无效
+ *
+ *  变异测试暴露的缺口：把 is_config_valid 的 magic 检查整个删掉，全套用例仍全绿
+ *  （CRC 的覆盖范围包含 magic，"CRC 对"近乎蕴含"magic 对"）。
+ *  但 magic 检查不是为了兜 CRC —— 它是为了挡住**别的格式写进来的记录**：
+ *  布局碰巧自洽、CRC 也算得对，只是不属于本协议。这里显式构造一条。
+ * ================================================================ */
+
+static void case_foreign_magic_is_rejected(void)
+{
+    flash_setup();
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+
+    /* 改成"别的格式"的 magic，并把 CRC 重算成自洽的 */
+    REC->magic       = 0xDEADBEEF;
+    REC->config_crc  = _iap_cfg_crc(REC); /* 测试 include 了实现 TU，可用 static 函数 */
+
+    CHECK_MSG(!app_flash_iap_is_config_valid(REC), "CRC 自洽但 magic 不对，仍被判为有效");
+}
+
+/* ================================================================
+ *  ⑧ 写失败必须上报（dev_flash_int._write 的返回值传递）
+ *
+ *  变异测试暴露的缺口：把 _write 里 `r = -1` 去掉（回到"丢弃编程返回值"的旧写法），
+ *  全套用例仍全绿。而调用方正是靠这个返回值判定"配置没落盘"。
+ * ================================================================ */
+
+static void case_write_failure_is_reported(void)
+{
+    flash_setup();
+
+    pl_flash_stub_fail_after(0); /* 从下一次编程起全部失败 */
+    app_flash_iap_sys_info_t info;
+    memset(&info, 0, sizeof info);
+    info.magic = APP_FLASH_IAP_MAGIC;
+
+    int32_t r = app_flash_iap_write_config(&info);
+    CHECK_MSG(r != 0, "编程全部失败，写接口却报了成功（返回 %d）", (int)r);
+
+    pl_flash_stub_fail_after(-1);
+    CHECK_MSG(app_flash_iap_write_config(&info) == 0, "正常情况下的写应该返回 0");
+}
+
+/* ================================================================
+ *  ⑨ dev_storage_ops 的"0 = 成功"约定
+ *
+ *  变异测试暴露的缺口：把 _read 的 `return 0` 改成 `return len`（返回字节数），
+ *  全套用例仍全绿。约定不钉住的话，下次有人按"返回字节数"理解就会出问题。
+ * ================================================================ */
+
+static void case_storage_returns_zero_on_success(void)
+{
+    flash_setup();
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+
+    dev_storage_t *st = app_flash_iap_get_storage();
+
+    uint8_t buf[16];
+    CHECK_MSG(dev_storage_read(st, 0, buf, sizeof buf) == 0, "读成功应返回 0（不返回字节数）");
+    CHECK(memcmp(buf, REC, sizeof buf) == 0);
+
+    /* 未擦除就写入"需要把 0 位写回 1"的内容 —— NOR 下必须失败。
+       原样写回则不算失败：不需要改变任何位，是合法的空操作。 */
+    buf[0] = 0xFF;
+    CHECK_MSG(dev_storage_write(st, 0, buf, sizeof buf) != 0,
+              "NOR 上把 0 位写回 1 应该失败，写接口却报了成功");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -326,6 +396,9 @@ int main(void)
         {"损坏记录不被去重短路", case_corrupt_is_not_deduped},
         {"CRC32 覆盖全部字段", case_crc_covers_every_field},
         {"并发写不交错", case_concurrent_writes_are_serialized},
+        {"异格式 magic（CRC 自洽）被拒", case_foreign_magic_is_rejected},
+        {"写失败必须上报", case_write_failure_is_reported},
+        {"存储接口 0 = 成功的约定", case_storage_returns_zero_on_success},
     };
 
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
