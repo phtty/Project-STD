@@ -29,6 +29,27 @@
    唯一的表现是上电读不出配置。把这条钉在编译期。 */
 _Static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
 
+/* 记录扇区**必须落在固件映像之外**。固件起点 = FLASH_BASE + BOARD_VECT_TAB_OFFSET，
+   与 boards/<板>/board.ld 的 FLASH_ORIGIN 同源（两处由这条断言间接钉住）。
+
+   这两件事是耦合的，只改一个就会回到"擦掉自己"的 HardFault：
+     · 给本板加 IAP bootloader → 必须同时
+         board.ld 的 FLASH_ORIGIN 改成 0x08040000（前 4 个扇区留给 bootloader）
+         board.h  的 BOARD_VECT_TAB_OFFSET 改成 0x40000
+         BOARD_HAS_IAP_RECORD 置 1
+     · 只把 BOARD_HAS_IAP_RECORD 置 1 而不动布局 → 这条断言当场编译失败 ✓
+
+   反过来的情况（改了布局忘了置 flag）不会崩，只是记录区白留着不用，属安全失败。 */
+#define IAP_FLASH_BASE 0x08000000UL
+_Static_assert(BOARD_HAS_IAP_RECORD == 0 ||
+                   ADDR_CONFIG_SECTOR < (IAP_FLASH_BASE + BOARD_VECT_TAB_OFFSET),
+               /* 断言文本用 ASCII：中文会被 GCC 按八进制转义，在最需要它的时刻读不出来。
+                  详细说明在上面的注释里。 */
+               "IAP record sector lies inside the firmware image - erasing it erases the "
+               "running code. A board WITH a bootloader must move board.ld FLASH_ORIGIN and "
+               "BOARD_VECT_TAB_OFFSET together to 0x08040000; a direct-flash board must keep "
+               "BOARD_HAS_IAP_RECORD at 0");
+
 /* ---- IAP Flash 存储实例 ---- */
 static dev_flash_int_t g_flash_iap = {
     .me        = {.capacity = IAP_SIZE},
