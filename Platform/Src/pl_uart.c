@@ -115,9 +115,21 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
 
 void pl_uart_irq_handler(uint8_t id)
 {
-    if (id >= PL_UART_MAX || !g_uart_ctx[id].huart) return;
-    HAL_UART_IRQHandler(g_uart_ctx[id].huart);
-    uart_idle_handle(&g_uart_ctx[id]);
+    if (id >= PL_UART_MAX) return;
+
+    /* 取句柄走**板级常量表**，不走 g_uart_ctx（那是 initcall 期才填的）。
+     * 窗口是真实存在的：MX_USARTx_UART_Init() 自己就会 HAL_NVIC_EnableIRQ，
+     * 而 g_uart_ctx[i].huart 是在那之后才赋值 —— 这中间来一条 UART 中断，
+     * 读运行时 ctx 就会既不处理、也不清标志，变成中断风暴。
+     * TIM7 上已经因为同一类问题卡死过一次（见 pl_tim.c 的说明）。 */
+    UART_HandleTypeDef *h = (UART_HandleTypeDef *)g_pl_uart_board[id].huart;
+    if (!h) return;
+
+    HAL_UART_IRQHandler(h); /* 无条件清标志：这一步绝不能依赖初始化期数据 */
+
+    /* 空闲中断的后续处理要用 ctx 里的 rx_buf/rx_cb，那些确实是运行期状态；
+       初始化完成前 ctx 还是空的，此时跳过即可（标志上面已经清过）。 */
+    if (g_uart_ctx[id].huart) uart_idle_handle(&g_uart_ctx[id]);
 }
 
 void pl_uart_dma_irq_handler(uint8_t id)
