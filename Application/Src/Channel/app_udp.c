@@ -49,6 +49,13 @@ void app_udp_broadcast(const uint8_t *data, uint16_t len)
 /* ---- 信号量资源 ---- */
 static osSemaphoreId_t udp_disconnect_sem;
 
+/* ---- 诊断计数（见 app_udp.h 的说明）---- */
+static volatile uint32_t s_rx_count;
+static volatile uint32_t s_tx_count;
+
+uint32_t app_udp_get_rx_count(void) { return s_rx_count; }
+uint32_t app_udp_get_tx_count(void) { return s_tx_count; }
+
 /* 这里曾注册一个链路监听器，在物理链路断开时释放 udp_disconnect_sem。
  * 它与 Platform 侧的通知机制一起删掉了 —— 理由见 Platform/Src/pl_net.c 顶部那段：
  * 通知本身从来没生效过，而且**不需要**：socket 一直绑着、netconn_recv 一直阻塞，
@@ -89,6 +96,7 @@ static int32_t udp_ccb_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *dat
     else
         IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
     err_t err = netconn_sendto(conn, nb, &addr, udp->src_port);
+    if (err == ERR_OK) s_tx_count++;
     NET_DIAG("TX  -> %s len=%u err=%s", (dst != nullptr && dst->broadcast) ? "广播" : "本帧来源",
              (unsigned)len, err == ERR_OK ? "ok" : lwip_strerr(err));
     netbuf_delete(nb);
@@ -176,6 +184,7 @@ void udp_connect_task(void *argument)
                 udp->src_ip[2]        = ip4_addr3((const ip4_addr_t *)addr);
                 udp->src_ip[3]        = ip4_addr4((const ip4_addr_t *)addr);
                 udp->src_port         = netbuf_fromport(buf);
+                s_rx_count++;
                 NET_DIAG("RX  <- %u.%u.%u.%u:%u len=%u", udp->src_ip[0], udp->src_ip[1],
                          udp->src_ip[2], udp->src_ip[3], (unsigned)udp->src_port, (unsigned)len);
                 app_ccb_dispatch(&udp->base, nullptr, (uint8_t *)data, len);

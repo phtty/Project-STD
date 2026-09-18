@@ -43,3 +43,11 @@ void app_udp_broadcast(const uint8_t *data, uint16_t len);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/
 ccb_t *app_udp_ccb(void);
+
+/** @brief 收/发帧计数（诊断用）
+ *
+ *  为什么要计数器而不是只看日志：RTT 输出会被后续的周期诊断刷掉，
+ *  而"上位机说连上了"这个判断**可能根本不依赖设备应答**。计数是抗截断的证据 ——
+ *  上位机说成功而这里仍为 0，说明它判的压根不是设备有没有回。 */
+uint32_t app_udp_get_rx_count(void);
+uint32_t app_udp_get_tx_count(void);

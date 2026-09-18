@@ -31,6 +31,7 @@
 #include "initcall.h"
 #include "pl_task.h"
 #include "pl_mem.h"
+#include "app_udp.h"
 
 #define APP_DIAG_INTERVAL_S (30U) /**< 打印周期（秒）*/
 #define APP_DIAG_TASK_MAX   (24U) /**< 最多列出多少个任务 */
@@ -50,6 +51,10 @@ static void _diag_dump(void)
     printf("\n[diag] heap=%u fail=%u  (rem: words, x4=bytes)\n", (unsigned)xPortGetFreeHeapSize(),
            (unsigned)pl_task_fail_count());
     printf("[diag] %-16s %3s %4s\n", "task", "pri", "rem");
+    /* UDP 计数单列一行：定位"上位机说连上但设备说没收到"这类矛盾时，
+       日志会被后面的周期输出刷掉，计数不会。 */
+    printf("[diag] udp rx=%lu tx=%lu\n", (unsigned long)app_udp_get_rx_count(),
+           (unsigned long)app_udp_get_tx_count());
 
     for (UBaseType_t i = 0; i < n; i++) {
         if (s_tasks[i].pcTaskName == NULL) continue;
