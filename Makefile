@@ -503,8 +503,19 @@ TEST_LDI_0AH_SRCS = \
 	Kernel/Src/crc_utils.c \
 	Kernel/Src/ring_buffer.c
 
+# 套件七：ISR 在 initcall 之前的安全性（上机卡死过的那一类）
+# 只编两个 Platform .c；HAL 由 test/stubs/stm32f4xx_hal.h 给形状，
+# 板级表 g_pl_tim_board / g_pl_uart_board 由测试文件自己提供。
+TEST_ISR_PREINIT_SRCS = \
+	test/test_isr_preinit.c \
+	Platform/Src/pl_tim.c \
+	Platform/Src/pl_uart.c
+
+# 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
+# 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
-      $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah
+      $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
+      $(TEST_BUILD)/test_isr_preinit
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -522,6 +533,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── LDI 0AH 跨记录 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ldi_0ah
+	@echo ""
+	@echo "──── ISR 在 initcall 之前 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_isr_preinit
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -559,3 +573,7 @@ $(TEST_BUILD)/test_ldi_0ah: $(TEST_LDI_0AH_SRCS)
 
 $(TEST_BUILD)/test_ldi_0ah: Application/Src/LDI/app_ldi_cfg.c Application/Src/IAP/app_iap_cfg.c \
                            Application/Src/LDI/app_ldi_cmd.c
+
+$(TEST_BUILD)/test_isr_preinit: $(TEST_ISR_PREINIT_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_ISR_PREINIT_SRCS) $(TEST_LDFLAGS)
