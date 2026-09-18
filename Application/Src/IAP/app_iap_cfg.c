@@ -50,14 +50,21 @@ hw_dev_initcall(_app_flash_iap_storage_init);
 /* ---- 串行化 ----
  * 写这条记录的有两条任务：iap_handle_task（队列超时空闲时做镜像对账，
  * app_iap.c 的 s_sync_pending）与 ldi_handle_task（0AH）。两边都是
- * "读记录 → 判定 → 擦扇区 → 编程"，交错就会丢更新：
+ * "读 → 判定 → 擦扇区 → 编程 17 个 word"。
  *
- *     LDI 任务：读记录（app_info = A）
- *     IAP 任务：写记录（app_info = B）
- *     LDI 任务：写回（app_info = A）      ← B 的更新没了
+ * 不加锁的后果不是"某次更新被覆盖"（那种交错最后写者胜，记录仍是完好的），
+ * 而是**两个写序列逐 word 交错，拼出一条 CRC 对不上的记录**：
  *
- * 窗口不大（0AH 是手工操作），但真实存在，且丢的是固件版本信息这类
- * 平时没人看、出事才用的字段。锁把整个读-改-擦-写包住。
+ *     A: 擦除 → program word 0..8
+ *     B: 擦除（把 A 刚写的 0..8 抹掉）
+ *     B: program word 0..16
+ *     A: program word 9..16（覆盖掉 B 的 9..16）
+ *
+ * 前 9 个 word 来自 B、后 8 个来自 A —— magic 是 B 的、config_crc 是 A 的。
+ * 这正是 update_net_cfg 里描述的那种损坏记录。
+ *
+ * 触发窗口很窄：内部 Flash 擦除期间 CPU 会被停住，两个任务都动不了，要撞上
+ * 得正好在编程循环里交错。但后果是"现场需整片重烧"（见下），代价不对等。
  *
  * 在 sw_dev(2) 创建：早于任何协议任务，故下面的入口里可以直接用。
  * if (s_lock) 判空是为了兼容"锁未建好就被调用"（如 hw initcall 阶段）。 */
@@ -70,7 +77,11 @@ static void _iap_cfg_lock_init(void)
 }
 sw_dev_initcall(_iap_cfg_lock_init);
 
-app_flash_iap_sys_info_t *g_config = (app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR; /* 直接映射到 Flash 地址 */
+/* 记录区指针，直接映射到 Flash 地址。
+ * 这里刻意暴露成**可写指针**而不是到处用 ADDR_CONFIG_SECTOR 宏：host 单测需要把
+ * 记录区重定向到 RAM（0x08004000 在宿主机上不可访问），而重定向只能通过覆盖一个
+ * 变量做到，宏做不到。生产代码里两者完全等价，故读取处统一走 g_config。 */
+app_flash_iap_sys_info_t *g_config = (app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR;
 
 /* ---- CRC32 覆盖范围 ----
  * 覆盖整条记录**除去 config_crc 字段自身**。这个公式原先在本文件里写了三遍
@@ -207,7 +218,7 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
 
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);
 
-    memcpy(&info, (void *)ADDR_CONFIG_SECTOR, sizeof(info));
+    memcpy(&info, (void *)g_config, sizeof(info));
 
     bool empty = app_flash_iap_is_config_empty(&info);
     bool valid = !empty && app_flash_iap_is_config_valid(&info);

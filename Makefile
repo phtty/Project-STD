@@ -468,8 +468,28 @@ TEST_CFG_SCHED_SRCS = \
 	Application/Src/app_cfg_sched.c \
 	Kernel/Src/crc_utils.c
 
+# 套件五：IAP 记录（内部 Flash Sector 1）
+# pl_flash_stub 把内部 Flash 换成 RAM —— 掉电时序在真机上构造不出来。
+# os_stub 提供那把串行化用的互斥量（pthread 实现）。
+# 注意：**不要**把 Application/Src/IAP/app_iap_cfg.c 列进来 —— 测试文件直接
+# include 了它的实现 TU（为了调用 static 的 _iap_cfg_lock_init，host 上
+# sw_dev_initcall 不执行），重复编译会符号重定义。
+TEST_IAP_CFG_SRCS = \
+	test/stubs/os_stub.c \
+	test/stubs/pl_crc_stub.c \
+	test/stubs/pl_flash_stub.c \
+	test/test_iap_cfg.c \
+	Device/Storage/dev_flash_int.c
+
+# 被测试文件 #include 的实现 TU：**不参与编译，但必须参与依赖**。
+# 它们不在任何 TEST_*_SRCS 里（列进去会符号重定义），于是 make 看不见它们 ——
+# 改了被测源码测试不会重编，跑的还是旧二进制，"反向验证"会得到假的绿。
+# 用单独的规则行把它们挂成依赖，配方里则显式列 SRCS（不能用 $^，那会把它们也编进去）。
+# 目前两处：test_cfg_sched ← app_ldi_cfg.c、test_iap_cfg ← app_iap_cfg.c，
+# 各自的依赖行分别写在对应的规则下面。
+
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
-      $(TEST_BUILD)/test_cfg_sched
+      $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -481,6 +501,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 配置调度器 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cfg_sched
+	@echo ""
+	@echo "──── IAP 记录 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_iap_cfg
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -496,10 +519,18 @@ $(TEST_BUILD)/test_probes: $(TEST_PROBES_SRCS)
 
 $(TEST_BUILD)/test_cfg_sched: $(TEST_CFG_SCHED_SRCS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CFG_SCHED_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cfg_sched: Application/Src/LDI/app_ldi_cfg.c
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
 # header does not break the build. Without this, editing a header does not
 # trigger recompilation and "it builds" refers to a stale binary.
 -include $(OBJ_ALL:.o=.d)
+
+$(TEST_BUILD)/test_iap_cfg: $(TEST_IAP_CFG_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_IAP_CFG_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_iap_cfg: Application/Src/IAP/app_iap_cfg.c
