@@ -7,12 +7,13 @@
  * "7 个端口的索引表、由面板驱动（dev_p10_112x10）自持 channel_map"，
  * 连时钟脉冲的 NOP 数都不同（本板 4，3833024 是 2）。
  *
- * 共享代码（Device/Display/dev_display.c）只需要以下四样，换板时新板必须同样提供，
+ * 共享代码（Device/Display/dev_display.c）只需要以下三样，换板时新板必须同样提供，
  * 否则编译不过 —— 契约由编译器保证，不需要额外的共享头：
  *     void pl_hub75_init(void);
  *     void pl_hub75_oe_set(bool blank);      // OE 低有效：true = 消隐
  *     void pl_hub75_latch_pulse(void);
- *     void pl_hub75_set_row(uint8_t row);
+ * 行地址不在这份契约里 —— 框架走的是 dev_display_ops::set_row，由各模组自己实现
+ * （本板 P10 112x10 的行地址接法与二进制位序不符，见该文件的 _set_row）。
  * 面板驱动另外会用到本板自己的数据通道访问器（pl_hub75_port_by_idx）。
  *
  * 位带写法必须保留：访问器在扫描热路径上，退化成函数调用会吃掉扫描预算。
@@ -72,7 +73,14 @@ __STATIC_INLINE void pl_hub75_oe_set(bool blank)
     HUB75_OE = blank ? 1 : 0;
 }
 
-/** @brief 行地址编码 (1..2, 与 B 工程 scan_channel 一致) */
+/** @brief 行地址编码 —— 自然二进制位序 (bit0→A, bit1→B, bit2→C, bit3→D)
+ *
+ *  **这是本板所有模组共用的通用编码，面板专有的接法不许写进来。**
+ *  模组的行地址若与二进制位序不符（例如本板 P10 112x10 的 A/B 是交叉的），
+ *  由该模组自己的 ops->set_row 处理，见 dev_p10_112x10_1000000661.c 的 _set_row。
+ *  把面板特性钉在这个函数里，会连累同板上其他模组。
+ *
+ *  注意 3833024 的同名函数长得一模一样，但两块板的引脚完全不同，别互相抄。 */
 __STATIC_INLINE void pl_hub75_set_row(uint8_t row)
 {
     HUB75_A = (row & 0x01) ? 1 : 0;

@@ -41,12 +41,10 @@ void MX_TIM3_Init(void)
     /* USER CODE BEGIN TIM3_Init 1 */
 
     /* USER CODE END TIM3_Init 1 */
-    /* 直通屏要求地址线持续快速切换: 84MHz/8400/200 ≈ 100Hz 逐行切换 → 整帧 50fps
-       (B 原值 2000 ≈ 10Hz 在直通屏上会 5Hz 闪烁, 此处按实机调优提高) */
     htim3.Instance               = TIM3;
     htim3.Init.Prescaler         = 8400;
     htim3.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim3.Init.Period            = 200;
+    htim3.Init.Period            = 50 - 1;
     htim3.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
     htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
     if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
@@ -83,7 +81,7 @@ void MX_TIM4_Init(void)
     htim4.Instance               = TIM4;
     htim4.Init.Prescaler         = 84;
     htim4.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim4.Init.Period            = 20;
+    htim4.Init.Period            = 20 - 1;
     htim4.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
     htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
     if (HAL_TIM_Base_Init(&htim4) != HAL_OK) {

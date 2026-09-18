@@ -5,7 +5,8 @@
  * 实现 dev_display_ops:
  *   prepare: convert_pixelmap (像素重排) + prepare_send_buffer (预计算 BSRR 整行表)
  *   scan:    整行 336 步 × 7 端口 BSRR 推送 + CLK 脉冲（OE/LAT 原子窗口由框架负责）
- *   set_row: 1/2 扫描行地址编码（注意 1-based, 框架传入 0-based, 需 +1）
+ *   set_row: 1/2 扫描行地址编码（1-based, 框架传 0-based 需 +1；且 A/B 与二进制
+ *            位序交叉，是本面板专有接法，故不走板级 pl_hub75_set_row）
  *
  * 屏幕 224×50, 2 行 × 5 列 P10 模组, 每模组 5 通道, 颜色不走固定 R/G/B 通道,
  * 由 convert_pixelmap 的组映射与 prepare_send_buffer 的逐通道位拆解共同决定。
@@ -68,56 +69,66 @@ typedef struct {
 
 /* ---- 通道映射（B 工程 display.c 生效版本, 升序, 50 通道） ---- */
 static const channel_info_t channel_map[TOTAL_CHANNELS] = {
+    // 模组第1排左
+    {PF_IDX, LED_CH10_Pin},
+    {PF_IDX, LED_CH9_Pin},
+    {PF_IDX, LED_CH8_Pin},
+    {PF_IDX, LED_CH7_Pin},
+    {PF_IDX, LED_CH6_Pin},
+    // 模组第1排右
     {PA_IDX, LED_CH0_Pin},
     {PA_IDX, LED_CH1_Pin},
     {PA_IDX, LED_CH2_Pin},
     {PC_IDX, LED_CH3_Pin},
     {PC_IDX, LED_CH4_Pin},
-    {PF_IDX, LED_CH6_Pin},
-    {PF_IDX, LED_CH7_Pin},
-    {PF_IDX, LED_CH8_Pin},
-    {PF_IDX, LED_CH9_Pin},
-    {PF_IDX, LED_CH10_Pin},
+    // 模组第2排左
+    {PE_IDX, LED_CH22_Pin},
+    {PE_IDX, LED_CH21_Pin},
+    {PE_IDX, LED_CH20_Pin},
+    {PE_IDX, LED_CH19_Pin},
+    {PE_IDX, LED_CH18_Pin},
+    // 模组第2排右
     {PF_IDX, LED_CH12_Pin},
     {PF_IDX, LED_CH13_Pin},
     {PF_IDX, LED_CH14_Pin},
     {PC_IDX, LED_CH15_Pin},
     {PC_IDX, LED_CH16_Pin},
-    {PE_IDX, LED_CH18_Pin},
-    {PE_IDX, LED_CH19_Pin},
-    {PE_IDX, LED_CH20_Pin},
-    {PE_IDX, LED_CH21_Pin},
-    {PE_IDX, LED_CH22_Pin},
+    // 模组第3排左
+    {PA_IDX, LED_CH34_Pin},
+    {PA_IDX, LED_CH33_Pin},
+    {PC_IDX, LED_CH32_Pin},
+    {PD_IDX, LED_CH31_Pin},
+    {PD_IDX, LED_CH30_Pin},
+    // 模组第3排右
     {PD_IDX, LED_CH24_Pin},
     {PD_IDX, LED_CH25_Pin},
     {PD_IDX, LED_CH26_Pin},
     {PD_IDX, LED_CH27_Pin},
     {PD_IDX, LED_CH28_Pin},
-    {PD_IDX, LED_CH30_Pin},
-    {PD_IDX, LED_CH31_Pin},
-    {PC_IDX, LED_CH32_Pin},
-    {PA_IDX, LED_CH33_Pin},
-    {PA_IDX, LED_CH34_Pin},
+    // 模组第4排左
+    {PD_IDX, LED_CH46_Pin},
+    {PD_IDX, LED_CH45_Pin},
+    {PD_IDX, LED_CH44_Pin},
+    {PD_IDX, LED_CH43_Pin},
+    {PG_IDX, LED_CH42_Pin},
+    // 模组第4排右
     {PC_IDX, LED_CH36_Pin},
     {PG_IDX, LED_CH37_Pin},
     {PG_IDX, LED_CH38_Pin},
     {PG_IDX, LED_CH39_Pin},
     {PG_IDX, LED_CH40_Pin},
-    {PG_IDX, LED_CH42_Pin},
-    {PD_IDX, LED_CH43_Pin},
-    {PD_IDX, LED_CH44_Pin},
-    {PD_IDX, LED_CH45_Pin},
-    {PD_IDX, LED_CH46_Pin},
+    // 模组第5排左
+    {PE_IDX, LED_CH58_Pin},
+    {PE_IDX, LED_CH57_Pin},
+    {PE_IDX, LED_CH56_Pin},
+    {PE_IDX, LED_CH55_Pin},
+    {PE_IDX, LED_CH54_Pin},
+    // 模组第5排右
     {PB_IDX, LED_CH48_Pin},
     {PB_IDX, LED_CH49_Pin},
     {PB_IDX, LED_CH50_Pin},
     {PB_IDX, LED_CH51_Pin},
     {PB_IDX, LED_CH52_Pin},
-    {PE_IDX, LED_CH54_Pin},
-    {PE_IDX, LED_CH55_Pin},
-    {PE_IDX, LED_CH56_Pin},
-    {PE_IDX, LED_CH57_Pin},
-    {PE_IDX, LED_CH58_Pin},
 };
 
 /* ---- P10 实例 ---- */
@@ -232,7 +243,6 @@ static void prepare_send_buffer(dev_display_t *dev)
             }
         }
     }
-
 }
 
 /* ---- prepare: 像素重排 + 预计算（B 工程 convert_pixelmap 尾部即调用） ---- */
@@ -267,10 +277,34 @@ static void _scan(dev_display_t *dev, uint8_t line)
     }
 }
 
-/* ---- set_row: 1/2 扫描行地址（框架传入 0-based, B 工程为 1-based, 需 +1） ---- */
+/* ================================================================
+ *  set_row: 1/2 扫描行地址 —— **本面板专有的编码，不走 pl_hub75_set_row**
+ *
+ *  框架传 0-based（0/1），B 工程 scan_channel 是 1-based，故先 +1。
+ *
+ *  **本面板行地址的 A/B 与二进制位序是交叉的：bit0 → HUB75_B(PF14)，
+ *  bit1 → HUB75_A(PF15)。** 依据是原工程（P10_flip_BarBoard_BB/USER/TIMER/
+ *  timer.c 的 scan_channel()：`line_cnt & 0x01 → HUB75_B`、`& 0x02 → HUB75_A`）——
+ *  那份工程配这块屏实机验证可用，且它的四个行地址引脚宏与本板 pl_hub75.h
+ *  **逐字节相同**，中间没有别处的交叉能把它抵消。C/D 是正常二进制序，
+ *  只有 A/B 这一对是反的。
+ *
+ *  照通用二进制序写会怎样：1/2 扫描只用 row ∈ {1,2}，两个扫描行的物理行组
+ *  正好互换，症状是**每相邻两排像素对调**（第 1↔2 排、第 3↔4 排…）。
+ *
+ *  这段交叉**刻意不下沉到 pl_hub75_set_row**：那是本板所有模组共用的通用
+ *  API，把本面板的接法钉进去会连累同板其他模组。也不能反过来"统一"给
+ *  3833024 —— 那块板行地址走 PA4~PA7、标签不交叉，照二进制写才是对的。
+ * ================================================================ */
+
 static void _set_row(uint8_t row)
 {
-    pl_hub75_set_row(row + 1);
+    uint8_t addr = row + 1; /* 框架 0-based → 本面板 1-based */
+
+    HUB75_B = (addr & 0x01) ? 1 : 0;
+    HUB75_A = (addr & 0x02) ? 1 : 0;
+    HUB75_C = (addr & 0x04) ? 1 : 0;
+    HUB75_D = (addr & 0x08) ? 1 : 0;
 }
 
 /* ---- ops 虚表 ---- */
