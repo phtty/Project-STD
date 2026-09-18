@@ -1,4 +1,5 @@
 #include "app_ldi.h"
+#include "net_diag.h"
 #include "FreeRTOS.h"
 #include "initcall.h"
 
@@ -64,7 +65,10 @@ void ldi_ctx_init(ldi_ctx_t *self)
 {
     app_flash_ldi_cfg_info_t flash_cfg = {0};
 
-    if (app_flash_ldi_load_config(&flash_cfg)) {
+    bool cfg_ok = app_flash_ldi_load_config(&flash_cfg);
+    NET_DIAG("LDI 配置%s（决定运行态 IP 是编译期默认值还是配置值）", cfg_ok ? "有效" : "无效/不存在");
+
+    if (cfg_ok) {
         /* Flash 有有效配置：应用到运行环境 */
 
         /* 网络参数（device_ip/mask/gw/host_ip/host_port 等） */

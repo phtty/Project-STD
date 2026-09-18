@@ -118,6 +118,11 @@ void pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[
 
     tcpip_callback(apply_ip_config, nullptr); /* 线程安全：投递到 TCP/IP 线程执行 */
 
+    /* 这条很关键：设备的"最终 IP"由这里决定（pl_net_init 用的是编译期默认值，
+       会被 LDI 配置覆盖）。要与上位机对照是否同网段，看这条。 */
+    NET_DIAG("set_ip -> %u.%u.%u.%u mask=%u.%u.%u.%u gw=%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3],
+             mask[0], mask[1], mask[2], mask[3], gw[0], gw[1], gw[2], gw[3]);
+
     /* 通知 IP 变更监听器（调用方任务上下文、同步回调）。
        订阅方据此同步各自持有的镜像（如 IAP 记录里的 net_cfg）。 */
     for (int i = 0; i < PL_NET_IP_LISTENER_MAX; i++)
