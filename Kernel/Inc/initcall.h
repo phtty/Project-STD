@@ -6,7 +6,14 @@
  *   hw: pre(0) → pl(1) → dev(2) → post(3)
  *   sw: pre(0) → pl(1) → dev(2) → app(3) → post(4)
  *   pl = Platform 层, dev = Device 层, app = Application 层
- *   同层内按符号名字母序排列
+ *   同层内的相对次序**不可依赖**，理由见下。
+ *
+ * 关于"同层顺序"：链接脚本写的是 KEEP(*(SORT(.sw_initcall.0))) —— SORT 排的是
+ * **输入段名**，而宏生成的段名是 section(".sw_initcall." #lvl)，不含函数名。
+ * 同层所有条目的段名完全相同，排序即空操作，剩下的就是目标文件在链接命令里的
+ * 先后，也就是构建清单的文件次序（Makefile 与 eide.yml 各有一份，两者未必一致）。
+ * 想表达依赖请用**层级**（如把"读配置"放到 sw_post(4) 让"加载配置"sw_app(3) 先跑），
+ * 不要靠调整清单顺序。
  */
 
 #pragma once

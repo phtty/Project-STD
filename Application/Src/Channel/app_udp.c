@@ -1,5 +1,5 @@
 /**
- * @file    dev_udp.c
+ * @file    app_udp.c
  * @brief       UDP 广播接收通道（监听端口 10011）
  *
  * 通道控制块是静态对象，连接信息（conn）挂在它上面：链路断开只清 conn、

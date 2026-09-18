@@ -93,9 +93,13 @@ __STATIC_INLINE void pl_hub75_latch_pulse(void)
     HUB75_LAT = 0;
 }
 
-__STATIC_INLINE void pl_hub75_oe_set(bool enable)
+/** @brief 消隐控制。HUB75 的 OE 低有效：blank=true → OE 拉高 → 输出关断（屏黑）
+ *
+ *  形参此前叫 enable，与"true 表示消隐"正好相反，调用点读起来像"使能输出"
+ *  实则相反，故更名 blank。 */
+__STATIC_INLINE void pl_hub75_oe_set(bool blank)
 {
-    HUB75_OE = enable ? 1 : 0;
+    HUB75_OE = blank ? 1 : 0;
 }
 
 __STATIC_INLINE void pl_hub75_set_row(uint8_t row)
@@ -118,5 +122,4 @@ __STATIC_INLINE void pl_hub75_bsrr_flush(const pl_hub75_bsrr_t *p)
 }
 
 /* ---- 初始化 ---- */
-void pl_hub75_init(void);
 void pl_hub75_init(void);

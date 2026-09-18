@@ -9,7 +9,6 @@
 #include "pl_iwdg.h"
 #include "pl_sys.h"
 #include "app_udp.h"
-#include "pl_net_adapt.h"
 
 #define U8_LEN(x)  ((x) * sizeof(uint32_t))
 #define U32_LEN(y) ((y) / sizeof(uint32_t))
@@ -68,20 +67,6 @@ static void cmd_SendReData(ccb_t *ccb, uint32_t ReSeq, uint32_t ReCmd, uint32_t 
                 sizeof(iap_frame_t) + U8_LEN(ReLen) + sizeof(uint32_t));
 }
 
-typedef struct {
-    ip4_addr_t ip;
-    ip4_addr_t mask;
-    ip4_addr_t gw;
-    uint16_t port;
-} iap_ipconfig_t;
-
-/** @brief TCP/IP 线程回调：应用新 IP 配置到 netif */
-static void iap_update_ip(void *ctx)
-{
-    iap_ipconfig_t *config = (iap_ipconfig_t *)ctx;
-    netif_set_addr(netif_default, &config->ip, &config->mask, &config->gw);
-}
-
 /* ---- Command handlers (0x00 ~ 0x07) ---- */
 
 /** @brief 0x00: Test (no-op) */
@@ -105,38 +90,21 @@ static void cmd_ReportIp_01(ccb_t *ccb, iap_frame_t *IAP_Data)
     cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd01, U32_LEN(sizeof(ReData)), ReData);
 }
 
-static iap_ipconfig_t ipconfig = {0};
-
-/** @brief 0x02: Force modify IP and write to Flash */
+/** @brief 0x02: 强制改 IP —— main app 中留桩，仅回执
+ *
+ *  强制改 IP 在 main app 中不实现，避免与具备 IP 配置能力的协议（如 LDI 0AH）
+ *  争夺"谁说了算"。分工约定：
+ *    - 有配置能力的协议：由其自己的设置命令与上电加载管理 IP
+ *    - 无配置能力的协议：由 Recovery app 的 0x02 写 IAP 记录，
+ *      该协议上电时读取 IAP 记录（app_flash_iap_is_config_valid）应用
+ *  本处理器仅回执，不做任何修改。
+ *
+ *  原先这里是"整块读 ADDR_CONFIG_SECTOR → 覆盖 net_cfg → edit_config"。该实现
+ *  绕过 app_flash_iap_update_net_cfg 的空记录骨架：记录为全 0xFF 时，magic 保持
+ *  0xFFFFFFFF 而 crc 被重算，产出**既非空也非有效、且永久如此**的记录——正是
+ *  d8c5b06 定性为会砖的那一类。改为留桩后该路径整体消失。 */
 static void cmd_ForceModifyIP_02(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
-    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
-
-    uint32_t TmpData[4] = {0};
-    memcpy(TmpData, IAP_Data->data_crc, sizeof(TmpData));
-
-    app_flash_iap_net_cfg_t net_info = {0};
-    net_info.ip[0]       = (uint8_t)(TmpData[0] >> 24);
-    net_info.ip[1]       = (uint8_t)(TmpData[0] >> 16);
-    net_info.ip[2]       = (uint8_t)(TmpData[0] >> 8);
-    net_info.ip[3]       = (uint8_t)(TmpData[0]);
-    net_info.mask[0]     = (uint8_t)(TmpData[1] >> 24);
-    net_info.mask[1]     = (uint8_t)(TmpData[1] >> 16);
-    net_info.mask[2]     = (uint8_t)(TmpData[1] >> 8);
-    net_info.mask[3]     = (uint8_t)(TmpData[1]);
-    net_info.gw[0]       = (uint8_t)(TmpData[2] >> 24);
-    net_info.gw[1]       = (uint8_t)(TmpData[2] >> 16);
-    net_info.gw[2]       = (uint8_t)(TmpData[2] >> 8);
-    net_info.gw[3]       = (uint8_t)(TmpData[2]);
-    net_info.port        = TmpData[3];
-
-    config_info.net_cfg = net_info;
-    IP4_ADDR(&ipconfig.ip, net_info.ip[0], net_info.ip[1], net_info.ip[2], net_info.ip[3]);
-    IP4_ADDR(&ipconfig.mask, net_info.mask[0], net_info.mask[1], net_info.mask[2], net_info.mask[3]);
-    IP4_ADDR(&ipconfig.gw, net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3]);
-    tcpip_callback(iap_update_ip, &ipconfig);
-
-    app_flash_iap_edit_config(&config_info);
     cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd02, 0, NULL);
 }
 
@@ -169,6 +137,10 @@ static void cmd_SendUpgradePackage_05(ccb_t *ccb, iap_frame_t *IAP_Data)
 /** @brief 0x06: Enter recovery mode (set flag in RTC backup register then reboot) */
 static void cmd_EnterRecoveryMode_06(ccb_t *ccb, iap_frame_t *IAP_Data)
 {
+    /* 复位进 Recovery 前强制对账一次镜像：保证 Recovery 读到的 net_cfg 就是
+       main app 此刻在用的 IP，消除"上电对账还没跑到就被复位"的滞后窗口 */
+    app_flash_iap_sync_from_runtime();
+
     pl_rtc_bkup_write(pl_rtc_get_handle(), 0 /* RTC 备份寄存器 0 */, FLAG_FORCE_UPDATE);
     cmd_SendReData(ccb, IAP_Data->seq, rtn_cmd06, 0, NULL);
 }

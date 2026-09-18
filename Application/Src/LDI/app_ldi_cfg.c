@@ -2,7 +2,7 @@
  * @file    app_ldi_cfg.c
  * @brief   LDI 配置持久化 — W25Qxx 尾部配置区（由配置调度器管理）
  *
- * 记录格式：cfg_record 24B 头 {name[16], version, len, crc32} + 46B 载荷。
+ * 记录格式：cfg_record 24B 头 {name[16], version, len, crc32} + 106B 载荷。
  * 归属/地址/组包/去重/擦写都由调度器处理，本模块只关心载荷语义。
  *
  * 协议边界：本模块只操作 LDI 自己的配置，不引用、不读写其他协议的任何存储。
@@ -30,7 +30,7 @@ static void _ldi_cfg_load(void)
 {
     /* 两个入口都会走到这里：本模块被首次用到时的按需加载，以及调度器的启动
        加载遍。谁先到谁生效，后到的直接返回——避免白读一遍 Flash（24B 头 +
-       46B 载荷外加一次 CRC）。两条路径都保留，是为了让 LDI 不依赖加载遍的时机：
+       106B 载荷外加一次 CRC）。两条路径都保留，是为了让 LDI 不依赖加载遍的时机：
        本模块的调用方在 sw_post(4)，而加载遍在 sw_app(3)，二者顺序其实有保证，
        但同层 initcall 的顺序取决于链接顺序，不该被依赖（见 initcall.h）。 */
     if (s_load_done) return;

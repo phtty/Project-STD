@@ -232,7 +232,9 @@ pl_sys (SystemClock_Config, delay, reset)
 .sw_initcall : { KEEP(*(SORT(.sw_initcall.0))) ... KEEP(*(SORT(.sw_initcall.4))) }
 ```
 
-每个 `*_initcall(fn)` 宏生成一个 `initcall_entry_t` 常量放入对应 section。`initcall_run(start, end)` 顺序遍历调用。同层内按函数名字母序排列（`SORT()` 保证确定性）。
+每个 `*_initcall(fn)` 宏生成一个 `initcall_entry_t` 常量放入对应 section。`initcall_run(start, end)` 顺序遍历调用。
+
+**同层内的相对次序不可依赖**：`SORT()` 排的是输入段名，而宏生成的段名是 `section(".sw_initcall." #lvl)`，同层所有条目段名完全相同 → 排序是空操作，实际次序就是目标文件在链接命令里的先后（即构建清单的文件次序，Makefile 与 eide.yml 各一份、未必一致）。要表达依赖请用**层级**——例如把"读配置"放到 `sw_post(4)`，让 `sw_app(3)` 的"加载配置"先跑。
 
 ## 中断体系
 

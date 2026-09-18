@@ -1,5 +1,5 @@
 /**
- * @file    dev_udp.h
+ * @file    app_udp.h
  * @brief   UDP 广播接收通道（Device 层）
  *
  * 监听 UDP 广播，用于 IAP 固件升级协议。

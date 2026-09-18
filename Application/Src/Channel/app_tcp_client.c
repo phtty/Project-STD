@@ -1,6 +1,9 @@
 /**
- * @file    dev_tcp_client.c
- * @brief       TCP 客户端通道（连接 192.168.114.100:9529）
+ * @file    app_tcp_client.c
+ * @brief   TCP 客户端通道（连接远程服务器，断线自动重连）
+ *
+ * 远端地址**不写死在注释里**：它是模块配置，由 app_tcp_client_set_remote() 设定，
+ * 也会被 LDI 0AH 配置覆盖（见 app_ldi.c 的上电路径）。注释里钉一个地址必然过期。
  *
  * 通道控制块是静态对象，连接信息（conn）挂在它上面：断线只清 conn、置 state，
  * 控制块本身始终有效，因此协议侧保存的 ccb_t* 永不悬空。
@@ -94,7 +97,7 @@ void tcp_client_task(void *argument)
         err_t err = netconn_connect(conn, &server_addr, s_host_port);
 
         if (err == ERR_OK || err == ERR_INPROGRESS) {
-            /* 轮询等待连接完成（15 秒超时） */
+            /* 轮询等待连接完成（4 秒超时） */
             uint32_t deadline = osKernelGetTickCount() + 4000;
             bool connected    = false;
 

@@ -19,6 +19,11 @@
 
 #define IAP_SIZE 0x4000 /* 16KB */
 
+/* IAP ABI 记录必须适配 Sector 1（16KB 单一擦除单元，与 Bootloader 共享布局）。
+   记录长度是 A/B 两侧的接口契约：本地 .c 改了结构体而 Bootloader 侧未同步，
+   唯一的表现是上电读不出配置。把这条钉在编译期。 */
+_Static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
+
 /* ---- IAP Flash 存储实例 ---- */
 static dev_flash_int_t g_flash_iap = {
     .me        = {.capacity = IAP_SIZE},

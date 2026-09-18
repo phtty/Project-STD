@@ -69,7 +69,7 @@ static void scan_task(void *arg)
         /* OE/LAT 原子窗口（所有模组通用） */
         osKernelLock();
         pl_tim_irq_disable(TIM4_IRQn);
-        pl_hub75_oe_set(true);
+        pl_hub75_oe_set(true); /* 消隐：行切换期间关断输出，避免鬼影 */
         if (dev->ops->set_row)
             dev->ops->set_row(scan_line);
         pl_hub75_latch_pulse();

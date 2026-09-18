@@ -29,7 +29,7 @@ typedef struct {
 static_assert(sizeof(app_flash_ldi_module_cfg_t) == 12);
 
 /**
- * LDI 车道设备配置信息（共 46 字节）
+ * LDI 车道设备配置信息（共 106 字节 = 34B 固定头 + 6 模块 × 12B）
  *
  * 存储 0AH 指令下发的全部网络参数 + 0BH 下发的模块配置。
  * 设备上电后从中加载配置。
@@ -46,6 +46,10 @@ typedef struct {
     uint8_t module_count;  // 功能模块数量 N
     app_flash_ldi_module_cfg_t modules[APP_FLASH_LDI_MAX_MODULES]; // N <= MAX_MODULES
 } app_flash_ldi_cfg_info_t;
+
+/* 载荷长度是持久化契约：记录头里的 len 与实际结构体不符时，读回会静默错位。
+   此前注释写的是 MAX_MODULES=1 时代的 46，靠人眼盯着必然烂掉，钉在编译期。 */
+static_assert(sizeof(app_flash_ldi_cfg_info_t) == 106, "与记录格式 106 字节不符");
 
 /** @brief 从配置区加载 LDI 配置，返回 true 表示读到有效配置
  *  @note  首次调用会触发一次读取，之后走缓存（见 .c 里的幂等说明） */

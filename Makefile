@@ -374,7 +374,17 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -rf $(BUILD_DIR)
+	@# compile_commands.json 由 EIDE 生成、.clangd 消费；删掉会让编辑器当场失去索引，
+	@# clangd 退化成启发式猜测并刷满假诊断（甚至崩溃）。这里先挪出、清完再放回。
+	@if [ -f $(BUILD_DIR)/compile_commands.json ]; then \
+		cp $(BUILD_DIR)/compile_commands.json build/.ccdb.bak; \
+		echo "保留 compile_commands.json（clangd 索引）"; \
+	fi
+	rm -rf $(BUILD_DIR) build/test
+	@if [ -f build/.ccdb.bak ]; then \
+		mkdir -p $(BUILD_DIR); \
+		mv build/.ccdb.bak $(BUILD_DIR)/compile_commands.json; \
+	fi
 
 # ---- Host Unit Tests ----
 # 用 test/stubs 下的替身（cmsis_os2 用 pthread 实现、FreeRTOS.h/main.h/dev_display.h

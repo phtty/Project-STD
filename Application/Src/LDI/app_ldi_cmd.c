@@ -61,6 +61,8 @@ typedef struct [[gnu::packed]] {
     ldi_network_info_t net;
 } cmd_set_ip_t;
 
+static_assert(sizeof(cmd_set_ip_t) == 85, "与规范 4.1.1 的 85 字节不符");
+
 /**
  * 设备参数配置 (0BH) DATA 域
  *
