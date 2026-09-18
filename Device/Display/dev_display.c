@@ -12,7 +12,6 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_tim.h"
-#include "board.h"
 #include "pl_task.h"
 
 /* ---- 扫描任务事件 ---- */
@@ -37,11 +36,11 @@ static void _on_pwm_period(void);
 /* ---- 硬件初始化（所有模组通用）---- */
 void dev_display_init(void)
 {
-    pl_tim_dbg_freeze(pl_tim_get_handle(BOARD_DISPLAY_SCAN_TIM));
-    pl_tim_dbg_freeze(pl_tim_get_handle(BOARD_DISPLAY_PWM_TIM));
+    pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM_DISPLAY_SCAN));
+    pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM_DISPLAY_PWM));
     pl_hub75_init();
-    pl_tim_register_period_cb(BOARD_DISPLAY_SCAN_TIM, _on_scan_period);
-    pl_tim_register_period_cb(BOARD_DISPLAY_PWM_TIM, _on_pwm_period);
+    pl_tim_register_period_cb(PL_TIM_DISPLAY_SCAN, _on_scan_period);
+    pl_tim_register_period_cb(PL_TIM_DISPLAY_PWM, _on_pwm_period);
 }
 hw_dev_initcall(dev_display_init);
 
@@ -51,8 +50,8 @@ static void scan_task(void *arg)
     dev_display_t *dev = (dev_display_t *)arg;
     static uint8_t scan_line;
 
-    pl_tim_start_it(pl_tim_get_handle(BOARD_DISPLAY_SCAN_TIM));
-    pl_tim_start_it(pl_tim_get_handle(BOARD_DISPLAY_PWM_TIM));
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_SCAN));
+    pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_PWM));
 
     for (;;) {
         osEventFlagsWait(s_scan_evt, 0x01, osFlagsWaitAny, osWaitForever);
@@ -69,12 +68,12 @@ static void scan_task(void *arg)
 
         /* OE/LAT 原子窗口（所有模组通用） */
         osKernelLock();
-        pl_tim_irq_disable(pl_tim_irq_of(BOARD_DISPLAY_PWM_TIM));
+        pl_tim_irq_disable(pl_tim_irq_of(PL_TIM_DISPLAY_PWM));
         pl_hub75_oe_set(true); /* 消隐：行切换期间关断输出，避免鬼影 */
         if (dev->ops->set_row)
             dev->ops->set_row(scan_line);
         pl_hub75_latch_pulse();
-        pl_tim_irq_enable(pl_tim_irq_of(BOARD_DISPLAY_PWM_TIM));
+        pl_tim_irq_enable(pl_tim_irq_of(PL_TIM_DISPLAY_PWM));
         osKernelUnlock();
 
         scan_line = (scan_line + 1) % dev->scan_lines;

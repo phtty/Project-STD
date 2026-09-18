@@ -5,15 +5,12 @@
  * 共享的 Platform/Src/pl_tim.c 只认 g_pl_tim_board[]，本文件是它对这块板的答案：
  * 有哪些定时器、各自怎么初始化、句柄是谁、IRQ 号是多少。
  *
- * **角色映射不在这里，在 boards/3833024/Inc/board.h 的 BOARD_DISPLAY_*_TIM**
- * （扫描 = TIM3，亮度 PWM = TIM4）。本表只回答"有哪些定时器、怎么初始化、句柄是谁"，
- * 不回答"谁干什么" —— 两块板的角色是错位的（5006048 是扫描 TIM2 / PWM TIM3），
- * 光看这张表会误判。
+ * 3833024 配 TIM3（扫描节拍）与 TIM4（OE 亮度 PWM），两者角色由 Platform/Inc/pl_tim.h
+ * 的 PL_TIM_DISPLAY_* 固定 —— 那是 MCU 级常量，两块板一致，不在板级表里表达。
+ * 本表只回答"有哪些定时器、怎么初始化、句柄是谁"。
  *
- * TIM2 本板配了但**没有任何消费者**（不 start_it、不注册回调）—— 疑似历史遗留。
- * 行地址不是定时器做的，是 pl_hub75_set_row() 直接用 GPIO。
- *
- * 换板时改这张表与 board.h，不要去改 pl_tim.c。
+ * TIM2 已移除：它曾被配成 2Hz（= 500ms 的"半秒定时器"），半秒业务改用 osDelay(500)
+ * 走 RTOS tick 之后就没有消费者了，与 5006048 对齐时一并删掉。
  */
 
 #include "pl_tim.h"
@@ -23,7 +20,6 @@
 extern TIM_HandleTypeDef htim7;
 
 const pl_tim_board_entry_t g_pl_tim_board[PL_TIM_MAX] = {
-    [PL_TIM2] = {.init = MX_TIM2_Init, .handle = &htim2, .irq = TIM2_IRQn},
     [PL_TIM3] = {.init = MX_TIM3_Init, .handle = &htim3, .irq = TIM3_IRQn},
     [PL_TIM4] = {.init = MX_TIM4_Init, .handle = &htim4, .irq = TIM4_IRQn},
     /* TIM7 无需 MX_ 初始化（HAL 时基自己配），故 .init 留空 */

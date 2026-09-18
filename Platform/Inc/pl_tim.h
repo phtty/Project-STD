@@ -23,6 +23,19 @@ enum {
 
 typedef void *pl_tim_handle_t;
 
+/** @brief 显示子系统占用的两个定时器角色
+ *
+ *  **这是 MCU 级常量，不是板级数据** —— 定时器是片上资源，两块板用的是同一颗
+ *  STM32F407ZG，没有理由各选一套。统一之前 3833024 是"扫描 TIM3 / 调光 TIM4"、
+ *  5006048 是"扫描 TIM2 / 调光 TIM3"，两者错位，看板级表根本看不出谁干什么，
+ *  还容易把 5006048 的"PL_TIM4 留空"误读成"调光定时器缺失"。
+ *
+ *  约定：扫描 = TIM3，调光 PWM = TIM4，HAL 时基 = TIM7，**TIM2 不用**。
+ *  两块板的 Core/Src/tim.c 都只配这三个（注意周期是**板级**的——模组不同，
+ *  扫描率与 PWM 率各异，那部分留在各板自己的 tim.c 里）。 */
+#define PL_TIM_DISPLAY_SCAN PL_TIM3
+#define PL_TIM_DISPLAY_PWM  PL_TIM4
+
 /** @brief 板级定时器表项（由 boards/<板>/Src/pl_tim_board.c 提供）
  *
  *  共享的 pl_tim.c 只认这张表，不认具体是哪几个定时器——哪些定时器存在、

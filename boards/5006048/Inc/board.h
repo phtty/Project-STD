@@ -16,10 +16,3 @@
  * 偏移 0；带 IAP bootloader 的板子则是 0x40000。两处不一致的表现是任何中断都
  * 跳到错误的地方（bootloader 的向量表或空白区），且不会有编译期报错。 */
 #define BOARD_VECT_TAB_OFFSET 0x00000000UL
-
-/* ---- 显示子系统的定时器角色 ----
- * 5006048：TIM2 出行同步中断（行扫描节拍），TIM3 出 8 级亮度 PWM。
- * 注意与 3833024 不同（那边是 TIM3/TIM4）——5006048 的 CubeMX 配置里没有 TIM4。
- * OE/LAT 原子窗口要屏蔽的是 PWM 那个中断：PWM 在窗口中间跳变会打断消隐时序。 */
-#define BOARD_DISPLAY_SCAN_TIM PL_TIM2
-#define BOARD_DISPLAY_PWM_TIM  PL_TIM3

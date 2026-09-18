@@ -99,8 +99,9 @@ static TIM_HandleTypeDef  s_htim4 = {.Instance = TIM4};
 static TIM_HandleTypeDef  s_htim7 = {.Instance = TIM7};
 static UART_HandleTypeDef s_huart1 = {.Instance = &s_fake_usart1};
 
+/* 角色统一后两块板都不再有 TIM2 条目，这里照实反映：PL_TIM2 留空，
+   它的 ISR 在没有句柄时什么都不做（NVIC 也不会使能，不会真的进来）。 */
 const pl_tim_board_entry_t g_pl_tim_board[PL_TIM_MAX] = {
-    [PL_TIM2] = {.init = NULL, .handle = &s_htim2, .irq = 0},
     [PL_TIM3] = {.init = NULL, .handle = &s_htim3, .irq = 0},
     [PL_TIM4] = {.init = NULL, .handle = &s_htim4, .irq = 0},
     [PL_TIM7] = {.init = NULL, .handle = &s_htim7, .irq = 0},
@@ -149,17 +150,19 @@ static void case_tim_isrs_before_init(void)
 
     s_tim_irq_calls = 0;
 
-    TIM2_IRQHandler();
-    CHECK_MSG(s_tim_irq_calls == 1 && s_last_tim == &s_htim2, "TIM2_IRQHandler 没把中断交给 HAL");
     TIM3_IRQHandler();
-    CHECK_MSG(s_tim_irq_calls == 2 && s_last_tim == &s_htim3, "TIM3_IRQHandler 没把中断交给 HAL");
+    CHECK_MSG(s_tim_irq_calls == 1 && s_last_tim == &s_htim3, "TIM3_IRQHandler 没把中断交给 HAL");
     TIM4_IRQHandler();
-    CHECK_MSG(s_tim_irq_calls == 3 && s_last_tim == &s_htim4, "TIM4_IRQHandler 没把中断交给 HAL");
+    CHECK_MSG(s_tim_irq_calls == 2 && s_last_tim == &s_htim4, "TIM4_IRQHandler 没把中断交给 HAL");
 
     /* TIM7 是真正的受害者：它是 HAL 时基，HAL_Init 阶段就被使能了 */
     TIM7_IRQHandler();
-    CHECK_MSG(s_tim_irq_calls == 4 && s_last_tim == &s_htim7,
+    CHECK_MSG(s_tim_irq_calls == 3 && s_last_tim == &s_htim7,
               "TIM7_IRQHandler 没把中断交给 HAL —— 真机上就是中断风暴、CPU 卡死在这里");
+
+    /* TIM2 统一后不再使用：没有板级条目，ISR 应安静返回（不清标志也不该被解引用崩溃） */
+    TIM2_IRQHandler();
+    CHECK_MSG(s_tim_irq_calls == 3, "TIM2 已不用，它的 ISR 不该去碰 HAL");
 }
 
 static void case_tim7_tick_before_init(void)

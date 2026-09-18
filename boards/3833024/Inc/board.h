@@ -16,12 +16,3 @@
  * 主固件从 0x08040000 起，偏移 0x40000；直烧的板子是 0。两处不一致的表现是任何
  * 中断都跳到错误的地方，且不会有编译期报错。 */
 #define BOARD_VECT_TAB_OFFSET 0x00040000UL
-
-/* ---- 显示子系统的定时器角色 ----
- * 3833024：TIM3 出行同步中断（行扫描节拍），TIM4 出 8 级亮度 PWM。
- * OE/LAT 原子窗口要屏蔽的是 PWM 那个中断——PWM 在窗口中间跳变会把消隐时序打断。 */
-#define BOARD_DISPLAY_SCAN_TIM PL_TIM3
-#define BOARD_DISPLAY_PWM_TIM  PL_TIM4
-
-/* ---- 板级特有的测试用例（实现见 boards/3833024/Src/app_test_board.c） ---- */
-void board_test_io_output(void);
