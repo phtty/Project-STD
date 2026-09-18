@@ -11,7 +11,3 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Src/pl_exti_board.c \
 	$(BOARD_DIR)/Src/pl_hub75_board.c
 
-# AH_MQTT 暂未启用，本板不参与编译（与 B 原工程的 Makefile 注释一致）。
-# 注意这条只影响 Makefile；eIDE 那边是各 target 的 excludeList 独立控制的。
-SRC_EXCLUDE += Application/Src/AH_MQTT/ah_mqtt.c
-SRC_EXCLUDE += Application/Src/AH_MQTT/ah_mqtt_cmd.c

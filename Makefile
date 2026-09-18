@@ -341,7 +341,14 @@ SRC_ALL = \
 	$(SRC_STARTUP)
 
 # ---- Object Files ----
-# board.mk 可选：本板不参与编译的**共享源**（板级源直接不写进 SRC_BOARD 即可）。
+# 工程级排除：AH_MQTT 暂未启用，所有板都不编。
+# **必须与 eIDE 保持一致** —— 两个 target 的 excludeList 里都有
+# <virtual_root>/Application/protocol/ah，这里不排的话，同一份源码在
+# Makefile 与 eIDE 下会产出不同的固件。
+SRC_EXCLUDE = Application/Src/AH_MQTT/ah_mqtt.c
+SRC_EXCLUDE += Application/Src/AH_MQTT/ah_mqtt_cmd.c
+
+# board.mk 还可以追加本板不参与编译的**共享源**（板级源直接不写进 SRC_BOARD 即可）。
 # 用 filter-out 而非让各板复制清单：排除项是少数、共享清单是多数，反过来的话
 # 每加一个共享文件都要改每一块板。
 # 必须放在 SRC_ALL **之后**：放前面的话 := 当场展开，那时 SRC_ALL 还是空的。
