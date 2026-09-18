@@ -271,7 +271,6 @@ SRC_PLATFORM = \
 	Platform/Src/pl_rtc.c \
 	Platform/Src/pl_sys.c \
 	Platform/Src/pl_flash.c \
-	Platform/Src/pl_hub75.c \
 	Platform/Src/pl_adc.c \
 	Platform/Src/pl_spi.c \
 	Platform/Src/pl_uart.c
@@ -289,7 +288,11 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Src/dev_rs485.c \
 	$(BOARD_DIR)/Src/dev_io_ctrl.c \
 	$(BOARD_DIR)/Src/app_rs232.c \
-	$(BOARD_DIR)/Src/dev_p20_16x8_2200001667.c
+	$(BOARD_DIR)/Src/dev_p20_16x8_2200001667.c \
+	$(BOARD_DIR)/Src/pl_tim_board.c \
+	$(BOARD_DIR)/Src/pl_uart_board.c \
+	$(BOARD_DIR)/Src/pl_exti_board.c \
+	$(BOARD_DIR)/Src/pl_hub75_board.c
 
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \

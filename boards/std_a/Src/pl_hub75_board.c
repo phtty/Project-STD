@@ -1,6 +1,9 @@
 /**
- * @file    pl_hub75.c
- * @brief   HUB75 平台抽象 — 引脚表和初始化
+ * @file    pl_hub75_board.c
+ * @brief   std_a 的 HUB75 引脚表与初始化
+ *
+ * 共享的 Platform/Inc/pl_hub75.h 只声明接口；"哪几根引脚、几路通道"是板级事实，
+ * 落在这里。换板时改本文件与 boards/<板>/Inc/hub75_pins.h，不动 Platform。
  */
 
 #include "pl_hub75.h"

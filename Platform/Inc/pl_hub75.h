@@ -3,27 +3,18 @@
  * @brief   HUB75 LED 点阵 GPIO 位拆裂抽象
  *
  * 封装所有 BITBAND_PERIPH 操作和 BSRR 直接寄存器写入，
- * 对外暴露高性能内联函数。换 MCU 只需重写此文件。
+ * 对外暴露高性能内联函数。
+ *
+ * 本文件是**共享接口**：内联访问器在热路径上（每行 336 步 × 50 行），
+ * 不能退化成函数调用，所以引脚宏必须保持编译期可见 —— 由板级头 hub75_pins.h
+ * 提供（HUB75_CHANNEL_MAX 与 HUB75_OE/CLK/LAT/A~D 的位带定义），
+ * 引脚表 g_hub75_pin_r/g/b 与 pl_hub75_init 由板级源实现。
  */
 
 #pragma once
 
-#include "main.h"
+#include "hub75_pins.h" /* 板级引脚宏：这些不是"共享"的，只是恰好同名 */
 #include <stdint.h>
-
-/* ---- HUB75 通道数 ---- */
-#define HUB75_CHANNEL_MAX 10
-
-/* ---- 控制信号 (bit-band) ---- */
-#define HUB75_OE  BITBAND_PERIPH(&(HUB75_OE_GPIO_Port->ODR), 0)
-#define HUB75_CLK BITBAND_PERIPH(&(HUB75_CLK_GPIO_Port->ODR), 1)
-#define HUB75_LAT BITBAND_PERIPH(&(HUB75_LAT_GPIO_Port->ODR), 3)
-
-/* ---- 行地址选择 (bit-band) ---- */
-#define HUB75_A BITBAND_PERIPH(&(HUB75_A_GPIO_Port->ODR), 4)
-#define HUB75_B BITBAND_PERIPH(&(HUB75_B_GPIO_Port->ODR), 5)
-#define HUB75_C BITBAND_PERIPH(&(HUB75_C_GPIO_Port->ODR), 6)
-#define HUB75_D BITBAND_PERIPH(&(HUB75_D_GPIO_Port->ODR), 7)
 
 /** @brief HUB75 单通道 RGB 引脚描述 */
 typedef struct {

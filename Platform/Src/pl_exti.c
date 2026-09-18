@@ -2,13 +2,17 @@
  * @file    pl_exti.c
  * @brief   EXTI 外部中断 Platform 层抽象
  *
- * ISR 收敛于此，Device 层通过 pl_exti_register_cb 注册回调。
- * 平台层不持有应用级 RTOS 对象，仅提供 ISR→回调分派。
+ * Device 层通过 pl_exti_register_cb 注册回调；本文件只提供 ISR→回调分派，
+ * 不持有应用级 RTOS 对象。
+ *
+ * 中断向量不在这里：哪些 EXTI 向量存在、各自服务哪几根引脚是板级事实，
+ * 写在 boards/<板>/Src/pl_exti_board.c，函数体复用 HAL_GPIO_EXTI_IRQHandler +
+ * 本文件的 HAL_GPIO_EXTI_Callback。
  */
 
 #include "pl_exti.h"
-#include "main.h"
 #include "initcall.h"
+#include <stddef.h> /* NULL（原经 main.h 间接引入，去掉板级头后要显式带） */
 
 #define PL_EXTI_CB_MAX 16
 
@@ -37,19 +41,6 @@ void pl_exti_register_cb(uint16_t pin, pl_exti_cb_t cb, void *ctx)
             return;
         }
     }
-}
-
-/* ---- ISR（从 stm32f4xx_it.c 迁移） ---- */
-void EXTI9_5_IRQHandler(void)
-{
-    HAL_GPIO_EXTI_IRQHandler(KEY_TST_Pin);
-}
-
-void EXTI15_10_IRQHandler(void)
-{
-    HAL_GPIO_EXTI_IRQHandler(SW3_Pin);
-    HAL_GPIO_EXTI_IRQHandler(SW2_Pin);
-    HAL_GPIO_EXTI_IRQHandler(SW1_Pin);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t pin)

@@ -11,17 +11,44 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
-/** @brief UART 实例 ID */
+/** @brief UART 实例 ID
+ *
+ *  **跨板稳定**：板子没有的那路在 g_pl_uart_board[] 里留空，枚举值不变，
+ *  这样按名字引用某一路的共享代码不需要条件编译。 */
 enum {
     PL_UART1 = 0, /**< USART1 (RS485) */
     PL_UART3,     /**< USART3 (RS232-0) */
-    PL_UART6,     /**< USART6 (RS232-1) — Project_STD 独有 */
+    PL_UART6,     /**< USART6 (RS232-1) */
     PL_UART_MAX,
 };
 
 /** @brief UART 不透明句柄 */
 typedef void *pl_uart_handle_t;
+
+/** @brief 板级 UART 表项（由 boards/<板>/Src/pl_uart_board.c 提供）
+ *
+ *  PL_UART_MAX 是 A/B 两块板枚举的并集；某块板没有的那几路 .init/.huart 留 NULL，
+ *  pl_uart_init 会跳过，pl_uart_get_handle 返回的 ctx 里 huart 为 NULL，
+ *  各 API 已经判空返回 -1。 */
+typedef struct {
+    void (*init)(void); /**< MX_USARTx_UART_Init，NULL 表示本板无此路 */
+    void *huart;        /**< &huartx，NULL 表示本板无此路 */
+    void *dma_rx;       /**< &hdma_usartx_rx，无 DMA 接收则 NULL */
+    uint8_t irq;        /**< USARTx_IRQn，0 表示无 */
+    uint8_t dma_irq;    /**< DMAn_Streamm_IRQn，0 表示无 */
+} pl_uart_board_entry_t;
+
+extern const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX];
+
+/** @brief 供板级 ISR 调用的中断入口
+ *
+ *  ISR 向量名（USART1_IRQHandler / DMA2_Stream2_IRQHandler …）必须写在某个 .c 里，
+ *  而"本板有哪些中断、哪个 DMA 流属于哪一路"是板级事实，所以向量放在
+ *  boards/<板>/Src/pl_uart_board.c，函数体复用这两个共享入口。 */
+void pl_uart_irq_handler(uint8_t id);
+void pl_uart_dma_irq_handler(uint8_t id);
 
 /** @brief DMA 空闲中断接收回调（ISR 上下文，应尽快返回） */
 typedef void (*pl_uart_rx_cb_t)(uint8_t *data, uint16_t len, void *ctx);

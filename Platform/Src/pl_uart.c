@@ -2,23 +2,19 @@
  * @file        pl_uart.c
  * @brief       UART 平台层抽象（hw_pl_initcall 优先级 3）
  *
- * 封装 USART1 (RS485)、USART3 (RS232-0)、USART6 (RS232-1)，
  * 提供不透明句柄、阻塞发送和 DMA 空闲中断接收。
- * UART 及 DMA 中断处理全部内聚于此文件。
+ *
+ * 本文件只有机制，不含"本板有哪几路 UART"——那来自板级的 g_pl_uart_board[]
+ * （见 boards/<板>/Src/pl_uart_board.c）。ISR 向量也在板级文件里，因为
+ * "有哪些中断向量、哪个 DMA 流配哪一路"同样是板级事实。
  */
 
 #include "pl_uart.h"
-#include "usart.h"
-#include "dma.h"
 #include "initcall.h"
 #include "pl_mem.h"
+#include "stm32f4xx_hal.h"
 #include <stdio.h>
 #include <string.h>
-
-/* DMA 句柄（定义在 Core/Src/dma.c） */
-extern DMA_HandleTypeDef hdma_usart1_rx;
-extern DMA_HandleTypeDef hdma_usart3_rx;
-extern DMA_HandleTypeDef hdma_usart6_rx;
 
 typedef struct {
     UART_HandleTypeDef *huart;
@@ -51,13 +47,10 @@ static void uart_idle_handle(uart_ctx_t *ctx)
 /* ---- initcall ---- */
 void pl_uart_init(void)
 {
-    MX_USART1_UART_Init();
-    MX_USART3_UART_Init();
-    MX_USART6_UART_Init();
-
-    g_uart_ctx[PL_UART1].huart = &huart1;
-    g_uart_ctx[PL_UART3].huart = &huart3;
-    g_uart_ctx[PL_UART6].huart = &huart6;
+    for (uint8_t i = 0; i < PL_UART_MAX; i++) {
+        if (g_pl_uart_board[i].init) g_pl_uart_board[i].init();
+        g_uart_ctx[i].huart = (UART_HandleTypeDef *)g_pl_uart_board[i].huart;
+    }
 }
 hw_pl_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
 
@@ -117,37 +110,19 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
 }
 
 /* ================================================================
- *  UART 及 DMA 中断服务例程（由 startup 向量表直接跳转）
+ *  中断入口（由 boards/<板>/Src/pl_uart_board.c 里的向量调用）
  * ================================================================ */
 
-void USART1_IRQHandler(void)
+void pl_uart_irq_handler(uint8_t id)
 {
-    HAL_UART_IRQHandler(&huart1);
-    uart_idle_handle(&g_uart_ctx[PL_UART1]);
+    if (id >= PL_UART_MAX || !g_uart_ctx[id].huart) return;
+    HAL_UART_IRQHandler(g_uart_ctx[id].huart);
+    uart_idle_handle(&g_uart_ctx[id]);
 }
 
-void USART3_IRQHandler(void)
+void pl_uart_dma_irq_handler(uint8_t id)
 {
-    HAL_UART_IRQHandler(&huart3);
-    uart_idle_handle(&g_uart_ctx[PL_UART3]);
-}
-
-void USART6_IRQHandler(void)
-{
-    HAL_UART_IRQHandler(&huart6);
-    uart_idle_handle(&g_uart_ctx[PL_UART6]);
-}
-
-/* DMA RX 中断 */
-void DMA1_Stream1_IRQHandler(void)
-{
-    HAL_DMA_IRQHandler(&hdma_usart3_rx);
-}
-void DMA2_Stream1_IRQHandler(void)
-{
-    HAL_DMA_IRQHandler(&hdma_usart6_rx);
-}
-void DMA2_Stream2_IRQHandler(void)
-{
-    HAL_DMA_IRQHandler(&hdma_usart1_rx);
+    if (id >= PL_UART_MAX) return;
+    DMA_HandleTypeDef *hdma = (DMA_HandleTypeDef *)g_pl_uart_board[id].dma_rx;
+    if (hdma) HAL_DMA_IRQHandler(hdma);
 }
