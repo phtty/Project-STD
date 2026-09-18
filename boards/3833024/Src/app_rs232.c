@@ -151,7 +151,7 @@ osThreadId_t app_rs232_1_start(void)
 }
 
 /* ---- 自注册启动 ----
- * 这一路是 std_a 独有的（B 板没有 RS232），所以启动调用点留在本文件里，
+ * 这一路是 3833024 独有的（B 板没有 RS232），所以启动调用点留在本文件里，
  * 由 initcall 自动挂上；共享的 app_boot.c 因此不需要知道 RS232 存在，
  * 也就不需要条件编译。用 sw_post(4)：让 app_dispatch_init（sw_app=3）
  * 先建好框架，通道任务再往里投帧。
@@ -167,7 +167,7 @@ osThreadId_t app_rs232_1_start(void)
 static void rs232_channels_start(void)
 {
     /* 本板的 RS232 端点承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
-       RS232 只有 std_a 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
+       RS232 只有 3833024 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
     app_proto_bind(app_iap_pcb(), app_rs232_0_ccb());
     app_proto_bind(app_iap_pcb(), app_rs232_1_ccb());
 

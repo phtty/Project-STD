@@ -104,7 +104,7 @@ static void init_task(void *argument)
     app_tcp_client_start();
     app_udp_start();
     app_rs485_start();
-    /* 板级特有的通道由各板自己用 initcall 启动（如 std_a 的两路 RS232），
+    /* 板级特有的通道由各板自己用 initcall 启动（如 3833024 的两路 RS232），
        不在这里点名——否则共享文件要认识每块板的外设。 */
 
     // app_test_run();

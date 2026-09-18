@@ -1,8 +1,8 @@
 /**
  * @file    app_test_board.c
- * @brief   std_a 特有的硬件测试用例
+ * @brief   3833024 特有的硬件测试用例
  *
- * 车道灯（PD14）与黄闪灯（PD15）只有 std_a 有，所以这个用例归板级，
+ * 车道灯（PD14）与黄闪灯（PD15）只有 3833024 有，所以这个用例归板级，
  * 不放共享的 Application/Src/app_test.c —— 否则共享文件要认识某一块板的外设。
  * 声明在本板的 Inc/board.h 里。
  */

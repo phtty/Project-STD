@@ -1,9 +1,9 @@
 /**
  * @file    dev_key_board.c
- * @brief   std_b 的按键板级表
+ * @brief   5005048 的按键板级表
  *
- * std_b 只有测试键 KEY_TST（PD8，EXTI 下降沿，内部上拉、低有效）。
- * std_a 的 SW1~SW3 与 DIP1~DIP2 在本板不存在，故不在表里 ——
+ * 5005048 只有测试键 KEY_TST（PD8，EXTI 下降沿，内部上拉、低有效）。
+ * 3833024 的 SW1~SW3 与 DIP1~DIP2 在本板不存在，故不在表里 ——
  * dev_key_get() 对这些 id 返回 NULL。
  */
 

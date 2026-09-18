@@ -22,7 +22,6 @@ virtualFolder:
         - name: channel
           files:
             - path: Application/Src/Channel/app_mqtt.c
-            - path: Application/Src/Channel/app_rs232.c
             - path: Application/Src/Channel/app_rs485.c
             - path: Application/Src/Channel/app_tcp_client.c
             - path: Application/Src/Channel/app_tcp_server.c
@@ -228,11 +227,6 @@ virtualFolder:
     - name: Device
       files: []
       folders:
-        - name: Comm
-          files:
-            - path: Device/Comm/dev_rs232.c
-            - path: Device/Comm/dev_rs485.c
-          folders: []
         - name: Network
           files:
             - path: Device/Network/dev_dp83848.c
@@ -246,16 +240,12 @@ virtualFolder:
           folders: []
         - name: IO
           files:
-            - path: Device/IO/dev_io_ctrl.c
             - path: Device/IO/dev_key.c
             - path: Device/IO/dev_light_sensor.c
           folders: []
         - name: Display
           files:
             - path: Device/Display/dev_display.c
-            - path: Device/Display/dev_p20_16x8_2200001667.c
-            - path: Device/Display/dev_p20_16x16_1000001055.c
-            - path: Device/Display/dev_P10_32x16_2200001703.c
           folders: []
     - name: Platform
       files:
@@ -272,7 +262,6 @@ virtualFolder:
         - path: Platform/Src/pl_rtc.c
         - path: Platform/Src/pl_sys.c
         - path: Platform/Src/pl_flash.c
-        - path: Platform/Src/pl_hub75.c
         - path: Platform/Src/pl_adc.c
         - path: Platform/Src/pl_spi.c
         - path: Platform/Src/pl_uart.c
@@ -287,31 +276,79 @@ virtualFolder:
         - path: Kernel/Src/text_cvt.c
         - path: Kernel/Src/bcc_utils.c
       folders: []
-    - name: Core
-      files:
-        - path: Core/Src/main.c
-        - path: Core/Src/stm32f4xx_it.c
-        - path: Core/Src/syscalls.c
-        - path: Core/Src/sysmem.c
-        - path: Core/Src/adc.c
-        - path: Core/Src/dma.c
-        - path: Core/Src/gpio.c
-        - path: Core/Src/iwdg.c
-        - path: Core/Src/rtc.c
-        - path: Core/Src/spi.c
-        - path: Core/Src/stm32f4xx_hal_msp.c
-        - path: Core/Src/stm32f4xx_hal_timebase_tim.c
-        - path: Core/Src/system_stm32f4xx.c
-        - path: Core/Src/tim.c
-        - path: Core/Src/usart.c
-        - path: Core/Src/crc.c
-      folders: []
+    - name: boards
+      files: []
+      folders:
+        - name: "3833024"
+          files:
+            - path: boards/3833024/Src/app_rs232.c
+            - path: boards/3833024/Src/app_test_board.c
+            - path: boards/3833024/Src/dev_io_ctrl.c
+            - path: boards/3833024/Src/dev_key_board.c
+            - path: boards/3833024/Src/dev_P10_32x16_2200001703.c
+            - path: boards/3833024/Src/dev_p20_16x8_2200001667.c
+            - path: boards/3833024/Src/dev_p20_16x16_1000001055.c
+            - path: boards/3833024/Src/dev_rs232.c
+            - path: boards/3833024/Src/dev_rs485.c
+            - path: boards/3833024/Src/pl_exti_board.c
+            - path: boards/3833024/Src/pl_hub75_board.c
+            - path: boards/3833024/Src/pl_tim_board.c
+            - path: boards/3833024/Src/pl_uart_board.c
+          folders:
+            - name: Core
+              files:
+                - path: boards/3833024/Core/Src/adc.c
+                - path: boards/3833024/Core/Src/crc.c
+                - path: boards/3833024/Core/Src/dma.c
+                - path: boards/3833024/Core/Src/gpio.c
+                - path: boards/3833024/Core/Src/iwdg.c
+                - path: boards/3833024/Core/Src/main.c
+                - path: boards/3833024/Core/Src/rtc.c
+                - path: boards/3833024/Core/Src/spi.c
+                - path: boards/3833024/Core/Src/stm32f4xx_hal_msp.c
+                - path: boards/3833024/Core/Src/stm32f4xx_hal_timebase_tim.c
+                - path: boards/3833024/Core/Src/stm32f4xx_it.c
+                - path: boards/3833024/Core/Src/syscalls.c
+                - path: boards/3833024/Core/Src/sysmem.c
+                - path: boards/3833024/Core/Src/system_stm32f4xx.c
+                - path: boards/3833024/Core/Src/tim.c
+                - path: boards/3833024/Core/Src/usart.c
+              folders: []
+        - name: "5005048"
+          files:
+            - path: boards/5005048/Src/dev_key_board.c
+            - path: boards/5005048/Src/dev_p10_112x10_1000000661.c
+            - path: boards/5005048/Src/dev_rs485.c
+            - path: boards/5005048/Src/pl_exti_board.c
+            - path: boards/5005048/Src/pl_hub75_board.c
+            - path: boards/5005048/Src/pl_tim_board.c
+            - path: boards/5005048/Src/pl_uart_board.c
+          folders:
+            - name: Core
+              files:
+                - path: boards/5005048/Core/Src/adc.c
+                - path: boards/5005048/Core/Src/crc.c
+                - path: boards/5005048/Core/Src/dma.c
+                - path: boards/5005048/Core/Src/gpio.c
+                - path: boards/5005048/Core/Src/iwdg.c
+                - path: boards/5005048/Core/Src/main.c
+                - path: boards/5005048/Core/Src/rtc.c
+                - path: boards/5005048/Core/Src/spi.c
+                - path: boards/5005048/Core/Src/stm32f4xx_hal_msp.c
+                - path: boards/5005048/Core/Src/stm32f4xx_hal_timebase_tim.c
+                - path: boards/5005048/Core/Src/stm32f4xx_it.c
+                - path: boards/5005048/Core/Src/syscalls.c
+                - path: boards/5005048/Core/Src/sysmem.c
+                - path: boards/5005048/Core/Src/system_stm32f4xx.c
+                - path: boards/5005048/Core/Src/tim.c
+                - path: boards/5005048/Core/Src/usart.c
+              folders: []
 dependenceList: []
 outDir: build
 miscInfo:
   uid: e3e6d7588780775da2eb8dcb95a2ad14
 targets:
-  Debug:
+  "3833024":
     cppPreprocessAttrs:
       defineList:
         - USE_HAL_DRIVER
@@ -338,6 +375,8 @@ targets:
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
+        - boards/3833024/Inc
+        - boards/3833024/Core/Inc
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -346,6 +385,21 @@ targets:
       - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
       - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/IO/dev_io_ctrl.c
+      - <virtual_root>/Device/Comm/dev_rs232.c
+      - <virtual_root>/Device/Comm/dev_rs485.c
+      - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
+      - <virtual_root>/Application/channel/app_rs232.c
+      - <virtual_root>/Core
+      - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
+      - <virtual_root>/board/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
+      - <virtual_root>/boards/dev_p20_16x16_1000001055.c
+      - <virtual_root>/boards/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/5005048
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -380,7 +434,7 @@ targets:
             output-format: elf
             remove-unused-input-sections: true
             use-float-printf: true
-        scatterFilePath: Compiler/STM32F407XX_FLASH.ld
+        scatterFilePath: boards/3833024/STM32F407XX_FLASH.ld
         storageLayout:
           RAM: []
           ROM: []
@@ -444,7 +498,7 @@ targets:
         speed: 10000
         target: STM32F407ZG
     uploader: Custom
-  Release:
+  "5005048":
     cppPreprocessAttrs:
       defineList:
         - USE_HAL_DRIVER
@@ -454,35 +508,44 @@ targets:
         - Drivers/CMSIS/Include
         - Drivers/CMSIS/Device/ST/STM32F4xx/Include
         - Drivers/STM32F4xx_HAL_Driver/Inc
-        - Drivers/BSP/Components/dp83848
-        - Drivers/BSP/Components/HUB75
-        - Drivers/BSP/Components/W25Qxx
-        - Drivers/RTT/Config
-        - Drivers/RTT/RTT
-        - LWIP/App
-        - LWIP/Target
         - Middlewares/Third_Party/LwIP/src/include
         - Middlewares/Third_Party/LwIP/system
         - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
         - Middlewares/Third_Party/FreeRTOS/Source/include
         - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
         - Compiler
-        - Drivers/BSP/Display
-        - Drivers/BSP/Key
-        - Drivers/BSP/RingBuffer
-        - Drivers/BSP/IAP
-        - Drivers/BSP/RingBuff
-        - Drivers/BSP/Components/ADC
-        - Drivers/BSP/Components/LightSensor
-        - Drivers/BSP/Protocol
-        - Drivers/BSP/Display/text_cvt
-        - Drivers/BSP/IOCtrl
+        - Application/Inc
+        - Device/Inc
+        - Kernel/Inc
+        - Platform/Inc
+        - Middlewares/Third_Party/SEGGER_RTT
+        - Application/Inc/Channel
+        - Application/Inc/IAP
+        - Application/Inc/LDI
+        - Application/Inc/AH_MQTT
+        - Application/Inc/RLS
+        - Application/Inc/CQ_P10
+        - boards/5005048/Inc
+        - boards/5005048/Core/Inc
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Application/NetIF/udp_interface.c
+      - <virtual_root>/Application/protocol/ah
+      - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/IO/dev_io_ctrl.c
+      - <virtual_root>/Device/Comm/dev_rs232.c
+      - <virtual_root>/Device/Comm/dev_rs485.c
+      - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
+      - <virtual_root>/Application/channel/app_rs232.c
+      - <virtual_root>/Core
+      - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
+      - <virtual_root>/board/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -497,22 +560,19 @@ targets:
           asm-compiler: {}
           beforeBuildTasks: []
           c/cpp-compiler:
-            language-c: c17
-            language-cpp: c++17
-            no-exceptions: true
-            no-rtti: true
-            no-threadsafe-statics: true
-            no-use-cxa-atexit: true
+            language-c: c23
+            language-cpp: c++23
             one-elf-section-per-data: true
             one-elf-section-per-function: true
-            optimization: level-size
+            optimization: level-debug
             warnings: all-warnings
           global:
             $float-abi-type: hard
-            arm-thumb-interwork: true
             arm-thumb-mode: thumb
+            callgraph-info: true
             not-use-syscalls: true
             output-debug-info: enable
+            stack-usage: true
             use-newlib-nano: true
           linker:
             $toolName: auto
@@ -520,6 +580,37 @@ targets:
             output-format: elf
             remove-unused-input-sections: true
             use-float-printf: true
+        scatterFilePath: boards/5005048/STM32F407XX_FLASH.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
+      LLVM_ARM:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 1
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            C_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums
+            language-c: c23
+            language-cpp: c++23
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-debug
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            output-debug-info: enable
+          linker:
+            $toolName: clang
+            LD_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums -Wl,--specs=nano.specs -Wl,--specs=nosys.specs
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
         scatterFilePath: Compiler/STM32F407XX_FLASH.ld
         storageLayout:
           RAM: []
@@ -528,20 +619,28 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${fileWorkspaceFolderBasename}.hex verify reset exit"
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/Debug/${workspaceFolderBasename}.hex verify reset exit"
         eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""
         bin: ""
         cpuInfo:
-          cpuName: "null"
-          vendor: "null"
+          cpuName: STM32F407ZG
+          vendor: ST
         otherCmds: ""
         proType: 1
         speed: 8000
       OpenOCD:
         baseAddr: "0x08000000"
         bin: ""
-        interface: stlink
-        target: stm32f1x
+        interface: cmsis-dap
+        target: stm32f4x
+      probe-rs:
+        allowEraseAll: false
+        baseAddr: "0x08000000"
+        bin: ""
+        otherOptions: ""
+        protocol: swd
+        speed: 10000
+        target: STM32F407ZG
     uploader: Custom

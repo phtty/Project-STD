@@ -1,4 +1,4 @@
-# std_a 的板级源清单（由顶层 Makefile 的 include $(BOARD_DIR)/board.mk 引入）
+# 3833024 的板级源清单（由顶层 Makefile 的 include $(BOARD_DIR)/board.mk 引入）
 #
 # 显示模组只列一个：每个驱动自带一份 CCMRAM 帧缓冲（pixel_map + hub75_buff），
 # 多编一份直接把 CCMRAM 顶爆（实测多两份超 588B）。同目录下的

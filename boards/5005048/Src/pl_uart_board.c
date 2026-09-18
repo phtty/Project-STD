@@ -1,9 +1,9 @@
 /**
  * @file    pl_uart_board.c
- * @brief   std_b 的 UART 板级表与中断向量
+ * @brief   5005048 的 UART 板级表与中断向量
  *
- * std_b 只有一路 UART：USART1 → RS485，RX 走 DMA2_Stream2。
- * PL_UART3 / PL_UART6（std_a 的两路 RS232）在本板留空。
+ * 5005048 只有一路 UART：USART1 → RS485，RX 走 DMA2_Stream2。
+ * PL_UART3 / PL_UART6（3833024 的两路 RS232）在本板留空。
  */
 
 #include "pl_uart.h"

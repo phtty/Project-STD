@@ -1,8 +1,8 @@
 /**
  * @file    dev_key_board.c
- * @brief   std_a 的按键板级表
+ * @brief   3833024 的按键板级表
  *
- * std_a 六个输入：
+ * 3833024 六个输入：
  *   PE12/PE11/PE10  SW1~SW3   干接点，EXTI 下降沿
  *   PD8             KEY_TST   测试键，EXTI 下降沿
  *   PE7/PE8         DIP1~DIP2 拨码开关，纯轮询（无 EXTI）

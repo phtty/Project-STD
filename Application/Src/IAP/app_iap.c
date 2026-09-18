@@ -81,7 +81,7 @@ pcb_t *app_iap_pcb(void)
     g_iap_msg_queue  = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
     s_iap_pcb.queue = g_iap_msg_queue;
 
-    /* 绑定两块板都有的通道。板级特有的通道（如 std_a 的两路 RS232）不在这里绑：
+    /* 绑定两块板都有的通道。板级特有的通道（如 3833024 的两路 RS232）不在这里绑：
        由各板的板级文件调 app_iap_pcb() 自行绑定，否则共享文件要认识每块板的外设。 */
     app_proto_bind(&s_iap_pcb, app_rs485_ccb());
     app_proto_bind(&s_iap_pcb, app_udp_ccb());

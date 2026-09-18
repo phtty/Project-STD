@@ -29,7 +29,7 @@ BUILD_DIR  = build/$(BOARD)/$(CONFIG)
 # 同一套 Kernel/Platform/Device/Application 共享代码，配不同板子编译。
 # 该板专属的源与头都在 boards/$(BOARD)/ 下（CubeMX 产物、显示模组、板级外设、
 # 板级通道）。新增一块板 = 复制一份 boards/<名字>/ 并改这一行。
-BOARD     ?= std_a
+BOARD     ?= 3833024
 BOARD_DIR  = boards/$(BOARD)
 
 # ---- MCU Flags ----
@@ -280,7 +280,7 @@ SRC_PLATFORM = \
 # ---- 板级源 ----
 # 清单由板自己声明：boards/<板>/board.mk 定义 SRC_BOARD。
 # 放在这里而不是写死在顶层，是因为"本板有哪些源文件"本身就是板级事实 ——
-# 例如 std_a 有两路 RS232 和两路灯控 IO，std_b 一个都没有。
+# 例如 3833024 有两路 RS232 和两路灯控 IO，5005048 一个都没有。
 # 显示模组**同时只能编一个**：每个驱动自带一份 CCMRAM 帧缓冲，多编一份直接
 # 把 CCMRAM 顶爆（实测多两份超 588B）。同目录下的其他驱动是可替换的面板选项，
 # 换屏时改 board.mk 里那一行，而不是追加。

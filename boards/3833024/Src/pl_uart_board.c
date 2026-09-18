@@ -1,8 +1,8 @@
 /**
  * @file    pl_uart_board.c
- * @brief   std_a 的 UART 板级表与中断向量
+ * @brief   3833024 的 UART 板级表与中断向量
  *
- * std_a 三路 UART：
+ * 3833024 三路 UART：
  *   USART1 → RS485       ，RX 走 DMA2_Stream2
  *   USART3 → RS232-0     ，RX 走 DMA1_Stream1
  *   USART6 → RS232-1     ，RX 走 DMA2_Stream1

@@ -1,11 +1,11 @@
 /**
  * @file    pl_tim_board.c
- * @brief   std_a 的定时器板级表
+ * @brief   3833024 的定时器板级表
  *
  * 共享的 Platform/Src/pl_tim.c 只认 g_pl_tim_board[]，本文件是它对这块板的答案：
  * 有哪些定时器、各自怎么初始化、句柄是谁、IRQ 号是多少。
  *
- * std_a 用 TIM2 做行地址、TIM3 做行同步扫描、TIM4 做亮度 PWM、TIM7 做 HAL 时基。
+ * 3833024 用 TIM2 做行地址、TIM3 做行同步扫描、TIM4 做亮度 PWM、TIM7 做 HAL 时基。
  * 换板时改这张表，不要去改 pl_tim.c。
  */
 

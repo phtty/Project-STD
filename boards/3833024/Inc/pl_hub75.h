@@ -1,9 +1,9 @@
 /**
  * @file    pl_hub75.h
- * @brief   std_a 的 HUB75 接口 —— 引脚定义与高性能内联访问器
+ * @brief   3833024 的 HUB75 接口 —— 引脚定义与高性能内联访问器
  *
  * **本头文件归板级**，不是共享 Platform 的一部分。原因：A/B 两块板的数据通道
- * 模型根本不同 —— std_a 是"R/G/B 各 10 路通道 + BSRR 预计算表"（g_hub75_pin_r/g/b），
+ * 模型根本不同 —— 3833024 是"R/G/B 各 10 路通道 + BSRR 预计算表"（g_hub75_pin_r/g/b），
  * B 板是"7 个端口的索引表、由面板驱动自持 channel_map"，连时钟脉冲的 NOP 数都不同
  * （本板 2，B 板 4）。硬抽一层共享接口只会把两边的硬件事实都拧弯。
  *
@@ -57,7 +57,7 @@ typedef enum {
     HUB75_COLOR_WHITE  = 7,
 } hub75_color_t;
 
-/** @brief HUB75 引脚表（由 boards/std_a/Src/pl_hub75_board.c 定义） */
+/** @brief HUB75 引脚表（由 boards/3833024/Src/pl_hub75_board.c 定义） */
 extern const hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX];
 extern const hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX];
 extern const hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX];
