@@ -12,6 +12,8 @@
 
 #include "app_rs232.h"
 #include "initcall.h"
+#include "app_iap.h"
+#include "app_dispatch.h"
 
 #include "FreeRTOS.h"
 #include "pl_uart.h"
@@ -164,6 +166,11 @@ osThreadId_t app_rs232_1_start(void)
  * 必定先跑完，rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
 static void rs232_channels_start(void)
 {
+    /* 本板的 RS232 端点承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
+       RS232 只有 std_a 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
+    app_proto_bind(app_iap_pcb(), app_rs232_0_ccb());
+    app_proto_bind(app_iap_pcb(), app_rs232_1_ccb());
+
     app_rs232_start();
     app_rs232_1_start();
 }

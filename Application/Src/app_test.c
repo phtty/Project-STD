@@ -8,7 +8,6 @@
 #include <string.h>
 #include "cmsis_os2.h"
 #include "dev_display.h"
-#include "dev_io_ctrl.h"
 #include "app_render.h"
 
 /* ================================================================
@@ -63,16 +62,6 @@ void app_test_render_text(void)
  *  IO 输出测试
  * ================================================================ */
 
-void app_test_io_output(void)
-{
-    dev_io_lane_light(true);
-    osDelay(1000);
-    dev_io_lane_light(false);
-
-    dev_io_flash_light(true);
-    osDelay(1000);
-    dev_io_flash_light(false);
-}
 
 /* ================================================================
  *  LED 灯序映射测试
@@ -116,5 +105,5 @@ void app_test_run(void)
     // app_test_led_mapping(); /* 新模组灯序确认时启用 */
     // app_test_pixel_scan();
     app_test_render_text();
-    // app_test_io_output();
+    // board_test_io_output(); /* 板级测试，见 boards/<板>/Src/app_test_board.c */
 }

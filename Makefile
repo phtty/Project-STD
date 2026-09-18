@@ -21,7 +21,9 @@ SIZE    = arm-none-eabi-size
 
 # ---- Directories ----
 CONFIG    ?= Debug
-BUILD_DIR  = build/$(CONFIG)
+# 构建目录**必须按板分**：两块板的同名目标文件（如 main.o）内容不同，
+# 共用一个目录会互相覆盖，链接出的是混合产物且不会有任何报错。
+BUILD_DIR  = build/$(BOARD)/$(CONFIG)
 
 # ---- 板级变体 ----
 # 同一套 Kernel/Platform/Device/Application 共享代码，配不同板子编译。
@@ -276,25 +278,14 @@ SRC_PLATFORM = \
 	Platform/Src/pl_spi.c \
 	Platform/Src/pl_uart.c
 
-# ---- 板级源（由 BOARD 选择，见 boards/$(BOARD)/）----
-# 该板专属的一切：显示模组、板级外设、板级通道。
-# 新增一块板 = 复制一份 boards/<名字>/ 并改顶部的 BOARD 变量。
-#
-# 显示模组**同时只能编一个**：每个驱动自带一份 CCMRAM 帧缓冲（pixel_map +
-# hub75_buff），多编一份直接把 CCMRAM 顶爆（多两份 → 超 588B）。同目录下的
-# dev_P10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
-# 换屏时在此换掉这一行，而不是追加。
-SRC_BOARD = \
-	$(BOARD_DIR)/Src/dev_rs232.c \
-	$(BOARD_DIR)/Src/dev_rs485.c \
-	$(BOARD_DIR)/Src/dev_io_ctrl.c \
-	$(BOARD_DIR)/Src/app_rs232.c \
-	$(BOARD_DIR)/Src/dev_p20_16x8_2200001667.c \
-	$(BOARD_DIR)/Src/pl_tim_board.c \
-	$(BOARD_DIR)/Src/pl_uart_board.c \
-	$(BOARD_DIR)/Src/pl_exti_board.c \
-	$(BOARD_DIR)/Src/pl_hub75_board.c \
-	$(BOARD_DIR)/Src/dev_key_board.c
+# ---- 板级源 ----
+# 清单由板自己声明：boards/<板>/board.mk 定义 SRC_BOARD。
+# 放在这里而不是写死在顶层，是因为"本板有哪些源文件"本身就是板级事实 ——
+# 例如 std_a 有两路 RS232 和两路灯控 IO，std_b 一个都没有。
+# 显示模组**同时只能编一个**：每个驱动自带一份 CCMRAM 帧缓冲，多编一份直接
+# 把 CCMRAM 顶爆（实测多两份超 588B）。同目录下的其他驱动是可替换的面板选项，
+# 换屏时改 board.mk 里那一行，而不是追加。
+include $(BOARD_DIR)/board.mk
 
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \

@@ -11,7 +11,6 @@
 #include "initcall.h"
 #include "pl_crc.h"
 #include "app_rs485.h"
-#include "app_rs232.h"
 #include "app_udp.h"
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
@@ -67,6 +66,11 @@ static pcb_t s_iap_pcb = {
 
 static_assert(IAP_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "IAP 最长帧超过框架暂存上限");
 
+pcb_t *app_iap_pcb(void)
+{
+    return &s_iap_pcb;
+}
+
 /* ---- 协议模块自注册 ---- */
 [[maybe_unused]] static void iap_module_init(void)
 {
@@ -77,10 +81,9 @@ static_assert(IAP_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "IAP 最长帧超过框架�
     g_iap_msg_queue  = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
     s_iap_pcb.queue = g_iap_msg_queue;
 
-    /* 绑定协议承载的通道。RS232 两路各是一个独立物理端点，与 RS485 同等对待。 */
+    /* 绑定两块板都有的通道。板级特有的通道（如 std_a 的两路 RS232）不在这里绑：
+       由各板的板级文件调 app_iap_pcb() 自行绑定，否则共享文件要认识每块板的外设。 */
     app_proto_bind(&s_iap_pcb, app_rs485_ccb());
-    app_proto_bind(&s_iap_pcb, app_rs232_0_ccb());
-    app_proto_bind(&s_iap_pcb, app_rs232_1_ccb());
     app_proto_bind(&s_iap_pcb, app_udp_ccb());
 
     /* 注册 IP 变更监听：任何协议改 IP 都触发 IAP 记录的镜像同步 */

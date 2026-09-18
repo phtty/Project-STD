@@ -18,7 +18,8 @@ void app_test_pixel_scan(void);
 void app_test_render_text(void);
 
 /** @brief IO 测试：依次点亮车道灯/黄闪灯各 1 秒 */
-void app_test_io_output(void);
+/* 板级特有的 IO 测试（如车道灯/黄闪灯）不放这里：只有部分板有这些输出，
+   声明见各板 boards/<板>/Inc/board.h。 */
 
 /** @brief LED 灯序测试：逐通道逐像素点亮 hub75_buff，用于确认物理灯序映射 */
 void app_test_led_mapping(void);

@@ -23,6 +23,13 @@ typedef struct {
     uint32_t data_crc[];
 } iap_frame_t;
 
+/** @brief 取 IAP 协议控制块
+ *
+ *  供板级代码把"本板才有的通道"绑到 IAP 上（如 std_a 的两路 RS232）。
+ *  共享的 app_iap.c 只绑定两块板都有的通道（RS485 / UDP），板级特有的通道由
+ *  各板自己绑——否则共享文件要认识每块板的外设。 */
+pcb_t *app_iap_pcb(void);
+
 extern osMessageQueueId_t g_iap_msg_queue;
 extern osThreadId_t g_iap_task_handle;
 extern const osThreadAttr_t iap_task_attr;
