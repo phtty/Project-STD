@@ -58,6 +58,17 @@ _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
 _Min_Stack_Size = 0x800; /* required amount of stack */
 
+/* ---- 防误用 ----
+ * 本文件**不能**直接作为 -T 的目标：它不含 FLASH 布局。直接 -T 本文件时
+ * FLASH_ORIGIN/FLASH_LENGTH 未定义，ld 的报错是
+ *     invalid origin for memory region FLASH
+ *     FLASH:  <大小>  18446744073709551615 B   0.00%
+ * （18446744073709551615 = 0xFFFFFFFFFFFFFFFF = -1，即"未定义"），
+ * 从这条信息看不出问题在哪，所以在这里主动补一条说明。
+ * 正确用法：-T boards/<板>/STM32F407XX_FLASH.ld，由它定义两个常量后 include 本文件。 */
+ASSERT(DEFINED(FLASH_ORIGIN) && FLASH_ORIGIN != 0,
+       "-T 应指向 boards/<板>/STM32F407XX_FLASH.ld，而不是 Compiler/sections.ld")
+
 /* ---- MEMORY ----
  * FLASH 的起始与长度是板级参数（直烧 vs 带 IAP bootloader），由**外层脚本**在本文件
  * 被 include 之前定义：
