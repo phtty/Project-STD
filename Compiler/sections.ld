@@ -58,12 +58,19 @@ _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
 _Min_Stack_Size = 0x800; /* required amount of stack */
 
-/* ---- 板级 FLASH 布局 ----
- * 带 IAP bootloader 的板子主固件从 0x08040000 起（前 4 个扇区留给 bootloader），
- * 直烧的板子从 0x08000000 起、整片 1024K 可用。起始地址同时决定 VTOR
- * （见各板 Core/Src/main.c），两处必须一致。
- * 由 -L $(BOARD_DIR) + boards/<板>/board.ld 提供，换板只改那个文件。 */
-INCLUDE board.ld
+/* ---- MEMORY ----
+ * FLASH 的起始与长度是板级参数（直烧 vs 带 IAP bootloader），由**外层脚本**在本文件
+ * 被 include 之前定义：
+ *     FLASH_ORIGIN / FLASH_LENGTH
+ * 外层脚本是 boards/<板>/STM32F407XX_FLASH.ld，由构建系统的 -T 指定。
+ * 本文件不含任何板级事实，两板共用。
+ *
+ * 为什么用"外层脚本 + INCLUDE 根相对路径"而不是"-- defsym / -L"：
+ * ld 的 INCLUDE 是按**解析 -T 那一刻已累积的 -L 目录**去找文件的 —— 同样一条
+ * `-T x.ld -L dir`，gcc 驱动（collect2 会把 -L 提前）能找到，裸 ld 找不到。
+ * 这个差异不写在任何文档里，且换构建系统就会翻车。改为 -T 直接指向板级脚本、
+ * 内部的 INCLUDE 用根相对固定路径，则与 -L、与参数顺序、与用 ld 还是 gcc 都无关。
+ */
 
 /* Specify the memory areas */
 MEMORY
