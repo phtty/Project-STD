@@ -292,7 +292,8 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Src/pl_tim_board.c \
 	$(BOARD_DIR)/Src/pl_uart_board.c \
 	$(BOARD_DIR)/Src/pl_exti_board.c \
-	$(BOARD_DIR)/Src/pl_hub75_board.c
+	$(BOARD_DIR)/Src/pl_hub75_board.c \
+	$(BOARD_DIR)/Src/dev_key_board.c
 
 # Device (仅 Project_STD 新模块，resend dev_* 等 Phase 6 Platform 集成后加入)
 SRC_DEVICE = \
@@ -405,6 +406,7 @@ HOSTCC       = cc
 TEST_BUILD   = build/test
 TEST_INC     = \
 	-I test/stubs \
+	-I $(BOARD_DIR)/Inc \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \

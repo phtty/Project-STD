@@ -17,7 +17,10 @@
 #include "cmsis_os2.h"
 #include "pl_gpio.h"
 
-/** @brief 按键/拨码开关 ID */
+/** @brief 按键/拨码开关 ID
+ *
+ *  **跨板稳定**：板子没有的按键不在 g_dev_key_board[] 里列出即可，
+ *  dev_key_get() 对它返回 NULL，枚举值不变。 */
 typedef enum {
     DEV_KEY_SW1  = 0,
     DEV_KEY_SW2  = 1,
@@ -46,6 +49,24 @@ struct dev_key {
     osSemaphoreId_t press_sem;    /* EXTI 释放，wait_press 获取 */
     uint32_t        last_edge_ms; /* 上次被采纳的边沿时刻，EXTI 回调据此软件去抖 */
 };
+
+/** @brief 板级按键描述（由 boards/<板>/Src/dev_key_board.c 提供）
+ *
+ *  "本板有哪些按键、各在哪根引脚、有没有 EXTI"是板级事实；而按键实例的存储、
+ *  虚表选择、去抖、信号量生命周期都是机制，留在 dev_key.c。
+ *
+ *  拨码开关（DIPx）走纯轮询：has_exti=false，wait_press 恒为 NULL。 */
+typedef struct {
+    dev_key_id_t id;
+    pl_port_t port;
+    uint8_t pin;
+    bool active_low;
+    bool has_exti;   /**< true = EXTI 型（wait_press 可用）；false = 纯轮询（拨码） */
+    uint16_t exti_pin; /**< 注册 EXTI 回调用的引脚掩码；0 = 不注册 */
+} dev_key_board_desc_t;
+
+extern const dev_key_board_desc_t g_dev_key_board[];
+extern const uint32_t g_dev_key_board_count;
 
 /* ---- 初始化 ---- */
 void dev_key_init(void);     /* hw_dev_initcall: 注册 EXTI 回调 */
