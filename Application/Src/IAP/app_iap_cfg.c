@@ -11,6 +11,7 @@
  */
 
 #include "app_iap_cfg.h"
+#include "board.h" /* BOARD_HAS_IAP_RECORD */
 
 #include <stdio.h> /* printf —— 损坏记录重建时要留痕 */
 #include <string.h>
@@ -120,13 +121,37 @@ bool app_flash_iap_is_config_valid(volatile const app_flash_iap_sys_info_t *info
  *  内层原语（调用方须已持 s_lock）
  * ================================================================ */
 
+/* ---- 记录区是否属于本板（BOARD_HAS_IAP_RECORD）----
+ * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：bootloader 占
+ * Sector 0~3、应用从 0x08040000 起，Sector 1 留作记录。
+ *
+ * **直烧的板子固件从 0x08000000 起铺满整片，而 ADDR_CONFIG_SECTOR 是写死的
+ * 0x08004000 —— 那就在固件映像内部。** 对它做任何擦写都是在抹正在执行的代码。
+ *
+ * 实测（5006048，无 bootloader）：上电约 100ms 后 app_iap.c 的启动对账调
+ * update_net_cfg，判定"记录无效"→ 擦 Sector 1 → 擦掉的正是自己的代码 → HardFault。
+ * 一旦进这个分支就是每次上电必崩，不是偶发。
+ *
+ * 所以**写路径整体短路**：擦与写两个最底层原语直接返回错误，上层的一切入口
+ * （update_net_cfg / edit_config / erase_config / write_config / init_config）
+ * 自然都变成无操作。
+ *
+ * 读路径留着无害：内存映射读，读到的是固件字节，必然判为无效，调用方回落到默认值。 */
+#if !BOARD_HAS_IAP_RECORD
+#define IAP_RECORD_ABSENT 1
+#else
+#define IAP_RECORD_ABSENT 0
+#endif
+
 static int32_t _erase_config_unlocked(void)
 {
+    if (IAP_RECORD_ABSENT) return -1; /* 本板无记录区：绝不能擦 */
     return dev_storage_erase(app_flash_iap_get_storage(), 0, 0);
 }
 
 static int32_t _write_config_unlocked(app_flash_iap_sys_info_t *info)
 {
+    if (IAP_RECORD_ABSENT) return -1; /* 本板无记录区：绝不能写 */
     return dev_storage_write(app_flash_iap_get_storage(), 0, (uint8_t *)info, sizeof(*info));
 }
 
@@ -214,6 +239,10 @@ int32_t app_flash_iap_write_config(app_flash_iap_sys_info_t *info)
 void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
                                   uint32_t port)
 {
+    /* 本板没有记录区：直接返回，连"是否损坏"都不判 —— 那块地址上是固件自身，
+       按"记录"去读必然判为无效，会打出一条误导性的"记录损坏"日志。 */
+    if (IAP_RECORD_ABSENT) return;
+
     app_flash_iap_sys_info_t info;
 
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);

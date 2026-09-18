@@ -11,6 +11,11 @@
 
 #pragma once
 
+/* ---- IAP 配置记录是否存在 ----
+ * **本板没有**：固件从 0x08000000 直烧、铺满 1024K，而 IAP 记录写死的地址是
+ * 0x08004000 —— 那就在固件映像内部。见 app_iap_cfg.c 的说明。 */
+#define BOARD_HAS_IAP_RECORD 0
+
 /* ---- 向量表偏移 ----
  * 必须与 boards/5006048/board.ld 的 FLASH_ORIGIN 保持一致：5006048 直烧 0x08000000，
  * 偏移 0；带 IAP bootloader 的板子则是 0x40000。两处不一致的表现是任何中断都
