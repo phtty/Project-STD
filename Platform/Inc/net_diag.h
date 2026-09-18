@@ -18,14 +18,18 @@
 
 #pragma once
 
-#include <stdio.h>
-#include "cmsis_os2.h"
-
+/* **默认关闭。** 排查网络问题时临时置 1，用完改回 0。
+ * 2026-09-18 那轮"上电首次连接失败"就是靠它定位的 —— 结论是设备侧清白
+ * （20/20 ping 同毫秒回复），丢包在虚拟化层。详见提交信息。 */
 #ifndef NET_DIAG_ENABLE
-#define NET_DIAG_ENABLE 1
+#define NET_DIAG_ENABLE 0
 #endif
 
 #if NET_DIAG_ENABLE
+
+#include <stdio.h>
+#include "cmsis_os2.h"
+
 /* __VA_OPT__：让宏在"只有一句结论、没有附加数值"时也能用（C23）。
    直接写 __VA_ARGS__ 的话 NET_DIAG("link DOWN") 会展开成 printf(..., ,) 编译不过。 */
 #define NET_DIAG(fmt, ...)                                                                         \

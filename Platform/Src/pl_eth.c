@@ -3,6 +3,7 @@
 #include "pl_eth.h"
 #include "net_diag.h"
 
+#if NET_DIAG_ENABLE
 /* ---- ETH 帧级诊断 ----
  * "上位机 ping 不通"这类问题的延迟可能卡在三处：帧没到、到了没回、回了没发出去。
  * 记下每一帧的以太类型就能把它们按顺序排出来：
@@ -30,6 +31,7 @@ static void _eth_dump_arp(const uint8_t *frame, uint16_t tot_len)
     NET_DIAG("      ARP %s：%u.%u.%u.%u 问 %u.%u.%u.%u", op == 1 ? "请求" : (op == 2 ? "应答" : "其他"),
              a[14], a[15], a[16], a[17], a[24], a[25], a[26], a[27]);
 }
+#endif /* NET_DIAG_ENABLE —— 关闭时这两个辅助函数会变成未使用的 static，一并守卫 */
 #include <string.h>
 #include "cmsis_os.h"
 #include "pl_task.h"
@@ -277,12 +279,14 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
     err_t errval                                = ERR_OK;
     ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT] = {0};
 
+#if NET_DIAG_ENABLE
     if (p != NULL && p->len >= 14) {
         NET_DIAG("ETH TX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
                  (unsigned)p->tot_len);
         if (_eth_type((const uint8_t *)p->payload) == 0x0806)
             _eth_dump_arp((const uint8_t *)p->payload, (uint16_t)p->tot_len);
     }
+#endif
 
     memset(Txbuffer, 0, ETH_TX_DESC_CNT * sizeof(ETH_BufferTypeDef));
 
@@ -367,12 +371,14 @@ void ethernetif_input(void *argument)
         if (osSemaphoreAcquire(RxPktSemaphore, TIME_WAITING_FOR_INPUT) == osOK) {
             do {
                 p = low_level_input(netif);
+#if NET_DIAG_ENABLE
                 if (p != NULL && p->len >= 14) {
                     NET_DIAG("ETH RX type=0x%04X len=%u", _eth_type((const uint8_t *)p->payload),
                              (unsigned)p->tot_len);
                     if (_eth_type((const uint8_t *)p->payload) == 0x0806)
                         _eth_dump_arp((const uint8_t *)p->payload, (uint16_t)p->tot_len);
                 }
+#endif
                 if (p != NULL) {
                     if (netif->input(p, netif) != ERR_OK) {
                         pbuf_free(p);
