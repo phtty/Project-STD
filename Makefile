@@ -311,6 +311,7 @@ SRC_APPLICATION = \
 	Application/Src/app_dispatch.c \
 	Application/Src/app_render.c \
 	Application/Src/app_cfg_sched.c \
+	Application/Src/app_screen.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
@@ -532,11 +533,19 @@ TEST_FONT_LIB_SRCS = \
 	test/test_font_lib.c \
 	$(BOARD_DIR)/Application/Src/font_lib_board.c
 
+# 套件九：整屏画布（经画布渲染必须与直写实屏逐像素相等）
+# 用例直接 include app_screen.c（sink 是 static），并自己提供 dev_display 原语作为
+# 独立参考实现 —— 所以不列 app_screen.c，也不列 Device/Display/dev_display.c。
+TEST_SCREEN_CANVAS_SRCS = \
+	test/test_screen_canvas.c \
+	test/stubs/os_stub.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
-      $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib
+      $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
+      $(TEST_BUILD)/test_screen_canvas
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -560,6 +569,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 板级字库表 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_font_lib
+	@echo ""
+	@echo "──── 整屏画布 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_canvas
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -585,6 +597,10 @@ $(TEST_BUILD)/test_font_lib: $(TEST_FONT_LIB_SRCS)
 
 # 换板换字库时必须重编本套件（期望表是按板 #if 选的）
 $(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
+
+$(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) Application/Src/app_screen.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

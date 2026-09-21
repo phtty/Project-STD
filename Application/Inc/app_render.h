@@ -144,6 +144,44 @@ typedef struct {
     };
 } render_cfg_t;
 
+/* ---- 可插拔渲染目标 ----
+ *
+ * 渲染引擎默认直接画到 `dev_display_get()` 那块实屏上。但级联场景里主卡要画到
+ * **覆盖整屏的逻辑画布**（比它自己那块屏大），画完再切分下发 —— 那需要换渲染目标。
+ *
+ * **为什么不复制一份渲染引擎**：前人那版联动（MSL, `origin/wire_p20`）就是复制了
+ * 一份 `msl_render_*`，把 `_render_text` 里 200 行排版/换行/对齐/字库索引逻辑抄了
+ * 一遍，只为把输出目标从实屏换成虚拟屏。那是本设计明确要避免的形态 —— 两份排版
+ * 逻辑必然漂移，而漂移的表现是"某个字号/对齐方式下两卡排版不一致"，极难查。
+ *
+ * 走这条缝的只有 3 个原语 + 2 处几何读取（见 app_render.c），排版逻辑一行不动。 */
+typedef struct {
+    void (*fill)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c);
+    void (*bitmap)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bm,
+                   display_color_t c);
+    void (*set_pixel)(void *ctx, uint16_t x, uint16_t y, display_color_t c);
+    void    *ctx;
+    uint16_t rows; /**< 目标宽（_render_fill 的全屏语义、_render_text 的边界判断要用） */
+    uint16_t cols; /**< 目标高 */
+} render_target_t;
+
+/** @brief 换渲染目标；传 NULL 回落 `dev_display_get()`（默认）。
+ *
+ *  可逆：传 NULL 即恢复直写实屏，级联整套关掉时靠它。 */
+void app_render_set_target(const render_target_t *t);
+
+/** @brief 显存持久化的接管钩子
+ *
+ *  `app_render_save/restore` 原先直接对 `dev_display_t` 读写。装了逻辑画布之后
+ *  那样会错位：主卡自己的带恢复了旧内容、画布却是黑的。注册了钩子就整体委托 ——
+ *  由画布所有者决定"存什么、从哪恢复"。不注册则保持原行为。 */
+typedef struct {
+    void (*save)(void);
+    bool (*restore)(void);
+} render_persist_hook_t;
+
+void app_render_set_persist_hook(const render_persist_hook_t *h);
+
 /* ---- API（模块自注册 sw_app_initcall，调用方无需传 display/font 句柄）---- */
 
 /** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现 */

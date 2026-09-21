@@ -42,3 +42,27 @@ typedef enum {
 
 #define DEV_DISPLAY_SCREEN_ROWS (128U)
 #define DEV_DISPLAY_SCREEN_COLS (32U)
+
+/* ---- 结构体与像素原语 ----
+ *
+ * 真 dev_display.h 里这个结构体有 ops 虚表、模组参数等一堆字段，且会拉进
+ * pl_hub75.h → main.h → HAL，host 编不了。这里只留**画布用例真正用到的**那几个：
+ * 几何、帧缓冲、亮度、脏标记。ops 用 void* 占位，免得为它再定义一套虚表类型。
+ *
+ * 原语的**实现不在这里**，由各测试自己给 —— 画布用例要拿"直写实屏"当独立参考，
+ * 自己的实现才好控制；链接真的 dev_display.c 反而要拖进 pl_tim/pl_task 一整串。 */
+typedef struct dev_display {
+    const void *ops;
+    uint16_t    screen_rows; /* 宽（注意：本工程 screen_rows 是宽、screen_cols 是高） */
+    uint16_t    screen_cols; /* 高 */
+    uint8_t    *pixel_map;
+    uint8_t     light_level;
+    bool        dirty;
+} dev_display_t;
+
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                      display_color_t color);
+void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint8_t *bitmap, display_color_t color);
+void dev_display_set_brightness(dev_display_t *dev, uint8_t level);

@@ -132,6 +132,53 @@ static bool _is_gbk(uint8_t high, uint8_t low)
 static dev_display_t *s_render_display;
 static dev_storage_t *s_render_font;
 
+/* ---- 渲染目标（见 app_render.h）----
+ * 未设置时回落"直写实屏"，与这条缝引入之前的行为完全一致。 */
+static const render_target_t *s_target;
+static const render_persist_hook_t *s_persist_hook;
+
+static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
+{
+    dev_display_fill((dev_display_t *)ctx, x, y, w, h, c);
+}
+static void _direct_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                           const uint8_t *bm, display_color_t c)
+{
+    dev_display_draw_bitmap((dev_display_t *)ctx, x, y, w, h, bm, c);
+}
+static void _direct_set_pixel(void *ctx, uint16_t x, uint16_t y, display_color_t c)
+{
+    dev_display_set_pixel((dev_display_t *)ctx, x, y, c);
+}
+
+/** @brief 取当前渲染目标；未显式设置时按实屏现搭一个。
+ *
+ *  每次现搭而不是缓存：几何来自 dev_display_t，而它在 hw initcall 里才注册，
+ *  缓存在模块静态里会锁住一个可能为 NULL 的早期值。现搭是 6 次赋值，可以忽略。 */
+static const render_target_t *_rt(void)
+{
+    static render_target_t direct;
+    if (s_target) return s_target;
+
+    direct.fill      = _direct_fill;
+    direct.bitmap    = _direct_bitmap;
+    direct.set_pixel = _direct_set_pixel;
+    direct.ctx       = s_render_display;
+    direct.rows      = s_render_display ? s_render_display->screen_rows : 0;
+    direct.cols      = s_render_display ? s_render_display->screen_cols : 0;
+    return &direct;
+}
+
+void app_render_set_target(const render_target_t *t)
+{
+    s_target = t;
+}
+
+void app_render_set_persist_hook(const render_persist_hook_t *h)
+{
+    s_persist_hook = h;
+}
+
 /* 显存持久化的调度器句柄（地址/归属/CRC/去重都由调度器管） */
 static uint8_t s_persist_id = 0xFF;
 
@@ -367,8 +414,9 @@ static inline void _render_text(const render_cfg_t *cfg)
                否则后面的字会挤到同一个位置叠着画 */
             if (_char_addr(&asc_key, &ch_byte, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-                dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
-                dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
+                const render_target_t *rt = _rt();
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
+                rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
             }
 
             cur_x += glyph_w;
@@ -401,8 +449,9 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint32_t addr;
             if (_char_addr(&gbk_key, gbk_ch, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-                dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
-                dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
+                const render_target_t *rt = _rt();
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
+                rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
             }
 
             cur_x += glyph_w;
@@ -419,17 +468,19 @@ static inline void _render_bitmap(const render_cfg_t *cfg)
 {
     if (!cfg->w || !cfg->h || !cfg->bitmap) return;
 
-    dev_display_draw_bitmap(s_render_display, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
+    const render_target_t *rt = _rt();
+    rt->bitmap(rt->ctx, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
 }
 
 static inline void _render_fill(const render_cfg_t *cfg)
 {
+    const render_target_t *rt = _rt();
     uint16_t w = cfg->w, h = cfg->h;
     if (!w || !h) {
-        w = s_render_display->screen_rows;
-        h = s_render_display->screen_cols;
+        w = rt->rows;
+        h = rt->cols;
     }
-    dev_display_fill(s_render_display, cfg->x, cfg->y, w, h, cfg->color);
+    rt->fill(rt->ctx, cfg->x, cfg->y, w, h, cfg->color);
 }
 
 /* ---- 渲染跳表 ---- */
@@ -496,6 +547,13 @@ static uint16_t _persist_bm_bytes(const dev_display_t *d)
 
 void app_render_save(void)
 {
+    /* 装了逻辑画布就整体委托：那时"该存什么"由画布所有者决定 ——
+       直接读 dev_display 会只存到主卡自己那块，与发给从卡的内容不是一回事。 */
+    if (s_persist_hook && s_persist_hook->save) {
+        s_persist_hook->save();
+        return;
+    }
+
     dev_display_t *d = s_render_display;
     if (!d || s_persist_id == 0xFF) return;
 
@@ -536,6 +594,10 @@ void app_render_save(void)
 
 bool app_render_restore(void)
 {
+    /* 同 save：有画布就整体委托。这条尤其要紧 —— 不委托时会出现"主卡自己的带
+       恢复了旧内容、画布却是黑的"，上电后第一轮静默提交会把从卡全刷黑。 */
+    if (s_persist_hook && s_persist_hook->restore) return s_persist_hook->restore();
+
     dev_display_t *d = s_render_display;
     if (!d || s_persist_id == 0xFF)
         return false;

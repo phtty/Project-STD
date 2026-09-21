@@ -35,3 +35,23 @@
  * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
  * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
 #define BOARD_FONT_LIB_TOTAL_BYTES 30713088U
+
+/* ---- 整屏逻辑画布（app_screen）----
+ *
+ * 级联时主卡要画"整屏"，它比本卡那块屏大（其余由从卡显示）。1bpp 画布装得下，
+ * 1 字节/像素装不下 —— 见 app_screen.c 的说明。
+ *
+ * 上限按**本板参与的最大级联规模**留：本板编的 P20 16×8 模组屏是 128×32，
+ * 按 4 卡横排算 512×32 → ceil(512/8) × 32 = 64 × 32 = 2048 字节。运行期几何从中切。
+ *
+ * BOARD_SCREEN_CANVAS 默认 **0**：单独一块卡上画布是纯开销 —— 多占一块缓冲、
+ * 多一次拷贝、还要把卡内多色塌缩成单色，却没换来任何功能。等级联落地时打开。
+ * 中间随时可以 `app_render_set_target(NULL)` 完全回退。 */
+#ifndef BOARD_SCREEN_CANVAS_MAX
+#define BOARD_SCREEN_CANVAS_MAX (2048U)
+#endif
+#ifndef BOARD_SCREEN_CANVAS
+#define BOARD_SCREEN_CANVAS     (0)
+#endif
+/* 本卡颜色（display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
+#define BOARD_SCREEN_COLOR      (2) /* COLOR_GREEN */
