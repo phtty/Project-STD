@@ -558,26 +558,42 @@ static void _screen_init(void)
     }
 
 #if BOARD_SCREEN_CANVAS
-    /* 渲染目标几何必须跟着**整屏**走 —— 排版/换行/居中判的是它 */
-    s_target.rows = s_rows;
-    s_target.cols = s_cols;
+    /* 只有主卡有"整屏"这个概念。**从卡不注册画布**：它的屏是整屏的一块窗口，
+       内容由主卡下发；本地渲染没有意义（下一轮就被覆盖），回落到直写实屏才不会
+       与下发的内容打架。 */
+    const bool is_master = app_screen_is_master();
 
-    app_render_set_persist_hook(&s_persist_hook);
-    app_render_set_target(&s_target);
+    if (is_master) {
+        /* 渲染目标几何必须跟着**整屏**走 —— 排版/换行/居中判的是它 */
+        s_target.rows = s_rows;
+        s_target.cols = s_cols;
 
-    const osThreadAttr_t attr = {
-        .name       = "screen",
-        .stack_size = 256 * 4,
-        .priority   = osPriorityNormal,
-    };
-    pl_task_new(_screen_task, nullptr, &attr);
+        app_render_set_persist_hook(&s_persist_hook);
+        app_render_set_target(&s_target);
+    }
 
-    const screen_card_t *c = &s_layout.cards[s_self];
+    /* 落屏的消费者**只能有一个**：
+     *  · 单卡       → 本模块自己的静默期任务（就是加级联之前的行为）
+     *  · 多卡主卡   → 级联的"轮"。它还要把同一份内容分发给从卡，必须由它统一决定
+     *                 何时落屏 —— 两个消费者并存的话主卡屏与从卡屏会差一轮
+     *  · 从卡       → 两个都不是，它的内容来自总线（app_screen_commit_bitmap） */
+    if (s_layout.count <= 1) {
+        const osThreadAttr_t attr = {
+            .name       = "screen",
+            .stack_size = 256 * 4,
+            .priority   = osPriorityNormal,
+        };
+        pl_task_new(_screen_task, nullptr, &attr);
+    }
+
+    const screen_card_t *c = app_screen_card(s_self);
     printf("[screen] 整屏画布 %ux%u（%u 字节，1bpp）共 %u 卡；本卡 #%u addr=%u "
-           "矩形 %ux%u@(%u,%u) 颜色 %u\n",
+           "矩形 %ux%u@(%u,%u) 颜色 %u%s\n",
            (unsigned)s_rows, (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_layout.count,
            (unsigned)s_self, (unsigned)app_screen_self_addr(), (unsigned)c->w, (unsigned)c->h,
-           (unsigned)c->x, (unsigned)c->y, (unsigned)s_color);
+           (unsigned)c->x, (unsigned)c->y, (unsigned)s_color,
+           is_master ? (s_layout.count > 1 ? "（主卡，落屏由级联轮次统一做）" : "（单卡）")
+                     : "（从卡，内容由主卡下发）");
 #else
     printf("[screen] 整屏门面未启用（BOARD_SCREEN_CANVAS=0），渲染直写实屏\n");
 #endif

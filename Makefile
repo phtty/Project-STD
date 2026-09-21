@@ -560,6 +560,15 @@ TEST_CASCADE_ROUND_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件十四：级联图传 · 主卡侧（开轮、分片下发、结算、定向重传、本地提交门控）
+# 同套件十三：用例 include app_cascade.c。总线那头坐着一个**假从卡**，
+# 它收到的分片经真探针 + 真队列喂回主卡 —— 分帧、探针、等待循环都是真的。
+TEST_CASCADE_MASTER_SRCS = \
+	test/test_cascade_master.c \
+	test/stubs/pl_crc_stub.c \
+	Kernel/Src/ring_buffer.c \
+	test/stubs/os_stub.c
+
 # 套件十：硬件 CRC32 封装（任意长度/对齐都要算全，不得截断）
 # 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
 TEST_CRC_SRCS = \
@@ -583,7 +592,7 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_cascade_frame $(TEST_BUILD)/test_screen_layout \
-      $(TEST_BUILD)/test_cascade_round
+      $(TEST_BUILD)/test_cascade_round $(TEST_BUILD)/test_cascade_master
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -622,6 +631,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 级联图传 · 从卡侧 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_round
+	@echo ""
+	@echo "──── 级联图传 · 主卡侧 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_master
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -678,6 +690,14 @@ $(TEST_BUILD)/test_cascade_round: $(TEST_CASCADE_ROUND_SRCS) Application/Src/CAS
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_ROUND_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_cascade_round: Application/Src/CASCADE/app_cascade.c \
+	Application/Inc/CASCADE/app_cascade.h $(BOARD_DIR)/board.h
+
+$(TEST_BUILD)/test_cascade_master: $(TEST_CASCADE_MASTER_SRCS) \
+	Application/Src/app_screen.c Application/Src/CASCADE/app_cascade.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_MASTER_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cascade_master: Application/Src/CASCADE/app_cascade.c \
 	Application/Inc/CASCADE/app_cascade.h $(BOARD_DIR)/board.h
 
 # ---- Header Dependencies ----
