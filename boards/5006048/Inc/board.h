@@ -28,3 +28,15 @@
  * 偏移 0；带 IAP bootloader 的板子则是 0x40000。两处不一致的表现是任何中断都
  * 跳到错误的地方（bootloader 的向量表或空白区），且不会有编译期报错。 */
 #define BOARD_VECT_TAB_OFFSET 0x00000000UL /* 做 IAP 时改 0x40000，与 board.ld 同步 */
+
+/* ---- 外部字库总量 ----
+ * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
+ * （见 app_cfg_sched.h 的 _Static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。
+ *
+ * **两板的字库不是同一版**：本板 GB2312、4 字号（16/24/32/48）；3833024 是
+ * GBK、5 字号（14/16/20/24/32），总量 30713088。所以这是板级量，不能放共享头。
+ *
+ * 必须与 Src/font_lib_board.c 的 g_board_font.total_bytes 一致。不同步的后果
+ * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
+ * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
+#define BOARD_FONT_LIB_TOTAL_BYTES 18518144U

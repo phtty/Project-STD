@@ -511,11 +511,19 @@ TEST_ISR_PREINIT_SRCS = \
 	Platform/Src/pl_tim.c \
 	Platform/Src/pl_uart.c
 
+# 套件八：板级字库表（累加偏移必须逐条等于实物映像基址）
+# 只编板级表本身 —— app_render.c 的依赖太重（W25Qxx / RTOS / 配置调度器），
+# 它的消费逻辑由本套件的结构性断言与 _render_init 的运行期校验共同覆盖。
+# 按 BOARD 分板编译：两版字库的字号集合、字符集、单元顺序都不同。
+TEST_FONT_LIB_SRCS = \
+	test/test_font_lib.c \
+	$(BOARD_DIR)/Src/font_lib_board.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
-      $(TEST_BUILD)/test_isr_preinit
+      $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -536,6 +544,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── ISR 在 initcall 之前 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_isr_preinit
+	@echo ""
+	@echo "──── 板级字库表 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_font_lib
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -554,6 +565,13 @@ $(TEST_BUILD)/test_cfg_sched: $(TEST_CFG_SCHED_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CFG_SCHED_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_cfg_sched: Application/Src/LDI/app_ldi_cfg.c
+
+$(TEST_BUILD)/test_font_lib: $(TEST_FONT_LIB_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_FONT_LIB_SRCS) $(TEST_LDFLAGS)
+
+# 换板换字库时必须重编本套件（期望表是按板 #if 选的）
+$(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/Inc/board.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

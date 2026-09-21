@@ -74,17 +74,17 @@ static void _cfg_sched_bind(void)
     s_bound = true;
 
     /* 门槛必须与**编译期契约同源**：配置区在器件尾部（capacity - (id+1)*4KB），
-       而字库从地址 0 起占据了前 FONT_LIB_TOTAL_BYTES 字节。只判"容量装得下配置区"
-       （>= CFG_REGION_BYTES，32KB）是不够的 —— JEDEC ID 若被误读成一个"合法但更小"
-       的值（如 0x17 = 8MB），门槛照样通过，块地址落到 8MB-32KB，**正好落在字库区
-       （0 ~ 29.3MB）内部**，首次 save 的扇区擦除就把字库数据毁了。
-       故要求：字库之后必须还放得下整个配置区。 */
-    s_ready = (cap >= FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES);
+       而字库从地址 0 起占据了前 BOARD_FONT_LIB_TOTAL_BYTES 字节（板级量，两版
+       字库大小不同）。只判"容量装得下配置区"（>= CFG_REGION_BYTES，32KB）是不够的
+       —— JEDEC ID 若被误读成一个"合法但更小"的值（如 0x17 = 8MB），门槛照样通过，
+       块地址落到 8MB-32KB，**正好落在字库区内部**，首次 save 的扇区擦除就把字库
+       数据毁了。故要求：字库之后必须还放得下整个配置区。 */
+    s_ready = (cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES);
 
     /* 持久化整体失效必须是可见的：各调用方都不检查 save 的返回值，
        否则"配置不生效"在现场无从查起。 */
     printf("[cfg] W25Qxx 容量 %u KB, 字库 %u KB + 配置区 %u KB -> %s\n", (unsigned)(cap / 1024U),
-           (unsigned)(FONT_LIB_TOTAL_BYTES / 1024U), (unsigned)(CFG_REGION_BYTES / 1024U),
+           (unsigned)(BOARD_FONT_LIB_TOTAL_BYTES / 1024U), (unsigned)(CFG_REGION_BYTES / 1024U),
            s_ready ? "就绪" : "不可用(持久化已禁用)");
 }
 

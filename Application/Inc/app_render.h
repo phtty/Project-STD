@@ -3,7 +3,8 @@
  * @brief   文字/图形渲染 — tagged union 统一入参
  *
  * 字库存储为 (字号, 编码, 字型) 三元组的顺序拼接。
- * 新增字号/字型只需在 g_font_lib 追加条目。
+ * **具体有哪些三元组、各自多大、怎么索引，是板级事实** —— 由
+ * boards/<板>/Src/font_lib_board.c 的 g_board_font 描述，本文件只声明接口。
  * 新增渲染类型只需在 render_type_t 和 union 中追加。
  */
 
@@ -14,7 +15,14 @@
 #include "dev_display.h"
 #include "dev_storage.h"
 
-/* ---- 字号（像素高度，ASCII 半宽 = size/2）---- */
+/* ---- 字号（像素高度，ASCII 半宽 = size/2）----
+ *
+ * 这里列的是**全部可能取值的并集**，不是某块板实际有的集合 —— 两板实测就差很多
+ * （3833024 是 14/16/20/24/32，5006048 是 16/24/32/48）。本板到底有哪些，
+ * 看 g_board_font.sizes[]。
+ *
+ * 调用方请求了本板没有的字号时**回落到最接近的一个**（见 app_render.c 的
+ * _resolve_size），不会静默按别的字库单元渲染。 */
 typedef enum {
     FONT_SELF_ADAPT = 0,
     FONT_14         = 14,
@@ -22,6 +30,7 @@ typedef enum {
     FONT_20         = 20,
     FONT_24         = 24,
     FONT_32         = 32,
+    FONT_48         = 48,
 } font_size_t;
 
 /* ---- 字型 ---- */
@@ -46,27 +55,47 @@ typedef struct {
     font_type_t type;   /* 字型 */
 } font_key_t;
 
-/* ---- 字库规模 ----
- * 字库在 W25Qxx 中从地址 0 起顺序排列，共 5 字号 × 2 编码 × 4 字型 = 40 个单元。
- * 这几个宏是 app_render.c 里 g_font_lib[] 的编译期等价物：ASC_UNIT/GBK_UNIT 给出
- * 单个单元的字节数，FONT_LIB_TOTAL_BYTES 给出全部。
+/* ---- 汉字在字库单元内的索引方式 ----
+ * 两版字库的区位基准不同，差错了就是整块取到别人的字形（不报错、只是显示成别的字）：
+ *   GBK    : (hi-0x81)*190 + (lo - (lo>=0x80 ? 0x41 : 0x40))   23940 字
+ *   GB2312 : 94*(hi-0xA1) + (lo-0xA1)                           8836 字 = 94×94 区位全集
+ * 由板级表逐块指定 —— 同一个型号的屏换一批字库母片就可能换一种。 */
+typedef enum {
+    FONT_IDX_GBK = 0,
+    FONT_IDX_GB2312,
+} font_idx_kind_t;
+
+/* ---- 字库单元（板级表的一项）---- */
+typedef struct {
+    font_key_t key;
+    uint32_t   unit_size; /* 该三元组在 Flash 中占用的总字节数 */
+} font_unit_t;
+
+/* ---- 板级字库描述 ----
  *
- * 放在头文件里的原因：字库占据 Flash 头部，任何排在它之后的持久化区都要靠
- * FONT_LIB_TOTAL_BYTES 做容量契约（见 app_cfg_sched.h 的 _Static_assert）。 */
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
+ * 单元在 W25Qxx 中**从地址 0 起线性连续**排列：第 i 项的起始偏移 = 前 i 项的
+ * unit_size 之和（两板的实物映像都验过是严丝合缝的链，无空洞）。
+ *
+ * **因此 lib[] 的顺序必须与实物映像的排布逐项一致。** 顺序错了不会有任何报错，
+ * 只会让每种字型都取到别人的字形（旧 feat/old_font_lib 分支就踩在这上面：
+ * 它按 ST,FS,KT,HT 排，而 5006048 的映像地理顺序是 FS,HT,KT,ST，24/32 项错位）。
+ *
+ * 唯一实例 g_board_font 由 boards/<板>/Src/font_lib_board.c 提供。 */
+typedef struct {
+    const font_unit_t *lib;
+    uint16_t           lib_count;
+    const font_size_t *sizes;     /* 本板可用字号，**必须升序**（最近邻回落依赖它） */
+    uint8_t            size_count;
+    uint8_t            asc_index_base; /* ASCII 索引起点：0x20（96 槽）或 0x00（128 槽） */
+    font_idx_kind_t    gb_index;       /* 汉字索引式 */
+    uint32_t           total_bytes;    /* 必须等于 lib[] 各项之和 */
+} font_lib_desc_t;
 
-/* 单元字节数: ASCII = (size/2)宽 × size高 × N_ASC_CHARS字; GBK = size宽 × size高 × N_GBK_CHARS */
-#define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
-#define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
+extern const font_lib_desc_t g_board_font;
 
-/* 全部 40 个单元之和。新增/删除字号或字型时必须同步改这里与 g_font_lib[]，
- * 两者不一致会被 _render_init 里的运行期交叉校验挡下。 */
-#define FONT_LIB_TOTAL_BYTES                                                                       \
-    (4U * (ASC_UNIT(14) + GBK_UNIT(14) + ASC_UNIT(16) + GBK_UNIT(16) + ASC_UNIT(20) +              \
-           GBK_UNIT(20) + ASC_UNIT(24) + GBK_UNIT(24) + ASC_UNIT(32) + GBK_UNIT(32)))
-
-_Static_assert(FONT_LIB_TOTAL_BYTES == 30713088U, "字库总量变化：请核对 g_font_lib[] 与 Flash 布局");
+/* 容量契约用编译期量 BOARD_FONT_LIB_TOTAL_BYTES（在 board.h，因为 app_cfg_sched.h
+ * 的 _Static_assert 要用它）。g_board_font.total_bytes 是它的运行期副本，两者由
+ * _render_init 的交叉校验钉住 —— 单靠编译期常量挡不住"表里写错一项"。 */
 
 /* ---- 水平/垂直对齐 ---- */
 typedef enum {

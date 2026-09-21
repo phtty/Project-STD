@@ -5,6 +5,7 @@
 # dev_P10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
 # 换屏时换掉这一行，而不是追加。
 SRC_BOARD = \
+	$(BOARD_DIR)/Src/font_lib_board.c \
 	$(BOARD_DIR)/Src/dev_rs232.c \
 	$(BOARD_DIR)/Src/dev_rs485.c \
 	$(BOARD_DIR)/Src/dev_io_ctrl.c \

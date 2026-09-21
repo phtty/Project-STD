@@ -26,7 +26,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "app_render.h" /* FONT_LIB_TOTAL_BYTES */
+#include "app_render.h" /* RENDER_PERSIST_PAYLOAD_MAX */
+#include "board.h"      /* BOARD_FONT_LIB_TOTAL_BYTES（板级，两版字库大小不同） */
 #include "cfg_record.h" /* cfg_rec_sta_t */
 
 /* ---- 编译期契约 ---- */
@@ -36,8 +37,9 @@
 #define CFG_REGION_BYTES      (CFG_REGION_MAX_BLOCKS * CFG_REGION_SECTOR)
 
 /* 字库与配置区在器件上都必须放得下。器件实配容量由运行期门槛把关
-   （见 app_cfg_sched.c 的 s_ready）—— 这里锁的是"设计假定的容量"。 */
-_Static_assert(FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES <= CFG_CAP_CONTRACT,
+   （见 app_cfg_sched.c 的 s_ready）—— 这里锁的是"设计假定的容量"。
+   字库大小是板级量（两版字库不同），取自 board.h。 */
+_Static_assert(BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES <= CFG_CAP_CONTRACT,
                "font region overlaps config region");
 
 /* 记录头的定长缓冲（cfg_record 的去重读回缓冲 + 本模块的组包缓冲）必须装得下

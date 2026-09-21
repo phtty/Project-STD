@@ -3,14 +3,16 @@
  * @brief   文字/图形渲染实现 — 数据驱动字库引擎
  *
  * 字库布局: (字号, 编码, 字型) 三元组在 Flash 中顺序拼接。
- * g_font_lib 描述每个三元组的总字节数，按 Flash 顺序排列。
- * 新增字号/字型只需追加条目。
+ * 具体有哪些三元组、各自多大、怎么索引，**都是板级事实**（两板字库不是同一版：
+ * 3833024 是 GBK/14-16-20-24-32，5006048 是 GB2312/16-24-32-48），由
+ * boards/<板>/Src/font_lib_board.c 的 g_board_font 提供，本模块只消费。
  */
 
 #include "app_render.h"
 
 #include <stdio.h>
 #include <string.h>
+#include "board.h" /* BOARD_FONT_LIB_TOTAL_BYTES（编译期容量契约） */
 #include "cmsis_os2.h"
 #include "text_cvt.h"
 #include "initcall.h"
@@ -19,73 +21,10 @@
 #include "cfg_record.h"   /* CFG_REC_OK */
 #include "app_cfg_sched.h" /* 显存持久化走调度器 */
 
-/* ---- 字库单元描述 ---- */
-typedef struct {
-    font_key_t key;
-    uint32_t unit_size; /* 该三元组的总字节数 */
-} font_unit_t;
-
-/* 字库规模宏（N_ASC_CHARS / N_GBK_CHARS / ASC_UNIT / GBK_UNIT / FONT_LIB_TOTAL_BYTES）
- * 定义于 app_render.h —— 持久化区要靠 FONT_LIB_TOTAL_BYTES 做容量契约。 */
-
-/* 字库描述表 — 顺序必须与 Flash 中字库单元的排列一致 */
-static const font_unit_t g_font_lib[] = {
-    /* 14号 */
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(14)},
-    {{.size = 14, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(14)},
-    /* 16号 */
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(16)},
-    {{.size = 16, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(16)},
-    /* 20号 */
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(20)},
-    {{.size = 20, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(20)},
-    /* 24号 */
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(24)},
-    {{.size = 24, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(24)},
-    /* 32号 */
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_ST}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_FS}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_KT}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_ASCII, .type = FONT_HT}, ASC_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_ST}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_FS}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_KT}, GBK_UNIT(32)},
-    {{.size = 32, .charset = FONT_ENC_GBK, .type = FONT_HT}, GBK_UNIT(32)},
-};
-
-/* 自适应字号的候选集合（从大到小尝试，索引 0 为 SELF_ADAPT 占位不参与选择） */
-static const font_size_t font_size_table[] = {
-    FONT_SELF_ADAPT,
-    FONT_14,
-    FONT_16,
-    FONT_20,
-    FONT_24,
-    FONT_32,
-};
+/* 字库表、可用字号集合、总字节数全部是板级事实（两板的字号集合与字符集都不同：
+ * 3833024 是 GBK 14/16/20/24/32，5006048 是 GB2312 16/24/32/48），见
+ * app_render.h 的 font_lib_desc_t 与 board.h 的 BOARD_FONT_LIB_TOTAL_BYTES。
+ * 本文件不再持有任何具体数字。 */
 
 /* ---- 内部: bytes_per_char ---- */
 static inline uint16_t _glyph_bytes(font_key_t k)
@@ -100,31 +39,87 @@ static inline uint8_t _glyph_width_px(font_key_t k)
     return (k.charset == FONT_ENC_ASCII) ? k.size / 2 : k.size;
 }
 
-/* ---- 内部: 查找字库单元起始偏移 ---- */
-static uint32_t _font_offset(const font_key_t *key)
+/* ---- 内部: 把请求字号解析为本板实际可用的字号 ----
+ *
+ * 两板的字号集合不同（3833024 无 48，5006048 无 14/20），而请求字号来自运行期
+ * 协议（LDI 的 0BH 等），编译期拦不住。**回落到最近邻。**
+ *
+ * 旧实现是让 _font_offset 找不到就返回偏移 0 —— 那会拿本板第 0 个字库单元当该
+ * 字号用，渲染出完全无关的内容，且不报错、不打日志，是最难查的一种失效。
+ *
+ * 并列时取**较小**的一个：调用方的显示区域是按请求字号预留的，取小的不会溢出。
+ * sizes[] 必须升序（font_lib_desc_t 的约定），下面"严格小于才替换"正是靠它
+ * 保证并列时留下先遇到的、也就是更小的那个。 */
+static font_size_t _resolve_size(font_size_t want)
 {
-    uint32_t off = 0;
-    for (uint8_t i = 0; i < sizeof(g_font_lib) / sizeof(g_font_lib[0]); i++) {
-        if (memcmp(&g_font_lib[i].key, key, sizeof(font_key_t)) == 0)
-            return off;
-        off += g_font_lib[i].unit_size;
+    const font_lib_desc_t *d = &g_board_font;
+    if (d->size_count == 0) return (font_size_t)0; /* 板级表为空：调用方据此放弃渲染 */
+
+    font_size_t best   = d->sizes[0];
+    uint32_t    best_d = (want > best) ? (uint32_t)(want - best) : (uint32_t)(best - want);
+
+    for (uint8_t i = 1; i < d->size_count; i++) {
+        font_size_t s   = d->sizes[i];
+        uint32_t    dif = (want > s) ? (uint32_t)(want - s) : (uint32_t)(s - want);
+        if (dif < best_d) {
+            best_d = dif;
+            best   = s;
+        }
     }
-    return 0;
+    return best;
 }
 
-/* ---- 内部: 单个字符在 Flash 中的地址 ---- */
-static uint32_t _char_addr(const font_key_t *key, const uint8_t *ch)
+/* ---- 内部: 查字库单元并给出其 Flash 起始偏移 ----
+ * 单元线性连续排列，偏移 = 前 i 项 unit_size 之和（见 font_lib_desc_t）。 */
+static bool _find_unit(const font_key_t *key, uint32_t *offset)
 {
-    uint32_t base  = _font_offset(key);
+    uint32_t off = 0;
+    for (uint16_t i = 0; i < g_board_font.lib_count; i++) {
+        const font_unit_t *u = &g_board_font.lib[i];
+        /* 逐字段比较而非 memcmp：结构体可能有填充字节，memcmp 会连填充一起比 */
+        if (u->key.size == key->size && u->key.charset == key->charset && u->key.type == key->type) {
+            *offset = off;
+            return true;
+        }
+        off += u->unit_size;
+    }
+    return false;
+}
+
+/* ---- 内部: 单个字符在 Flash 中的地址 ----
+ *
+ * 单元缺失（板级表缺项）返回 false，**调用方跳过该字** —— 不要退回偏移 0 去读，
+ * 那是别的字型的字形。索引式按 g_board_font 指定的方案选：两版字库的 ASCII 起点
+ * （0x20 / 0x00）与汉字区位基准（GBK 190 进制 / GB2312 94 进制）都不同。 */
+static bool _char_addr(const font_key_t *key, const uint8_t *ch, uint32_t *addr)
+{
+    uint32_t base;
+    if (!_find_unit(key, &base)) return false;
+
     uint16_t bytes = _glyph_bytes(*key);
 
-    // ascii: 1字节, ch[0] = 字符码
-    if (key->charset == FONT_ENC_ASCII)
-        return base + (ch[0] - 0x20) * bytes;
+    if (key->charset == FONT_ENC_ASCII) {
+        /* ASCII: 1字节, ch[0] = 字符码。起点由字库决定，不是想当然的 0x20 ——
+           5006048 的映像就是 0x00 起、按原始码索引的 128 槽表。 */
+        if (ch[0] < g_board_font.asc_index_base) return false;
+        *addr = base + ((uint32_t)ch[0] - g_board_font.asc_index_base) * bytes;
+        return true;
+    }
 
-    // GBK: 2字节, ch[0]=高字节, ch[1]=低字节
-    uint32_t idx = (uint32_t)(ch[0] - 0x81) * 190 + (ch[1] >= 0x80 ? ch[1] - 0x41 : ch[1] - 0x40);
-    return base + idx * bytes;
+    /* 汉字: 2字节, ch[0]=高字节, ch[1]=低字节 */
+    uint32_t idx;
+    if (g_board_font.gb_index == FONT_IDX_GB2312) {
+        /* hi 从 0x81 起也要拦：_is_gbk 放行 0x81~0xFE，而 (hi-0xA1) 在 hi<0xA1 时
+           下溢；lo=0xA0 同理（参考工程对 0xA1~0xA9 区正是放行 lo>=0xA0 的）。
+           两处下溢都会回绕成一个巨大索引，读到**别的字型的尾部** —— 真实可达。 */
+        if (ch[0] < 0xA1 || ch[1] < 0xA1) return false;
+        idx = 94U * (uint32_t)(ch[0] - 0xA1) + (uint32_t)(ch[1] - 0xA1);
+    } else {
+        if (ch[0] < 0x81 || ch[1] < 0x40) return false;
+        idx = (uint32_t)(ch[0] - 0x81) * 190U + (ch[1] >= 0x80 ? ch[1] - 0x41 : ch[1] - 0x40);
+    }
+    *addr = base + idx * bytes;
+    return true;
 }
 
 /* ---- 判断两字节是否为合法 GBK 码 ---- */
@@ -161,22 +156,40 @@ static void _render_persist_register(void)
 /* sw_dev(2)：注册只需早于 sw_app(3) 的启动加载遍，以及早于任何 save。 */
 sw_dev_initcall(_render_persist_register);
 
+
 /* ---- 模块自注册，依赖storage和display模块）---- */
 static void _render_init(void)
 {
     s_render_display = dev_display_get();
     s_render_font    = dev_w25qxx_get();
 
-    /* 运行期交叉校验：描述表实际求和必须等于编译期常量。
-     * app_render.h 的 _Static_assert 只能验公式，挡不住"g_font_lib[] 被手改一行"
-     * （例如某条硬编码了字节数、或加了字号却漏改 FONT_LIB_TOTAL_BYTES）——
-     * 那会让其后每个单元的 Flash 偏移整体错位，字库取到乱码。 */
+    /* 运行期交叉校验。三条都是"错了不会报错、只会让字库取到乱码"的失效模式，
+       所以宁可每次上电多说一句。 */
     uint32_t sum = 0;
-    for (uint32_t i = 0; i < sizeof(g_font_lib) / sizeof(g_font_lib[0]); i++)
-        sum += g_font_lib[i].unit_size;
-    if (sum != FONT_LIB_TOTAL_BYTES)
-        printf("[render] 字库描述表求和 %u != 编译期常量 %u，字库偏移已错位\n", (unsigned)sum,
-               (unsigned)FONT_LIB_TOTAL_BYTES);
+    for (uint16_t i = 0; i < g_board_font.lib_count; i++)
+        sum += g_board_font.lib[i].unit_size;
+
+    if (sum != g_board_font.total_bytes)
+        printf("[render] 板级字库表求和 %u != 表内 total_bytes %u，其后每个单元的偏移都错位了\n",
+               (unsigned)sum, (unsigned)g_board_font.total_bytes);
+
+    /* 表内 total_bytes 与编译期常量分居两处（前者板级 .c、后者 board.h）。不同步的
+       后果不只是取字乱码 —— 配置区地址 = capacity - (blk+1)*4096，门槛按哪个值算的
+       就是按哪个；常量偏小会让配置区落进字库区，首次擦写直接毁字库。 */
+    if (g_board_font.total_bytes != BOARD_FONT_LIB_TOTAL_BYTES)
+        printf("[render] 板级字库 total_bytes %u != board.h 的 %u，配置区地址会算错\n",
+               (unsigned)g_board_font.total_bytes, (unsigned)BOARD_FONT_LIB_TOTAL_BYTES);
+
+    /* sizes[] 必须升序 —— _resolve_size 的"并列取小"依赖这个前提，
+       乱序时最近邻会挑错，且同样没有任何报错。 */
+    for (uint8_t i = 1; i < g_board_font.size_count; i++) {
+        if (g_board_font.sizes[i] <= g_board_font.sizes[i - 1]) {
+            printf("[render] 板级字号集合非升序（%u 号在 %u 号之后），最近邻回落会选错\n",
+                   (unsigned)g_board_font.sizes[i], (unsigned)g_board_font.sizes[i - 1]);
+            break;
+        }
+    }
+
 
     /* 持久化区的地址/容量门槛不再由本模块计算 —— 配置调度器统一管
      * （见 app_cfg_sched.c 的 s_ready：要求"字库之后还放得下整个配置区"）。 */
@@ -215,19 +228,39 @@ static inline void _render_text(const render_cfg_t *cfg)
         text_len = n;
     }
 
-    /* 字号自适应：按文本长度与渲染区域容量，从最大字号开始选择能容纳的最大字号，默认最小字号 14 */
+    /* ---- 字号落定 ---- */
+    const font_lib_desc_t *flib = &g_board_font;
+    if (flib->size_count == 0) return; /* 板级字库表为空：本板根本没有字库 */
+
     if (cfg->font_size == FONT_SELF_ADAPT) {
-        gbk_key.size = FONT_14;
-        asc_key.size = FONT_14;
-        for (int8_t i = (int8_t)(sizeof(font_size_table) / sizeof(font_size_table[0])) - 1; i >= 1; i--) {
-            uint16_t h_res = cfg->h / font_size_table[i];
-            uint16_t w_res = cfg->w / (font_size_table[i] / 2);
+        /* 自适应：按文本长度与渲染区域容量，从最大字号开始选能容纳的最大字号。
+           都不放得下时用最小字号（下面的初值），由换行/截断逻辑收尾。 */
+        gbk_key.size = flib->sizes[0];
+        asc_key.size = flib->sizes[0];
+        for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+            uint16_t h_res = cfg->h / flib->sizes[i];
+            uint16_t w_res = cfg->w / (flib->sizes[i] / 2);
             if (text_len <= h_res * w_res) {
-                gbk_key.size = font_size_table[i];
-                asc_key.size = font_size_table[i];
+                gbk_key.size = flib->sizes[i];
+                asc_key.size = flib->sizes[i];
                 break;
             }
         }
+    } else {
+        /* 请求字号不在本板上时回落到最近邻 —— 否则 _find_unit 找不到，会一路
+           退化成"什么都不画"或（旧实现）拿偏移 0 的单元去读 */
+        font_size_t r = _resolve_size(cfg->font_size);
+        gbk_key.size  = r;
+        asc_key.size  = r;
+    }
+
+    /* 三元组齐全性：缺项就整条不画。逐字失败会把同一条日志每字刷一遍，
+       而缺项是板级表的问题，一次说清就够。 */
+    uint32_t probe;
+    if (!_find_unit(&gbk_key, &probe) || !_find_unit(&asc_key, &probe)) {
+        printf("[render] 板级字库缺 %u 号/%u 字型，本次不渲染\n", (unsigned)gbk_key.size,
+               (unsigned)gbk_key.type);
+        return;
     }
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
@@ -328,11 +361,15 @@ static inline void _render_text(const render_cfg_t *cfg)
                 }
             }
 
-            uint8_t ch_byte = (uint8_t)text_buf[char_pos];
-            uint32_t addr   = _char_addr(&asc_key, &ch_byte);
-            dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
-            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
+            uint8_t  ch_byte = (uint8_t)text_buf[char_pos];
+            uint32_t addr;
+            /* 取址失败（板级表缺项或码位越界）就只跳过这个字，仍照常推进光标 ——
+               否则后面的字会挤到同一个位置叠着画 */
+            if (_char_addr(&asc_key, &ch_byte, &addr)) {
+                dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
+                dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
+                dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
+            }
 
             cur_x += glyph_w;
             char_pos++;
@@ -360,11 +397,13 @@ static inline void _render_text(const render_cfg_t *cfg)
                 }
             }
 
-            uint8_t gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
-            uint32_t addr     = _char_addr(&gbk_key, gbk_ch);
-            dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-            dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
-            dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
+            uint8_t  gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
+            uint32_t addr;
+            if (_char_addr(&gbk_key, gbk_ch, &addr)) {
+                dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
+                dev_display_fill(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
+                dev_display_draw_bitmap(s_render_display, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
+            }
 
             cur_x += glyph_w;
             char_pos += 2;
