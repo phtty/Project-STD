@@ -280,21 +280,7 @@ virtualFolder:
       files: []
       folders:
         - name: "3833024"
-          files:
-            - path: boards/3833024/Src/app_rs232.c
-            - path: boards/3833024/Src/app_test_board.c
-            - path: boards/3833024/Src/dev_io_ctrl.c
-            - path: boards/3833024/Src/dev_key_board.c
-            - path: boards/3833024/Src/dev_P10_32x16_2200001703.c
-            - path: boards/3833024/Src/dev_p20_16x8_2200001667.c
-            - path: boards/3833024/Src/dev_p20_16x16_1000001055.c
-            - path: boards/3833024/Src/dev_rs232.c
-            - path: boards/3833024/Src/dev_rs485.c
-            - path: boards/3833024/Src/pl_exti_board.c
-            - path: boards/3833024/Src/pl_hub75_board.c
-            - path: boards/3833024/Src/pl_tim_board.c
-            - path: boards/3833024/Src/pl_uart_board.c
-            - path: boards/3833024/Src/font_lib_board.c
+          files: []
           folders:
             - name: Core
               files:
@@ -315,16 +301,32 @@ virtualFolder:
                 - path: boards/3833024/Core/Src/tim.c
                 - path: boards/3833024/Core/Src/usart.c
               folders: []
+            - name: App
+              files:
+                - path: boards/3833024/Application/Src/app_rs232.c
+                - path: boards/3833024/Application/Src/app_test_board.c
+                - path: boards/3833024/Application/Src/font_lib_board.c
+              folders: []
+            - name: Device
+              files:
+                - path: boards/3833024/Device/Src/dev_io_ctrl.c
+                - path: boards/3833024/Device/Src/dev_key_board.c
+                - path: boards/3833024/Device/Src/dev_P10_32x16_2200001703.c
+                - path: boards/3833024/Device/Src/dev_p20_16x8_2200001667.c
+                - path: boards/3833024/Device/Src/dev_p20_16x16_1000001055.c
+                - path: boards/3833024/Device/Src/dev_rs232.c
+                - path: boards/3833024/Device/Src/dev_rs485.c
+              folders: []
+            - name: Platform
+              files:
+                - path: boards/3833024/Platform/Src/pl_eth_board.c
+                - path: boards/3833024/Platform/Src/pl_exti_board.c
+                - path: boards/3833024/Platform/Src/pl_hub75_board.c
+                - path: boards/3833024/Platform/Src/pl_tim_board.c
+                - path: boards/3833024/Platform/Src/pl_uart_board.c
+              folders: []
         - name: "5006048"
-          files:
-            - path: boards/5006048/Src/dev_key_board.c
-            - path: boards/5006048/Src/dev_p10_112x10_1000000661.c
-            - path: boards/5006048/Src/dev_rs485.c
-            - path: boards/5006048/Src/pl_exti_board.c
-            - path: boards/5006048/Src/pl_hub75_board.c
-            - path: boards/5006048/Src/pl_tim_board.c
-            - path: boards/5006048/Src/pl_uart_board.c
-            - path: boards/5006048/Src/font_lib_board.c
+          files: []
           folders:
             - name: Core
               files:
@@ -344,6 +346,24 @@ virtualFolder:
                 - path: boards/5006048/Core/Src/system_stm32f4xx.c
                 - path: boards/5006048/Core/Src/tim.c
                 - path: boards/5006048/Core/Src/usart.c
+              folders: []
+            - name: App
+              files:
+                - path: boards/5006048/Application/Src/font_lib_board.c
+              folders: []
+            - name: Device
+              files:
+                - path: boards/5006048/Device/Src/dev_key_board.c
+                - path: boards/5006048/Device/Src/dev_p10_112x10_1000000661.c
+                - path: boards/5006048/Device/Src/dev_rs485.c
+              folders: []
+            - name: platform
+              files:
+                - path: boards/5006048/Platform/Src/pl_eth_board.c
+                - path: boards/5006048/Platform/Src/pl_exti_board.c
+                - path: boards/5006048/Platform/Src/pl_hub75_board.c
+                - path: boards/5006048/Platform/Src/pl_tim_board.c
+                - path: boards/5006048/Platform/Src/pl_uart_board.c
               folders: []
 dependenceList: []
 outDir: build
@@ -377,8 +397,11 @@ targets:
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
-        - boards/3833024/Inc
         - boards/3833024/Core/Inc
+        - boards/3833024
+        - boards/3833024/Application/Inc
+        - boards/3833024/Device/Inc
+        - boards/3833024/Platform/Inc
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -402,6 +425,8 @@ targets:
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_P10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
+      - <virtual_root>/boards/3833024/Device/dev_P10_32x16_2200001703.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -527,8 +552,10 @@ targets:
         - Application/Inc/AH_MQTT
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
-        - boards/5006048/Inc
         - boards/5006048/Core/Inc
+        - boards/5006048/Device/Inc
+        - boards/5006048/Platform/Inc
+        - boards/5006048
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
