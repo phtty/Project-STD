@@ -659,6 +659,13 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
 
     s_ack.valid = false;
     (void)_send_seq(CASC_T_SYNC_BEGIN, c->addr, seq, 0, 0, &p, sizeof(p));
+
+    /* **BEGIN 与第一片之间也要留一个间隔**，与其余分片一样。
+     * 对端靠**空闲中断**分帧：两帧首尾相接时线路上不出现空闲，对端会把它们当成
+     * **一个块**收下来 —— 接收侧要在一瞬间处理两条帧（这正是当初把深 2 队列压垮的
+     * 形态），而且"每帧间隔 1ms"这个前提对第一对不成立，时序再也推不准。
+     * 代价 1ms/轮。 */
+    osDelay(1);
     _send_frags(c, seq, bmp_len, frag_n, full);
     _casc_drain(); /* NACK（几何不符）可能已经回来了，下面第一圈就会看到 */
 
