@@ -31,10 +31,15 @@ uint32_t pl_rtc_bkup_read(pl_rtc_handle_t h, uint32_t reg)
 
 uint32_t pl_rtc_get_timestamp(pl_rtc_handle_t h)
 {
+    /* 句柄参数是**本层 API 的一致形参**：pl_rtc_bkup_read 要用它，这里不用。
+       CubeMX 生成的 RTC_GetUnixTimestamp 走的是它自己的全局 hrtc —— 单实例下等价，
+       真出现第二个 RTC 时这两处要先改。 */
+    (void)h;
     return (uint32_t)RTC_GetUnixTimestamp();
 }
 
 bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
 {
+    (void)h; /* 同 pl_rtc_get_timestamp */
     return RTC_Set_UnixTimeStamp((time_t)ts) == HAL_OK;
 }
