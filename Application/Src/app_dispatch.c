@@ -229,15 +229,18 @@ void frame_dispatch_task(void *argument)
  *  安全守卫：ops / ops->send 为空表示通道尚未就绪，直接丢弃。
  * ================================================================ */
 
-void ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+int32_t ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
-    if (ccb == nullptr || ccb->ops == nullptr || ccb->ops->send == nullptr) return;
-    ccb->ops->send(ccb, dst, data, len);
+    /* **返回值必须露出来**：通道自己的 ops->send 会返回 -1（如 RS485 在通道未 UP 时
+       直接返回），原先这里把它就地丢掉，于是"帧根本没发出去"与"发出去了"在调用方
+       完全分不开 —— 而两者的排查方向相反（查本机通道状态 vs 查线）。 */
+    if (ccb == nullptr || ccb->ops == nullptr || ccb->ops->send == nullptr) return -1;
+    return ccb->ops->send(ccb, dst, data, len);
 }
 
-void ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
+int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
 {
-    ccb_send_to(ccb, nullptr, data, len);
+    return ccb_send_to(ccb, nullptr, data, len);
 }
 
 /* ================================================================

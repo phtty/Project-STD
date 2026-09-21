@@ -154,6 +154,14 @@ int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint
                 printf("[pl_uart] DMA 发送超时（%u 字节 @%u baud）\n", (unsigned)len,
                        (unsigned)ctx->huart->Init.BaudRate);
             }
+        } else {
+            /* **这一条必须报**：DMA 起不来时（gState 不是 READY、或 DMA 流被占）本函数
+               原地返回 -1，而整条 ccb_send 链**没人看返回值**。表现是"帧根本没发出去"
+               却一声不响 —— 与"发出去了但对端没收到"在现场完全分不开，而两者的排查
+               方向相反（查本机状态机 vs 查线）。 */
+            printf("[pl_uart] DMA 发送**没起来**（%u 字节）：uart gState=%u，TX DMA State=%u\n",
+                   (unsigned)len, (unsigned)ctx->huart->gState,
+                   (unsigned)(ctx->huart->hdmatx ? ctx->huart->hdmatx->State : 0xFFFFU));
         }
     } else {
         ret = (HAL_UART_Transmit(ctx->huart, (uint8_t *)buf, len, timeout_ms) == HAL_OK)

@@ -105,8 +105,18 @@ static osMessageQueueId_t s_casc_queue;
  *
  * 首次尝试可能撞上从卡还没起来（它自己的初始化比主卡慢），所以失败就隔 1 秒再来；
  * 试满这么多轮仍不成，就交给下一次真正的更新。 */
+#define CASC_ENUM_WAIT_MS        (1500U)
 #define CASC_BOOT_ALIGN_TRIES    (5U)
 #define CASC_BOOT_ALIGN_RETRY_MS (1000U)
+
+/* 上电枚举的收卷时刻（0 = 不判定）与"是否见到过应答"。
+ *
+ * **为什么要专门报一句**：主卡收不到任何应答时，日志里只是"静悄悄地没有 PRESENT"，
+ * 而那与"缓冲区被冲掉了""还没到点"分不开。而"从卡整个不答"与"答了但内容不对"
+ * 是**完全相反**的两个排查方向（查线 vs 查协议），必须一刀切开。
+ * 枚举与画布无关，所以这两个变量放在守卫之外。 */
+static uint32_t s_enum_deadline;
+static bool     s_enum_seen;
 
 /* pcb 的字段在 _cascade_init 里填（探针定义在本文件后部，ops 要指向它） */
 static pcb_t s_casc_pcb;
@@ -239,7 +249,17 @@ static int32_t _send_seq(uint8_t type, uint8_t dst, uint16_t seq, uint8_t idx, u
     uint16_t len = _build(s_tx, sizeof(s_tx), type, dst, seq, idx, frag_n, payload, payload_len);
     if (!len) return -1;
 
-    ccb_send(app_rs485_ccb(), s_tx, len);
+    const int32_t r = ccb_send(app_rs485_ccb(), s_tx, len);
+    if (r < 0) {
+        /* 通道没 UP / 平台层拒收。**只报前几次**：真出问题时每轮都会失败，
+           不限量会把 RTT 冲干净，反而看不到别的。 */
+        static uint8_t s_fail_logged;
+        if (s_fail_logged < 4U) {
+            s_fail_logged++;
+            CASC_LOG("[casc] 发送**没出去**（%u 字节，类型 %02X）—— 通道未 UP 或平台层拒绝\n",
+                     (unsigned)len, (unsigned)type);
+        }
+    }
     return (int32_t)len;
 }
 
@@ -583,6 +603,7 @@ static uint16_t s_round_seq;
 static uint8_t  s_align_left;
 static uint32_t s_align_next;
 
+
 /** @brief 把 `mask` 位选中的分片发出去（每片 CASC_FRAG_BYTES 字节）
  *
  *  **每片之间 osDelay(1)**：对端的 UART 靠**空闲中断**分帧（pl_uart.c 的
@@ -734,6 +755,16 @@ static void casc_task(void *argument)
 
         uint32_t now = osKernelGetTickCount();
 
+        /* 上电枚举的收卷：到点报一句"有没有卡应答" —— 没有应答时后面那些
+           "本轮未完成 / 等应答超时"是必然的，这里先把话说在前面，免得白查协议。 */
+        if (s_enum_deadline && (int32_t)(now - s_enum_deadline) >= 0) {
+            CASC_LOG("[casc·主] 上电枚举：%s\n",
+                     s_enum_seen ? "有卡应答（从卡在，链路通）"
+                                 : "**没有任何卡应答** —— 从卡没上电/没接 485/没烧这份固件，"
+                                   "或总线方向与接线不对；后面那些「本轮未完成」都是必然的");
+            s_enum_deadline = 0;
+        }
+
         /* 上电枚举一次：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒。
            运行期的重新枚举（拔插、掉线恢复）留到 P4。 */
         if (app_screen_is_master() && (int32_t)(now - next_ping) >= 0) {
@@ -741,8 +772,10 @@ static void casc_task(void *argument)
             (void)app_cascade_ping();
 #if BOARD_SCREEN_CANVAS
             /* 枚举之后立刻对齐一次整屏 —— 见 CASC_BOOT_ALIGN_TRIES 的说明 */
-            s_align_left = CASC_BOOT_ALIGN_TRIES;
-            s_align_next = now;
+            s_align_left  = CASC_BOOT_ALIGN_TRIES;
+            s_align_next  = now;
+            s_enum_seen   = false;
+            s_enum_deadline = now + CASC_ENUM_WAIT_MS;
 #endif
         }
 

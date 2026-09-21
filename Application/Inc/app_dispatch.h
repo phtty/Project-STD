@@ -181,11 +181,16 @@ void app_proto_bind(pcb_t *pcb, ccb_t *ccb);
 void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *data,
                           uint16_t len);
 
-/** @brief 发送到显式目的地（虚表分派）；dst 为 nullptr 等同回复到本帧来源 */
-void ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len);
+/** @brief 发送到显式目的地（虚表分派）；dst 为 nullptr 等同回复到本帧来源
+ *
+ *  @return 通道 ops->send 的结果；<0 表示**没发出去**（通道未 UP、参数被拒等）。
+ *  **调用方该看的就看** —— 尤其是"发得对不对"会决定现场怎么查。
+ *  历史上这两条返回 void，把结果就地丢了，于是"帧没发出去"与"发出去了但对方没收"
+ *  完全分不开。已有的调用点忽略返回值也不受影响。 */
+int32_t ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len);
 
-/** @brief 回复到本帧来源（ccb_send_to(ccb, nullptr, ...) 的便捷形式）*/
-void ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len);
+/** @brief 回复到本帧来源（ccb_send_to(ccb, nullptr, ...) 的便捷形式） */
+int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len);
 
 /** @brief 注册接收事件监听（每收到一段数据触发一次）*/
 void app_dispatch_register_rx_listener(dispatch_rx_listener_t fn);

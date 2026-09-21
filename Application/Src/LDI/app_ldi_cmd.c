@@ -333,6 +333,7 @@ static uint8_t ldi_next_rpt_seq(void)
  */
 static void ldi_send_response(ccb_t *ccb, uint8_t rsp_cmd, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
 {
+    (void)rsp_cmd; /* 响应码由各调用方自己拼进载荷，本函数只负责"发" */
     osMutexAcquire(g_ldi.tx_lock, osWaitForever);
 
     ldi_frame_t *frame = (ldi_frame_t *)g_ldi.tx_buf;
@@ -537,6 +538,7 @@ static void cmd_reboot(ccb_t *ccb, void *data)
  */
 static void cmd_rep_ip(ccb_t *ccb, void *data)
 {
+    (void)data; /* 本条无入参，报文内容全部由本机状态拼出 */
     uint8_t buf[sizeof(ldi_status_rsp_t) + sizeof(ldi_network_info_t)] = {0};
 
     ldi_status_rsp_t *rsp   = (ldi_status_rsp_t *)buf;
@@ -932,6 +934,7 @@ static void cmd_rep_func(ccb_t *ccb, void *data)
  */
 static void cmd_search(ccb_t *ccb, void *data)
 {
+    (void)ccb;
     (void)data;
 
     ldi_search_rsp_t rsp;
