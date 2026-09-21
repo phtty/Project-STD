@@ -66,15 +66,36 @@ typedef struct {
 /** @brief 本卡看到的切分表。**永远非空**（没有级联时是"单卡占满整屏"）。 */
 const screen_layout_t *app_screen_layout(void);
 
+/* ---- 下标 与 地址 是两回事，别混 ----
+ *
+ * 切分表按**下标**索引（0..count-1，几何顺序），而协议按**地址**寻址。两者**顺序
+ * 可以不同**：现场那个"上面一块、下面一块、下面那块是主卡"的拼法，
+ * 下标 0 的 addr 是 1，下标 1 的 addr 是 0 —— 正好相反。
+ *
+ * 所以：**永远不要拿地址当下标**。要某张卡的矩形，先 `app_screen_index_of_addr()`
+ * 换下标，或直接 `app_screen_card(下标)` 取那一项（地址与矩形在同一个结构体里，
+ * 不可能对不上）。反过来，开轮时每帧的 `dst` 取的就是那一项的 `.addr`。
+ *
+ * 混了的表现：两块屏的内容**互换**，而 CRC / 长度 / 几何校验**全部通过** ——
+ * 没有任何一处会报错。 */
+
+/** @brief 第 card_idx 张卡（**切分表下标，不是总线地址**）；越界返回 nullptr。
+ *
+ *  返回的项同时带 `.addr` 与矩形，所以"发给谁"和"发哪块"从同一个来源取，不会错配。 */
+const screen_card_t *app_screen_card(uint8_t card_idx);
+
+/** @brief 总线地址 → 切分表下标；表中没有该地址返回 0xFF */
+uint8_t app_screen_index_of_addr(uint8_t addr);
+
 /** @brief 本卡在切分表里的下标；本卡地址不在表中返回 0xFF（配置错误） */
 uint8_t app_screen_self_index(void);
 
-/** @brief 第 idx 张卡矩形的 1bpp 位图长度（字节）；idx 越界返回 0 */
-uint16_t app_screen_card_bm_len(uint8_t idx);
+/** @brief 第 card_idx 张卡（**切分表下标**）矩形的 1bpp 位图长度（字节）；越界返回 0 */
+uint16_t app_screen_card_bm_len(uint8_t card_idx);
 
 #if BOARD_SCREEN_CANVAS
 
-/** @brief 把第 idx 张卡的矩形从画布抽成 1bpp 位图
+/** @brief 把第 card_idx 张卡（**切分表下标，不是总线地址**）的矩形从画布抽成 1bpp 位图
  *
  *  位图格式与 `dev_display_draw_bitmap` / `render_persist_t` **逐位一致**：
  *  `(w+7)/8` 行字节、行优先、MSB-first、bit=1 为上色 —— 所以抽出来的东西从卡
@@ -83,8 +104,8 @@ uint16_t app_screen_card_bm_len(uint8_t idx);
  *  **末字节的补位一律归零**（w 不是 8 的倍数时），这样"抽出来的位图"是唯一确定的
  *  一串字节，可以直接比对、可以直接当协议载荷。
  *
- *  @return false = idx 越界 / buf 装不下 / 矩形超出画布（都不写 buf） */
-bool app_screen_extract(uint8_t idx, uint8_t *buf, uint16_t cap);
+ *  @return false = card_idx 越界 / buf 装不下 / 矩形超出画布（都不写 buf） */
+bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap);
 
 /** @brief 把本卡那块画布矩形抽出来落到本地实屏
  *

@@ -71,19 +71,28 @@ const screen_layout_t *app_screen_layout(void)
     return &s_layout;
 }
 
-uint16_t app_screen_card_bm_len(uint8_t idx)
+const screen_card_t *app_screen_card(uint8_t card_idx)
 {
-    if (idx >= s_layout.count) return 0;
-    const screen_card_t *c = &s_layout.cards[idx];
-    return (uint16_t)(((c->w + 7U) / 8U) * c->h);
+    return (card_idx < s_layout.count) ? &s_layout.cards[card_idx] : nullptr;
+}
+
+uint8_t app_screen_index_of_addr(uint8_t addr)
+{
+    for (uint8_t i = 0; i < s_layout.count; i++)
+        if (s_layout.cards[i].addr == addr) return i;
+    return 0xFF;
 }
 
 uint8_t app_screen_self_index(void)
 {
-    const uint8_t me = app_screen_self_addr();
-    for (uint8_t i = 0; i < s_layout.count; i++)
-        if (s_layout.cards[i].addr == me) return i;
-    return 0xFF;
+    return app_screen_index_of_addr(app_screen_self_addr());
+}
+
+uint16_t app_screen_card_bm_len(uint8_t card_idx)
+{
+    const screen_card_t *c = app_screen_card(card_idx);
+    if (!c) return 0;
+    return (uint16_t)(((c->w + 7U) / 8U) * c->h);
 }
 
 /** @brief 按 nx×ny 的网格合成切分表；本卡屏几何取自运行期的 display
@@ -228,13 +237,13 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
  *  "主卡屏上对、从卡屏上差一列"，现场几乎无法归因。
  * ================================================================ */
 
-bool app_screen_extract(uint8_t idx, uint8_t *buf, uint16_t cap)
+bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap)
 {
-    if (idx >= s_layout.count || !buf) return false;
+    const screen_card_t *c = app_screen_card(card_idx); /* **下标**，不是地址 */
+    if (!c || !buf) return false;
 
-    const screen_card_t *c = &s_layout.cards[idx];
-    const uint16_t stride  = (uint16_t)((c->w + 7U) / 8U);
-    const uint16_t need    = (uint16_t)(stride * c->h);
+    const uint16_t stride = (uint16_t)((c->w + 7U) / 8U);
+    const uint16_t need   = (uint16_t)(stride * c->h);
 
     /* 矩形必须整个落在画布里。网格切分下恒真；切分表可由记录覆盖后就未必了，
        所以这里挡住而不是让它读到画布外面去。 */

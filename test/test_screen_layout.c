@@ -482,6 +482,40 @@ static void case_master_below(void)
     check_all_cards("1×2 主卡在下");
 }
 
+/** 地址 ↔ 下标 ↔ 矩形 的对应必须钉死 —— 级联最容易写错、且错了不报错的地方
+ *
+ *  协议按**地址**寻址，切分表按**下标**索引，两者顺序可以相反：主卡在下时
+ *  （master_cell=1）下标 0 是 addr 1（上面那块）、下标 1 是 addr 0（下面那块）。
+ *  谁要是把地址当下标去索引，就会把主卡的矩形发给从卡、从卡的发给主卡 ——
+ *  两块屏内容**互换**，而 CRC / 长度 / 几何校验**全部通过**，没有任何一处报错。 */
+static void case_addr_index_mapping(void)
+{
+    TEST_BEGIN("地址 ↔ 下标 ↔ 矩形：主卡在下时两者顺序相反，不许拿地址当下标");
+
+    canvas_reset_mc(48, 16, 1, 2, 1); /* 1×2，主卡在格 1（下面那块） */
+
+    CHECK_MSG(app_screen_index_of_addr(0) == 1, "addr 0（主卡）应落在下标 1，得到 %u",
+              (unsigned)app_screen_index_of_addr(0));
+    CHECK_MSG(app_screen_index_of_addr(1) == 0, "addr 1 应落在下标 0，得到 %u",
+              (unsigned)app_screen_index_of_addr(1));
+
+    const screen_card_t *bottom = app_screen_card(app_screen_index_of_addr(0)); /* 正确用法 */
+    const screen_card_t *oops   = app_screen_card(0);                          /* 地址当下标 */
+
+    CHECK_MSG(bottom && bottom->addr == 0 && bottom->y == 16,
+              "addr 0 的矩形应在下半屏（addr=0, y=16），得到 addr=%u y=%u",
+              bottom ? (unsigned)bottom->addr : 999U, bottom ? (unsigned)bottom->y : 999U);
+
+    /* 这条是**自检**：如果哪天网格/地址分配变了、两种取法恰好取到同一项，
+       上面那些断言就失去了分辨力，这条会先把这件事说出来。 */
+    CHECK_MSG(bottom && oops && bottom != oops && bottom->y != oops->y,
+              "本用例必须让「地址当下标」取到**另一块**矩形，否则这里测不出东西");
+
+    CHECK_MSG(app_screen_card(2) == nullptr, "越界下标应返回 nullptr");
+    CHECK_MSG(app_screen_card_bm_len(2) == 0, "越界下标的位图长度应为 0");
+    CHECK_MSG(app_screen_index_of_addr(9) == 0xFF, "表中没有的地址应返回 0xFF");
+}
+
 /** 地址不在切分表里：停用门面，**不静默降级**成"单卡占满" */
 static void case_self_addr_not_in_table(void)
 {
@@ -508,6 +542,7 @@ int main(void)
     case_extract_bounds();
     case_commit_self_matches_canvas();
     case_master_below();
+    case_addr_index_mapping();
     case_self_addr_not_in_table();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
