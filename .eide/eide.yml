@@ -294,6 +294,7 @@ virtualFolder:
             - path: boards/3833024/Src/pl_hub75_board.c
             - path: boards/3833024/Src/pl_tim_board.c
             - path: boards/3833024/Src/pl_uart_board.c
+            - path: boards/3833024/Src/font_lib_board.c
           folders:
             - name: Core
               files:
@@ -323,6 +324,7 @@ virtualFolder:
             - path: boards/5006048/Src/pl_hub75_board.c
             - path: boards/5006048/Src/pl_tim_board.c
             - path: boards/5006048/Src/pl_uart_board.c
+            - path: boards/5006048/Src/font_lib_board.c
           folders:
             - name: Core
               files:
@@ -545,6 +547,8 @@ targets:
       - <virtual_root>/Core
       - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/board/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/3833024
     settings:
       debugger: cortex-debug

@@ -42,7 +42,7 @@ void MX_TIM3_Init(void)
 
     /* USER CODE END TIM3_Init 1 */
     htim3.Instance               = TIM3;
-    htim3.Init.Prescaler         = 8400;
+    htim3.Init.Prescaler         = 8400 - 1;
     htim3.Init.CounterMode       = TIM_COUNTERMODE_UP;
     htim3.Init.Period            = 50 - 1;
     htim3.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
@@ -79,7 +79,7 @@ void MX_TIM4_Init(void)
     /* USER CODE END TIM4_Init 1 */
     /* B 工程参数: 84MHz/84/20 ≈ 94kHz OE 亮度 PWM */
     htim4.Instance               = TIM4;
-    htim4.Init.Prescaler         = 84;
+    htim4.Init.Prescaler         = 84 - 1;
     htim4.Init.CounterMode       = TIM_COUNTERMODE_UP;
     htim4.Init.Period            = 20 - 1;
     htim4.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
