@@ -487,59 +487,52 @@ u32_t sys_now(void)
  */
 void HAL_ETH_MspInit(ETH_HandleTypeDef *ethHandle)
 {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    if (ethHandle->Instance == ETH) {
-        /* 使能外设时钟 */
-        __HAL_RCC_ETH_CLK_ENABLE();
-        __HAL_RCC_GPIOC_CLK_ENABLE();
-        __HAL_RCC_GPIOA_CLK_ENABLE();
-        __HAL_RCC_GPIOG_CLK_ENABLE();
+    if (ethHandle->Instance != ETH) return;
 
-        /* GPIOC：MDC、RXD0、RXD1 */
-        GPIO_InitStruct.Pin       = GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5;
-        GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull      = GPIO_NOPULL;
-        GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    __HAL_RCC_ETH_CLK_ENABLE();
 
-        /* GPIOA：REF_CLK、MDIO、CRS_DV */
-        GPIO_InitStruct.Pin       = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_7;
-        GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull      = GPIO_NOPULL;
-        GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
-        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    /* 引脚分组完全由板级表驱动 —— 哪些端口、哪些脚、什么复用功能是板级事实，
+       原先直接写在这里（从 CubeMX 的 stm32f4xx_hal_msp.c 搬来的），见
+       pl_eth.h 里 g_pl_eth_pin_grps 的说明。 */
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Mode             = GPIO_MODE_AF_PP;
+    gpio.Pull             = GPIO_NOPULL;
+    gpio.Speed            = GPIO_SPEED_FREQ_VERY_HIGH;
 
-        /* GPIOG：TX_EN、TXD0、TXD1 */
-        GPIO_InitStruct.Pin       = GPIO_PIN_11 | GPIO_PIN_13 | GPIO_PIN_14;
-        GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull      = GPIO_NOPULL;
-        GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
-        HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+    for (uint8_t i = 0; i < g_pl_eth_pin_grp_count; i++) {
+        const pl_eth_pin_grp_t *g    = &g_pl_eth_pin_grps[i];
+        GPIO_TypeDef           *port = (GPIO_TypeDef *)pl_gpio_port_base(g->port);
+        if (!port) continue; /* 板级表写了非法端口：跳过而不是崩 */
 
-        /* NVIC 中断配置：ETH IRQ 优先级 5 */
-        HAL_NVIC_SetPriority(ETH_IRQn, 5, 0);
-        HAL_NVIC_EnableIRQ(ETH_IRQn);
+        pl_gpio_clk_enable(g->port);
+        gpio.Pin       = g->pins;
+        gpio.Alternate = g->alternate;
+        HAL_GPIO_Init(port, &gpio);
     }
+
+    /* 中断优先级是**工程级策略**（configMAX_SYSCALL_INTERRUPT_PRIORITY = 5），
+       不是板级数据，故不放进表里。 */
+    HAL_NVIC_SetPriority(ETH_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(ETH_IRQn);
 }
 
 /** @brief ETH 外设 MSP 反初始化：关闭时钟、回收 GPIO、关闭 NVIC */
 void HAL_ETH_MspDeInit(ETH_HandleTypeDef *ethHandle)
 {
-    if (ethHandle->Instance == ETH) {
-        /* 关闭外设时钟 */
-        __HAL_RCC_ETH_CLK_DISABLE();
+    if (ethHandle->Instance != ETH) return;
 
-        /* 回收 ETH 相关 GPIO */
-        HAL_GPIO_DeInit(GPIOC, GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5);
-        HAL_GPIO_DeInit(GPIOA, GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_7);
-        HAL_GPIO_DeInit(GPIOG, GPIO_PIN_11 | GPIO_PIN_13 | GPIO_PIN_14);
+    /* 关闭外设时钟 */
+    __HAL_RCC_ETH_CLK_DISABLE();
 
-        /* 关闭 NVIC */
-        HAL_NVIC_DisableIRQ(ETH_IRQn);
+    /* 回收 ETH 相关 GPIO —— 与 MspInit 同一张板级表，避免两处各写一份而漂移 */
+    for (uint8_t i = 0; i < g_pl_eth_pin_grp_count; i++) {
+        const pl_eth_pin_grp_t *g    = &g_pl_eth_pin_grps[i];
+        GPIO_TypeDef           *port = (GPIO_TypeDef *)pl_gpio_port_base(g->port);
+        if (port) HAL_GPIO_DeInit(port, g->pins);
     }
+
+    /* 关闭 NVIC */
+    HAL_NVIC_DisableIRQ(ETH_IRQn);
 }
 
 /* ================================================================

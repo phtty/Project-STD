@@ -4,6 +4,7 @@
 #include "lwip/err.h"
 #include "lwip/netif.h"
 #include "cmsis_os.h"
+#include "pl_gpio.h" /* pl_port_t（板级引脚表用） */
 
 /** @brief 链路状态（Platform 层抽象，隔离具体 PHY 型号的状态码） */
 typedef enum {
@@ -16,6 +17,26 @@ typedef enum {
 
 /** @brief PHY 链路状态查询函数类型（Device 层注册） */
 typedef pl_eth_link_state_t (*pl_phy_link_fn_t)(void);
+
+/* ---- 板级表：ETH 的 RMII 引脚分组 ----
+ *
+ * 共享的 pl_eth.c 只认这张表，本表是板子对"PHY 怎么接"的回答。
+ *
+ * **为什么要有它**：这段引脚配置原先直接写在 pl_eth.c 的 HAL_ETH_MspInit 里 ——
+ * 它是从 CubeMX 的 stm32f4xx_hal_msp.c 搬过来的**板级数据**，却住在共享层。两块板
+ * 恰好都是 F407 的标准 RMII 脚位，所以一直没暴露；换一块 PHY 接线不同的板会静默
+ * 拿到这几个脚，表现为"网口不通"且没有任何编译期提示。
+ *
+ * 引脚号在 CubeMX 的 main.h 里没有标签（本工程不再重新生成 CubeMX 代码），
+ * 故板级表直接写端口与引脚号。 */
+typedef struct {
+    pl_port_t port;      /**< 该组引脚所在端口 */
+    uint16_t  pins;      /**< 该组的引脚掩码，可多脚同组 */
+    uint8_t   alternate; /**< 复用功能编号 */
+} pl_eth_pin_grp_t;
+
+extern const pl_eth_pin_grp_t g_pl_eth_pin_grps[];
+extern const uint8_t          g_pl_eth_pin_grp_count;
 
 /* ---- ETH MAC 硬件初始化（Platform 层职责）---- */
 void pl_eth_mac_hw_init(void);

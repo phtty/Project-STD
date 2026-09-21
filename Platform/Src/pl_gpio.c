@@ -43,3 +43,25 @@ bool pl_gpio_read(pl_port_t port, uint8_t pin)
     GPIO_TypeDef *gpio = (GPIO_TypeDef *)g_port_base[port];
     return (gpio->IDR & (1U << pin)) != 0;
 }
+
+void pl_gpio_clk_enable(pl_port_t port)
+{
+    /* 逐个列：__HAL_RCC_GPIOx_CLK_ENABLE() 是宏，取不出数组，只能分支 */
+    switch (port) {
+        case PL_PORT_A: __HAL_RCC_GPIOA_CLK_ENABLE(); break;
+        case PL_PORT_B: __HAL_RCC_GPIOB_CLK_ENABLE(); break;
+        case PL_PORT_C: __HAL_RCC_GPIOC_CLK_ENABLE(); break;
+        case PL_PORT_D: __HAL_RCC_GPIOD_CLK_ENABLE(); break;
+        case PL_PORT_E: __HAL_RCC_GPIOE_CLK_ENABLE(); break;
+        case PL_PORT_F: __HAL_RCC_GPIOF_CLK_ENABLE(); break;
+        case PL_PORT_G: __HAL_RCC_GPIOG_CLK_ENABLE(); break;
+        case PL_PORT_H: __HAL_RCC_GPIOH_CLK_ENABLE(); break;
+        default: break;
+    }
+}
+
+void *pl_gpio_port_base(pl_port_t port)
+{
+    if (port >= PL_PORT_MAX) return NULL;
+    return (void *)g_port_base[port];
+}

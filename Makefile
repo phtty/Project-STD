@@ -41,8 +41,13 @@ MCU_FLAGS = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)
 # ---- Common Flags ----
 DEFINES = -DUSE_HAL_DRIVER -DSTM32F407xx
 
+# 板级头按层分布，镜像主树：Platform/Inc、Device/Inc、Application/Inc 各管自己那层，
+# board.h（纯板级配置，不分层）放板根。原来的 -I $(BOARD_DIR)/Inc 已拆成这四条。
 INC_DIRS = \
-	-I $(BOARD_DIR)/Inc \
+	-I $(BOARD_DIR) \
+	-I $(BOARD_DIR)/Platform/Inc \
+	-I $(BOARD_DIR)/Device/Inc \
+	-I $(BOARD_DIR)/Application/Inc \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
@@ -415,7 +420,10 @@ HOSTCC       = cc
 TEST_BUILD   = build/$(BOARD)/test
 TEST_INC     = \
 	-I test/stubs \
-	-I $(BOARD_DIR)/Inc \
+	-I $(BOARD_DIR) \
+	-I $(BOARD_DIR)/Platform/Inc \
+	-I $(BOARD_DIR)/Device/Inc \
+	-I $(BOARD_DIR)/Application/Inc \
 	-I Application/Inc \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
@@ -521,7 +529,7 @@ TEST_ISR_PREINIT_SRCS = \
 # 按 BOARD 分板编译：两版字库的字号集合、字符集、单元顺序都不同。
 TEST_FONT_LIB_SRCS = \
 	test/test_font_lib.c \
-	$(BOARD_DIR)/Src/font_lib_board.c
+	$(BOARD_DIR)/Application/Src/font_lib_board.c
 
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
@@ -575,7 +583,7 @@ $(TEST_BUILD)/test_font_lib: $(TEST_FONT_LIB_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_FONT_LIB_SRCS) $(TEST_LDFLAGS)
 
 # 换板换字库时必须重编本套件（期望表是按板 #if 选的）
-$(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/Inc/board.h
+$(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

@@ -57,7 +57,7 @@ typedef enum {
     HUB75_COLOR_WHITE  = 7,
 } hub75_color_t;
 
-/** @brief HUB75 引脚表（由 boards/3833024/Src/pl_hub75_board.c 定义） */
+/** @brief HUB75 引脚表（由 boards/3833024/Platform/Src/pl_hub75_board.c 定义） */
 extern const hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX];
 extern const hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX];
 extern const hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX];
