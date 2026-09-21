@@ -323,6 +323,9 @@ static void _cmd_present(frame_msg_t *msg)
     if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_present_t))) return;
 
     const casc_present_t *p = (const casc_present_t *)(msg->data + sizeof(casc_hdr_t));
+
+    s_enum_seen = true; /* 上电枚举据此判"有没有卡应答" */
+
     printf("[casc] PRESENT addr=%u %ux%u bright=%u ver=%u\n", (unsigned)p->addr,
            (unsigned)casc_get_u16(p->w), (unsigned)casc_get_u16(p->h), (unsigned)p->bright,
            (unsigned)p->proto_ver);
