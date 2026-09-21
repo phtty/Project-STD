@@ -25,6 +25,7 @@
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart1_tx; /* 手写补充，非 CubeMX 产物（本工程不再重新生成） */
 
 /* USART1 init function */
 
@@ -94,9 +95,37 @@ void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
 
         __HAL_LINKDMA(uartHandle, hdmarx, hdma_usart1_rx);
 
+        /* USART1_TX Init —— **手写，非 CubeMX 产物**
+           本工程不再重新生成 CubeMX 代码，故这块直接写在这里。
+           TX DMA 是级联协议长帧的前提：轮询发送会把 CPU 按在整帧的物理时间上
+           （1.4KB @115200 = 122ms），而扫描任务是 Realtime 的，被占住会影响扫描节拍。
+           选 DMA2_Stream7/Ch4 —— F407 上 USART1_TX 的两个可选流（S7/S5）都空闲，取 S7。
+           注意不是循环模式：每次发送由 HAL_UART_Transmit_DMA 重新装载。 */
+        hdma_usart1_tx.Instance                 = DMA2_Stream7;
+        hdma_usart1_tx.Init.Channel             = DMA_CHANNEL_4;
+        hdma_usart1_tx.Init.Direction           = DMA_MEMORY_TO_PERIPH;
+        hdma_usart1_tx.Init.PeriphInc           = DMA_PINC_DISABLE;
+        hdma_usart1_tx.Init.MemInc              = DMA_MINC_ENABLE;
+        hdma_usart1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.Mode                = DMA_NORMAL;
+        hdma_usart1_tx.Init.Priority            = DMA_PRIORITY_LOW;
+        hdma_usart1_tx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+        if (HAL_DMA_Init(&hdma_usart1_tx) != HAL_OK) {
+            Error_Handler();
+        }
+
+        __HAL_LINKDMA(uartHandle, hdmatx, hdma_usart1_tx);
+
         /* USART1 interrupt Init */
         HAL_NVIC_SetPriority(USART1_IRQn, 7, 0);
         HAL_NVIC_EnableIRQ(USART1_IRQn);
+
+        /* TX DMA 中断：优先级取 7，与既有 DMA（6/7）一致。
+           必须 ≥ configMAX_SYSCALL_INTERRUPT_PRIORITY(5) —— 因为 TX 完成回调
+           （HAL_UART_TxCpltCallback）里要 release 信号量唤醒发送任务。 */
+        HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 7, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
         /* USER CODE BEGIN USART1_MspInit 1 */
 
         /* USER CODE END USART1_MspInit 1 */
@@ -121,6 +150,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
 
         /* USART1 DMA DeInit */
         HAL_DMA_DeInit(uartHandle->hdmarx);
+        HAL_DMA_DeInit(uartHandle->hdmatx);
+        HAL_NVIC_DisableIRQ(DMA2_Stream7_IRQn);
 
         /* USART1 interrupt Deinit */
         HAL_NVIC_DisableIRQ(USART1_IRQn);

@@ -520,6 +520,7 @@ TEST_LDI_0AH_SRCS = \
 # 板级表 g_pl_tim_board / g_pl_uart_board 由测试文件自己提供。
 TEST_ISR_PREINIT_SRCS = \
 	test/test_isr_preinit.c \
+	test/stubs/os_stub.c \
 	Platform/Src/pl_tim.c \
 	Platform/Src/pl_uart.c
 

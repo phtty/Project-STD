@@ -29,6 +29,10 @@ UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart3_rx;
 DMA_HandleTypeDef hdma_usart6_rx;
+/* TX 三条手写补充，非 CubeMX 产物（本工程不再重新生成 CubeMX 代码） */
+DMA_HandleTypeDef hdma_usart1_tx;
+DMA_HandleTypeDef hdma_usart3_tx;
+DMA_HandleTypeDef hdma_usart6_tx;
 
 /* USART1 init function */
 
@@ -152,6 +156,32 @@ void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
 
         __HAL_LINKDMA(uartHandle, hdmarx, hdma_usart1_rx);
 
+        /* USART1_TX Init —— **手写，非 CubeMX 产物**
+           TX DMA 是长帧发送的前提：轮询会把 CPU 按在整帧的物理时间上，而扫描任务是 Realtime 的。
+           选 DMA2_Stream7/Ch4；F407 上 USART1_TX 的可选流里这条空闲且不与本板
+           已用的 S0(SPI1_RX)/S1(USART6_RX)/S2(USART1_RX)/S3(SPI1_TX)/DMA1_S1(USART3_RX) 冲突。 */
+        hdma_usart1_tx.Instance                 = DMA2_Stream7;
+        hdma_usart1_tx.Init.Channel             = DMA_CHANNEL_4;
+        hdma_usart1_tx.Init.Direction           = DMA_MEMORY_TO_PERIPH;
+        hdma_usart1_tx.Init.PeriphInc           = DMA_PINC_DISABLE;
+        hdma_usart1_tx.Init.MemInc              = DMA_MINC_ENABLE;
+        hdma_usart1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+        hdma_usart1_tx.Init.Mode                = DMA_NORMAL;
+        hdma_usart1_tx.Init.Priority            = DMA_PRIORITY_LOW;
+        hdma_usart1_tx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+        if (HAL_DMA_Init(&hdma_usart1_tx) != HAL_OK) {
+            Error_Handler();
+        }
+
+        __HAL_LINKDMA(uartHandle, hdmatx, hdma_usart1_tx);
+
+        /* TX DMA 中断优先级取 7（与既有 DMA 一致）—— 必须 ≥
+           configMAX_SYSCALL_INTERRUPT_PRIORITY(5)，因为 TX 完成回调里要 release 信号量 */
+        HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 7, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
+
+
         /* USART1 interrupt Init */
         HAL_NVIC_SetPriority(USART1_IRQn, 7, 0);
         HAL_NVIC_EnableIRQ(USART1_IRQn);
@@ -194,6 +224,32 @@ void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
         }
 
         __HAL_LINKDMA(uartHandle, hdmarx, hdma_usart3_rx);
+
+        /* USART3_TX Init —— **手写，非 CubeMX 产物**
+           同上，RS232-0 也补上与 RS485 一致的能力（IAP 在 RS232 上也有长帧）。
+           选 DMA1_Stream3/Ch4；F407 上 USART3_TX 的可选流里这条空闲且不与本板
+           已用的 S0(SPI1_RX)/S1(USART6_RX)/S2(USART1_RX)/S3(SPI1_TX)/DMA1_S1(USART3_RX) 冲突。 */
+        hdma_usart3_tx.Instance                 = DMA1_Stream3;
+        hdma_usart3_tx.Init.Channel             = DMA_CHANNEL_4;
+        hdma_usart3_tx.Init.Direction           = DMA_MEMORY_TO_PERIPH;
+        hdma_usart3_tx.Init.PeriphInc           = DMA_PINC_DISABLE;
+        hdma_usart3_tx.Init.MemInc              = DMA_MINC_ENABLE;
+        hdma_usart3_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart3_tx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+        hdma_usart3_tx.Init.Mode                = DMA_NORMAL;
+        hdma_usart3_tx.Init.Priority            = DMA_PRIORITY_LOW;
+        hdma_usart3_tx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+        if (HAL_DMA_Init(&hdma_usart3_tx) != HAL_OK) {
+            Error_Handler();
+        }
+
+        __HAL_LINKDMA(uartHandle, hdmatx, hdma_usart3_tx);
+
+        /* TX DMA 中断优先级取 7（与既有 DMA 一致）—— 必须 ≥
+           configMAX_SYSCALL_INTERRUPT_PRIORITY(5)，因为 TX 完成回调里要 release 信号量 */
+        HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 7, 0);
+        HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+
 
         /* USART3 interrupt Init */
         HAL_NVIC_SetPriority(USART3_IRQn, 7, 0);
@@ -238,6 +294,32 @@ void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
 
         __HAL_LINKDMA(uartHandle, hdmarx, hdma_usart6_rx);
 
+        /* USART6_TX Init —— **手写，非 CubeMX 产物**
+           同上，RS232-1。
+           选 DMA2_Stream6/Ch5；F407 上 USART6_TX 的可选流里这条空闲且不与本板
+           已用的 S0(SPI1_RX)/S1(USART6_RX)/S2(USART1_RX)/S3(SPI1_TX)/DMA1_S1(USART3_RX) 冲突。 */
+        hdma_usart6_tx.Instance                 = DMA2_Stream6;
+        hdma_usart6_tx.Init.Channel             = DMA_CHANNEL_5;
+        hdma_usart6_tx.Init.Direction           = DMA_MEMORY_TO_PERIPH;
+        hdma_usart6_tx.Init.PeriphInc           = DMA_PINC_DISABLE;
+        hdma_usart6_tx.Init.MemInc              = DMA_MINC_ENABLE;
+        hdma_usart6_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart6_tx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+        hdma_usart6_tx.Init.Mode                = DMA_NORMAL;
+        hdma_usart6_tx.Init.Priority            = DMA_PRIORITY_LOW;
+        hdma_usart6_tx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+        if (HAL_DMA_Init(&hdma_usart6_tx) != HAL_OK) {
+            Error_Handler();
+        }
+
+        __HAL_LINKDMA(uartHandle, hdmatx, hdma_usart6_tx);
+
+        /* TX DMA 中断优先级取 7（与既有 DMA 一致）—— 必须 ≥
+           configMAX_SYSCALL_INTERRUPT_PRIORITY(5)，因为 TX 完成回调里要 release 信号量 */
+        HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 7, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
+
+
         /* USART6 interrupt Init */
         HAL_NVIC_SetPriority(USART6_IRQn, 7, 0);
         HAL_NVIC_EnableIRQ(USART6_IRQn);
@@ -265,6 +347,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
 
         /* USART1 DMA DeInit */
         HAL_DMA_DeInit(uartHandle->hdmarx);
+        HAL_DMA_DeInit(uartHandle->hdmatx);
 
         /* USART1 interrupt Deinit */
         HAL_NVIC_DisableIRQ(USART1_IRQn);
@@ -286,6 +369,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
 
         /* USART3 DMA DeInit */
         HAL_DMA_DeInit(uartHandle->hdmarx);
+        HAL_DMA_DeInit(uartHandle->hdmatx);
 
         /* USART3 interrupt Deinit */
         HAL_NVIC_DisableIRQ(USART3_IRQn);
@@ -307,6 +391,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
 
         /* USART6 DMA DeInit */
         HAL_DMA_DeInit(uartHandle->hdmarx);
+        HAL_DMA_DeInit(uartHandle->hdmatx);
 
         /* USART6 interrupt Deinit */
         HAL_NVIC_DisableIRQ(USART6_IRQn);

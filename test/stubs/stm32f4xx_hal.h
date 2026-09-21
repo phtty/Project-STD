@@ -38,8 +38,14 @@ typedef struct {
 } TIM_HandleTypeDef;
 
 typedef struct {
+    uint32_t BaudRate; /* pl_uart 用它按波特率算发送超时下限 */
+} UART_InitTypeDef;
+
+typedef struct {
     USART_TypeDef     *Instance;
     DMA_HandleTypeDef *hdmarx;
+    DMA_HandleTypeDef *hdmatx; /* TX DMA：pl_uart 的 DMA 发送模式靠它判有无 */
+    UART_InitTypeDef   Init;
 } UART_HandleTypeDef;
 
 typedef enum {
@@ -76,7 +82,11 @@ void          HAL_UART_IRQHandler(UART_HandleTypeDef *huart);
 HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len,
                                     uint32_t timeout);
 HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 HAL_StatusTypeDef HAL_UART_DMAStop(UART_HandleTypeDef *huart);
+/* 桩不模拟 TC 中断，故这个回调在 host 上不会被调用；声明是为了让
+   pl_uart.c 能原样通过编译（生产源码不替换、不改写） */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
 
 void HAL_DMA_IRQHandler(DMA_HandleTypeDef *hdma);
 

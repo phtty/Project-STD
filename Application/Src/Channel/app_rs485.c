@@ -13,11 +13,17 @@
 
 #include "FreeRTOS.h"
 #include "pl_uart.h"
+#include "pl_mem.h"
 #include "dev_rs485.h"
 #include "app_dispatch.h"
 #include "pl_task.h"
 
 #define RS485_BUF_SIZE (2048U)
+
+/* 发送超时。**不必在这里算字节数** —— pl_uart 会按波特率兜下限
+   （原实现把 100ms 写死在这里，@115200 只够 1152 字节，长帧会被 HAL 拦腰截断）。
+   给一个宽松值即可，真正的下限由 pl_uart 抬。 */
+#define RS485_TX_TIMEOUT_MS (200U)
 
 typedef struct {
     ccb_t base; /**< 第一个成员：container_of 还原 */
@@ -35,7 +41,15 @@ static int32_t rs485_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data,
     /* state 置 UP 的唯一位置在任务里、UART 与 DMA 接收就绪之后，
        因此它同时表达了"uart 已绑定"，无需再单独判空 */
     if (self->base.state != CCB_STATE_UP) return -1;
-    return pl_uart_send(self->uart, data, len, 100);
+
+    /* 长帧走 DMA：轮询会把调用任务按在整帧的物理时间上（1.4KB @115200 = 122ms），
+       DMA 下这段时间交给硬件、任务阻塞在信号量上。
+       **但缓冲落在 CCMRAM 时只能轮询** —— DMA 够不到 CCM 区（见 pl_mem.h），
+       这是数据摆放决定的、不是可选项。在这里先判，免得 pl_uart 每次都打一条拒绝日志，
+       也免得协议侧拿 CCMRAM 缓冲发响应时被静默丢弃（返回值无人检查）。 */
+    if (pl_mem_is_dma_capable(data, len))
+        return pl_uart_send_dma(self->uart, data, len, RS485_TX_TIMEOUT_MS);
+    return pl_uart_send(self->uart, data, len, RS485_TX_TIMEOUT_MS);
 }
 
 static const ccb_ops_t rs485_ccb_ops = {.send = rs485_send};
