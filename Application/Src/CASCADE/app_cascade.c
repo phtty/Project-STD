@@ -654,19 +654,19 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
             /* **定向重传**：只补 ACK 报缺的那几片，不是重发整轮 */
             _send_frags(c, seq, bmp_len, frag_n, mask);
         }
-        CASC_LOG("[casc·主] 卡%u 第%u次：发 %02X 那几片 + COMMIT\n", (unsigned)c->addr,
-                 (unsigned)(attempt + 1), (unsigned)mask);
+        CASC_LOG("[casc·主] seq=%u 卡%u 第%u次：发 %02X 那几片 + COMMIT\n", (unsigned)seq,
+                 (unsigned)c->addr, (unsigned)(attempt + 1), (unsigned)mask);
         (void)_send_seq(CASC_T_SYNC_COMMIT, c->addr, seq, 0, 0, nullptr, 0);
 
         if (!_wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS)) {
-            CASC_LOG("[casc·主] 卡%u ← 等应答超时（%ums）\n", (unsigned)c->addr,
-                     (unsigned)CASC_ACK_TIMEOUT_MS);
+            CASC_LOG("[casc·主] seq=%u 卡%u ← 等应答超时（%ums）\n", (unsigned)seq,
+                     (unsigned)c->addr, (unsigned)CASC_ACK_TIMEOUT_MS);
             /* 超时 = 这张卡没应答，或者 ACK 丢了 —— 现场分不开，只能整卡重来一次 */
             mask = full;
             continue;
         }
-        CASC_LOG("[casc·主] 卡%u ← sta=%u 缺=%02X\n", (unsigned)c->addr, (unsigned)s_ack.sta,
-                 (unsigned)s_ack.miss_mask);
+        CASC_LOG("[casc·主] seq=%u 卡%u ← sta=%u 缺=%02X\n", (unsigned)seq, (unsigned)c->addr,
+                 (unsigned)s_ack.sta, (unsigned)s_ack.miss_mask);
 
         if (s_ack.sta == CASC_ACK_OK) return true; /* 本轮完成 */
         if (s_ack.sta == CASC_ACK_MISS) {
@@ -690,6 +690,9 @@ static bool _round_run(void)
     const uint16_t         seq    = ++s_round_seq;
     const uint8_t          bright = app_screen_get_brightness();
     bool                   all_ok = true;
+
+    CASC_LOG("[casc·主] 开轮 seq=%u（共 %u 卡，本卡 addr=%u）\n", (unsigned)seq,
+             (unsigned)L->count, (unsigned)me);
 
     for (uint8_t i = 0; i < L->count; i++) {
         const screen_card_t *c = app_screen_card(i);
