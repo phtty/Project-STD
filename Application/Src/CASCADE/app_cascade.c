@@ -27,12 +27,46 @@
 #include "pl_mem.h"
 #include "pl_task.h"
 
+/* ---- 诊断输出 ----
+ *
+ * **两侧都要有**：只有一侧打日志时，"帧没到"与"帧到了但没处理"在现场分不开，
+ * 而这两种情况的排查方向完全相反（查线 vs 查任务）。
+ * 默认开；现场嫌吵可 -DCASC_DIAG=0 关掉，与 app_screen_status() 那条"上报是可选的"
+ * 是两回事 —— 这是**本地**调试输出，不出设备。 */
+#ifndef CASC_DIAG
+#define CASC_DIAG (1)
+#endif
+#if CASC_DIAG
+#define CASC_LOG(...) printf(__VA_ARGS__)
+#else
+#define CASC_LOG(...) ((void)0)
+#endif
+
 /* ---- 队列与缓冲区（容量取法见 app_iap.c / app_rls.c 的同名注释）---- */
 
-#define CASC_MSG_SIZE (sizeof(frame_msg_t) + CASC_FRAME_MAX)
+/* **本协议真正会发出的最长帧**：分片帧 = 头 15 + CASC_FRAG_BYTES。不是 CASC_FRAME_MAX
+ * （那是探针允许的最大帧长）—— 队列元素按后者算是 1052 字节，深 8 就要 8.2KB CCMRAM，
+ * 而实际最大的一帧只有 527。把它同时设成 pcb.payload_max，框架就会把"超出本协议
+ * 实际会发的长度"的帧判为违规并丢弃，队列元素因此有硬上界。 */
+#define CASC_MSG_MAX (CASC_OVERHEAD + CASC_FRAG_BYTES)
+
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_sync_begin_t),
+               "SYNC_BEGIN 比「最长帧」还长 —— 队列元素装不下");
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_ack_t), "ACK 装不下");
+
+#define CASC_MSG_SIZE (sizeof(frame_msg_t) + CASC_MSG_MAX)
+
+/* **深度 8 是照着一轮的连发算出来的，不是随手取的**：一轮 = BEGIN + N 片 + COMMIT，
+   最多 5 帧（3 片）在 4ms 内连发完。而 ISR → rs485_task → frame_dispatch_task →
+   本协议任务**四跳全是 Normal 优先级**，每跳最多等一个 tick，端到端几毫秒 ——
+   深 2 的队列（P2 时期帧很稀疏，够用）在这中间是**静默丢帧**（框架的 Put 超时为 0），
+   现场表现为"总缺中间那几片"，且两侧都看不出原因。
+
+   实测就是这样：从卡回过一次 `缺片位 03`（只有第 2 片到了），而它本身工作正常。 */
+#define CASC_QUEUE_DEPTH (8U)
 
 static StaticQueue_t s_casc_queue_cb;
-static uint8_t       s_casc_queue_buf[2 * CASC_MSG_SIZE] PL_CCMRAM;
+static uint8_t       s_casc_queue_buf[CASC_QUEUE_DEPTH * CASC_MSG_SIZE] PL_CCMRAM;
 static const osMessageQueueAttr_t s_casc_queue_attr = {
     .name    = "proto_casc_queue",
     .cb_mem  = &s_casc_queue_cb,
@@ -326,6 +360,9 @@ static void _cmd_sync_begin(frame_msg_t *msg)
         frag_b == 0 || (uint32_t)frag_b * p->frag_n < bm_len) {
         const casc_nack_t nack = {.err = CASC_NACK_GEOM};
         s_rx.active            = false;
+        CASC_LOG("[casc·从] 拒绝 BEGIN：矩形 %ux%u 或分片参数不符（本卡屏 %ux%u，暂存 %u）\n",
+                 (unsigned)w, (unsigned)hh, (unsigned)(d ? d->screen_rows : 0),
+                 (unsigned)(d ? d->screen_cols : 0), (unsigned)sizeof(s_rx.stage));
         /* 回带**本轮序号**：主卡靠它认"这条 NACK 是答哪一轮的" */
         (void)_send_seq(CASC_T_NACK, CASC_ADDR_MASTER, casc_get_u16(h->seq), 0, 0, &nack,
                         sizeof(nack));
@@ -340,6 +377,10 @@ static void _cmd_sync_begin(frame_msg_t *msg)
     s_rx.color      = p->color;
     s_rx.bright     = p->bright;
     s_rx.active     = true;
+
+    CASC_LOG("[casc·从] BEGIN seq=%u %ux%u@(%u,%u) 位图%u=%u片×%u bright=%u\n", (unsigned)s_rx.seq,
+             (unsigned)w, (unsigned)hh, (unsigned)casc_get_u16(p->x), (unsigned)casc_get_u16(p->y),
+             (unsigned)bm_len, (unsigned)p->frag_n, (unsigned)frag_b, (unsigned)p->bright);
 
     /* **每一轮都重新断言亮度**。SET_BRIGHT 是单次广播、没有重传，而本帧是每轮必发、
        丢一轮就自己自愈的一字节 —— 这是"从卡永久停在旧亮度上"的唯一防线。 */
@@ -400,6 +441,10 @@ static void _cmd_sync_commit(frame_msg_t *msg)
             app_screen_commit_bitmap(s_rx.stage, s_rx.bmp_len, s_rx.color);
         }
     }
+
+    CASC_LOG("[casc·从] COMMIT seq=%u 收到片=%02X → sta=%u 缺=%02X\n",
+             (unsigned)casc_get_u16(h->seq), (unsigned)s_rx.have_mask, (unsigned)ack.sta,
+             (unsigned)ack.miss_mask);
 
     /* 回带**本轮序号**（不是自己的发送计数器）—— 主卡的等待循环按 (seq, src) 匹配 */
     (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, casc_get_u16(h->seq), 0, 0, &ack, sizeof(ack));
@@ -609,13 +654,20 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
             /* **定向重传**：只补 ACK 报缺的那几片，不是重发整轮 */
             _send_frags(c, seq, bmp_len, frag_n, mask);
         }
+        CASC_LOG("[casc·主] 卡%u 第%u次：发 %02X 那几片 + COMMIT\n", (unsigned)c->addr,
+                 (unsigned)(attempt + 1), (unsigned)mask);
         (void)_send_seq(CASC_T_SYNC_COMMIT, c->addr, seq, 0, 0, nullptr, 0);
 
         if (!_wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS)) {
+            CASC_LOG("[casc·主] 卡%u ← 等应答超时（%ums）\n", (unsigned)c->addr,
+                     (unsigned)CASC_ACK_TIMEOUT_MS);
             /* 超时 = 这张卡没应答，或者 ACK 丢了 —— 现场分不开，只能整卡重来一次 */
             mask = full;
             continue;
         }
+        CASC_LOG("[casc·主] 卡%u ← sta=%u 缺=%02X\n", (unsigned)c->addr, (unsigned)s_ack.sta,
+                 (unsigned)s_ack.miss_mask);
+
         if (s_ack.sta == CASC_ACK_OK) return true; /* 本轮完成 */
         if (s_ack.sta == CASC_ACK_MISS) {
             mask = s_ack.miss_mask;
@@ -744,12 +796,14 @@ static void _cascade_init(void)
     p->name        = "cascade";
     p->ops         = &s_casc_ops;
     p->rb          = &s_casc_rb;
-    p->payload_max = CASC_FRAME_MAX;
+    /* 不是 CASC_FRAME_MAX：见 CASC_MSG_MAX 的说明 —— 队列元素按它定，设大了
+       要么白占 CCMRAM，要么被迫把队列做浅。本协议发出的最长帧就是分片帧。 */
+    p->payload_max = CASC_MSG_MAX;
 
     rb_init(&s_casc_rb, "cascade");
 
     /* 队列必须在 initcall 内建好，不能等任务启动 —— 否则有"向空队列投递"的窗口 */
-    s_casc_queue = osMessageQueueNew(2, CASC_MSG_SIZE, &s_casc_queue_attr);
+    s_casc_queue = osMessageQueueNew(CASC_QUEUE_DEPTH, CASC_MSG_SIZE, &s_casc_queue_attr);
     if (s_casc_queue == nullptr) {
         printf("[casc] 队列创建失败，级联协议停用\n");
         return;
