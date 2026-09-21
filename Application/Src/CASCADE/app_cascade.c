@@ -97,17 +97,26 @@ static osMessageQueueId_t s_casc_queue;
    卡真的掉线时，每轮都卡在这儿会拖长整轮时间（其余卡与主卡本来不用等它）。 */
 #define CASC_RETRY_MAX (2U)
 
-/* 上电对齐：主卡枚举之后主动推一轮整屏，让所有卡一上电就是同一幅画面。
+/* 上电枚举：发 PING 等 PRESENT，**没等到就再发**，最多这么多轮、每轮隔这么久。
+ *
+ * **不能只发一次就下结论**：从卡可能比主卡晚就绪，或者那一帧正好赶上总线冲突。
+ * 只发一次的话"链路其实没问题"会被报成"整个不通"—— 实测就撞上过：枚举说没人应答，
+ * 紧接着的对齐轮次却全部成功，把人往接线/上电的方向引了半天。
+ * （这也正是 P4 要做的"运行期重新枚举"的雏形。） */
+#define CASC_PING_TRIES     (5U)
+#define CASC_PING_RETRY_MS  (250U)
+
+/* 枚举收尾后、第一轮对齐之前的间隔。**两者不能同刻** —— 半双工总线上一次只能有
+   一个节点驱动，从卡回 PRESENT 时主卡若正在发分片，两边都成乱码（P3 的现场根因）。 */
+#define CASC_BOOT_ALIGN_PING_GAP_MS (300U)
+
+/* 上电对齐：枚举之后主动推一轮整屏，让所有卡一上电就是同一幅画面。
  *
  * **为什么不能只靠"画布有未落屏内容"**：上电时画布里的东西是从持久化恢复来的，
  * 它不算"新内容"（`_persist_restore` 明确把待落屏标志清掉了）—— 于是那一轮永远
- * 不会开，从卡会一直停在上电前它自己那幅旧画面上，与主卡对不上，直到有人下发一次。
+ * 不会开，从卡会一直停在上电前它自己那幅旧画面上，直到有人下发一次。
  *
- * 首次尝试可能撞上从卡还没起来（它自己的初始化比主卡慢），所以失败就隔 1 秒再来；
- * 试满这么多轮仍不成，就交给下一次真正的更新。 */
-#define CASC_ENUM_WAIT_MS        (1500U)
-/* 枚举的 PING 与第一轮对齐之间要留的间隔 —— 见对齐处那段说明（半双工冲突） */
-#define CASC_BOOT_ALIGN_PING_GAP_MS (300U)
+ * 首次可能撞上从卡还没起来，失败就隔 1 秒再来；试满仍不成则交给下一次真正的更新。 */
 #define CASC_BOOT_ALIGN_TRIES    (5U)
 #define CASC_BOOT_ALIGN_RETRY_MS (1000U)
 
@@ -119,6 +128,29 @@ static osMessageQueueId_t s_casc_queue;
  * 枚举与画布无关，所以这两个变量放在守卫之外。 */
 static uint32_t s_enum_deadline;
 static bool     s_enum_seen;
+
+/* 上电枚举的剩余次数与下次发包时刻（0 = 枚举已收尾） */
+static uint8_t  s_ping_left;
+static uint32_t s_ping_next;
+
+/* 上电对齐的剩余次数与下次尝试时刻（0 = 对齐已完成或尚未开始）。
+   放在这儿（而不是 _round_run 旁边）是因为 _enum_finish 也要写它。
+   跟着画布开关走：没有画布就没有"轮"，它自然也用不上。 */
+#if BOARD_SCREEN_CANVAS
+static uint8_t  s_align_left;
+static uint32_t s_align_next;
+#endif
+
+/** @brief 枚举收尾：不再发 PING，等最后一帧 PRESENT 走完就开对齐轮 */
+static void _enum_finish(uint32_t now)
+{
+    s_ping_left     = 0;
+    s_enum_deadline = now + CASC_BOOT_ALIGN_PING_GAP_MS;
+#if BOARD_SCREEN_CANVAS
+    s_align_left = CASC_BOOT_ALIGN_TRIES;
+    s_align_next = s_enum_deadline;
+#endif
+}
 
 /* pcb 的字段在 _cascade_init 里填（探针定义在本文件后部，ops 要指向它） */
 static pcb_t s_casc_pcb;
@@ -612,10 +644,6 @@ static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
 
 static uint16_t s_round_seq;
 
-/* 上电对齐剩余次数与下次尝试时刻（0 = 对齐已完成或尚未开始） */
-static uint8_t  s_align_left;
-static uint32_t s_align_next;
-
 
 /** @brief 把 `mask` 位选中的分片发出去（每片 CASC_FRAG_BYTES 字节）
  *
@@ -766,7 +794,8 @@ static void casc_task(void *argument)
 {
     (void)argument;
 
-    uint32_t next_ping = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
+    s_ping_left = CASC_PING_TRIES;
+    s_ping_next = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
 
     for (;;) {
         /* 阻塞等第一条（超时取轮询周期而不是 osWaitForever：本任务还兼着周期活，
@@ -780,30 +809,23 @@ static void casc_task(void *argument)
         if (s_enum_deadline && (int32_t)(now - s_enum_deadline) >= 0) {
             CASC_LOG("[casc·主] 上电枚举：%s\n",
                      s_enum_seen ? "有卡应答（从卡在，链路通）"
-                                 : "**没有任何卡应答** —— 从卡没上电/没接 485/没烧这份固件，"
-                                   "或总线方向与接线不对；后面那些「本轮未完成」都是必然的");
+                                 : "连发多次 PING 都没有应答 —— 从卡没上电/没接 485/没烧这份"
+                                   "固件，或总线方向与接线不对；后面那些「本轮未完成」都是必然的");
             s_enum_deadline = 0;
         }
 
-        /* 上电枚举一次：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒。
+        /* 上电枚举：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒起发，
+           没等到应答就再发 —— 见 CASC_PING_TRIES 的说明。
            运行期的重新枚举（拔插、掉线恢复）留到 P4。 */
-        if (app_screen_is_master() && (int32_t)(now - next_ping) >= 0) {
-            next_ping = now + 0x7FFFFFFFU; /* 只做一次 */
+        if (app_screen_is_master() && s_ping_left && (int32_t)(now - s_ping_next) >= 0) {
+            s_ping_left--;
+            s_enum_seen = false; /* 只认**这一轮**发出去之后的应答 */
             (void)app_cascade_ping();
-#if BOARD_SCREEN_CANVAS
-            /* 枚举之后立刻对齐一次整屏 —— 见 CASC_BOOT_ALIGN_TRIES 的说明 */
-            s_align_left  = CASC_BOOT_ALIGN_TRIES;
-            s_enum_seen   = false;
-            s_enum_deadline = now + CASC_ENUM_WAIT_MS;
-            /* **对齐要等枚举的应答走完**，不能同一刻就开轮。
-               半双工总线一次只能有一个节点驱动：从卡收到 PING 会立刻回 PRESENT，
-               而那时主卡正在发这一轮的分片 —— 两个节点同时驱动，**两边都成乱码**。
-               实测就是这么坏的：第一轮从卡只收到 COMMIT，它前面的 BEGIN 与分片全被
-               撞掉，而主卡那边永远等不到 PRESENT。
-               300ms 足够一帧 PRESENT（22 字节 ≈ 2ms）走完。 */
-            s_align_next  = now + CASC_BOOT_ALIGN_PING_GAP_MS;
-#endif
+            s_ping_next = now + CASC_PING_RETRY_MS;
+            if (!s_ping_left) _enum_finish(now); /* 次数用尽：不再等 */
         }
+        /* 收到应答就提前收尾，不必把重试次数耗完 */
+        if (app_screen_is_master() && s_ping_left && s_enum_seen) _enum_finish(now);
 
         /* 亮度待下发：光传感器每秒钟都可能改，这里把"变了"攒成一次广播。
            广播本身**不要求应答** —— 亮度差一帧不可见，且它天然是渐变量。
