@@ -1,4 +1,5 @@
 #include "app_rls_cmd.h"
+#include "app_screen.h"
 
 #include "app_render.h"
 
@@ -14,10 +15,13 @@ const rls_cmd_handler_fn_t g_rls_cmd_table[] = {
 
 [[maybe_unused]] static void cmd_test(ccb_t *ccb, void *data)
 {
+    (void)ccb;
+    (void)data;
 }
 
 static void cmd_display(ccb_t *ccb, void *data)
 {
+    (void)ccb; /* 回复走 ccb_send_to 的表来源，不需要本帧的通道 */
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
     // 显示前先清屏
@@ -33,8 +37,8 @@ static void cmd_display(ccb_t *ccb, void *data)
         .type   = RENDER_BITMAP,
         .x      = 0,
         .y      = 0,
-        .w      = dev_display_get()->screen_rows,
-        .h      = dev_display_get()->screen_cols,
+        .w      = app_screen_rows(),
+        .h      = app_screen_cols(),
         .color  = display_ctx->color,
         .bitmap = display_ctx->bitmap,
     });
@@ -42,6 +46,7 @@ static void cmd_display(ccb_t *ccb, void *data)
 
 static void cmd_display_save(ccb_t *ccb, void *data)
 {
+    (void)ccb;
     rls_dispaly_t *display_ctx = (rls_dispaly_t *)data;
 
     // 显示前先清屏
@@ -57,8 +62,8 @@ static void cmd_display_save(ccb_t *ccb, void *data)
         .type   = RENDER_BITMAP,
         .x      = 0,
         .y      = 0,
-        .w      = dev_display_get()->screen_rows,
-        .h      = dev_display_get()->screen_cols,
+        .w      = app_screen_rows(),
+        .h      = app_screen_cols(),
         .color  = display_ctx->color,
         .bitmap = display_ctx->bitmap,
     });

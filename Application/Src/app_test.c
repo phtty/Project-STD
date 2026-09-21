@@ -4,6 +4,7 @@
  */
 
 #include "app_test.h"
+#include "app_screen.h"
 
 #include <string.h>
 #include "cmsis_os2.h"
@@ -43,8 +44,8 @@ void app_test_render_text(void)
         .type  = RENDER_TEXT,
         .x     = 0,
         .y     = 0,
-        .w     = dev_display_get()->screen_rows,
-        .h     = dev_display_get()->screen_cols,
+        .w     = app_screen_rows(),
+        .h     = app_screen_cols(),
         .style = &(render_style_t){
             .h_align = ALIGN_CENTER,
             .v_align = ALIGN_CENTER,

@@ -71,6 +71,22 @@ const screen_layout_t *app_screen_layout(void)
     return &s_layout;
 }
 
+/* 门面停用（显示未就绪 / 地址不在表里）时 s_rows/s_cols 还是 0，回落到本卡屏几何 ——
+   与加级联之前逐字相同，免得"门面一停用，渲染矩形就成了 0×0"。 */
+uint16_t app_screen_rows(void)
+{
+    if (s_rows) return s_rows;
+    const dev_display_t *d = dev_display_get();
+    return d ? d->screen_rows : 0;
+}
+
+uint16_t app_screen_cols(void)
+{
+    if (s_cols) return s_cols;
+    const dev_display_t *d = dev_display_get();
+    return d ? d->screen_cols : 0;
+}
+
 const screen_card_t *app_screen_card(uint8_t card_idx)
 {
     return (card_idx < s_layout.count) ? &s_layout.cards[card_idx] : nullptr;

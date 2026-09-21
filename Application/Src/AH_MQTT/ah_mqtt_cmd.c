@@ -2,6 +2,7 @@
 
 #include "ah_mqtt.h"
 #include "text_cvt.h"
+#include "app_screen.h"
 #include "app_render.h"
 #include "dev_display.h"
 
@@ -51,7 +52,7 @@ static void cmd_display(pcb_t *self, ccb_t *ccb, char *buff)
     app_render(&(render_cfg_t){
         .type = RENDER_TEXT,
         .x = 0, .y = 0,
-        .w = dev_display_get()->screen_rows, .h = dev_display_get()->screen_cols,
+        .w = app_screen_rows(), .h = app_screen_cols(),
         .color    = disp_color[(uint8_t)(para->color) - 0x30],
         .text      = gbk_txt, .len = (uint16_t)gbk_len,
         .font_size = disp_size[(uint8_t)(para->size) - 0x30],

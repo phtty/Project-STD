@@ -1,4 +1,5 @@
 #include "app_vms_ctrl.h"
+#include "app_screen.h"
 
 #include "string.h"
 
@@ -83,9 +84,10 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     align_t         h_align   = MAP(s_align_map, ctx->format, ALIGN_CENTER);
     font_size_t     font_size = MAP(s_font_size_map, ctx->font_size, FONT_16);
 
-    dev_display_t *d  = dev_display_get();
-    uint16_t screen_w = d->screen_rows;
-    uint16_t screen_h = d->screen_cols;
+    /* **逻辑屏**尺寸，不是本卡那块屏 —— 级联时整屏比本卡屏大，用本卡的
+       screen_rows/cols 算布局会让内容整块落到别的卡那半边去。 */
+    uint16_t screen_w = app_screen_rows();
+    uint16_t screen_h = app_screen_cols();
 
     /* ---- 计算行布局 ---- */
     uint16_t render_y = 0;

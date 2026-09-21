@@ -15,6 +15,7 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
+#include "app_screen.h"
 #include "app_udp.h"
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
@@ -69,8 +70,8 @@ void app_boot(void)
             .type  = RENDER_TEXT,
             .x     = 0,
             .y     = 0,
-            .w     = dev_display_get()->screen_rows,
-            .h     = dev_display_get()->screen_cols,
+            .w     = app_screen_rows(),
+            .h     = app_screen_cols(),
             .style = &(render_style_t){
                 .h_align = ALIGN_CENTER,
                 .v_align = ALIGN_CENTER,
