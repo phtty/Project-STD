@@ -15,6 +15,8 @@
 #include "pl_uart.h"
 #include "pl_mem.h"
 #include "dev_rs485.h"
+#include <stdio.h>
+
 #include "app_dispatch.h"
 #include "pl_task.h"
 
@@ -75,11 +77,28 @@ static const osMessageQueueAttr_t s_rs485_rx_attr = {
     .mq_size = sizeof(s_rs485_rx_buf),
 };
 
-/* ---- ISR → 任务通知 ---- */
+/* ---- 传输层收包诊断 ----
+ *
+ * 查"帧到没到"时它是决定性的：**收到 527 字节**与**什么都没收到**，把问题一刀切成
+ * "上游（线/收发器/接收 DMA）"与"下游（分发/探针/匹配）"—— 两者排查方向相反。
+ * 顺带能看出对端的**分帧**（一个块是几条帧粘出来的）。
+ *
+ * **限次**：一次运行只报前 RS485_RX_LOG_MAX 条，不然会把 1KB 的 RTT 缓冲冲掉，
+ * 反而看不到别的。查完把它置 0 关掉。 */
+#define RS485_RX_LOG 1
+#define RS485_RX_LOG_MAX 20U
+
 static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 {
     (void)data;
     rs485_ccb_t *self = (rs485_ccb_t *)ctx;
+#if RS485_RX_LOG
+    static uint8_t s_logged;
+    if (s_logged < RS485_RX_LOG_MAX) {
+        s_logged++;
+        printf("[rs485] 收到 %u 字节\n", (unsigned)len);
+    }
+#endif
     osMessageQueuePut(self->rx_queue, &len, 0, 0);
 }
 
