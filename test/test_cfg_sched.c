@@ -9,9 +9,10 @@
  *
  * 移植来源：参考工程 Project_STD_B/test/test_cfg_sched.c。三处按本工程改动：
  *   · CFG_RECORD_MAX_IMAGE 2048 → 2600（本工程最大载荷是 P10 320×64 显存 2565B）
- *   · s_ready 门槛改成 cap >= FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES
+ *   · s_ready 门槛改成 cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES
  *     → 假 Flash 容量必须 32MB 级；参考工程那版用 64KB，在这里会被判为"不可用"
- *   · FONT_LIB_TOTAL_BYTES 30,713,088（两工程同值）
+ *   · 字库总量改成板级量 BOARD_FONT_LIB_TOTAL_BYTES（两版字库不同：
+ *     3833024 是 GBK/5 字号 30,713,088，5006048 是 GB2312/4 字号 18,518,144）
  *
  * 相对参考工程补强的三处：
  *   1. 参考工程 case_foreign_record_ignored 是**假信心用例**（它自己在 commit 114383b
@@ -29,7 +30,7 @@
  *
  * 本工程相对参考工程有三处修正，各有用例守着：
  *   · 容量门槛与编译期契约同源（case_capacity_gate_font_contract）：
- *     门槛必须是 cap >= FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES，而不是"装得下配置区"。
+ *     门槛必须是 cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES，而不是"装得下配置区"。
  *     退回旧写法时，JEDEC 被误读成 8MB 会让块地址落进字库区，首次 save 就把字库擦了
  *     —— 该用例正是用一条"字库哨兵字节"把这个后果测出来的。
  *   · 绑定不在失败时闩锁（case_bind_recovers_when_capacity_appears）：容量 0 时
@@ -49,7 +50,8 @@
 #include <unistd.h>
 
 #include "app_cfg_sched.h"
-#include "app_render.h" /* FONT_LIB_TOTAL_BYTES / RENDER_PERSIST_PAYLOAD_MAX */
+#include "app_render.h" /* RENDER_PERSIST_PAYLOAD_MAX */
+#include "board.h"      /* BOARD_FONT_LIB_TOTAL_BYTES（板级量） */
 #include "cfg_record.h"
 
 /* LDI 配置模块的实现 TU 直接包含进来（本文件因此**不能**再把 app_ldi_cfg.c
@@ -94,8 +96,10 @@ static int g_fail;
  *  假 Flash（RAM）—— 按 NOR 语义
  * ================================================================ */
 
-/* 容量必须过本工程的门槛：cap >= FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES ≈ 29.33MB。
-   取 32MB（= CFG_CAP_CONTRACT，W25Q256），块地址落在数组尾部。 */
+/* 容量必须过门槛：cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES。两版字库都
+   满足（3833024 是 29.31MB、5006048 是 17.66MB，门槛分别是 29.33MB / 17.69MB）。
+   取 32MB（= CFG_CAP_CONTRACT，W25Q256），块地址落在数组尾部。
+   本套件按当前 BOARD 编译 —— make test 用默认板，make test BOARD=5006048 验另一版。 */
 #define FAKE_CAP (32U * 1024U * 1024U)
 
 /* MAP_SHARED：fork 出的"重启进程"必须能看到上一次上电写的字节。普通全局数组做不到
@@ -449,12 +453,12 @@ static void case_capacity_gate_font_contract(void)
 
     /* JEDEC ID 被识别成一个"合法但更小"的值（0x17 = 8MB）。参考工程的门槛只要求
        cap >= CFG_REGION_BYTES(32KB)，于是 8MB 会通过 —— 而块 0 = cap - 4096 落在
-       字库区（0 ~ FONT_LIB_TOTAL_BYTES）内部，首次 save 的扇区擦除直接毁掉字库。
+       字库区（0 ~ BOARD_FONT_LIB_TOTAL_BYTES）内部，首次 save 的扇区擦除直接毁掉字库。
        下面这条断言把这个前提写死：门槛必须与编译期契约同源。 */
     const uint32_t cap           = 8U * 1024U * 1024U;
     const uint32_t would_be_blk0 = cap - CFG_REGION_SECTOR;
     s_cap                        = cap;
-    CHECK_MSG(would_be_blk0 < FONT_LIB_TOTAL_BYTES,
+    CHECK_MSG(would_be_blk0 < BOARD_FONT_LIB_TOTAL_BYTES,
               "前提变了（8MB 的块 0 不在字库区内），本例的论证需重写");
 
     s_flash[would_be_blk0] = 0x5A; /* 假装这是字库数据 */

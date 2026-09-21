@@ -389,7 +389,7 @@ clean:
 		cp $(BUILD_DIR)/compile_commands.json build/.ccdb.bak; \
 		echo "保留 compile_commands.json（clangd 索引）"; \
 	fi
-	rm -rf $(BUILD_DIR) build/test
+	rm -rf $(BUILD_DIR) build/$(BOARD)/test
 	@if [ -f build/.ccdb.bak ]; then \
 		mkdir -p $(BUILD_DIR); \
 		mv build/.ccdb.bak $(BUILD_DIR)/compile_commands.json; \
@@ -408,7 +408,11 @@ clean:
 # --gc-sections 是关键：协议源文件整份编译，但只有探针真正被引用，任务 / initcall
 # 等未引用段会被丢弃，因此不必为它们准备桩。
 HOSTCC       = cc
-TEST_BUILD   = build/test
+# 与 BUILD_DIR 同理，**必须按板分开**：两板的字库表、board.h 都不同，而且都参与
+# 测试编译。共用目录时，切 BOARD 后 make 看到二进制比"本板源文件"还新（本板源文件
+# 压根没动过），于是不重编 —— 直接跑另一块板编出来的二进制，且**退出码是 0**。
+# 这正是固件那边踩过的坑（同名的 .o 在板间静默混用），测试侧同样适用。
+TEST_BUILD   = build/$(BOARD)/test
 TEST_INC     = \
 	-I test/stubs \
 	-I $(BOARD_DIR)/Inc \

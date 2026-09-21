@@ -300,6 +300,80 @@ static bool ldi_record_is(const uint8_t ip[4], uint16_t port)
     return memcmp(got.device_ip, ip, 4) == 0 && got.device_port == port;
 }
 
+static bool run_case(void (*fn)(void))
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        g_pass = g_fail = 0;
+        fn();
+        printf("    → 通过 %d，失败 %d\n", g_pass, g_fail);
+        fflush(stdout);
+        _exit(g_fail == 0 ? 0 : 1);
+    }
+    int st = 0;
+    waitpid(pid, &st, 0);
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+/* ================================================================
+ *  分板：本板有没有 IAP 记录区
+ *
+ *  下面四个用例都建立在"0AH 会把新值同时写进两条记录"之上。直烧板
+ *  （BOARD_HAS_IAP_RECORD 0）的 0x08004000 落在固件映像内部，app_iap_cfg.c 的
+ *  擦/写原语被整体短路 —— 镜像那条根本不存在，四个用例全部不成立。
+ *
+ *  本板要守的是短路**在 0AH 这条路径上**也成立：0AH 是写这条记录的两个入口之一
+ *  （另一个是 IAP 任务的启动对账），少了短路就是"发一条 0AH 把固件擦了"。
+ * ================================================================ */
+
+#if !BOARD_HAS_IAP_RECORD
+
+static void case_0ah_leaves_internal_flash_alone(void)
+{
+    TEST_BEGIN("直烧板：0AH 只写 LDI 记录，内部 Flash 一个字节都不碰");
+
+    env_setup();
+
+    /* 记录区先塞一份有效记录，让"若短路失效就会真的去擦写"成为可达路径 */
+    app_flash_iap_sys_info_t good;
+    memset(&good, 0, sizeof good);
+    good.magic      = APP_FLASH_IAP_MAGIC;
+    good.update_sta = APP_FLASH_IAP_UPDATED;
+    good.config_crc = _iap_cfg_crc(&good);
+    memcpy((void *)g_config, &good, sizeof good);
+    pl_flash_stub_reset();
+
+    cmd_set_ip_t req;
+    make_0ah(&req, IP_A, MASK, GW, PORT);
+    cmd_set_ip(NULL, &req);
+
+    CHECK_MSG(pl_flash_stub_erase_count() == 0, "0AH 擦了内部 Flash %d 次 —— 会擦掉固件自身",
+              pl_flash_stub_erase_count());
+    CHECK_MSG(memcmp((void *)g_config, &good, sizeof good) == 0, "0AH 改动了内部 Flash 内容");
+
+    /* LDI 自己那条记录照常写 —— 短路不该把 0AH 整条路径带停 */
+    CHECK_MSG(ldi_record_is(IP_A, PORT), "LDI 记录没写进去，短路把 0AH 也挡住了");
+    CHECK_MSG(rsp_status() == 0x00, "回执 status 应为 0x00，实际 0x%02X", rsp_status());
+
+    /* 运行态 IP 不变（"下次上电生效"语义），与有记录区的板一致 */
+    CHECK_MSG(s_set_ip_calls == 0, "0AH 改了运行态 IP（应为下次上电生效）");
+}
+
+int main(void)
+{
+    printf("\n\033[33m⚠ 本板 BOARD_HAS_IAP_RECORD = 0（直烧板），"
+           "跨记录用例不适用，只跑 0AH 短路守卫\033[0m\n\n");
+    fflush(stdout); /* run_case 会 fork —— 不先刷出去，子进程会把这段横幅再打一遍 */
+
+    int failed = 0;
+    if (!run_case(case_0ah_leaves_internal_flash_alone)) failed++;
+
+    printf("\n用例 1 个，失败 %d 个\n", failed);
+    return failed ? 1 : 0;
+}
+
+#else /* BOARD_HAS_IAP_RECORD */
+
 /* ================================================================
  *  用例
  * ================================================================ */
@@ -389,20 +463,6 @@ static void case_second_0ah_overwrites_both(void)
  *  打印**，父进程只能从退出码知道成败。第一版忘了这点：父进程拿自己的计数器去
  *  比对，既漏统计又重复记失败，输出全是"子进程异常退出"。
  *  fflush 是必须的 —— _exit 不刷 stdio 缓冲，管道下子进程的输出会被整个丢掉。 */
-static bool run_case(void (*fn)(void))
-{
-    pid_t pid = fork();
-    if (pid == 0) {
-        g_pass = g_fail = 0;
-        fn();
-        printf("    → 通过 %d，失败 %d\n", g_pass, g_fail);
-        fflush(stdout);
-        _exit(g_fail == 0 ? 0 : 1);
-    }
-    int st = 0;
-    waitpid(pid, &st, 0);
-    return WIFEXITED(st) && WEXITSTATUS(st) == 0;
-}
 
 int main(void)
 {
@@ -427,3 +487,5 @@ int main(void)
     printf("\n用例 %zu 个，失败 %d 个\n", sizeof(cases) / sizeof(cases[0]), failed);
     return failed ? 1 : 0;
 }
+
+#endif /* BOARD_HAS_IAP_RECORD */

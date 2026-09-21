@@ -138,6 +138,72 @@ static const uint8_t GW[4]      = {10, 0, 0, 254};
 #define PORT 9529
 
 /* ================================================================
+ *  分板：本板有没有 IAP 记录区
+ *
+ *  **下面那一整套用例只对"带 bootloader、Sector 1 是记录区"的板成立。**
+ *  直烧板（BOARD_HAS_IAP_RECORD 0）的 0x08004000 落在固件映像内部，app_iap_cfg.c
+ *  的擦/写两个最底层原语被整体短路，所有建立在"能擦能写"之上的用例在这块板上
+ *  没有意义 —— 强行跑只会得到一片假失败。
+ *
+ *  本板真正要守的是**短路本身**：没有它，启动对账会判定"记录无效"→ 擦 Sector 1
+ *  → 擦掉的正是正在执行的代码 → 每次上电必崩（上机 HardFault 过，见提交 8b39f37）。
+ *
+ *  这段 #if 一定要有：本套件按 `-I $(BOARD_DIR)/Inc` 分板编译，少了它
+ *  `make test BOARD=<直烧板>` 会红一片，而被当成"测试挂了"而不是"这套不适用"。
+ * ================================================================ */
+
+#if !BOARD_HAS_IAP_RECORD
+
+static void case_write_path_is_short_circuited(void)
+{
+    flash_setup();
+
+    /* 记录区里先塞一份**看起来完全有效**的记录：这样若短路失效，
+       update_net_cfg 会认为"有效但内容不同"进而真的去擦写 —— 能被下面数出来。 */
+    app_flash_iap_sys_info_t good;
+    memset(&good, 0, sizeof(good));
+    good.magic      = APP_FLASH_IAP_MAGIC;
+    good.update_sta = APP_FLASH_IAP_UPDATED;
+    good.config_crc = _iap_cfg_crc(&good);
+    memcpy((void *)g_config, &good, sizeof(good));
+
+    pl_flash_stub_reset();
+
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+
+    CHECK_MSG(pl_flash_stub_erase_count() == 0, "本板无记录区，却擦了 %d 次",
+              pl_flash_stub_erase_count());
+    CHECK_MSG(pl_flash_stub_program_count() == 0, "本板无记录区，却编程了 %d 次",
+              pl_flash_stub_program_count());
+
+    /* 记录内容必须原封不动 —— 短路是"什么都不做"，不是"写一份新的" */
+    CHECK_MSG(memcmp((void *)g_config, &good, sizeof(good)) == 0, "短路径居然改动了记录区内容");
+
+    /* 两个公开入口同样要报错而不是假装成功 */
+    CHECK(0 != app_flash_iap_erase_config());
+    CHECK(0 != app_flash_iap_write_config(&good));
+    CHECK_MSG(pl_flash_stub_erase_count() == 0 && pl_flash_stub_program_count() == 0,
+              "公开入口绕过了短路");
+}
+
+int main(void)
+{
+    printf("\n\033[33m⚠ 本板 BOARD_HAS_IAP_RECORD = 0（直烧板），"
+           "记录读写用例不适用，只跑短路守卫\033[0m\n\n");
+
+    int before = g_failures;
+    printf("▶ 本板无记录区：擦/写一律不碰 Flash\n");
+    case_write_path_is_short_circuited();
+    printf("  %s（本用例失败 %d）\n", g_failures == before ? "通过" : "**失败**",
+           g_failures - before);
+
+    printf("\n用例 1 个，失败 %d 个\n", g_failures);
+    return g_failures ? 1 : 0;
+}
+
+#else /* BOARD_HAS_IAP_RECORD */
+
+/* ================================================================
  *  ① 空记录 → 播种有效骨架
  * ================================================================ */
 
@@ -412,3 +478,5 @@ int main(void)
     printf("\n用例 %zu 个，失败 %d 个\n", sizeof(cases) / sizeof(cases[0]), g_failures);
     return g_failures ? 1 : 0;
 }
+
+#endif /* BOARD_HAS_IAP_RECORD */
