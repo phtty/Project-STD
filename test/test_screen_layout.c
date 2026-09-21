@@ -11,6 +11,12 @@
  * "画布自己写错了"以外的错（这正是 test_screen_canvas.c 覆盖的那部分），
  * 两者互补而非重复。
  *
+ * ---- 网格三个方向都要测 ----
+ * 切分表是 COLS×ROWS 网格：COLS>1 是**左右**拼，ROWS>1 是**上下**堆叠。
+ * **只测 2×1 会漏掉抽带的 y 偏移**（纯横向时每张卡的矩形 y 恒为 0，漏加 y 偏移
+ * 也看不出来），而上下拼法的现场表现正是"上半屏的内容跑到下半屏去"。
+ * 所以本文件对 2×1 / 1×2 / 2×2 三种网格各跑一遍同一组断言。
+ *
  * ---- 本用例为什么把本卡设成**第二张** ----
  * `BOARD_CASCADE_ADDR=1`：矩形不在画布原点。原点那张卡的矩形与"整块画布"重合，
  * 抽带就算整个写错（比如忘了加矩形偏移）也看不出来。第二张卡同时覆盖
@@ -21,7 +27,7 @@
  */
 
 #define BOARD_SCREEN_CANVAS 1
-#define BOARD_CASCADE_ADDR  1 /* 本卡 = 第二张（非原点矩形） */
+#define BOARD_CASCADE_ADDR  1 /* 本卡 = 第二张（网格下标 1，非原点矩形） */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -89,8 +95,9 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
  *  夹具
  * ================================================================ */
 
-#define FB_MAX_W (128U)
-#define FB_MAX_H (16U)
+/* 整屏上限：最多 2×2 张 48×16 的卡 → 96×32 */
+#define FB_MAX_W (96U)
+#define FB_MAX_H (32U)
 
 /** 单卡位图缓冲：本用例最大的一块是 48×16 → 6×16 = 96 字节，留到 128 */
 #define BM_MAX (128U)
@@ -105,6 +112,7 @@ static uint16_t      s_h;
    去打包"别的卡那一块"会读到屏外 —— 本用例第一版就是这么错的，ASan 当场抓到。 */
 static uint8_t  s_ref[FB_MAX_W * FB_MAX_H];
 static uint16_t s_ref_w; /* 整屏宽 */
+static uint16_t s_ref_h; /* 整屏高 */
 
 static void display_reset(uint16_t w, uint16_t h)
 {
@@ -128,20 +136,32 @@ dev_display_t *dev_display_get(void)
  *  走的是生产里的两个真函数（`_layout_build_grid` + `_apply_layout`）——
  *  `_screen_init` 只是它们的调用者外加"注册渲染目标 / 建任务"，那两步在 host 上
  *  没有意义（本文件已把 app_render 与 pl_task 桩掉）。 */
-static void canvas_reset(uint16_t w, uint16_t h, uint8_t nx, uint8_t ny)
+static void canvas_reset_mc(uint16_t w, uint16_t h, uint8_t nx, uint8_t ny, uint8_t master_cell)
 {
+    if ((uint32_t)w * nx > FB_MAX_W || (uint32_t)h * ny > FB_MAX_H) {
+        printf("      夹具失败：整屏 %ux%u 超出本用例缓冲\n", (unsigned)(w * nx),
+               (unsigned)(h * ny));
+        return;
+    }
     display_reset(w, h);
     memset(s_ref, COLOR_BLACK, sizeof(s_ref));
-    s_ref_w   = (uint16_t)(w * nx); /* 整屏宽 = 单卡宽 × 横排卡数 */
-    s_display = &s_dev;             /* _screen_init 的第一件事 */
-    if (!_layout_build_grid(nx, ny)) {
-        printf("      夹具失败：切分表 %ux%u 没合成出来\n", nx, ny);
+    s_ref_w   = (uint16_t)(w * nx);
+    s_ref_h   = (uint16_t)(h * ny);
+    s_display = &s_dev; /* _screen_init 的第一件事 */
+    if (!_layout_build_grid(nx, ny, master_cell)) {
+        printf("      夹具失败：切分表 %ux%u（主卡格 %u）没合成出来\n", nx, ny, master_cell);
         return;
     }
     if (!_apply_layout()) {
         printf("      夹具失败：本卡 addr=%u 不在 %ux%u 的切分表里\n", (unsigned)BOARD_CASCADE_ADDR,
                nx, ny);
     }
+}
+
+/** 默认主卡在格 0（左上）—— 绝大多数用例只关心几何，不关心谁主谁从 */
+static void canvas_reset(uint16_t w, uint16_t h, uint8_t nx, uint8_t ny)
+{
+    canvas_reset_mc(w, h, nx, ny, 0);
 }
 
 /* ---- 独立参考实现（1B/px 帧缓冲） ---- */
@@ -151,7 +171,7 @@ static void ref_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_col
 {
     for (uint16_t r = 0; r < h; r++)
         for (uint16_t k = 0; k < w; k++)
-            if (x + k < s_ref_w && y + r < s_h) s_ref[(y + r) * s_ref_w + (x + k)] = (uint8_t)c;
+            if (x + k < s_ref_w && y + r < s_ref_h) s_ref[(y + r) * s_ref_w + (x + k)] = (uint8_t)c;
 }
 
 /** @brief 参考打包：帧缓冲里的一块矩形 → 1bpp（(宽+7)/8 行字节、MSB-first、黑=0）
@@ -167,19 +187,30 @@ static void pack_rect_ref(uint16_t rx, uint16_t ry, uint16_t rw, uint16_t rh, ui
                 out[(uint32_t)y * stride + (x >> 3)] |= (uint8_t)(0x80U >> (x & 7));
 }
 
-/** @brief 同一条图案同时画进画布（生产路径）与帧缓冲（参考路径）
+/** @brief 同一条图案同时画进画布（生产路径）与参考帧缓冲（参考路径）
  *
- *  图案刻意**横跨卡缝**：每 3 列一根通高竖条（抓行/列索引错位）+ 一段跨缝的横条
- *  （抓"矩形右边越界取到邻卡"）。 */
-static void paint_pattern(uint16_t total_w)
+ *  图案刻意让**每条卡缝都被跨过**：
+ *   · 每 3 列一根**通高**竖条 —— 竖条跨越水平卡缝（上下拼法），也抓列索引错位
+ *   · 一段横条跨过竖直卡缝
+ *   · 一段竖条跨过水平卡缝
+ *  只有图案真的跨过缝，漏加 x/y 偏移才会露出来。 */
+static void paint_pattern(void)
 {
-    for (uint16_t x = 0; x < total_w; x += 3) {
-        _sink_fill(nullptr, x, 0, 1, s_h, COLOR_RED);
-        ref_fill(x, 0, 1, s_h, COLOR_RED);
+    for (uint16_t x = 0; x < s_ref_w; x += 3) {
+        _sink_fill(nullptr, x, 0, 1, s_ref_h, COLOR_RED);
+        ref_fill(x, 0, 1, s_ref_h, COLOR_RED);
     }
-    const uint16_t bx = (uint16_t)(total_w / 2 - 5);
-    _sink_fill(nullptr, bx, 8, 10, 3, COLOR_GREEN);
-    ref_fill(bx, 8, 10, 3, COLOR_GREEN);
+    const uint16_t cx = (uint16_t)(s_ref_w / 2);
+    const uint16_t cy = (uint16_t)(s_ref_h / 2);
+
+    if (cx >= 5) { /* 横条跨竖直卡缝 */
+        _sink_fill(nullptr, (uint16_t)(cx - 5), cy, 10, 3, COLOR_GREEN);
+        ref_fill((uint16_t)(cx - 5), cy, 10, 3, COLOR_GREEN);
+    }
+    if (cy >= 5) { /* 竖条跨水平卡缝 */
+        _sink_fill(nullptr, cx, (uint16_t)(cy - 5), 3, 10, COLOR_BLUE);
+        ref_fill(cx, (uint16_t)(cy - 5), 3, 10, COLOR_BLUE);
+    }
 }
 
 /* ---- 断言 ---- */
@@ -215,85 +246,132 @@ static void check_bitmaps_equal(const uint8_t *a, const uint8_t *b, uint16_t len
  *  用例
  * ================================================================ */
 
-/** 网格合成出来的几何与地址分配 */
-static void case_grid_shape(void)
+/** @brief 逐卡与参考比对 + 矩形互不重叠。任意 nx×ny 网格通用 ——
+ *         三种网格跑的是**同一组**断言，所以"上下拼法漏了 y 偏移"跑不掉。 */
+static void check_all_cards(const char *what)
 {
-    TEST_BEGIN("切分表：两卡横排的几何与地址");
-
-    canvas_reset(48, 16, 2, 1);
     const screen_layout_t *L = app_screen_layout();
 
-    CHECK_MSG(L->count == 2, "卡数应为 2，得到 %u", (unsigned)L->count);
-    CHECK_MSG(L->rows == 96 && L->cols == 16, "整屏应为 96x16，得到 %ux%u", (unsigned)L->rows,
-              (unsigned)L->cols);
+    static uint8_t owner[FB_MAX_H][FB_MAX_W]; /* 位 i = 第 i 张卡碰过这个像素 */
+    memset(owner, 0, sizeof(owner));
 
-    /* 地址 = 网格下标（行优先），0 在原点 */
-    CHECK_MSG(L->cards[0].addr == 0 && L->cards[0].x == 0 && L->cards[0].w == 48,
-              "0 号卡应为 addr=0 矩形 48x16@(0,0)");
-    CHECK_MSG(L->cards[1].addr == 1 && L->cards[1].x == 48 && L->cards[1].w == 48,
-              "1 号卡应为 addr=1 矩形 48x16@(48,0)");
+    for (uint8_t i = 0; i < L->count; i++) {
+        const screen_card_t *c = &L->cards[i];
+        const uint16_t       n = app_screen_card_bm_len(i);
+        uint8_t              got[BM_MAX], ref[BM_MAX];
 
-    /* 本用例的本卡是 addr=1，应落在下标 1 */
-    CHECK_MSG(app_screen_self_index() == 1, "本卡（addr=1）应落在下标 1，得到 %u",
-              (unsigned)app_screen_self_index());
+        if (n > sizeof(got)) {
+            CHECK_MSG(0, "%s：%u 号卡位图 %u 超出本用例缓冲", what, (unsigned)i, (unsigned)n);
+            continue;
+        }
 
-    CHECK_MSG(app_screen_card_bm_len(0) == 6 * 16, "0 号卡位图应为 96 字节，得到 %u",
-              (unsigned)app_screen_card_bm_len(0));
+        pack_rect_ref(c->x, c->y, c->w, c->h, ref);
+        if (!app_screen_extract(i, got, sizeof(got))) {
+            CHECK_MSG(0, "%s：%u 号卡抽带失败", what, (unsigned)i);
+            continue;
+        }
+        char label[48];
+        snprintf(label, sizeof(label), "%s · %u 号卡 %ux%u@(%u,%u)", what, (unsigned)i,
+                 (unsigned)c->w, (unsigned)c->h, (unsigned)c->x, (unsigned)c->y);
+        check_bitmaps_equal(got, ref, n, label);
+
+        const uint16_t stride = (uint16_t)((c->w + 7) / 8);
+        for (uint16_t y = 0; y < c->h; y++)
+            for (uint16_t x = 0; x < c->w; x++)
+                if (got[(uint32_t)y * stride + (x >> 3)] & (uint8_t)(0x80U >> (x & 7U)))
+                    owner[c->y + y][c->x + x] |= (uint8_t)(1U << i);
+    }
+
+    /* 矩形不许重叠：同一像素被两张卡都点亮 = 矩形算错。
+       （"有没有漏像素"由上面逐卡与参考比对覆盖 —— 漏掉的那块在两张卡里都不出现，
+        只有参考实现知道它本该亮。） */
+    uint16_t bad_x = 0xFFFF, bad_y = 0xFFFF;
+    for (uint16_t y = 0; y < s_ref_h && bad_x == 0xFFFF; y++)
+        for (uint16_t x = 0; x < s_ref_w; x++)
+            if (owner[y][x] & (uint8_t)(owner[y][x] - 1U)) {
+                bad_x = x;
+                bad_y = y;
+                break;
+            }
+    CHECK_MSG(bad_x == 0xFFFF, "%s：(%u,%u) 同时出现在两张卡的位图里（矩形重叠）", what,
+              (unsigned)bad_x, (unsigned)bad_y);
+}
+
+/** 网格合成出来的几何与地址（三种拼法各验一次地址分配与矩形位置） */
+static void case_grid_shape(void)
+{
+    TEST_BEGIN("切分表：左右 / 上下 / 四宫格的几何与地址");
+
+    struct {
+        const char *what;
+        uint8_t     nx, ny;
+    } grids[] = {
+        {"2×1 左右", 2, 1},
+        {"1×2 上下", 1, 2},
+        {"2×2 四宫格", 2, 2},
+    };
+
+    for (unsigned g = 0; g < sizeof(grids) / sizeof(grids[0]); g++) {
+        const uint8_t nx = grids[g].nx, ny = grids[g].ny;
+        canvas_reset(48, 16, nx, ny);
+        const screen_layout_t *L = app_screen_layout();
+
+        CHECK_MSG(L->count == (uint8_t)(nx * ny), "%s：卡数应为 %u，得到 %u", grids[g].what,
+                  (unsigned)(nx * ny), (unsigned)L->count);
+        CHECK_MSG(L->rows == 48 * nx && L->cols == 16 * ny, "%s：整屏应为 %ux%u，得到 %ux%u",
+                  grids[g].what, (unsigned)(48 * nx), (unsigned)(16 * ny), (unsigned)L->rows,
+                  (unsigned)L->cols);
+
+        /* 地址 = 网格下标（**行优先**）：addr = r*nx + c，矩形 (c*48, r*16) */
+        bool shapes_ok = true;
+        for (uint8_t r = 0; r < ny && shapes_ok; r++)
+            for (uint8_t c = 0; c < nx; c++) {
+                const screen_card_t *k = &L->cards[(uint8_t)(r * nx + c)];
+                if (k->addr != (uint8_t)(r * nx + c) || k->x != (uint16_t)(c * 48) ||
+                    k->y != (uint16_t)(r * 16) || k->w != 48 || k->h != 16) {
+                    CHECK_MSG(0, "%s：%u 行 %u 列的卡应为 addr=%u 矩形 48x16@(%u,%u)", grids[g].what,
+                              (unsigned)r, (unsigned)c, (unsigned)(r * nx + c), (unsigned)(c * 48),
+                              (unsigned)(r * 16));
+                    shapes_ok = false;
+                    break;
+                }
+            }
+        if (shapes_ok) CHECK_MSG(1, "%s：地址与矩形位置", grids[g].what);
+
+        /* 本用例的本卡是 addr=1 → 恒为网格下标 1（0 行 1 列） */
+        CHECK_MSG(app_screen_self_index() == 1, "%s：本卡（addr=1）应落在下标 1，得到 %u",
+                  grids[g].what, (unsigned)app_screen_self_index());
+        CHECK_MSG(s_rows == L->rows && s_cols == L->cols && s_stride == (uint16_t)((L->rows + 7) / 8),
+                  "%s：画布几何应与整屏一致", grids[g].what);
+    }
+
+    /* 越界下标 */
+    canvas_reset(48, 16, 2, 1);
     CHECK_MSG(app_screen_card_bm_len(2) == 0, "越界下标应返回 0");
-
-    /* 画布几何 = 整屏，且抽带缓冲装得下本卡 */
-    CHECK_MSG(s_rows == 96 && s_cols == 16 && s_stride == 12, "画布几何应为 96x16/12");
     CHECK_MSG(app_screen_card_bm_len(1) <= BOARD_CASCADE_BAND_MAX,
               "本卡位图 %u 超过 BOARD_CASCADE_BAND_MAX %u", (unsigned)app_screen_card_bm_len(1),
               (unsigned)BOARD_CASCADE_BAND_MAX);
 }
 
-/** 对齐矩形（卡宽是 8 的倍数，两板的实际情形） */
-static void case_extract_aligned(void)
+/** 三种网格下逐卡抽带都等于参考（含跨缝图案） */
+static void case_extract_grids(void)
 {
-    TEST_BEGIN("抽带：对齐矩形，两张卡各等于参考打包");
+    TEST_BEGIN("抽带：左右 / 上下 / 四宫格，逐卡等于参考打包");
 
-    canvas_reset(48, 16, 2, 1);
-    paint_pattern(96);
+    struct {
+        const char *what;
+        uint8_t     nx, ny;
+    } grids[] = {
+        {"2×1 左右", 2, 1},
+        {"1×2 上下", 1, 2},
+        {"2×2 四宫格", 2, 2},
+    };
 
-    uint8_t got[BM_MAX], ref[BM_MAX];
-
-    for (uint8_t i = 0; i < 2; i++) {
-        const screen_card_t *c = &app_screen_layout()->cards[i];
-        uint16_t             n = app_screen_card_bm_len(i);
-        if (n > sizeof(got)) {
-            CHECK_MSG(0, "%u 号卡位图 %u 超出本用例缓冲 %u", (unsigned)i, (unsigned)n,
-                      (unsigned)sizeof(got));
-            continue;
-        }
-        pack_rect_ref(c->x, c->y, c->w, c->h, ref);
-        CHECK_MSG(app_screen_extract(i, got, sizeof(got)), "%u 号卡抽带应成功", (unsigned)i);
-        check_bitmaps_equal(got, ref, n, i == 0 ? "0 号卡（原点）" : "1 号卡（有偏移）");
+    for (unsigned g = 0; g < sizeof(grids) / sizeof(grids[0]); g++) {
+        canvas_reset(48, 16, grids[g].nx, grids[g].ny);
+        paint_pattern();
+        check_all_cards(grids[g].what);
     }
-
-    /* 两张卡的矩形**不许重叠**：同一列被两张卡都点亮，说明矩形算错了。
-       （"有没有漏列"由上面逐卡与参考比对覆盖 —— 漏掉的那列在两张卡里都不会出现，
-        只有参考实现知道它本该亮。） */
-    /* 按**卡**记账（位 i = 第 i 张卡碰过这一列），不是按像素计数 ——
-       竖条在每一行都点亮同一列，按像素数会累加到 16。 */
-    uint8_t owner[96];
-    memset(owner, 0, sizeof(owner));
-    for (uint8_t i = 0; i < 2; i++) {
-        const screen_card_t *c = &app_screen_layout()->cards[i];
-        uint8_t             bm[BM_MAX];
-        if (!app_screen_extract(i, bm, sizeof(bm))) continue;
-        for (uint16_t y = 0; y < c->h; y++)
-            for (uint16_t x = 0; x < c->w; x++)
-                if (bm[y * ((c->w + 7) / 8) + x / 8] & (0x80 >> (x % 8)))
-                    owner[c->x + x] |= (uint8_t)(1U << i);
-    }
-    uint16_t bad_x = 0xFFFF;
-    for (uint16_t x = 0; x < 96; x++)
-        if (owner[x] & (uint8_t)(owner[x] - 1U)) { /* 多于一位 = 多张卡都碰了这列 */
-            bad_x = x;
-            break;
-        }
-    CHECK_MSG(bad_x == 0xFFFF, "第 %u 列同时出现在两张卡的位图里（矩形重叠）", (unsigned)bad_x);
 }
 
 /** 非对齐矩形 + 末字节补位：卡宽 44（44%8=4），x 也不是 8 的倍数 */
@@ -302,37 +380,25 @@ static void case_extract_unaligned(void)
     TEST_BEGIN("抽带：x%8≠0 且 w%8≠0 的矩形（末字节补位必须归零）");
 
     canvas_reset(44, 16, 2, 1); /* 整屏 88x16；1 号卡在 x=44 */
-    paint_pattern(88);
-
-    uint8_t got[BM_MAX], ref[BM_MAX];
-
-    for (uint8_t i = 0; i < 2; i++) {
-        const screen_card_t *c = &app_screen_layout()->cards[i];
-        uint16_t             n = app_screen_card_bm_len(i);
-        CHECK_MSG(c->w == 44, "%u 号卡宽应为 44", (unsigned)i);
-        if (n > sizeof(got)) {
-            CHECK_MSG(0, "%u 号卡位图 %u 超出本用例缓冲", (unsigned)i, (unsigned)n);
-            continue;
-        }
-        pack_rect_ref(c->x, c->y, c->w, c->h, ref);
-        CHECK_MSG(app_screen_extract(i, got, sizeof(got)), "%u 号卡抽带应成功", (unsigned)i);
-        check_bitmaps_equal(got, ref, n, i == 0 ? "0 号卡（x=0，宽 44）" : "1 号卡（x=44，宽 44）");
-    }
+    paint_pattern();
+    check_all_cards("44 宽 2×1");
 
     /* 显式钉住补位：1 号卡矩形是 x=44..87，末字节覆盖 x=84..87 这 4 个真实位 +
-       高 4 位补位。只让**邻卡**（0 号卡的 x=84 不在它范围内…）——
-       这里直接把 84..87 点亮、把 88 之外的点灭，再要求补位那 4 位为 0。 */
+       高 4 位补位。 */
     canvas_reset(44, 16, 2, 1);
-    /* 让 1 号卡末字节覆盖的最后几个真实像素为 1，且紧右边的画布位也为 1 */
     _sink_fill(nullptr, 84, 0, 4, 1, COLOR_RED); /* 1 号卡的真实位 84..87 */
-    _sink_fill(nullptr, 88, 0, 0, 0, COLOR_BLACK);
-    uint8_t bm[BM_MAX];
-    CHECK_MSG(app_screen_extract(1, bm, sizeof(bm)), "1 号卡抽带应成功");
+    uint8_t        bm[BM_MAX];
     const uint16_t stride = 6; /* ceil(44/8) */
+    CHECK_MSG(app_screen_extract(1, bm, sizeof(bm)), "1 号卡抽带应成功");
     CHECK_MSG((bm[stride - 1] & 0x0FU) == 0U, "末字节高 4 位是补位，必须为 0，得到 %02X",
               bm[stride - 1]);
     CHECK_MSG((bm[stride - 1] & 0xF0U) == 0xF0U, "末字节低 4 位是真实像素（应全亮），得到 %02X",
               bm[stride - 1]);
+
+    /* 上下拼法 + 非对齐**行**：卡高 12（12%…高度不参与位打包，但要保证 y 偏移对） */
+    canvas_reset(44, 12, 1, 2); /* 整屏 44x24，1 号卡在 y=12 */
+    paint_pattern();
+    check_all_cards("44×12 上下");
 }
 
 /** 越界与容量：一律拒绝，且不得动调用方的缓冲 */
@@ -365,28 +431,55 @@ static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
 
-    canvas_reset(44, 16, 2, 1); /* 本卡 = 1 号卡，矩形 44x16@(44,0) */
-    paint_pattern(88);
+    canvas_reset(44, 12, 1, 2); /* 本卡 = 1 号卡，矩形 44x12@(0,12)：y 偏移非 0 */
+    paint_pattern();
 
     CHECK_MSG(app_screen_commit_self(), "本卡落屏应成功");
 
-    /* 逐像素比对：实屏（1B/px）× 画布（1bpp）里本卡那块矩形 */
-    const screen_card_t *c     = &app_screen_layout()->cards[app_screen_self_index()];
+    const screen_card_t *c = &app_screen_layout()->cards[app_screen_self_index()];
     uint8_t              bm[BM_MAX];
     CHECK_MSG(app_screen_extract(app_screen_self_index(), bm, sizeof(bm)), "抽带应成功");
 
-    uint16_t diff = 0;
+    /* 逐像素比对：实屏（1B/px，本卡尺寸）× 画布（1bpp）里本卡那块矩形 */
+    uint16_t diff  = 0;
+    uint16_t stride = (uint16_t)((c->w + 7) / 8);
     for (uint16_t y = 0; y < s_h; y++)
         for (uint16_t x = 0; x < s_w; x++) {
             bool on_screen = (s_fb[(uint32_t)y * s_w + x] != COLOR_BLACK);
-            bool on_canvas = (bm[(uint32_t)y * ((c->w + 7) / 8) + (x >> 3)] &
-                              (uint8_t)(0x80U >> (x & 7U))) != 0;
+            bool on_canvas = (bm[(uint32_t)y * stride + (x >> 3)] & (uint8_t)(0x80U >> (x & 7U))) != 0;
             if (on_screen != on_canvas) diff++;
         }
     CHECK_MSG(diff == 0, "实屏与画布有 %u 个像素不一致", (unsigned)diff);
 
     /* 落屏用的颜色必须是**本卡**的（切分表逐卡给），不是全局默认 */
     CHECK_MSG(s_fb[0] == COLOR_BLACK || s_fb[0] == c->color, "落屏颜色不是本卡那一色");
+}
+
+/** 主卡在**下面**那一块 —— 现场的实际拼法。地址不按网格下标编。 */
+static void case_master_below(void)
+{
+    TEST_BEGIN("主卡在下方：地址按「主卡那格编 0」分配，抽带仍按矩形");
+
+    /* 1×2 网格：格 0 在上、格 1 在下；主卡是**下面那块** → 格 1 编 addr 0 */
+    canvas_reset_mc(48, 16, 1, 2, 1);
+    const screen_layout_t *L = app_screen_layout();
+
+    CHECK_MSG(L->count == 2 && L->rows == 48 && L->cols == 32, "整屏应为 48x32，得到 %ux%u",
+              (unsigned)L->rows, (unsigned)L->cols);
+    CHECK_MSG(L->cards[0].addr == 1, "上面的卡应编 addr 1（主卡在下），得到 %u",
+              (unsigned)L->cards[0].addr);
+    CHECK_MSG(L->cards[1].addr == 0, "下面的卡应编 addr 0（主卡），得到 %u",
+              (unsigned)L->cards[1].addr);
+    CHECK_MSG(L->cards[0].y == 0 && L->cards[1].y == 16,
+              "矩形仍按几何排：上半 y=0 / 下半 y=16，得到 %u / %u", (unsigned)L->cards[0].y,
+              (unsigned)L->cards[1].y);
+
+    /* 本用例的本卡是 addr=1 → 就是**上面**那块（主卡在下面） */
+    CHECK_MSG(app_screen_self_index() == 0, "本卡（addr=1）应落在下标 0（上半屏），得到 %u",
+              (unsigned)app_screen_self_index());
+
+    paint_pattern();
+    check_all_cards("1×2 主卡在下");
 }
 
 /** 地址不在切分表里：停用门面，**不静默降级**成"单卡占满" */
@@ -410,10 +503,11 @@ int main(void)
     printf("\n\033[36m切分表与抽带（本卡 addr=%u）\033[0m\n", (unsigned)BOARD_CASCADE_ADDR);
 
     case_grid_shape();
-    case_extract_aligned();
+    case_extract_grids();
     case_extract_unaligned();
     case_extract_bounds();
     case_commit_self_matches_canvas();
+    case_master_below();
     case_self_addr_not_in_table();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

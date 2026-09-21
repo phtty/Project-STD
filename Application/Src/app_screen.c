@@ -89,8 +89,15 @@ uint8_t app_screen_self_index(void)
 /** @brief 按 nx×ny 的网格合成切分表；本卡屏几何取自运行期的 display
  *
  *  取参数而不是直接读 board.h 的宏：后续期这里是"先查 W25Qxx 的切分表记录、
- *  没有才回落网格"的那条路，届时 nx/ny 来自记录。 */
-static bool _layout_build_grid(uint8_t nx, uint8_t ny)
+ *  没有才回落网格"的那条路，届时 nx/ny 来自记录。
+ *
+ *  @param master_cell 主卡所在的**网格下标**（行优先）。
+ *
+ *  **主卡不必在网格原点** —— 现场的拼法就有"上面一块、下面一块，下面那块是主卡"
+ *  的（此时主卡在最后一行）。所以地址不能拿网格下标当：主卡那格编 0，
+ *  其余按行优先依次编 1、2、3…。全工程没有任何地方假设主卡在原点
+ *  （持久化恢复也按本卡矩形映射，见 _persist_restore）。 */
+static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
 {
     const uint16_t cw = s_display ? s_display->screen_rows : 0; /* 单卡屏宽 */
     const uint16_t ch = s_display ? s_display->screen_cols : 0; /* 单卡屏高 */
@@ -101,16 +108,22 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny)
                (unsigned)SCREEN_CARD_MAX);
         return false;
     }
+    if (master_cell >= (uint8_t)(nx * ny)) {
+        printf("[screen] 主卡格号 %u 超出 %ux%u 网格（0..%u）\n", (unsigned)master_cell,
+               (unsigned)nx, (unsigned)ny, (unsigned)(nx * ny - 1));
+        return false;
+    }
 
     s_layout.count = (uint8_t)(nx * ny);
     s_layout.rows  = (uint16_t)(cw * nx); /* 整屏宽 */
     s_layout.cols  = (uint16_t)(ch * ny); /* 整屏高 */
 
+    uint8_t next_addr = 1; /* 0 留给主卡 */
     for (uint8_t r = 0; r < ny; r++)
         for (uint8_t c = 0; c < nx; c++) {
             const uint8_t i = (uint8_t)(r * nx + c);
             s_cards[i]      = (screen_card_t){
-                .addr  = i, /* 地址 = 网格下标 */
+                .addr  = (i == master_cell) ? 0U : next_addr++,
                 .color = BOARD_SCREEN_COLOR,
                 .x     = (uint16_t)(c * cw),
                 .y     = (uint16_t)(r * ch),
@@ -121,10 +134,11 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny)
     return true;
 }
 
-/** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASCADE_COLS/ROWS） */
+/** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASCADE_COLS/ROWS/MASTER_CELL） */
 static bool _layout_build(void)
 {
-    return _layout_build_grid((uint8_t)BOARD_CASCADE_COLS, (uint8_t)BOARD_CASCADE_ROWS);
+    return _layout_build_grid((uint8_t)BOARD_CASCADE_COLS, (uint8_t)BOARD_CASCADE_ROWS,
+                              (uint8_t)BOARD_CASCADE_MASTER_CELL);
 }
 
 /** @brief 由切分表推出画布几何、定位本卡、清画布

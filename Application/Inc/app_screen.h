@@ -41,7 +41,10 @@
 
 /** @brief 一张卡在整屏里占的矩形 */
 typedef struct {
-    uint8_t  addr;  /**< 总线地址：0 = 主卡，1..0x1F = 从卡 */
+    uint8_t  addr;  /**< 总线地址：0 = 主卡，1..0x1F = 从卡。
+                     *   **与网格下标不是一回事**：主卡可以在任意一格（现场的拼法
+                     *   就有"下面那块是主卡"），地址由 board.h 的
+                     *   BOARD_CASCADE_MASTER_CELL 决定谁编 0。 */
     uint8_t  color; /**< 该卡的显示颜色（display_color_t）—— 卡间可不同，见 design */
     uint16_t x, y;  /**< 矩形左上角（整屏逻辑坐标，像素） */
     uint16_t w, h;  /**< 矩形尺寸。**本工程要求它 == 该卡自己的屏几何**（见下） */

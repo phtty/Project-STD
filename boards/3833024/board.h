@@ -67,6 +67,13 @@
 #define BOARD_CASCADE_ROWS      (1)
 #endif
 
+/* 主卡所在的**网格下标**（行优先：0 = 左上）。主卡不必在原点 —— 现场的拼法就有
+ * "上面一块、下面一块，下面那块是主卡"，那是 1×2 网格里的格号 1。
+ * 详见 5006048/board.h 的同名宏。 */
+#ifndef BOARD_CASCADE_MASTER_CELL
+#define BOARD_CASCADE_MASTER_CELL (0)
+#endif
+
 /* ---- 单卡矩形位图的上限（字节）----
  * 1bpp、ceil(屏宽/8)×屏高：本板单卡 128×32 → 16×32 = **512**。
  * app_screen 的抽带缓冲与 app_cascade 的从卡暂存都按它静态分配。 */
