@@ -52,3 +52,22 @@ void app_screen_set_brightness(uint8_t level);
 
 /** @brief 当前亮度等级 */
 uint8_t app_screen_get_brightness(void);
+
+/** @brief 取走"亮度已变、待下发"的标志 —— 级联协议用它把每秒可能变多次的亮度
+ *         攒成一次广播。返回 true 时 *level 给出新等级。
+ *
+ *  为什么要有这个：光传感器每秒都可能改，而广播要走总线。攒成一次比每次改都发
+ *  省得多，且亮度是渐变量、晚几十毫秒下发不可见。 */
+bool app_screen_brightness_take_pending(uint8_t *level);
+
+/** @brief 本卡总线地址。0 = 主卡。
+ *
+ *  **身份属于整屏，不属于某个协议** —— 所以放在这里而不是 app_cascade：否则
+ *  光传感器、以及将来任何"只有主卡该做"的事，都得去依赖级联协议。
+ *
+ *  本期取 board.h 的编译期常量（主卡/从卡烧不同固件）；后续期由 W25Qxx 的切分表
+ *  记录覆盖 —— 同型号板子可以是 2/3/4 卡部署，那是**部署期事实**，不可能写死。 */
+uint8_t app_screen_self_addr(void);
+
+/** @brief 本卡是否主卡（地址 0） */
+bool app_screen_is_master(void);

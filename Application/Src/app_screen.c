@@ -240,17 +240,39 @@ static bool _persist_restore(void)
  *  亮度
  * ================================================================ */
 
+static volatile bool    s_bright_pending;
+static volatile uint8_t s_bright_level;
+
 void app_screen_set_brightness(uint8_t level)
 {
     if (level > 7) level = 7;
     if (s_display) dev_display_set_brightness(s_display, level);
-    /* 级联接入后这里置"亮度待下发"标志，由级联轮次广播给从卡；
-       P1 只有本屏，没有可下发的对象。 */
+
+    s_bright_level   = level;
+    s_bright_pending = true; /* 由级联协议取走并广播给从卡 */
 }
 
 uint8_t app_screen_get_brightness(void)
 {
     return s_display ? s_display->light_level : 0;
+}
+
+bool app_screen_brightness_take_pending(uint8_t *level)
+{
+    if (!s_bright_pending) return false;
+    s_bright_pending = false;
+    if (level) *level = s_bright_level;
+    return true;
+}
+
+uint8_t app_screen_self_addr(void)
+{
+    return (uint8_t)BOARD_CASCADE_ADDR;
+}
+
+bool app_screen_is_master(void)
+{
+    return app_screen_self_addr() == 0U; /* 地址 0 = 主卡 */
 }
 
 void app_screen_flush(void)

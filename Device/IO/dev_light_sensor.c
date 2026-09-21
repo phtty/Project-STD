@@ -64,7 +64,10 @@ void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
     bool external = (dev->display->light_level != applied_level);
 
     if ((cand_cnt >= STABLE_N || external) && new_light != applied_level) {
-        dev->display->light_level = new_light;
-        applied_level             = new_light;
+        if (dev->apply)
+            dev->apply(dev->apply_ctx, new_light);
+        else
+            dev->display->light_level = new_light;
+        applied_level = new_light;
     }
 }

@@ -66,3 +66,4 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                              const uint8_t *bitmap, display_color_t color);
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
+dev_display_t *dev_display_get(void);

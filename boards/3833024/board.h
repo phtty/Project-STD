@@ -55,3 +55,15 @@
 #endif
 /* 本卡颜色（display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
 #define BOARD_SCREEN_COLOR      (2) /* COLOR_GREEN */
+
+/* ---- 级联总线地址（app_screen_self_addr）----
+ * 0 = 主卡，1..0x1F = 从卡。**本期是编译期常量**，即主卡与从卡烧不同固件；
+ * 后续期由 W25Qxx 的切分表记录覆盖 —— 同型号板子可以是 2/3/4 卡部署，
+ * 那是部署期事实，不可能永久写死在固件里。
+ *
+ * 注意 3833024 有 DIP1/DIP2 可以直接读出地址（2 bit = 4 码，恰好 1 主 + 3 从），
+ * 而 5006048 只有 KEY_TST、没有拨码 —— 所以本参数不能做成"必须靠硬件读"，
+ * 否则得给 5006048 改板。 */
+#ifndef BOARD_CASCADE_ADDR
+#define BOARD_CASCADE_ADDR      (0) /* 0 = 主卡 */
+#endif

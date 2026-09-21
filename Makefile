@@ -54,6 +54,7 @@ INC_DIRS = \
 	-I Application/Inc/RLS \
 	-I Application/Inc/AH_MQTT \
 	-I Application/Inc/Channel \
+	-I Application/Inc/CASCADE \
 	-I Device/Inc \
 	-I Platform/Inc \
 	-I Kernel/Inc \
@@ -270,7 +271,7 @@ SRC_PLATFORM = \
 	Platform/Src/pl_exti.c \
 	Platform/Src/pl_net.c \
 	Platform/Src/pl_eth.c \
-	Platform/Src/pl_crc.c \
+	test/stubs/pl_crc_stub.c \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \
 	Platform/Src/pl_dwt.c \
@@ -312,6 +313,7 @@ SRC_APPLICATION = \
 	Application/Src/app_render.c \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/app_screen.c \
+	Application/Src/CASCADE/app_cascade.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
@@ -429,6 +431,7 @@ TEST_INC     = \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
 	-I Application/Inc/RLS \
+	-I Application/Inc/CASCADE \
 	-I Application/Inc/Channel \
 	-I Kernel/Inc \
 	-I Platform/Inc \
@@ -544,7 +547,16 @@ TEST_SCREEN_CANVAS_SRCS = \
 # 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
 TEST_CRC_SRCS = \
 	test/test_crc.c \
-	Platform/Src/pl_crc.c \
+	test/stubs/pl_crc_stub.c \
+	test/stubs/os_stub.c
+
+# 套件十一：级联协议探针（四态 / 地址过滤 / 长度域 / 与既有协议互不毒化）
+# 用例 include app_cascade.c（探针是 static）；除探针真正用到的 rb 与 CRC 外，
+# 其余符号都要给桩 —— 探针只窥视，不碰通道与队列。
+TEST_CASCADE_FRAME_SRCS = \
+	test/test_cascade_frame.c \
+	test/stubs/pl_crc_stub.c \
+	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
@@ -552,7 +564,8 @@ TEST_CRC_SRCS = \
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
-      $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc
+      $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
+      $(TEST_BUILD)/test_cascade_frame
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -582,6 +595,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 硬件 CRC32 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_crc
+	@echo ""
+	@echo "──── 级联协议探针 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_frame
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -615,6 +631,15 @@ $(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) Application/Src/app
 $(TEST_BUILD)/test_crc: $(TEST_CRC_SRCS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CRC_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cascade_frame: $(TEST_CASCADE_FRAME_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_FRAME_SRCS) $(TEST_LDFLAGS)
+
+# **必须单独挂依赖**：用例 TU-include 了 app_cascade.c，它不在 SRCS 里，
+# make 看不见 —— 不挂这行的话改了被测源码测试不重编，跑的是旧二进制。
+# （同 test_cfg_sched / test_iap_cfg / test_ldi_0ah / test_screen_canvas 的那几条。）
+$(TEST_BUILD)/test_cascade_frame: Application/Src/CASCADE/app_cascade.c
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
