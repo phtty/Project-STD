@@ -247,13 +247,146 @@ static void _cmd_set_bright(frame_msg_t *msg)
     app_screen_set_brightness(p->level);
 }
 
+/* ================================================================
+ *  图传（从卡侧）—— 收分片、暂存、收到 COMMIT 且收齐才落屏
+ *
+ *  **先攒后换**，不边收边画：边收边落会出半幅画面（片上去了、下一片还没来），
+ *  而半双工总线上这个窗口是毫秒级、肉眼可见。
+ * ================================================================ */
+
+static struct {
+    uint8_t  stage[BOARD_CASCADE_BAND_MAX]; /**< 本轮位图暂存 */
+    uint16_t seq;        /**< 本轮的轮次序号；**陈旧分片靠它丢** */
+    uint16_t bmp_len;    /**< 本轮位图总字节数 */
+    uint16_t frag_bytes; /**< 每片载荷字节数 */
+    uint8_t  frag_n;     /**< 本轮分片数 */
+    uint8_t  have_mask;  /**< 位 i = 第 i 片已收到 */
+    uint8_t  color;      /**< 本卡颜色 */
+    uint8_t  bright;     /**< 最近一次 BEGIN 断言的亮度（诊断用） */
+    bool     active;     /**< 收到过本轮 BEGIN */
+} s_rx;
+
+static void _cmd_sync_begin(frame_msg_t *msg)
+{
+    /* 主卡不该收到发给从卡的 BEGIN（半双工回声、或两张卡地址配重时会）。
+       不应答、不入暂存 —— 否则总线上会多出一个应答源，主卡把自己当从卡。 */
+    if (app_screen_is_master()) return;
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_sync_begin_t))) return;
+
+    const casc_hdr_t        *h = (const casc_hdr_t *)msg->data;
+    const casc_sync_begin_t *p = (const casc_sync_begin_t *)(msg->data + sizeof(casc_hdr_t));
+
+    const dev_display_t *d      = dev_display_get();
+    const uint16_t       w      = casc_get_u16(p->w);
+    const uint16_t       hh     = casc_get_u16(p->h);
+    const uint16_t       bm_len = casc_get_u16(p->bmp_len);
+    const uint16_t       frag_b = casc_get_u16(p->frag_bytes);
+
+    /* 几何/参数不符 → 明确回 NACK，**不将就**。将就的后果是错位画面，而从卡自己
+       不知道错位了（它会以为一切正常地把半幅图显示出去）。
+       本工程的部署形态是"每张卡各带一整块屏"，所以矩形尺寸必须 == 本卡屏几何。 */
+    if (!d || w != d->screen_rows || hh != d->screen_cols || bm_len == 0 ||
+        bm_len > sizeof(s_rx.stage) || p->frag_n == 0 || p->frag_n > CASC_FRAG_MAX ||
+        frag_b == 0 || (uint32_t)frag_b * p->frag_n < bm_len) {
+        const casc_nack_t nack = {.err = CASC_NACK_GEOM};
+        s_rx.active            = false;
+        (void)_send(CASC_T_NACK, CASC_ADDR_MASTER, &nack, sizeof(nack));
+        return;
+    }
+
+    s_rx.seq        = casc_get_u16(h->seq);
+    s_rx.bmp_len    = bm_len;
+    s_rx.frag_bytes = frag_b;
+    s_rx.frag_n     = p->frag_n;
+    s_rx.have_mask  = 0;
+    s_rx.color      = p->color;
+    s_rx.bright     = p->bright;
+    s_rx.active     = true;
+
+    /* **每一轮都重新断言亮度**。SET_BRIGHT 是单次广播、没有重传，而本帧是每轮必发、
+       丢一轮就自己自愈的一字节 —— 这是"从卡永久停在旧亮度上"的唯一防线。 */
+    app_screen_set_brightness(p->bright);
+}
+
+static void _cmd_sync_data(frame_msg_t *msg)
+{
+    if (app_screen_is_master()) return;
+
+    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
+    const uint16_t    seq = casc_get_u16(h->seq);
+
+    /* **陈旧分片必须丢**：上一轮的迟到分片帧头完好、CRC 也是对的，探针照常放行 ——
+       只能靠 seq 拦。放进去的后果是画面"一半旧内容一半新内容"，且从卡不知道自己错了。 */
+    if (!s_rx.active || seq != s_rx.seq || h->frag_n != s_rx.frag_n) return;
+
+    const uint8_t idx = h->idx;
+    if (idx >= s_rx.frag_n) return;
+
+    const uint16_t off = (uint16_t)((uint32_t)idx * s_rx.frag_bytes);
+    if (off >= s_rx.bmp_len) return;
+
+    const uint16_t n = (uint16_t)(msg->data_len - CASC_OVERHEAD);
+    const uint16_t want =
+        (uint16_t)(((uint32_t)s_rx.bmp_len - off > s_rx.frag_bytes)
+                       ? s_rx.frag_bytes
+                       : (s_rx.bmp_len - off));
+
+    /* 长度必须**正好**是这一片该有的字节数。短一截的分片若不拒，会静默留下上一轮的
+       旧字节，而 have_mask 记成"这片到了" —— 主卡便再也不会补发，错内容永久留在屏上。 */
+    if (n != want) return;
+
+    memcpy(&s_rx.stage[off], msg->data + sizeof(casc_hdr_t), n);
+    s_rx.have_mask |= (uint8_t)(1U << idx);
+}
+
+static void _cmd_sync_commit(frame_msg_t *msg)
+{
+    if (app_screen_is_master()) return;
+
+    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
+    casc_ack_t        ack = {.sta = CASC_ACK_OK, .miss_mask = 0};
+
+    if (!s_rx.active || casc_get_u16(h->seq) != s_rx.seq) {
+        /* 没收到 BEGIN：本轮的 DATA 也全被丢了，所以让主卡**整轮重来**，
+           而不是只补几片（补片也没意义 —— 暂存是空的） */
+        ack.sta = CASC_ACK_NOBEGIN;
+    } else {
+        const uint8_t full = (uint8_t)((1U << s_rx.frag_n) - 1U);
+        ack.miss_mask      = (uint8_t)(full & ~s_rx.have_mask);
+        if (ack.miss_mask) {
+            ack.sta = CASC_ACK_MISS;
+        } else {
+            /* 收齐了才落屏。**幂等**：主卡没收到 ACK 会重发 COMMIT，重落同一份内容
+               没有副作用 —— 所以这里**不清** active/have_mask。清了的话第二次 COMMIT
+               要回 NOBEGIN，主卡会以为整轮白做、重发 3 片。下一轮的 BEGIN 会重置它们。 */
+            app_screen_commit_bitmap(s_rx.stage, s_rx.bmp_len, s_rx.color);
+        }
+    }
+
+    (void)_send(CASC_T_ACK, CASC_ADDR_MASTER, &ack, sizeof(ack));
+}
+
+static void _cmd_sync_abort(frame_msg_t *msg)
+{
+    (void)msg;
+    if (app_screen_is_master()) return;
+    /* 主卡放弃本轮：清掉暂存，免得半份内容留在那儿被下一轮的 COMMIT 误用 */
+    s_rx.active    = false;
+    s_rx.have_mask = 0;
+}
+
 typedef void (*casc_cmd_fn_t)(frame_msg_t *msg);
 
-/* 按帧类型索引。0 项留空 = 未实现或不支持（P2 只三条）。 */
+/* 按帧类型索引。0 项留空 = 未实现或不支持。
+   ACK/NACK 是**主卡侧**的处理，尚未实现（P3b-2）—— 从卡只发不收。 */
 static const casc_cmd_fn_t g_casc_cmd[CASC_TYPE_MASK + 1U] = {
-    [CASC_T_PING]       = _cmd_ping,
-    [CASC_T_PRESENT]    = _cmd_present,
-    [CASC_T_SET_BRIGHT] = _cmd_set_bright,
+    [CASC_T_SYNC_BEGIN]  = _cmd_sync_begin,
+    [CASC_T_SYNC_DATA]   = _cmd_sync_data,
+    [CASC_T_SYNC_COMMIT] = _cmd_sync_commit,
+    [CASC_T_SYNC_ABORT]  = _cmd_sync_abort,
+    [CASC_T_PING]        = _cmd_ping,
+    [CASC_T_PRESENT]     = _cmd_present,
+    [CASC_T_SET_BRIGHT]  = _cmd_set_bright,
 };
 
 /* ================================================================
@@ -275,8 +408,14 @@ static void casc_task(void *argument)
            而分发任务在队列满时**静默丢帧**（app_dispatch.c 的 osMessageQueuePut
            超时为 0），所以这个超时不能太长 —— P3 会改成"每帧后主动排空"。 */
         if (osMessageQueueGet(s_casc_queue, msg, nullptr, CASC_BRIGHT_POLL_MS) == osOK) {
-            uint8_t type = msg->aux;
-            if (type <= CASC_TYPE_MASK && g_casc_cmd[type]) g_casc_cmd[type](msg);
+            /* **取到一条就把队列排空再回去睡**：队列深度只有 2，而框架在队列满时
+               **静默丢帧**（app_dispatch.c 的 osMessageQueuePut 超时为 0）。
+               一轮图传是"每毫秒一帧"地连发，处理一条就回去睡的话，从第 3 帧起全被
+               丢掉 —— 现场表现是"总缺第 2、3 片"，而缺片在从卡侧看不出原因。 */
+            do {
+                const uint8_t type = msg->aux;
+                if (type <= CASC_TYPE_MASK && g_casc_cmd[type]) g_casc_cmd[type](msg);
+            } while (osMessageQueueGet(s_casc_queue, msg, nullptr, 0) == osOK);
         }
 
         uint32_t now = osKernelGetTickCount();

@@ -160,6 +160,67 @@ typedef struct [[gnu::packed]] {
     uint8_t level; /**< 0..7 */
 } casc_set_bright_t;
 
+/* ================================================================
+ *  图传：一轮整屏更新
+ *
+ *  一轮 = BEGIN（认领本卡矩形与参数）→ DATA×frag_n（位图分片）→ COMMIT（应用并应答）。
+ *
+ *  **为什么必须分片**：`app_dispatch.c` 给探针的暂存区恒为 `FRAME_DATA_MAX_LEN`
+ *  (1044)，与协议自己声明的 payload_max 无关。单卡 224×50 的 1bpp 位图就是 1400
+ *  字节 —— 一帧根本投递不上来。这是框架的硬约束，不是优化。
+ * ================================================================ */
+
+/** @brief 一轮最多分几片。**取 8 是因为 `casc_ack_t.miss_mask` 只有 8 位** ——
+ *         改大它就得同时把 miss_mask 加宽，否则缺片位会静默丢失。 */
+#define CASC_FRAG_MAX (8U)
+
+/** @brief 每片载荷字节数（最后一片可能更少）。
+ *
+ *  512 = 224 宽的 1bpp 位图 18 行。「帧小一点」的代价是每片多 15 字节头，
+ *  换来的是**定向重传的粒度**：丢一片只补一片（527 字节），不是重发整轮
+ *  （1400 字节）。且 RS485 是半双工，长帧会一直占着总线。 */
+#define CASC_FRAG_BYTES (512U)
+
+/** @brief 主 → 从：开启一轮（单播）
+ *
+ *  矩形是**整屏逻辑坐标**，其尺寸必须等于该卡自己的屏几何 —— 本工程的部署形态是
+ *  「每张卡各带一整块屏，几块屏拼起来是整屏」（见 app_screen.h 的 screen_card_t）。
+ *  不符时从卡回 NACK 而不是将就：将就的后果是错位画面，而从卡自己不知道错位了。 */
+typedef struct [[gnu::packed]] {
+    uint8_t x[2], y[2];   /**< 本卡矩形左上角（整屏坐标），大端 */
+    uint8_t w[2], h[2];   /**< 本卡矩形尺寸，大端 */
+    uint8_t bmp_len[2];   /**< 本轮位图总字节数，大端 */
+    uint8_t frag_bytes[2];/**< 每片载荷字节数，大端（最后一片按 bmp_len 截断） */
+    uint8_t frag_n;       /**< 本轮分片数 1..CASC_FRAG_MAX */
+    uint8_t bright;       /**< 本轮亮度断言 0..7 —— 见 app_cascade.c 的说明 */
+    uint8_t color;        /**< 本卡颜色（display_color_t） */
+} casc_sync_begin_t;
+
+_Static_assert(sizeof(casc_sync_begin_t) == 15, "SYNC_BEGIN 载荷必须是 15 字节");
+
+/** @brief 从 → 主：本轮结果 */
+typedef enum {
+    CASC_ACK_OK      = 0, /**< 收齐并已落屏 */
+    CASC_ACK_MISS    = 1, /**< 有缺片，看 miss_mask（主卡据此**定向重传**） */
+    CASC_ACK_NOBEGIN = 2, /**< 没收到本轮的 BEGIN（seq 对不上）→ 请主卡整轮重来 */
+} casc_ack_sta_t;
+
+typedef struct [[gnu::packed]] {
+    uint8_t sta;       /**< casc_ack_sta_t */
+    uint8_t miss_mask; /**< 位 i = 第 i 片未收到（仅 sta=CASC_ACK_MISS 时有意义） */
+} casc_ack_t;
+
+_Static_assert(sizeof(casc_ack_t) == 2, "ACK 载荷必须是 2 字节");
+
+/** @brief 从 → 主：这张卡参与不了（配置错，重发也没用） */
+typedef enum {
+    CASC_NACK_GEOM = 1, /**< BEGIN 的矩形尺寸 == 本卡屏几何；长度/分片参数越界 */
+} casc_nack_err_t;
+
+typedef struct [[gnu::packed]] {
+    uint8_t err; /**< casc_nack_err_t */
+} casc_nack_t;
+
 /* ---- 本机身份见 app_screen.h ----
  * 本卡地址与主/从角色放在 app_screen 而不是这里：身份属于"整屏"，不属于某个协议。
  * 否则光传感器、以及将来任何"只有主卡该做"的事，都得去依赖级联协议。 */
