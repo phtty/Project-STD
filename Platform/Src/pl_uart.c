@@ -62,7 +62,17 @@ static void uart_idle_handle(uart_ctx_t *ctx)
     if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) return;
     __HAL_UART_CLEAR_IDLEFLAG(ctx->huart);
 
-    HAL_UART_DMAStop(ctx->huart);
+    /* **只停接收，绝不能用 HAL_UART_DMAStop()** —— 那个函数在 gState 是 BUSY_TX 时
+     * 会把**发送** DMA 一并中止（见 HAL 源码里那两段对称的 dmarequest 判断）。
+     *
+     * 而接收侧的这个中断随时可能落在一次发送进行中：半双工收发器切回接收那一刻，
+     * 线路本来就是空闲的，IDLE 会立刻置位。此时若把发送 DMA 中止掉，这一帧就永远
+     * 等不到 TC —— 表现为 `[pl_uart] DMA 发送超时（N 字节）`，丢的却是**与接收毫无
+     * 关系的那一帧**，且丢哪一帧取决于时序，看上去随机。
+     *
+     * 症状第一次出现在级联开轮时：主卡发完 PING 紧接着就发 BEGIN，两帧首尾相接，
+     * 接收侧的中断正好压在 BEGIN 的发送中间。此前 PING 是孤立的一帧，撞不上。 */
+    HAL_UART_AbortReceive(ctx->huart);
 
     uint16_t len = ctx->rx_buf_size - __HAL_DMA_GET_COUNTER(ctx->huart->hdmarx);
 
