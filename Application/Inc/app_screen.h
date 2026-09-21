@@ -26,6 +26,78 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "board.h" /* BOARD_SCREEN_CANVAS / BOARD_CASCADE_* —— 本文件的 API 按它们开关 */
+
+/* ================================================================
+ *  切分表 —— 整屏怎么分给各张卡
+ *
+ *  **为什么放在整屏门面而不是级联协议里**：切分描述的是"整屏长什么样"，那是部署
+ *  事实，与用哪种总线、哪个协议下发无关。放这里，光传感器、持久化、以及将来任何
+ *  "只有主卡该做"的事都能读它，不必去依赖级联协议（依赖方向：协议 → 整屏）。
+ * ================================================================ */
+
+/** @brief 切分表最多几张卡（4 卡横排是已知的最大部署规模） */
+#define SCREEN_CARD_MAX (4U)
+
+/** @brief 一张卡在整屏里占的矩形 */
+typedef struct {
+    uint8_t  addr;  /**< 总线地址：0 = 主卡，1..0x1F = 从卡 */
+    uint8_t  color; /**< 该卡的显示颜色（display_color_t）—— 卡间可不同，见 design */
+    uint16_t x, y;  /**< 矩形左上角（整屏逻辑坐标，像素） */
+    uint16_t w, h;  /**< 矩形尺寸。**本工程要求它 == 该卡自己的屏几何**（见下） */
+} screen_card_t;
+
+/** @brief 切分表。
+ *
+ *  **矩形必须等于该卡的屏几何**（w×h == screen_rows×screen_cols）—— 本工程的每张卡
+ *  各自带一整块屏，"卡要显示的那块"就是"它自己那块屏"。若将来要支持"多张卡分一块
+ *  大屏的 HUB75 口"（矩形小于本卡屏），需要给落屏加一个偏移，那是另一期的事；
+ *  现在不符会被 app_screen_commit_bitmap 的长度校验明确拒绝，不会静默错位。 */
+typedef struct {
+    const screen_card_t *cards;
+    uint8_t              count; /**< 卡数 */
+    uint16_t             rows;  /**< **整屏**宽（= 各卡矩形并集宽） */
+    uint16_t             cols;  /**< **整屏**高 */
+} screen_layout_t;
+
+/** @brief 本卡看到的切分表。**永远非空**（没有级联时是"单卡占满整屏"）。 */
+const screen_layout_t *app_screen_layout(void);
+
+/** @brief 本卡在切分表里的下标；本卡地址不在表中返回 0xFF（配置错误） */
+uint8_t app_screen_self_index(void);
+
+/** @brief 第 idx 张卡矩形的 1bpp 位图长度（字节）；idx 越界返回 0 */
+uint16_t app_screen_card_bm_len(uint8_t idx);
+
+#if BOARD_SCREEN_CANVAS
+
+/** @brief 把第 idx 张卡的矩形从画布抽成 1bpp 位图
+ *
+ *  位图格式与 `dev_display_draw_bitmap` / `render_persist_t` **逐位一致**：
+ *  `(w+7)/8` 行字节、行优先、MSB-first、bit=1 为上色 —— 所以抽出来的东西从卡
+ *  可以直接吃，零转码。
+ *
+ *  **末字节的补位一律归零**（w 不是 8 的倍数时），这样"抽出来的位图"是唯一确定的
+ *  一串字节，可以直接比对、可以直接当协议载荷。
+ *
+ *  @return false = idx 越界 / buf 装不下 / 矩形超出画布（都不写 buf） */
+bool app_screen_extract(uint8_t idx, uint8_t *buf, uint16_t cap);
+
+/** @brief 把本卡那块画布矩形抽出来落到本地实屏
+ *
+ *  主卡本地提交走这条 —— 与"抽出来发给从卡"是同一个 `app_screen_extract`，
+ *  所以主卡屏上的内容与从卡收到的是同一份（这正是同步显示要保证的）。
+ *  @return false = 本卡不在切分表里，或抽带缓冲不够大 */
+bool app_screen_commit_self(void);
+
+/** @brief 画布有未落屏的内容、且已过静默期 → 返回 true 并清掉"待落屏"标志
+ *
+ *  单卡时由 app_screen 自己的任务消费；级联主卡由开轮的那个任务消费 ——
+ *  **两者只能有一个**，谁消费谁负责把内容落下去。 */
+bool app_screen_take_pending_settled(void);
+
+#endif /* BOARD_SCREEN_CANVAS */
+
 /** @brief 显式提交：立刻把画布内容落到本地屏（不必等静默期）
  *
  *  默认不需要调 —— 静默期会自动提交，现有渲染调用点一行都不用改。

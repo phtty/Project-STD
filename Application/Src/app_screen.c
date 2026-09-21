@@ -36,12 +36,132 @@ static uint8_t s_canvas[BOARD_SCREEN_CANVAS_MAX];
 #endif /* BOARD_SCREEN_CANVAS */
 
 static dev_display_t *s_display;
-static uint16_t       s_rows;   /* 逻辑宽（P1 = 本屏宽；级联后来自切分表） */
-static uint16_t       s_cols;   /* 逻辑高 */
+static uint16_t       s_rows;   /* **整屏**逻辑宽（单卡时 == 本屏宽） */
+static uint16_t       s_cols;   /* 整屏逻辑高 */
 static uint16_t       s_stride; /* = (s_rows + 7) / 8 */
 static uint16_t       s_bm_len; /* = s_stride * s_cols */
+static uint8_t        s_self;   /* 本卡在切分表里的下标 */
 
-[[maybe_unused]] static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（级联后由切分表逐卡给） */
+static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表本卡那一项） */
+
+/* 抽带缓冲：本卡矩形抽出来放这儿，再交给 commit_bitmap 落屏。
+   主卡本地提交与"单卡即整屏"共用它 —— 长度由 BOARD_CASCADE_BAND_MAX 兜底，
+   _screen_init 按**运行期几何**校验一次（超了会明确打出来并停用门面）。 */
+#if BOARD_SCREEN_CANVAS
+static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
+#endif
+
+/* ================================================================
+ *  切分表 —— 本期由 board.h 的网格参数合成
+ *
+ *  **整屏 = COLS×ROWS 张等尺寸卡**，每张卡占一整块"本卡屏几何"大小的矩形，
+ *  地址 = 网格下标（行优先），所以地址 0 恒在网格原点（主卡 = 左上）。
+ *
+ *  合成而不是写一张常量表：单卡几何是**运行期**才知道的（dev_display_t 没有
+ *  编译期几何宏，换模组只需改 board.mk 一行）—— 写死一张表，换屏就得同步改表，
+ *  而不同步的表现是画面错位，不报错。
+ *
+ *  后续期这里改成"先查 W25Qxx 的切分表记录，没有才回落本网格" —— 那时才谈得上
+ *  异形拼法与现场改址。 */
+static screen_card_t   s_cards[SCREEN_CARD_MAX];
+static screen_layout_t s_layout = {.cards = s_cards, .count = 0, .rows = 0, .cols = 0};
+
+const screen_layout_t *app_screen_layout(void)
+{
+    return &s_layout;
+}
+
+uint16_t app_screen_card_bm_len(uint8_t idx)
+{
+    if (idx >= s_layout.count) return 0;
+    const screen_card_t *c = &s_layout.cards[idx];
+    return (uint16_t)(((c->w + 7U) / 8U) * c->h);
+}
+
+uint8_t app_screen_self_index(void)
+{
+    const uint8_t me = app_screen_self_addr();
+    for (uint8_t i = 0; i < s_layout.count; i++)
+        if (s_layout.cards[i].addr == me) return i;
+    return 0xFF;
+}
+
+/** @brief 按 nx×ny 的网格合成切分表；本卡屏几何取自运行期的 display
+ *
+ *  取参数而不是直接读 board.h 的宏：后续期这里是"先查 W25Qxx 的切分表记录、
+ *  没有才回落网格"的那条路，届时 nx/ny 来自记录。 */
+static bool _layout_build_grid(uint8_t nx, uint8_t ny)
+{
+    const uint16_t cw = s_display ? s_display->screen_rows : 0; /* 单卡屏宽 */
+    const uint16_t ch = s_display ? s_display->screen_cols : 0; /* 单卡屏高 */
+
+    if (!cw || !ch) return false;
+    if ((uint16_t)nx * ny > SCREEN_CARD_MAX) {
+        printf("[screen] 切分 %ux%u 张卡超过 SCREEN_CARD_MAX=%u\n", (unsigned)nx, (unsigned)ny,
+               (unsigned)SCREEN_CARD_MAX);
+        return false;
+    }
+
+    s_layout.count = (uint8_t)(nx * ny);
+    s_layout.rows  = (uint16_t)(cw * nx); /* 整屏宽 */
+    s_layout.cols  = (uint16_t)(ch * ny); /* 整屏高 */
+
+    for (uint8_t r = 0; r < ny; r++)
+        for (uint8_t c = 0; c < nx; c++) {
+            const uint8_t i = (uint8_t)(r * nx + c);
+            s_cards[i]      = (screen_card_t){
+                .addr  = i, /* 地址 = 网格下标 */
+                .color = BOARD_SCREEN_COLOR,
+                .x     = (uint16_t)(c * cw),
+                .y     = (uint16_t)(r * ch),
+                .w     = cw,
+                .h     = ch,
+            };
+        }
+    return true;
+}
+
+/** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASCADE_COLS/ROWS） */
+static bool _layout_build(void)
+{
+    return _layout_build_grid((uint8_t)BOARD_CASCADE_COLS, (uint8_t)BOARD_CASCADE_ROWS);
+}
+
+/** @brief 由切分表推出画布几何、定位本卡、清画布
+ *
+ *  `_screen_init` 与 host 用例都走这一条 —— 用例换一组几何/网格时不必自己拼
+ *  "设几何 + 清画布"那几步，也就不会与生产初始化漂移。
+ *  @return false = 本卡地址不在表里，或画布池装不下整屏 */
+static bool _apply_layout(void)
+{
+    s_rows   = s_layout.rows;
+    s_cols   = s_layout.cols;
+    s_stride = (uint16_t)((s_rows + 7U) / 8U);
+    s_bm_len = (uint16_t)(s_stride * s_cols);
+
+    s_self = app_screen_self_index();
+    if (s_self >= s_layout.count) {
+        /* 本卡地址不在切分表里 = 板上的地址与部署对不上。**不静默降级成"单卡占满"**：
+           那会让现场以为一切正常，只是别的卡永远不亮（而"别的卡不亮"最容易被当成
+           硬件故障去查线）。 */
+        printf("[screen] 本卡地址 %u 不在切分表里（表内 %u 张卡），整屏门面停用\n",
+               (unsigned)app_screen_self_addr(), (unsigned)s_layout.count);
+        return false;
+    }
+    s_color = s_layout.cards[s_self].color;
+
+#if BOARD_SCREEN_CANVAS
+    /* 尺寸校验必须在 memset 之前 —— 池子小了先清就是直接写穿 */
+    if (s_bm_len > sizeof(s_canvas)) {
+        /* 拦下而不是截断：画布小了的表现是"右边/下边一块永远不更新"，很难查 */
+        printf("[screen] 画布需要 %u 字节 > BOARD_SCREEN_CANVAS_MAX %u，整屏门面停用\n",
+               (unsigned)s_bm_len, (unsigned)sizeof(s_canvas));
+        return false;
+    }
+    memset(s_canvas, 0, s_bm_len);
+#endif
+    return true;
+}
 
 static volatile uint32_t s_gen;             /* 内容代数：每次写入自增 */
 static volatile uint32_t s_last_write_tick; /* 最后一次写入的时刻，静默期据此算 */
@@ -85,9 +205,63 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
  *  级联接入后这里要改成"按切分表抽出本卡那个矩形"，因为画布会大于本屏。 */
 /* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
 #if BOARD_SCREEN_CANVAS
-static void _commit_local(void)
+
+/* ================================================================
+ *  抽带：画布上的一个矩形 → 一张 1bpp 位图
+ *
+ *  这是**主卡本地提交**与**发给从卡**共用的唯一提取路径 —— 两条路各写一份提取
+ *  逻辑，迟早会在某个边界（w 不是 8 的倍数、x 不对齐）上漂移，而漂移的表现是
+ *  "主卡屏上对、从卡屏上差一列"，现场几乎无法归因。
+ * ================================================================ */
+
+bool app_screen_extract(uint8_t idx, uint8_t *buf, uint16_t cap)
 {
-    app_screen_commit_bitmap(s_canvas, s_bm_len, s_color);
+    if (idx >= s_layout.count || !buf) return false;
+
+    const screen_card_t *c = &s_layout.cards[idx];
+    const uint16_t stride  = (uint16_t)((c->w + 7U) / 8U);
+    const uint16_t need    = (uint16_t)(stride * c->h);
+
+    /* 矩形必须整个落在画布里。网格切分下恒真；切分表可由记录覆盖后就未必了，
+       所以这里挡住而不是让它读到画布外面去。 */
+    if (cap < need || (uint32_t)c->x + c->w > s_rows || (uint32_t)c->y + c->h > s_cols)
+        return false;
+
+    memset(buf, 0, need);
+
+    for (uint16_t y = 0; y < c->h; y++) {
+        uint8_t       *dst = &buf[(uint32_t)y * stride];
+        const uint8_t *row = &s_canvas[(uint32_t)(c->y + y) * s_stride];
+
+        if ((c->x & 7U) == 0U) {
+            /* 矩形按字节对齐 —— 两板的卡宽都是 8 的倍数，这是常见情形（整行 memcpy） */
+            memcpy(dst, &row[c->x >> 3], stride);
+        } else {
+            for (uint16_t x = 0; x < c->w; x++) {
+                const uint16_t sx = (uint16_t)(c->x + x);
+                if (row[sx >> 3] & (uint8_t)(0x80U >> (sx & 7U)))
+                    dst[x >> 3] |= (uint8_t)(0x80U >> (x & 7U));
+            }
+        }
+
+        /* 末字节补位归零：w 不是 8 的倍数时，memcpy 会把矩形右边**属于邻卡**的
+           位也搬过来。不清掉的话同一幅画面会有两种字节表示（取决于画布右边是什么），
+           比对与差分都失去意义。 */
+        if (c->w & 7U) dst[stride - 1U] &= (uint8_t)(0xFFU << (8U - (c->w & 7U)));
+    }
+    return true;
+}
+
+bool app_screen_commit_self(void)
+{
+    if (s_self >= s_layout.count) return false;
+    const uint16_t len = app_screen_card_bm_len(s_self);
+    if (!len || len > sizeof(s_band)) return false;
+    if (!app_screen_extract(s_self, s_band, sizeof(s_band))) return false;
+
+    /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致 */
+    app_screen_commit_bitmap(s_band, len, s_color);
+    return true;
 }
 
 /* ================================================================
@@ -206,10 +380,13 @@ static const render_persist_hook_t s_persist_hook = {.save = _persist_save, .res
 
 static void _persist_save(void)
 {
-    /* P1 画布 = 本屏，直接复用 app_render 原有的落盘路径：
-       那里读的是 dev_display 的 pixel_map，而画布刚刚才提交给它，两者一致。
-       级联接入后改为直接存画布（那时实屏只是整屏的一条带，不够）。
-       此处显式写明这个前提，免得日后忘了改。 */
+    /* 复用 app_render 原有的落盘路径：它读的是 dev_display 的 pixel_map，而**本卡
+       那一块**画布刚刚经 app_screen_commit_self 提交给它，两者逐位一致。
+       所以存实屏 == 存本卡矩形，是多卡下也对的一件事（画布其余部分属于别的卡）。
+
+       刻意**不**改成存整张画布：记录格式（render_persist_t）的尺寸域与位图上限
+       （RENDER_PERSIST_BITMAP_MAX=2560）都是按**单块屏**定的，整屏画布 4 卡能到
+       5600 字节，存不下。要存整屏得先改记录格式 —— 那是另一件事。 */
     app_render_set_persist_hook(nullptr);
     app_render_save();
     app_render_set_persist_hook(&s_persist_hook);
@@ -223,13 +400,24 @@ static bool _persist_restore(void)
     app_render_set_persist_hook(&s_persist_hook);
 
     /* 恢复了实屏，画布要跟着同步 —— 否则下一轮静默提交会拿一张空画布把屏刷黑。
-       P1 下画布=实屏，由实屏重新打包即可。 */
-    if (ok && s_display) {
+     *
+     * 记录里存的是**本卡那块实屏**（render_persist_t 的尺寸域与位图上限都按单块屏
+     * 算的），不是整屏画布。所以这里要把实屏按"本卡在画布上的矩形"摆回去 ——
+     * 多卡时画布比实屏大，直接按画布尺寸索引 pixel_map 会读到屏外。
+     * 索引一律用**实屏几何** dw/dh，与画布几何 s_rows/s_cols 是两回事。 */
+    if (ok && s_display && s_self < s_layout.count) {
+        const screen_card_t *c  = &s_layout.cards[s_self];
+        const uint16_t       dw = s_display->screen_rows;
+        const uint16_t       dh = s_display->screen_cols;
+
         memset(s_canvas, 0, s_bm_len);
-        for (uint16_t y = 0; y < s_cols; y++)
-            for (uint16_t x = 0; x < s_rows; x++)
-                if (s_display->pixel_map[(uint32_t)y * s_rows + x] != COLOR_BLACK)
-                    s_canvas[(uint32_t)y * s_stride + (x >> 3)] |= (uint8_t)(0x80U >> (x & 7U));
+        for (uint16_t y = 0; y < dh && y < c->h; y++)
+            for (uint16_t x = 0; x < dw && x < c->w; x++)
+                if (s_display->pixel_map[(uint32_t)y * dw + x] != COLOR_BLACK) {
+                    const uint16_t cx = (uint16_t)(c->x + x);
+                    const uint16_t cy = (uint16_t)(c->y + y);
+                    s_canvas[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
+                }
         s_pending = false; /* 刚恢复的内容已经落过屏，不必再提交一遍 */
     }
     return ok;
@@ -294,15 +482,21 @@ void app_screen_flush(void)
 
 /* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
 #if BOARD_SCREEN_CANVAS
+
+bool app_screen_take_pending_settled(void)
+{
+    if (!s_pending) return false;
+    if ((osKernelGetTickCount() - s_last_write_tick) < SCREEN_SETTLE_MS) return false;
+    s_pending = false;
+    return true;
+}
+
 static void _screen_task(void *arg)
 {
     (void)arg;
     for (;;) {
         osDelay(SCREEN_POLL_MS);
-        if (!s_pending) continue;
-        if ((osKernelGetTickCount() - s_last_write_tick) < SCREEN_SETTLE_MS) continue;
-        s_pending = false;
-        _commit_local();
+        if (app_screen_take_pending_settled()) (void)app_screen_commit_self();
     }
 }
 #endif /* BOARD_SCREEN_CANVAS */
@@ -320,22 +514,28 @@ static void _screen_init(void)
     }
     s_display = d;
 
-    /* P1：逻辑几何 = 本屏几何。级联接入后这里改成切分表给出的整屏几何。 */
-    s_rows   = d->screen_rows;
-    s_cols   = d->screen_cols;
-    s_stride = (uint16_t)((s_rows + 7U) / 8U);
-    s_bm_len = (uint16_t)(s_stride * s_cols);
-
-#if BOARD_SCREEN_CANVAS
-    if (s_bm_len > sizeof(s_canvas)) {
-        /* 拦下而不是截断：画布小了的表现是"右边/下边一块永远不更新"，很难查 */
-        printf("[screen] 画布需要 %u 字节 > BOARD_SCREEN_CANVAS_MAX %u，整屏门面停用\n",
-               (unsigned)s_bm_len, (unsigned)sizeof(s_canvas));
+    if (!_layout_build()) {
+        printf("[screen] 切分表合成失败，整屏门面停用\n");
         s_display = nullptr;
         return;
     }
-    memset(s_canvas, 0, s_bm_len);
+    /* 逻辑几何 = **整屏**（多卡时比本卡那块屏大）—— 主卡画的就是这个 */
+    if (!_apply_layout()) {
+        s_display = nullptr;
+        return;
+    }
 
+    /* board.h 的 BOARD_CASCADE_BAND_MAX 只是编译期上限，这里按**运行期**几何核一次 */
+    const uint16_t band = app_screen_card_bm_len(s_self);
+    if (band > BOARD_CASCADE_BAND_MAX) {
+        printf("[screen] 本卡矩形位图 %u > BOARD_CASCADE_BAND_MAX %u，整屏门面停用\n",
+               (unsigned)band, (unsigned)BOARD_CASCADE_BAND_MAX);
+        s_display = nullptr;
+        return;
+    }
+
+#if BOARD_SCREEN_CANVAS
+    /* 渲染目标几何必须跟着**整屏**走 —— 排版/换行/居中判的是它 */
     s_target.rows = s_rows;
     s_target.cols = s_cols;
 
@@ -348,8 +548,13 @@ static void _screen_init(void)
         .priority   = osPriorityNormal,
     };
     pl_task_new(_screen_task, nullptr, &attr);
-    printf("[screen] 逻辑画布 %ux%u（%u 字节，1bpp），颜色 %u\n", (unsigned)s_rows,
-           (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_color);
+
+    const screen_card_t *c = &s_layout.cards[s_self];
+    printf("[screen] 整屏画布 %ux%u（%u 字节，1bpp）共 %u 卡；本卡 #%u addr=%u "
+           "矩形 %ux%u@(%u,%u) 颜色 %u\n",
+           (unsigned)s_rows, (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_layout.count,
+           (unsigned)s_self, (unsigned)app_screen_self_addr(), (unsigned)c->w, (unsigned)c->h,
+           (unsigned)c->x, (unsigned)c->y, (unsigned)s_color);
 #else
     printf("[screen] 整屏门面未启用（BOARD_SCREEN_CANVAS=0），渲染直写实屏\n");
 #endif

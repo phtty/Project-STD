@@ -56,10 +56,39 @@
 #define BOARD_SCREEN_CANVAS_MAX (5600U)
 #endif
 #ifndef BOARD_SCREEN_CANVAS
-#define BOARD_SCREEN_CANVAS     (0)
+#define BOARD_SCREEN_CANVAS (0)
 #endif
 /* 本卡颜色（display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
-#define BOARD_SCREEN_COLOR      (2) /* COLOR_GREEN */
+#define BOARD_SCREEN_COLOR (2) /* COLOR_GREEN */
+
+/* ---- 级联切分（整屏 = 若干张等尺寸卡按网格拼）----
+ *
+ * 本板单卡屏 224×50。整屏 = COLS 张卡横排 × ROWS 张卡竖排，每张卡占一整块
+ * 224×50（卡的矩形尺寸就是本卡的屏几何，运行期从 dev_display_get() 读）。
+ *
+ * **1×1 = 单卡直显，行为与没有级联之前逐字节相同** —— 这是默认值，也是现场
+ * 单卡出货的形态。做多卡时改这两个数（暂时如此；后续期由 W25Qxx 的切分表记录
+ * 覆盖 —— 同型号板子可以是 2/3/4 卡部署，那是部署期事实，不该永久编译进固件）。
+ *
+ * 卡地址 = 网格下标（行优先）：0 = 左上 = 主卡，其余依次。**地址 0 必须落在
+ * 网格原点** —— app_screen 把"主卡自己的屏"直接对应到画布左上角那块矩形，
+ * 靠的就是这一点（见 app_screen.c 的 _persist_restore）。
+ *
+ * 网格只能表达**等尺寸卡**的规则拼法。异形拼法（一张卡占左半、另两张在右侧
+ * 上下堆叠）要等切分表记录那一期。 */
+#ifndef BOARD_CASCADE_COLS
+#define BOARD_CASCADE_COLS (1)
+#endif
+#ifndef BOARD_CASCADE_ROWS
+#define BOARD_CASCADE_ROWS (1)
+#endif
+
+/* ---- 单卡矩形位图的上限（字节）----
+ *
+ * 1bpp、ceil(屏宽/8)×屏高：本板单卡 224×50 → 28×50 = **1400**。
+ * app_screen 的抽带缓冲与 app_cascade 的从卡暂存都按它静态分配。
+ * 必须 ≥ 实屏几何算出来的值 —— _screen_init 有运行期校验，不符会明确打出来。 */
+#define BOARD_CASCADE_BAND_MAX (1400U)
 
 /* ---- 级联总线地址（app_screen_self_addr）----
  * 0 = 主卡，1..0x1F = 从卡。**本期是编译期常量**，即主卡与从卡烧不同固件；
@@ -70,5 +99,17 @@
  * 而 5006048 只有 KEY_TST、没有拨码 —— 所以本参数不能做成"必须靠硬件读"，
  * 否则得给 5006048 改板。 */
 #ifndef BOARD_CASCADE_ADDR
-#define BOARD_CASCADE_ADDR      (0) /* 0 = 主卡 */
+#define BOARD_CASCADE_ADDR (0) /* 0 = 主卡 */
 #endif
+
+/* ---- 板级组合校验（放在最后：上面几个宏都要已定义）---- */
+
+/* 多卡必须有整屏画布：没有画布就没有"整屏"这个对象，主卡无从切分下发。
+ * 这里拦下而不是运行期静默降级 —— 降级的表现是"配了多卡但只有主卡自己那块屏动"。 */
+#if BOARD_SCREEN_CANVAS == 0 && (BOARD_CASCADE_COLS > 1 || BOARD_CASCADE_ROWS > 1)
+#error "多卡级联需要 BOARD_SCREEN_CANVAS=1（整屏画布）"
+#endif
+
+/* "画布池装得下整屏"不在这里判：那要用**实屏几何**（由所选的显示模组驱动决定，
+ * 可以用 board.mk 换），board.h 里只有单卡尺寸这个事实，写死会与换屏脱节。
+ * _screen_init 有该检查，用的是运行期几何，不符会明确打出来并停用门面。 */

@@ -543,6 +543,14 @@ TEST_SCREEN_CANVAS_SRCS = \
 	test/test_screen_canvas.c \
 	test/stubs/os_stub.c
 
+# 套件十二：切分表与抽带（画布上的矩形 → 1bpp 位图，必须与独立参考逐位相等）
+# 同套件九：用例 include app_screen.c（sink 与抽带都是 static），并自带一套
+# 1B/px 帧缓冲作为独立参考 —— 所以不列 app_screen.c，也不列 dev_display.c。
+# 本套件的本卡地址被钉成 1（非原点矩形），故与套件九不是重复覆盖。
+TEST_SCREEN_LAYOUT_SRCS = \
+	test/test_screen_layout.c \
+	test/stubs/os_stub.c
+
 # 套件十：硬件 CRC32 封装（任意长度/对齐都要算全，不得截断）
 # 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
 TEST_CRC_SRCS = \
@@ -565,7 +573,7 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
-      $(TEST_BUILD)/test_cascade_frame
+      $(TEST_BUILD)/test_cascade_frame $(TEST_BUILD)/test_screen_layout
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -598,6 +606,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 级联协议探针 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_frame
+	@echo ""
+	@echo "──── 切分表与抽带 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_layout
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -640,6 +651,13 @@ $(TEST_BUILD)/test_cascade_frame: $(TEST_CASCADE_FRAME_SRCS)
 # make 看不见 —— 不挂这行的话改了被测源码测试不重编，跑的是旧二进制。
 # （同 test_cfg_sched / test_iap_cfg / test_ldi_0ah / test_screen_canvas 的那几条。）
 $(TEST_BUILD)/test_cascade_frame: Application/Src/CASCADE/app_cascade.c
+
+# 同上：用例 TU-include 了 app_screen.c 与板级 board.h，都不在 SRCS 里。
+$(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) Application/Src/app_screen.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_LAYOUT_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_screen_layout: Application/Src/app_screen.c $(BOARD_DIR)/board.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
