@@ -550,9 +550,9 @@ static void _send_frags(const screen_card_t *c, uint16_t seq, uint16_t bmp_len, 
     for (uint8_t k = 0; k < frag_n; k++) {
         if (!(mask & (uint8_t)(1U << k))) continue;
 
-        const uint16_t off = (uint16_t)(k * CASC_FRAG_BYTES);
-        const uint16_t n =
-            (uint16_t)((bmp_len - off > CASC_FRAG_BYTES) ? CASC_FRAG_BYTES : (bmp_len - off));
+        const uint16_t off   = (uint16_t)(k * CASC_FRAG_BYTES);
+        const uint32_t left  = (uint32_t)bmp_len - off; /* 无符号，避免与 CASC_FRAG_BYTES 的符号比较 */
+        const uint16_t n     = (uint16_t)((left > CASC_FRAG_BYTES) ? CASC_FRAG_BYTES : left);
 
         (void)_send_seq(CASC_T_SYNC_DATA, c->addr, seq, k, frag_n, &s_band[off], n);
         osDelay(1);

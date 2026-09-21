@@ -29,6 +29,14 @@
 #define BOARD_SCREEN_CANVAS 1
 #define BOARD_CASCADE_ADDR  1 /* 本卡 = 第二张（网格下标 1，非原点矩形） */
 
+/* **钉住切分参数，不跟着 board.h 的现场配置变**：本用例用 _layout_build_grid()
+   显式指定网格，但 _screen_init() 走的是 board.h 的部署配置 —— 那是**现场**参数
+   （可能是 1×2、主卡在下）。跟着它变的话，同一份测试在不同板子上测出不同结论，
+   而且不报错，只是静默地少测几条。 */
+#define BOARD_CASCADE_COLS        1
+#define BOARD_CASCADE_ROWS        1
+#define BOARD_CASCADE_MASTER_CELL 0
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

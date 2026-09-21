@@ -19,6 +19,15 @@
    否则整段画布代码会被编译掉，本用例就变成空跑。 */
 #define BOARD_SCREEN_CANVAS 1
 
+/* **钉住切分参数，不跟着 board.h 的现场配置变**：本用例要测的是"单卡 / 主卡在原点"
+   这批基准行为，而 board.h 是**部署**配置（现场可能是 1×2、主卡在下）。
+   跟着它变的话，同一份测试在别人的板子上会测出不同结论 —— 而且不会报错，
+   只会静默地少测几条。 */
+#define BOARD_CASCADE_COLS        1
+#define BOARD_CASCADE_ROWS        1
+#define BOARD_CASCADE_MASTER_CELL 0
+#define BOARD_CASCADE_ADDR        0
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
