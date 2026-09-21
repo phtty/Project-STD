@@ -37,6 +37,22 @@ typedef struct {
     TIM_TypeDef *Instance;
 } TIM_HandleTypeDef;
 
+/* ---- 硬件 CRC 单元 ----
+ * DR 是可读写的（写一次算一拍、读出来是当前结果），CR 只用到复位位。
+ * 真单元是有状态的，所以 test_crc.c 里的 HAL_CRC_Calculate 桩按真语义逐字推进。 */
+typedef struct {
+    volatile uint32_t DR;
+    volatile uint32_t CR;
+} CRC_TypeDef;
+
+typedef struct {
+    CRC_TypeDef *Instance;
+} CRC_HandleTypeDef;
+
+uint32_t HAL_CRC_Calculate(CRC_HandleTypeDef *hcrc, uint32_t pBuffer[], uint32_t BufferLength);
+/** 累加（不重置内部状态）—— pl_crc.c 的非对齐路径靠它分块算完长输入 */
+uint32_t HAL_CRC_Accumulate(CRC_HandleTypeDef *hcrc, uint32_t pBuffer[], uint32_t BufferLength);
+
 typedef struct {
     uint32_t BaudRate; /* pl_uart 用它按波特率算发送超时下限 */
 } UART_InitTypeDef;

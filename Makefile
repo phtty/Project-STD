@@ -540,12 +540,19 @@ TEST_SCREEN_CANVAS_SRCS = \
 	test/test_screen_canvas.c \
 	test/stubs/os_stub.c
 
+# 套件十：硬件 CRC32 封装（任意长度/对齐都要算全，不得截断）
+# 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
+TEST_CRC_SRCS = \
+	test/test_crc.c \
+	Platform/Src/pl_crc.c \
+	test/stubs/os_stub.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
-      $(TEST_BUILD)/test_screen_canvas
+      $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -572,6 +579,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 整屏画布 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_canvas
+	@echo ""
+	@echo "──── 硬件 CRC32 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_crc
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -601,6 +611,10 @@ $(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
 $(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) Application/Src/app_screen.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_crc: $(TEST_CRC_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CRC_SRCS) $(TEST_LDFLAGS)
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

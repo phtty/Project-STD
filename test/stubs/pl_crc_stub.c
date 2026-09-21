@@ -11,11 +11,12 @@
  * WORDS 格式下 HAL 把 32 位字直接写进 DR、单元按 MSB 优先逐位处理，因此等价于
  * 把每个 4 字节组按**大端序**喂给 CRC-32/MPEG-2。
  *
- * 本文件**逐行对齐 Platform/Src/pl_crc.c 的实际行为**，包括它的缺陷：
- * 非对齐分支里 `memcpy(buf, data, len)` 只夹紧了 word_cnt（≤64 字 = 256 字节的
- * 栈缓冲），**没有一起夹紧 len** —— len > 256 时该 memcpy 会写穿栈缓冲。
- * 桩若比真实现"更正确"，测试就会掩盖真实缺陷，所以这里保留该行为，
- * 由 ASan 在触发时给出与实机同形态的报告。
+ * **本文件与 Platform/Src/pl_crc.c 行为一致**（含非对齐/非整字输入的尾部补零约定）。
+ *
+ * 早先本文件刻意保留过真实现的一个缺陷（非对齐分支只夹 `word_cnt` 不夹 `len`，
+ * 于是 len > 256 会写穿栈缓冲）。那个缺陷真实现已经修掉，本文件随之改为正确实现 ——
+ * "桩比真实现更正确会掩盖缺陷"这条原则依然成立，只是现在两者都对了。
+ * 真实现本身的正确性由 `test/test_crc.c` 链接**真文件**来测，不靠桩。
  */
 
 #include "pl_crc.h"
@@ -23,9 +24,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#define CRC32_POLY      0x04C11DB7U
-#define CRC32_INIT      0xFFFFFFFFU
-#define STUB_WORD_LIMIT 64U /* 与真实现一致：非对齐分支最多 64 字 */
+#define CRC32_POLY 0x04C11DB7U
+#define CRC32_INIT 0xFFFFFFFFU
 
 static uint32_t crc32_byte(uint32_t crc, uint8_t byte)
 {
@@ -35,16 +35,13 @@ static uint32_t crc32_byte(uint32_t crc, uint8_t byte)
     return crc;
 }
 
-/** @brief 等价的 HAL_CRC_Calculate：按字喂入，字内字节反序（大端） */
-static uint32_t crc32_words(const uint8_t *data, size_t word_cnt)
+/** @brief 一个 32 位字的硬件行为：字内按大端逐字节处理 */
+static uint32_t crc32_word(uint32_t crc, const uint8_t *w)
 {
-    uint32_t crc = CRC32_INIT;
-    for (size_t i = 0; i < word_cnt; i++) {
-        crc = crc32_byte(crc, data[i * 4 + 3]);
-        crc = crc32_byte(crc, data[i * 4 + 2]);
-        crc = crc32_byte(crc, data[i * 4 + 1]);
-        crc = crc32_byte(crc, data[i * 4 + 0]);
-    }
+    crc = crc32_byte(crc, w[3]);
+    crc = crc32_byte(crc, w[2]);
+    crc = crc32_byte(crc, w[1]);
+    crc = crc32_byte(crc, w[0]);
     return crc;
 }
 
@@ -56,17 +53,26 @@ pl_crc_handle_t pl_crc_get_handle(void)
 uint32_t pl_crc32_calc(pl_crc_handle_t h, const uint8_t *data, size_t len)
 {
     (void)h;
-    size_t word_cnt = (len + 3) / 4;
+    if (!data) return CRC32_INIT;
 
-    /* 对齐路径：4 字节对齐且长度为 4 的倍数时零拷贝直通 */
-    if (((uintptr_t)data & 3U) == 0U && (len & 3U) == 0U)
-        return crc32_words(data, word_cnt);
+    /* 对齐且整字：零拷贝直通 */
+    if (((uintptr_t)data & 3U) == 0U && (len & 3U) == 0U) {
+        uint32_t crc = CRC32_INIT;
+        for (size_t i = 0; i < len; i += 4)
+            crc = crc32_word(crc, data + i);
+        return crc;
+    }
 
-    /* 非对齐路径：与真实现同样**只**夹紧 word_cnt，len 原样传给 memcpy */
-    if (word_cnt > STUB_WORD_LIMIT) word_cnt = STUB_WORD_LIMIT;
+    /* 逐字喂入，**无长度上限**；尾巴不足一个字时高位补零 */
+    uint32_t crc = CRC32_INIT;
+    size_t   i   = 0;
+    for (; i + 4U <= len; i += 4U)
+        crc = crc32_word(crc, data + i);
 
-    uint32_t buf[STUB_WORD_LIMIT];
-    memset(buf, 0, word_cnt * 4);
-    memcpy(buf, data, len);
-    return crc32_words((const uint8_t *)buf, word_cnt);
+    if (i < len) {
+        uint8_t tail[4] = {0, 0, 0, 0};
+        memcpy(tail, data + i, len - i);
+        crc = crc32_word(crc, tail);
+    }
+    return crc;
 }
