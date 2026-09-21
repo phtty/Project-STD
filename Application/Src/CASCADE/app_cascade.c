@@ -63,6 +63,17 @@ static osMessageQueueId_t s_casc_queue;
    卡真的掉线时，每轮都卡在这儿会拖长整轮时间（其余卡与主卡本来不用等它）。 */
 #define CASC_RETRY_MAX (2U)
 
+/* 上电对齐：主卡枚举之后主动推一轮整屏，让所有卡一上电就是同一幅画面。
+ *
+ * **为什么不能只靠"画布有未落屏内容"**：上电时画布里的东西是从持久化恢复来的，
+ * 它不算"新内容"（`_persist_restore` 明确把待落屏标志清掉了）—— 于是那一轮永远
+ * 不会开，从卡会一直停在上电前它自己那幅旧画面上，与主卡对不上，直到有人下发一次。
+ *
+ * 首次尝试可能撞上从卡还没起来（它自己的初始化比主卡慢），所以失败就隔 1 秒再来；
+ * 试满这么多轮仍不成，就交给下一次真正的更新。 */
+#define CASC_BOOT_ALIGN_TRIES    (5U)
+#define CASC_BOOT_ALIGN_RETRY_MS (1000U)
+
 /* pcb 的字段在 _cascade_init 里填（探针定义在本文件后部，ops 要指向它） */
 static pcb_t s_casc_pcb;
 
@@ -523,6 +534,10 @@ static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
 
 static uint16_t s_round_seq;
 
+/* 上电对齐剩余次数与下次尝试时刻（0 = 对齐已完成或尚未开始） */
+static uint8_t  s_align_left;
+static uint32_t s_align_next;
+
 /** @brief 把 `mask` 位选中的分片发出去（每片 CASC_FRAG_BYTES 字节）
  *
  *  **每片之间 osDelay(1)**：对端的 UART 靠**空闲中断**分帧（pl_uart.c 的
@@ -549,19 +564,19 @@ static void _send_frags(const screen_card_t *c, uint16_t seq, uint16_t bmp_len, 
  *  **逐卡走完再下一张**（而不是"以分片为主序、每片发给所有卡"）：一张卡的矩形要
  *  抽进 s_band，逐卡走完只需一块缓冲；分片为主序则每发一片都要重抽一次。代价是
  *  卡与卡之间多一次应答往返，3 卡约 120ms，对指令式刷新无所谓。 */
-static void _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
+static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
 {
     const screen_card_t *c       = app_screen_card(idx);
     const uint16_t       bmp_len = app_screen_card_bm_len(idx);
-    if (!c || !bmp_len || bmp_len > sizeof(s_band)) return;
+    if (!c || !bmp_len || bmp_len > sizeof(s_band)) return false;
 
-    if (!app_screen_extract(idx, s_band, sizeof(s_band))) return;
+    if (!app_screen_extract(idx, s_band, sizeof(s_band))) return false;
 
     const uint8_t frag_n = (uint8_t)((bmp_len + CASC_FRAG_BYTES - 1U) / CASC_FRAG_BYTES);
     if (frag_n == 0 || frag_n > CASC_FRAG_MAX) {
         printf("[casc] 卡 %u 的位图 %u 字节需 %u 片，超出 CASC_FRAG_MAX=%u，本轮跳过\n",
                (unsigned)c->addr, (unsigned)bmp_len, (unsigned)frag_n, (unsigned)CASC_FRAG_MAX);
-        return;
+        return false;
     }
     const uint8_t full = (uint8_t)((1U << frag_n) - 1U);
 
@@ -587,7 +602,7 @@ static void _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
         if (s_ack.valid && s_ack.src == c->addr && s_ack.seq == seq && s_ack.sta == CASC_STA_NACK) {
             printf("[casc] 卡 %u 拒绝本轮（err=%u），本轮不更新它\n", (unsigned)c->addr,
                    (unsigned)s_ack.miss_mask);
-            return;
+            return false;
         }
         if (attempt) {
             if (!mask) break;
@@ -601,10 +616,10 @@ static void _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
             mask = full;
             continue;
         }
-        if (s_ack.sta == CASC_ACK_OK) return; /* 本轮完成 */
+        if (s_ack.sta == CASC_ACK_OK) return true; /* 本轮完成 */
         if (s_ack.sta == CASC_ACK_MISS) {
             mask = s_ack.miss_mask;
-            if (!mask) return; /* 说没缺片却回了 MISS：当完成，别在这儿死循环 */
+            if (!mask) return true; /* 说没缺片却回了 MISS：当完成，别在这儿死循环 */
             continue;
         }
         break; /* NOBEGIN：BEGIN 都没到，多半是链路问题，留到下一轮比在这儿死磕省总线 */
@@ -612,15 +627,17 @@ static void _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
 
     printf("[casc] 卡 %u 本轮未完成（最后已知缺片位 %02X）—— 其余卡与主卡照常更新\n",
            (unsigned)c->addr, (unsigned)mask);
+    return false;
 }
 
 /** @brief 开一轮：逐张从卡下发它那一块，全部结算完后主卡自己也换帧 */
-static void _round_run(void)
+static bool _round_run(void)
 {
     const screen_layout_t *L      = app_screen_layout();
     const uint8_t          me     = app_screen_self_addr();
     const uint16_t         seq    = ++s_round_seq;
     const uint8_t          bright = app_screen_get_brightness();
+    bool                   all_ok = true;
 
     for (uint8_t i = 0; i < L->count; i++) {
         const screen_card_t *c = app_screen_card(i);
@@ -628,7 +645,7 @@ static void _round_run(void)
            （主卡在下时 addr 与下标相反），拿地址当下标会把两块屏的内容对调。
            本卡那块不下发，由下面的本地提交处理。 */
         if (!c || c->addr == me) continue;
-        _round_one_card(i, seq, bright);
+        if (!_round_one_card(i, seq, bright)) all_ok = false;
     }
 
     /* **本地提交放在最后**：主卡自己那块也换到新画面。走的是与从卡完全相同的
@@ -639,6 +656,8 @@ static void _round_run(void)
        代价是主卡的换帧时机被总线节奏绑住（一轮 ~130ms/卡）。本项目是交通屏、
        只显示静态文字与标识，指令式刷新，所以不为此另开"只更新主卡本地"的快路径。 */
     (void)app_screen_commit_self();
+
+    return all_ok; /* 只要有一张从卡没完成，上电对齐就还要再试 */
 }
 
 #endif /* BOARD_SCREEN_CANVAS */
@@ -665,6 +684,11 @@ static void casc_task(void *argument)
         if (app_screen_is_master() && (int32_t)(now - next_ping) >= 0) {
             next_ping = now + 0x7FFFFFFFU; /* 只做一次 */
             (void)app_cascade_ping();
+#if BOARD_SCREEN_CANVAS
+            /* 枚举之后立刻对齐一次整屏 —— 见 CASC_BOOT_ALIGN_TRIES 的说明 */
+            s_align_left = CASC_BOOT_ALIGN_TRIES;
+            s_align_next = now;
+#endif
         }
 
         /* 亮度待下发：光传感器每秒钟都可能改，这里把"变了"攒成一次广播。
@@ -680,9 +704,29 @@ static void casc_task(void *argument)
            静默期任务在多卡时不启动，见 app_screen.c 的 _screen_init）。
            单卡时整屏就是本卡自己，走那个任务更直接，这儿不成立。
            放在周期活之后：一轮约 130ms/卡，跑起来本任务就顾不上别的了。 */
-        if (app_screen_is_master() && app_screen_layout()->count > 1 &&
-            app_screen_take_pending_settled()) {
-            _round_run();
+        if (app_screen_is_master() && app_screen_layout()->count > 1) {
+            bool go = false;
+
+            if (s_align_left && (int32_t)(now - s_align_next) >= 0) {
+                go = true; /* 上电对齐到点了 */
+            } else if (!s_align_left && app_screen_take_pending_settled()) {
+                go = true; /* 画布有新内容且已过静默期 */
+            }
+
+            if (go) {
+                const bool all_ok = _round_run();
+                if (s_align_left) {
+                    /* 对齐期间**不去消费**待落屏标志：那期间来的渲染留在那儿，
+                       等对齐完成后的下一圈自然会开一轮 */
+                    if (all_ok) {
+                        s_align_left = 0;
+                    } else if (--s_align_left) {
+                        s_align_next = osKernelGetTickCount() + CASC_BOOT_ALIGN_RETRY_MS;
+                    } else {
+                        printf("[casc] 上电对齐重试用尽，仍有卡没完成 —— 等下一次内容更新\n");
+                    }
+                }
+            }
         }
 #endif
     }

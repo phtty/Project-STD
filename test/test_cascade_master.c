@@ -354,7 +354,8 @@ static void case_round_ok(void)
     TEST_BEGIN("正常一轮：分片到齐、从卡收齐、主卡提交本地");
 
     fixture_reset();
-    _round_run();
+    /* 返回值是给"上电对齐"用的：全部从卡都完成才算成 */
+    CHECK_MSG(_round_run(), "全部从卡完成时应返回 true（上电对齐据此决定还要不要再试）");
 
     CHECK_MSG(s_slave.begin_rx == 1, "从卡应收到 1 帧 BEGIN，得到 %d", s_slave.begin_rx);
     CHECK_MSG(s_slave.commit_rx >= 1, "从卡应收到 COMMIT，得到 %d", s_slave.commit_rx);
@@ -460,7 +461,7 @@ static void case_silent_slave_master_still_commits(void)
     s_slave.silent = true;
 
     const uint32_t t0 = osKernelGetTickCount();
-    _round_run();
+    CHECK_MSG(!_round_run(), "从卡没完成时应返回 false（上电对齐据此重试）");
     const uint32_t dt = osKernelGetTickCount() - t0;
 
     CHECK_MSG(s_commit_self_calls == 1, "从卡一句话不回时，主卡**仍然**要提交本地，得到 %d 次",
