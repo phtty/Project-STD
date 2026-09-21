@@ -109,6 +109,11 @@ HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *h)
     return HAL_OK;
 }
 void HAL_DMA_IRQHandler(DMA_HandleTypeDef *hdma) { (void)hdma; }
+HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma)
+{
+    (void)hdma;
+    return HAL_OK;
+}
 void NVIC_DisableIRQ(IRQn_Type irq) { (void)irq; }
 void NVIC_EnableIRQ(IRQn_Type irq) { (void)irq; }
 

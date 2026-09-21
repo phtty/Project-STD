@@ -66,7 +66,11 @@ typedef struct {
     UART_InitTypeDef   Init;
     /* 同 DMA_HandleTypeDef.State：只给诊断输出用 */
     uint32_t gState;
+    uint32_t RxState;
 } UART_HandleTypeDef;
+
+/* UART 状态机：pl_uart 的接收重启兜底要把 RxState 拽回 READY */
+#define HAL_UART_STATE_READY (0U)
 
 typedef enum {
     HAL_OK   = 0x00,
@@ -111,6 +115,7 @@ HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *huart);
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
 
 void HAL_DMA_IRQHandler(DMA_HandleTypeDef *hdma);
+HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma);
 
 void NVIC_DisableIRQ(IRQn_Type irq);
 void NVIC_EnableIRQ(IRQn_Type irq);

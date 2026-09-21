@@ -56,6 +56,31 @@ static uint32_t _wire_ms(uint32_t baud, size_t len)
     return (uint32_t)(((uint64_t)len * 10U * 1000U) / baud) + 2U;
 }
 
+/* ---- 重新武装接收 DMA ----
+ *
+ * **返回值必须看**：重启失败 = 这一路**从此再也收不到任何东西**，而且一声不响。
+ * 现象是"刚才还好好的，忽然就什么都收不到了"，然后重启才好 —— 与"线松了"
+ * 在现场完全分不开。
+ *
+ * 传输层的接收是"空闲中断 → 停接收 DMA → 取走这一段 → 重新武装"，所以每收一段
+ * 就走一次这个函数。任何一次没武装上，后面就全哑了。 */
+static bool _rx_rearm(uart_ctx_t *ctx)
+{
+    if (HAL_UART_Receive_DMA(ctx->huart, ctx->rx_buf, ctx->rx_buf_size) == HAL_OK) return true;
+
+    /* 兜一次：把接收 DMA 流与 UART 的接收状态都拽回可用再试。
+       HAL_UART_AbortReceive 正常会把两者都复位；走到这儿说明有一步没成。 */
+    HAL_DMA_Abort(ctx->huart->hdmarx);
+    ctx->huart->RxState = HAL_UART_STATE_READY;
+    if (HAL_UART_Receive_DMA(ctx->huart, ctx->rx_buf, ctx->rx_buf_size) == HAL_OK) return true;
+
+    printf("[pl_uart] **接收重启失败**（uart RxState=%u，RX DMA State=%u）—— "
+           "本路从此收不到任何数据，直到复位\n",
+           (unsigned)ctx->huart->RxState,
+           (unsigned)(ctx->huart->hdmarx ? ctx->huart->hdmarx->State : 0xFFFFU));
+    return false;
+}
+
 /* ---- 内部：UART 空闲中断处理 ---- */
 static void uart_idle_handle(uart_ctx_t *ctx)
 {
@@ -79,7 +104,7 @@ static void uart_idle_handle(uart_ctx_t *ctx)
     if (ctx->rx_cb && len > 0)
         ctx->rx_cb(ctx->rx_buf, len, ctx->rx_cb_ctx);
 
-    HAL_UART_Receive_DMA(ctx->huart, ctx->rx_buf, ctx->rx_buf_size);
+    (void)_rx_rearm(ctx);
     __HAL_UART_ENABLE_IT(ctx->huart, UART_IT_IDLE);
 }
 
@@ -231,8 +256,7 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
     ctx->rx_buf      = buf;
     ctx->rx_buf_size = len;
 
-    HAL_StatusTypeDef st = HAL_UART_Receive_DMA(ctx->huart, buf, len);
-    if (st != HAL_OK) return -1;
+    if (!_rx_rearm(ctx)) return -1;
 
     __HAL_UART_ENABLE_IT(ctx->huart, UART_IT_IDLE);
     return 0;
