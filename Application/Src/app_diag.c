@@ -19,7 +19,8 @@
  * 关闭：把下面 APP_DIAG_ENABLE 置 0。
  */
 
-#define APP_DIAG_ENABLE 1
+#define APP_DIAG_ENABLE 0 /* 级联调试期关掉：一次全量打印约 1.2KB，会把 1KB 的 RTT 上行缓冲冲掉，
+                          * 把级联那几行挤没了。查完再打开。 */
 
 #if APP_DIAG_ENABLE
 
