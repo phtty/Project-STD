@@ -505,6 +505,11 @@ static void _cmd_ack(frame_msg_t *msg)
     const casc_hdr_t  *h = (const casc_hdr_t *)msg->data;
     const casc_ack_t  *a = (const casc_ack_t *)(msg->data + sizeof(casc_hdr_t));
 
+    /* **收到就打**，不等匹配：只有这一行能把"字节根本没到"与"到了但没对上"分开，
+       而这两者排查方向相反（查接收链路 vs 查匹配条件）。 */
+    CASC_LOG("[casc·主] ← 收到 ACK seq=%u src=%u sta=%u 缺=%02X\n", (unsigned)casc_get_u16(h->seq),
+             (unsigned)h->src, (unsigned)a->sta, (unsigned)a->miss_mask);
+
     s_ack.seq       = casc_get_u16(h->seq);
     s_ack.src       = h->src;
     s_ack.sta       = a->sta;
@@ -518,6 +523,9 @@ static void _cmd_nack(frame_msg_t *msg)
     if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_nack_t))) return;
 
     const casc_hdr_t *h = (const casc_hdr_t *)msg->data;
+
+    CASC_LOG("[casc·主] ← 收到 NACK seq=%u src=%u err=%u\n", (unsigned)casc_get_u16(h->seq),
+             (unsigned)h->src, (unsigned)msg->data[sizeof(casc_hdr_t)]);
 
     s_ack.seq       = casc_get_u16(h->seq);
     s_ack.src       = h->src;
