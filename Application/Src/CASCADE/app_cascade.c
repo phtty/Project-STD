@@ -106,6 +106,8 @@ static osMessageQueueId_t s_casc_queue;
  * 首次尝试可能撞上从卡还没起来（它自己的初始化比主卡慢），所以失败就隔 1 秒再来；
  * 试满这么多轮仍不成，就交给下一次真正的更新。 */
 #define CASC_ENUM_WAIT_MS        (1500U)
+/* 枚举的 PING 与第一轮对齐之间要留的间隔 —— 见对齐处那段说明（半双工冲突） */
+#define CASC_BOOT_ALIGN_PING_GAP_MS (300U)
 #define CASC_BOOT_ALIGN_TRIES    (5U)
 #define CASC_BOOT_ALIGN_RETRY_MS (1000U)
 
@@ -788,9 +790,15 @@ static void casc_task(void *argument)
 #if BOARD_SCREEN_CANVAS
             /* 枚举之后立刻对齐一次整屏 —— 见 CASC_BOOT_ALIGN_TRIES 的说明 */
             s_align_left  = CASC_BOOT_ALIGN_TRIES;
-            s_align_next  = now;
             s_enum_seen   = false;
             s_enum_deadline = now + CASC_ENUM_WAIT_MS;
+            /* **对齐要等枚举的应答走完**，不能同一刻就开轮。
+               半双工总线一次只能有一个节点驱动：从卡收到 PING 会立刻回 PRESENT，
+               而那时主卡正在发这一轮的分片 —— 两个节点同时驱动，**两边都成乱码**。
+               实测就是这么坏的：第一轮从卡只收到 COMMIT，它前面的 BEGIN 与分片全被
+               撞掉，而主卡那边永远等不到 PRESENT。
+               300ms 足够一帧 PRESENT（22 字节 ≈ 2ms）走完。 */
+            s_align_next  = now + CASC_BOOT_ALIGN_PING_GAP_MS;
 #endif
         }
 
