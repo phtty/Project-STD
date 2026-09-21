@@ -31,6 +31,8 @@ typedef struct {
 
 typedef struct {
     uint32_t dummy;
+    /* pl_uart 报"DMA 发送没起来"时会打它（诊断用），桩不推进这个状态 */
+    uint32_t State;
 } DMA_HandleTypeDef;
 
 typedef struct {
@@ -62,6 +64,8 @@ typedef struct {
     DMA_HandleTypeDef *hdmarx;
     DMA_HandleTypeDef *hdmatx; /* TX DMA：pl_uart 的 DMA 发送模式靠它判有无 */
     UART_InitTypeDef   Init;
+    /* 同 DMA_HandleTypeDef.State：只给诊断输出用 */
+    uint32_t gState;
 } UART_HandleTypeDef;
 
 typedef enum {

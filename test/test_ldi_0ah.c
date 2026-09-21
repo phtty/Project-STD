@@ -89,12 +89,13 @@ static uint8_t  s_tx[512];
 static uint16_t s_tx_len;
 static int      s_tx_count;
 
-void ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
+int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
 {
     (void)ccb;
     s_tx_count++;
     s_tx_len = len <= sizeof(s_tx) ? len : sizeof(s_tx);
     if (data && s_tx_len) memcpy(s_tx, data, s_tx_len);
+    return (int32_t)len; /* 桩：装作发出去了 */
 }
 
 /** @brief 从捕获到的响应帧里取 status 字节

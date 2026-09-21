@@ -32,7 +32,7 @@ static uint8_t  s_tx_frame[CASC_FRAME_MAX];
 static uint16_t s_tx_len;
 static int      s_tx_count;
 
-void ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
     if (l <= sizeof(s_tx_frame)) {
@@ -40,6 +40,7 @@ void ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
         s_tx_len = l;
     }
     s_tx_count++;
+    return (int32_t)l;
 }
 ccb_t *app_rs485_ccb(void) { return nullptr; }
 void   app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }

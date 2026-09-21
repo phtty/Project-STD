@@ -277,11 +277,12 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
     }
 }
 
-void ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
     s_tx_count++;
     if (l >= CASC_OVERHEAD) slave_on_master_frame(d, l);
+    return (int32_t)l;
 }
 ccb_t *app_rs485_ccb(void) { return nullptr; }
 void   app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }

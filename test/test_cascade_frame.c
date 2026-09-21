@@ -32,7 +32,12 @@ uint8_t  app_screen_get_brightness(void) { return 0; }
 bool     app_screen_brightness_take_pending(uint8_t *l) { (void)l; return false; }
 dev_display_t *dev_display_get(void) { return nullptr; } /* PRESENT 用，本套件不测那条 */
 
-void     ccb_send(ccb_t *c, const uint8_t *d, uint16_t l) { (void)c; (void)d; (void)l; }
+int32_t  ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+{
+    (void)c;
+    (void)d;
+    return (int32_t)l; /* 桩：装作发出去了 */
+}
 void     app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }
 ccb_t   *app_rs485_ccb(void) { return nullptr; }
 void     pl_task_new_stub(void) {}
