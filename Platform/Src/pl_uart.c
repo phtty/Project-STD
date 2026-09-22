@@ -320,6 +320,23 @@ void pl_uart_irq_handler(uint8_t id)
      *
      * 这一条不改"无条件清标志"的性质：HAL 照样无条件执行，只是挪到后面。
      * 初始化期 ctx 还是空的，这里照旧跳过（HAL 那一步会清掉标志，不会成风暴）。 */
+    /* ---- 诊断：ISR 入口的寄存器快照（限次）----
+     * 只在"看起来不对"时打：有错误位、或接收 DMA 请求不在了。
+     * SR 位（F4）：PE(0) FE(1) NE(2) ORE(3) IDLE(4) RXNE(5) TC(6) TXE(7)
+     * CR3 位：EIE(0) DMAR(6)  CR1 位：RE(2) RXNEIE(5) IDLEIE(4) */
+    static uint8_t s_isr_diag;
+    if (s_isr_diag < 16U) {
+        const uint32_t sr = h->Instance->SR;
+        if ((sr & 0x0FU) || !(h->Instance->CR3 & USART_CR3_DMAR)) {
+            s_isr_diag++;
+            printf("[%8u] [pl_uart] ISR SR=%04X CR3=%04X CR1=%04X RxState=%u DMAState=%u\n",
+                   (unsigned)osKernelGetTickCount(), (unsigned)(sr & 0xFFFFU),
+                   (unsigned)(h->Instance->CR3 & 0xFFFFU), (unsigned)(h->Instance->CR1 & 0xFFFFU),
+                   (unsigned)(g_uart_ctx[id].huart ? h->RxState : 0xEEU),
+                   (unsigned)(h->hdmarx ? h->hdmarx->State : 0xFFU));
+        }
+    }
+
     if (g_uart_ctx[id].huart) uart_idle_handle(&g_uart_ctx[id]);
 
     /* ---- **自己清掉错误标志，不让 HAL 的错误路径跑起来** ----
