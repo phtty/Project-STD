@@ -36,10 +36,14 @@
 #ifndef CASC_DIAG
 #define CASC_DIAG (1)
 #endif
+/* **每行带内核 tick**：probe-rs 打的是"它读到这一行的时刻"，不是打印时刻 ——
+ * 一次 attach 会把缓冲区里积压的多行打上同一个时间戳，跨两次 attach 的日志更是
+ * 没法对照。今天已经因此误判过好几次（"PING 到 PRESENT 只隔了 1.4 秒"之类）。
+ * 带上 tick，日志就自己说明先后与间隔，不必再反推。 */
 #if CASC_DIAG
-#define CASC_LOG(...) printf(__VA_ARGS__)
+#define CASC_LOG(fmt, ...) printf("[%8u] " fmt, (unsigned)osKernelGetTickCount(), ##__VA_ARGS__)
 #else
-#define CASC_LOG(...) ((void)0)
+#define CASC_LOG(fmt, ...) ((void)0)
 #endif
 
 /* ---- 队列与缓冲区（容量取法见 app_iap.c / app_rls.c 的同名注释）---- */
