@@ -16,6 +16,7 @@
 #include "pl_mem.h"
 #include "dev_rs485.h"
 #include <stdio.h>
+#include <string.h> /* memcpy：ISR 把收到的这一段拷进自己的槽位 */
 
 #include "app_dispatch.h"
 #include "pl_task.h"
@@ -67,16 +68,39 @@ ccb_t *app_rs485_ccb(void)
 }
 
 /* ---- rs485_rx_queue 静态分配 ---- */
-/* **队列元素带到达时刻**：只有把"交给分发任务的时刻"也记下来，才能把
- * "ISR → 任务"与"任务 → 协议任务"两跳分开 —— 实测从卡有一帧 247ms 后才被处理、
- * 另一帧 21 秒后，而那两次 ISR 那一行要么晚了要么干脆没出现。查完连同 RS485_RX_LOG 收掉。 */
+/* ================================================================
+ *  收包槽位 —— **ISR 把这一段拷出来再投递**
+ *
+ * 原先队列里只放"长度"，数据留在共享的 rx_buf 里，深度只能是 1：
+ *   · 队列一旦满，投递失败 → **这一段静默丢掉**（Put 超时为 0）；
+ *   · 队列加深也没用 —— 数据在共享缓冲里，第二个槽的"长度"会配上已经被覆盖的
+ *     "数据"，比丢更糟。
+ *
+ * 实测就是这样丢的：从卡在 tick 3457 收到了 COMMIT 那个 15 字节的块，ISR 那一行打了，
+ * 而"交付给任务"那一行**根本没有** —— 投递失败。之后它在环形缓冲区里被下一个块
+ * 顺带带进去，于是 21 秒后才被处理。
+ *
+ * 改成"ISR 拷进自己的槽位、队列里放槽号"：投递不再会丢，也不会错配。
+ * 2 槽足以吸收一次调度延迟（分片是 1ms 一帧连发的）。
+ * 放 CCMRAM：这是 ISR 里 memcpy 的目的地，CPU 访问，不需要 DMA 可达。 */
+#define RS485_RX_SLOTS (2U)
+
 typedef struct {
     uint16_t len;
-    uint32_t tick; /* ISR 交付这一段数据的时刻 */
+    uint8_t  data[RS485_BUF_SIZE];
+} rs485_rx_slot_t;
+
+static rs485_rx_slot_t s_slots[RS485_RX_SLOTS] PL_CCMRAM;
+static uint8_t         s_slot_next; /* ISR 下次写哪个槽 */
+static uint8_t         s_slot_busy; /* 位 i = 槽 i 已投递、尚未被任务取走 */
+
+/** @brief 副本长度上限的一个静态护栏（投递的是槽号，不是长度） */
+typedef struct {
+    uint8_t slot;
 } rs485_rx_msg_t;
 
 static StaticQueue_t  s_rs485_rx_cb;
-static rs485_rx_msg_t s_rs485_rx_buf[1];
+static rs485_rx_msg_t s_rs485_rx_buf[RS485_RX_SLOTS];
 static const osMessageQueueAttr_t s_rs485_rx_attr = {
     .name    = "rs485_rx",
     .cb_mem  = &s_rs485_rx_cb,
@@ -103,16 +127,29 @@ static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 {
     (void)data;
     rs485_ccb_t *self = (rs485_ccb_t *)ctx;
-#if RS485_RX_LOG
-    static uint8_t s_logged;
-    if (s_logged < RS485_RX_LOG_MAX) {
-        s_logged++;
-        /* **带 tick**：与 `[casc·从]` 那些行的 tick 一比，就把"帧在队列里等了多久"
-           与"处理本身花了多久"分开了 —— 从卡那 246ms 的延迟必须先切成这两段。 */
-        printf("[%8u] [rs485] 收到 %u 字节\n", (unsigned)osKernelGetTickCount(), (unsigned)len);
+
+    if (len > RS485_BUF_SIZE) return; /* 不可能：DMA 缓冲就这么大 */
+
+    /* 找一个空槽；两个都占着说明任务已经落后整整一段，这一段落掉（并报出来） */
+    uint8_t slot = 0xFF;
+    for (uint8_t k = 0; k < RS485_RX_SLOTS; k++) {
+        const uint8_t i = (uint8_t)((s_slot_next + k) % RS485_RX_SLOTS);
+        if (!(s_slot_busy & (uint8_t)(1U << i))) { slot = i; break; }
     }
+    if (slot == 0xFF) {
+#if RS485_RX_LOG
+        printf("[%8u] [rs485] **槽位用尽，丢一段 %u 字节**\n",
+               (unsigned)osKernelGetTickCount(), (unsigned)len);
 #endif
-    const rs485_rx_msg_t m = {.len = len, .tick = osKernelGetTickCount()};
+        return;
+    }
+
+    memcpy(s_slots[slot].data, data, len);
+    s_slots[slot].len = len;
+    s_slot_busy |= (uint8_t)(1U << slot);
+    s_slot_next = (uint8_t)((slot + 1U) % RS485_RX_SLOTS);
+
+    const rs485_rx_msg_t m = {.slot = slot};
     osMessageQueuePut(self->rx_queue, &m, 0, 0);
 }
 
@@ -134,12 +171,13 @@ static void rs485_task(void *argument)
     for (;;) {
         rs485_rx_msg_t m = {0};
         if (osMessageQueueGet(self->rx_queue, &m, 0, osWaitForever) == osOK) {
+            const uint16_t n = s_slots[m.slot].len;
 #if RS485_RX_LOG
-            const uint32_t now = osKernelGetTickCount();
-            printf("[%8u] [rs485] 交付 %u 字节（ISR 到任务 %u ms）\n", (unsigned)now,
-                   (unsigned)m.len, (unsigned)(now - m.tick));
+            printf("[%8u] [rs485] 交付槽 %u：%u 字节\n", (unsigned)osKernelGetTickCount(),
+                   (unsigned)m.slot, (unsigned)n);
 #endif
-            app_ccb_dispatch(&self->base, nullptr, self->rx_buf, m.len);
+            app_ccb_dispatch(&self->base, nullptr, s_slots[m.slot].data, n);
+            s_slot_busy &= (uint8_t)~(1U << m.slot); /* 交出去之后才能释放，否则 ISR 会覆写 */
         }
     }
 }
