@@ -663,16 +663,21 @@ static bool _persist_restore(void)
         const uint16_t       dh = s_display->screen_cols;
 
         memset(s_canvas, 0, s_bm_len);
-        /* 恢复的内容**直写画布**、不经过 sink，所以这条路上颜色无从得知 ——
-           落屏时退回切分表给本卡的颜色（记录里那个颜色字段本版本还没接进来）。 */
+        /* 恢复的内容**直写画布**、不经过 sink —— 内容色在这里补记：
+           实屏上那份是 `app_render_restore` 用**记录里的颜色**画出来的
+           （存的时候也是取"第一个非黑像素的颜色"，见 app_render_save），
+           所以照着像素记一遍即可，落屏时才不会退回卡片色。 */
         _reset_content_color();
         for (uint16_t y = 0; y < dh && y < c->h; y++)
-            for (uint16_t x = 0; x < dw && x < c->w; x++)
-                if (s_display->pixel_map[(uint32_t)y * dw + x] != COLOR_BLACK) {
-                    const uint16_t cx = (uint16_t)(c->x + x);
-                    const uint16_t cy = (uint16_t)(c->y + y);
-                    s_canvas[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
-                }
+            for (uint16_t x = 0; x < dw && x < c->w; x++) {
+                const uint8_t px = s_display->pixel_map[(uint32_t)y * dw + x];
+                if (px == COLOR_BLACK) continue;
+
+                _note_content_color((display_color_t)px);
+                const uint16_t cx = (uint16_t)(c->x + x);
+                const uint16_t cy = (uint16_t)(c->y + y);
+                s_canvas[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
+            }
         s_pending = false; /* 刚恢复的内容已经落过屏，不必再提交一遍 */
     }
     return ok;

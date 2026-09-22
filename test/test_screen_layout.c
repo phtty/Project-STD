@@ -76,7 +76,11 @@ void app_render_set_persist_hook(const render_persist_hook_t *h) { s_hook_last =
 /* 落盘计数：本套件要断言"**落屏之后**才存"（存早了存的就是上一帧） */
 static int  s_save_calls;
 void        app_render_save(void) { s_save_calls++; }
-bool app_render_restore(void) { return false; }
+/* 恢复桩的状态：用例可让它"恢复"出指定颜色的一块内容（持久化颜色那条用例要用）。
+   函数体在 `s_dev` 声明之后（要往实屏上画）。 */
+static bool            s_restore_ok;
+static display_color_t s_restore_color;
+bool app_render_restore(void);
 /* "这一帧要落盘"的请求位：生产里由 app_render 置，本套件直接摆它 */
 static bool s_persist_req;
 bool app_render_take_persist_req(void)
@@ -179,6 +183,15 @@ static void display_reset(uint16_t w, uint16_t h)
 dev_display_t *dev_display_get(void)
 {
     return &s_dev;
+}
+
+/** @brief 恢复桩：按"记录里的颜色"往实屏上画一块内容（模拟真 restore 的产物） */
+bool app_render_restore(void)
+{
+    if (!s_restore_ok) return false;
+    dev_display_fill(&s_dev, 0, 0, s_dev.screen_rows, s_dev.screen_cols, COLOR_BLACK);
+    dev_display_fill(&s_dev, 0, 0, 4, 4, s_restore_color);
+    return true;
 }
 
 /** @brief 按给定几何与网格重建切分表与画布
@@ -587,6 +600,33 @@ static void case_identity_reapply(void)
  *
  *  反向验证：把 `app_screen_output_color` 里的内容色那一条去掉（退回只看卡片色），
  *  本用例第一条立刻红。 */
+/** 持久化恢复也要带回颜色（记录里那个颜色字段不能丢在半路）
+ *
+ *  恢复这条路是**直写画布**、不经过渲染 sink，所以内容色要在重建画布时补记 ——
+ *  否则上电恢复出来的内容会退回切分表给本卡的颜色（存在记录里的颜色白存了）。 */
+static void case_restore_color(void)
+{
+    TEST_BEGIN("持久化恢复：内容颜色跟着回来（记录里存的就是它）");
+
+    canvas_reset_mc(44, 12, 1, 2, 1); /* 本卡（addr=1）是格 0 */
+    s_restore_ok    = true;
+    s_restore_color = COLOR_RED;
+
+    CHECK_MSG(_persist_restore(), "恢复应成功（桩按记录里的颜色画实屏）");
+    CHECK_MSG(app_screen_commit_self(), "落屏应成功");
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_RED,
+              "恢复出来的内容该是记录里的红，得到 %u（本卡色 %u）", (unsigned)s_fb[0],
+              (unsigned)BOARD_SCREEN_COLOR);
+
+    /* 换一种颜色再恢复一次：不能记着上一次的 */
+    s_restore_color = COLOR_BLUE;
+    CHECK_MSG(_persist_restore(), "第二次恢复应成功");
+    app_screen_commit_self();
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_BLUE, "第二次恢复该是蓝，得到 %u", (unsigned)s_fb[0]);
+
+    s_restore_ok = false;
+}
+
 static void case_content_color(void)
 {
     TEST_BEGIN("内容颜色：单色内容用它的颜色，混色才退回本卡颜色");
@@ -892,6 +932,7 @@ int main(void)
     case_identity_reapply();
     case_color_override();
     case_content_color();
+    case_restore_color();
     case_master_cell_runtime();
     case_commit_self_matches_canvas();
     case_master_below();
