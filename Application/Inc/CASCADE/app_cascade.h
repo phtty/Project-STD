@@ -309,11 +309,7 @@ int32_t app_cascade_broadcast_bright(uint8_t level);
  *  等 ACK 最长约 1s）由级联任务做：`s_tx` 与轮次都是它的，按键所在的工厂测试任务
  *  不能碰。
  *
- *  **单卡板上是空函数**（没有级联可认领）：调用点因此不必带条件编译。 */
-#if BOARD_CASCADE_ENABLED
+ *  **单卡板上是空函数**（定义在 `app_cascade.c` 的禁用分支里）：调用点因此不必带
+ *  条件编译，而且符号**永远存在** —— 增量构建只按 `.c` 的时间戳重编，改了 `.h`
+ *  时调用方的旧目标文件可能没重编、还在引用它，有定义就不会变成"未定义引用"。 */
 void app_cascade_claim_master(void);
-#else
-static inline void app_cascade_claim_master(void)
-{
-}
-#endif
