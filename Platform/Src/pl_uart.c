@@ -281,10 +281,34 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
     ctx->rx_buf_size = len;
     ctx->rx_pos      = 0;
 
-    /* **循环模式**：DMA 一直转，空闲中断只用来算长度（见 uart_idle_handle 的说明）。
-       在这里改而不是在板级 usart.c 里改 —— 那是 CubeMX 产物、用户手工维护，
-       而"这一路接收用循环 DMA"是平台层的机制选择。 */
-    ctx->huart->hdmarx->Init.Mode = DMA_CIRCULAR;
+    /* ---- **把接收流真正编成"循环 + 直接模式"** ----
+     *
+     * 这两条都是本文件的分帧方式（空闲中断 + `pos = 缓冲大小 − NDTR`，见
+     * uart_idle_handle）的**前提**，各有一个实测过的坑：
+     *
+     * ① **循环**：`Init` 只是软件影子 —— `HAL_DMA_Init` 早在开机的板级 MX_DMA_Init 里
+     *    就照着板级文件的 `DMA_NORMAL` 把 `DMA_SxCR` 编好了，之后**只改 Init 字段不会
+     *    动硬件**。硬件停在非循环模式时，每收满一个缓冲就完成一次传输，而 HAL 的
+     *    `UART_DMAReceiveCplt` 里写着：
+     *        if ((hdma->Instance->CR & DMA_SxCR_CIRC) == 0U) { …清 CR3 的 DMAR… }
+     *    —— 接收**被 HAL 悄悄拆掉**（实测快照正是 SR=00F8 CR3=0000，害得查了好几轮：
+     *    它不是错误路径清的，是**传输完成**路径清的）。补武装只能落在帧中间，字节流
+     *    从此错位。实测对过账：从卡那一轮交付 16+15×8+1427+485 恰好 = 2048，
+     *    就是那个完成点。循环模式下这个分支根本不进，什么都不会被清。
+     *
+     * ② **直接模式（FIFO 关）**：FIFO 模式下 NDTR 与内存**不同步** —— 帧尾最多 3 字节
+     *    还压在 DMA 的 FIFO 里没落进内存，而本文件按 NDTR 算"又收了多少"。于是每次
+     *    交付的尾部都是过期的旧字节，**而 CRC 恰好在帧尾**：帧长看着对、内容永远校验
+     *    不过（实测那批"长度 1427、协议层一行都没有"的帧就是它）。
+     *
+     * 放平台层而不是板级 usart.c：那是 CubeMX 产物、重新生成会覆盖——这条已经踩过一次。
+     * 所以这里**显式重编一次流**，让硬件无论如何都是我们要的样子。 */
+    ctx->huart->hdmarx->Init.Mode     = DMA_CIRCULAR;
+    ctx->huart->hdmarx->Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(ctx->huart->hdmarx) != HAL_OK) {
+        printf("[pl_uart] 接收 DMA 流重配置失败 —— 这一路收不到数据\n");
+        return -1;
+    }
 
     if (!_rx_rearm(ctx)) return -1;
 

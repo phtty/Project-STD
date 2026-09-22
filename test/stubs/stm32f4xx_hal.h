@@ -35,16 +35,31 @@ typedef struct {
 
 #define USART_CR3_DMAR (1U << 6)
 
+/* DMA 流寄存器：只需要 CR 里的 CIRC 位。
+ *
+ * **为什么必须有这一位**：`Init` 只是软件影子，真正的模式在 `DMA_SxCR` 里，只有
+ * `HAL_DMA_Init` 才会把它写进去。HAL 的 `UART_DMAReceiveCplt` 是**照寄存器**判断
+ * "收完了要不要把接收拆掉"的（非循环分支里清 CR3 的 DMAR）—— 这正是接收路径
+ * 那个"每收满一个缓冲就哑掉"的根因。替身里留着 CR，那类回归才测得到。 */
 typedef struct {
-    uint32_t dummy;
+    uint32_t CR;
+} DMA_TypeDef;
+
+typedef struct {
+    DMA_TypeDef *Instance;
     /* pl_uart 报"DMA 发送没起来"时会打它（诊断用），桩不推进这个状态 */
-    uint32_t State;
+    uint32_t     State;
     struct {
-        uint32_t Mode; /* pl_uart 把接收流改成循环模式 */
+        uint32_t Mode;     /* pl_uart 把接收流改成循环模式 */
+        uint32_t FIFOMode; /* 直接模式（FIFO 关）—— NDTR 与内存必须同步 */
     } Init;
 } DMA_HandleTypeDef;
 
-#define DMA_CIRCULAR (1U << 8)
+#define DMA_NORMAL      (0U)
+#define DMA_CIRCULAR    (1U << 8) /* == DMA_SxCR_CIRC（真 HAL 里就是同一个值） */
+#define DMA_SxCR_CIRC   (1U << 8)
+#define DMA_FIFOMODE_DISABLE (0U)
+#define DMA_FIFOMODE_ENABLE  (1U)
 
 typedef struct {
     TIM_TypeDef *Instance;
@@ -127,6 +142,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
 
 void HAL_DMA_IRQHandler(DMA_HandleTypeDef *hdma);
 HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma);
+/* 只有它会照 `Init` 把配置写进流寄存器（影子 → 硬件的那一步） */
+HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *hdma);
 
 void NVIC_DisableIRQ(IRQn_Type irq);
 void NVIC_EnableIRQ(IRQn_Type irq);

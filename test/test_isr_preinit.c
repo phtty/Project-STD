@@ -88,9 +88,41 @@ HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *h, uint8_t *d, uint16_t 
     s_last_tx_len     = l;
     return HAL_OK;
 }
+/* ---- 假接收 DMA 流 ----
+ * 起点就是板级 CubeMX 给的 `DMA_NORMAL`（真板就是这样），
+ * 由 pl_uart_start_rx 在运行期改成循环 —— 那条路径正是本套件要守的。 */
+static DMA_TypeDef       s_fake_dma2_stream2;
+static DMA_HandleTypeDef s_hdma_rx1 = {.Instance = &s_fake_dma2_stream2, .Init.Mode = DMA_NORMAL};
+
+/** @brief `HAL_DMA_Init` 是**唯一**把 `Init` 影子写进流寄存器的一步
+ *
+ *  替身照这个语义实现，"只改 Init.Mode、不重新 Init"这个坑在 host 上才复现得出来。 */
+static int s_dma_init_calls;
+HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *hdma)
+{
+    s_dma_init_calls++;
+    if (!hdma || !hdma->Instance) return HAL_ERROR;
+    hdma->Instance->CR = (hdma->Init.Mode == DMA_CIRCULAR) ? DMA_SxCR_CIRC : 0U;
+    hdma->State        = HAL_DMA_STATE_READY;
+    return HAL_OK;
+}
+
+/** @brief 模拟"接收 DMA 转到了缓冲末尾"这一次完成事件
+ *
+ *  **照真 HAL 抄的**（`Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c` 的
+ *  `UART_DMAReceiveCplt`）：非循环分支里它会 `ATOMIC_CLEAR_BIT(CR3, USART_CR3_DMAR)`，
+ *  也就是把接收**整条拆掉**；循环分支什么都不做。
+ *  这正是"每收满一个缓冲就哑掉"的根因，所以替身必须能演出来。 */
+static void rx_reach_buffer_end(UART_HandleTypeDef *h)
+{
+    if ((h->hdmarx->Instance->CR & DMA_SxCR_CIRC) == 0U) h->Instance->CR3 &= ~USART_CR3_DMAR;
+}
+
 HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *h, uint8_t *d, uint16_t l)
 {
-    (void)h; (void)d; (void)l;
+    (void)d; (void)l;
+    /* 真 HAL 在武装接收时置 DMAR */
+    if (h && h->Instance) h->Instance->CR3 |= USART_CR3_DMAR;
     return HAL_OK;
 }
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *h, uint8_t *d, uint16_t l)
@@ -121,12 +153,16 @@ void NVIC_EnableIRQ(IRQn_Type irq) { (void)irq; }
  *      注意这**不是**在测板级文件，是给它一份最小可用的表让被测机制能跑。
  *      init 全为空 —— 我们刻意不跑任何初始化。 ---- */
 
-static TIM_HandleTypeDef  s_htim2 = {.Instance = TIM2};
 static TIM_HandleTypeDef  s_htim3 = {.Instance = TIM3};
 static TIM_HandleTypeDef  s_htim4 = {.Instance = TIM4};
 static TIM_HandleTypeDef  s_htim7 = {.Instance = TIM7};
-/* BaudRate 要给真值：pl_uart 的发送超时下限按它算 */
-static UART_HandleTypeDef s_huart1 = {.Instance = &s_fake_usart1, .Init = {.BaudRate = 115200}};
+/* BaudRate 要给真值：pl_uart 的发送超时下限按它算。
+   `hdmarx` 在真板上由 CubeMX 生成的 `__HAL_LINKDMA` 接上，这里手工接同一个意思。 */
+static UART_HandleTypeDef s_huart1 = {
+    .Instance = &s_fake_usart1,
+    .hdmarx   = &s_hdma_rx1,
+    .Init     = {.BaudRate = 115200},
+};
 
 /* 角色统一后两块板都不再有 TIM2 条目，这里照实反映：PL_TIM2 留空，
    它的 ISR 在没有句柄时什么都不做（NVIC 也不会使能，不会真的进来）。 */
@@ -137,7 +173,7 @@ const pl_tim_board_entry_t g_pl_tim_board[PL_TIM_MAX] = {
 };
 
 const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX] = {
-    [PL_UART1] = {.init = NULL, .huart = &s_huart1, .dma_rx = NULL, .irq = 0, .dma_irq = 0},
+    [PL_UART1] = {.init = NULL, .huart = &s_huart1, .dma_rx = &s_hdma_rx1, .irq = 0, .dma_irq = 0},
 };
 
 /* ---- 断言 ---- */
@@ -254,6 +290,66 @@ static void case_tx_timeout_floor(void)
     CHECK_MSG(s_last_tx_timeout == 100, "短帧的超时被抬了：%ums", (unsigned)s_last_tx_timeout);
 }
 
+/* ================================================================
+ *  接收流必须是"循环 + 直接模式"——**影子改了不算，得看寄存器**
+ *
+ *  这是那条**真实发生过**的回归的守门用例：接收改成循环时只写了
+ *      ctx->huart->hdmarx->Init.Mode = DMA_CIRCULAR;
+ *  而 `Init` 只是软件影子 —— `HAL_DMA_Init` 早在开机的板级 MX_DMA_Init 里就照着
+ *  板级文件的 `DMA_NORMAL` 把 `DMA_SxCR` 编好了，之后改影子**不动硬件**。
+ *  硬件停在非循环模式时，每收满一个缓冲（2048）就完成一次传输，HAL 的
+ *  `UART_DMAReceiveCplt` 会走非循环分支把 `CR3` 的 DMAR 清掉 —— 接收**被悄悄拆掉**，
+ *  补武装只能落在帧中间，字节流从此错位。现场表现是"每过一阵子就收不到东西"，
+ *  而寄存器快照 `SR=00F8 CR3=0000` 把一个"传输完成"事件伪装成了"错误"，
+ *  害得排查方向一直对着错误路径。
+ *
+ *  **反向验证**：把 pl_uart_start_rx 里的 `HAL_DMA_Init(...)` 去掉（退回只改影子），
+ *  本用例立刻红 —— 见本文件末尾的自检注释。
+ * ================================================================ */
+
+static void case_rx_stream_really_circular(void)
+{
+    TEST_BEGIN("接收流必须真编成循环（影子改了不算，寄存器里得是 CIRC）");
+
+    pl_uart_init();
+    pl_uart_handle_t h = pl_uart_get_handle(PL_UART1);
+
+    /* 夹具自检：起点就是板级 CubeMX 给的 DMA_NORMAL —— 与真板一致，
+       否则这条用例测的不是真板上会发生的事 */
+    CHECK_MSG(s_hdma_rx1.Init.Mode == DMA_NORMAL, "夹具起点应当是板级的 DMA_NORMAL");
+
+    static uint8_t rx_buf[64];
+    CHECK_MSG(pl_uart_start_rx(h, rx_buf, sizeof(rx_buf)) == 0, "start_rx 应当成功");
+
+    /* ① 寄存器里必须真是循环 */
+    CHECK_MSG((s_fake_dma2_stream2.CR & DMA_SxCR_CIRC) != 0,
+              "DMA_SxCR 的 CIRC 位没写进去 —— Init 只是影子，不重新 HAL_DMA_Init 硬件仍是"
+              "非循环，每收满一个缓冲 HAL 就会把接收拆掉");
+    CHECK_MSG(s_dma_init_calls >= 1, "应当重新初始化过 DMA 流（影子写进寄存器的那一步）");
+
+    /* ② 直接模式：FIFO 模式下 NDTR 与内存不同步，而分帧正是按 NDTR 算的 */
+    CHECK_MSG(s_hdma_rx1.Init.FIFOMode == DMA_FIFOMODE_DISABLE,
+              "接收流必须关 FIFO —— 否则帧尾还压在 FIFO 里没落进内存，交付出去的是过期字节");
+
+    /* ③ 收满一个缓冲之后接收仍然活着 —— 这才是这条用例真正要守的东西 */
+    CHECK_MSG((s_fake_usart1.CR3 & USART_CR3_DMAR) != 0, "武装之后 DMAR 应当在");
+    rx_reach_buffer_end(&s_huart1);
+    CHECK_MSG((s_fake_usart1.CR3 & USART_CR3_DMAR) != 0,
+              "收满一个缓冲之后 DMAR 被清掉了 —— 接收被 HAL 拆了，本路从此收不到东西");
+
+    /* 模型自检：**把流改回非循环，上面那条机制必须报得出来** ——
+       否则这个替身是空转的，用例给的是假信心。 */
+    s_hdma_rx1.Init.Mode = DMA_NORMAL;
+    (void)HAL_DMA_Init(&s_hdma_rx1);
+    s_fake_usart1.CR3 |= USART_CR3_DMAR; /* 假装刚武装上 */
+    rx_reach_buffer_end(&s_huart1);
+    CHECK_MSG((s_fake_usart1.CR3 & USART_CR3_DMAR) == 0,
+              "非循环模式下应当被拆掉 —— 替身没复现出这个行为，说明本条用例测不到东西");
+
+    /* 复原，别影响别的用例 */
+    s_fake_usart1.CR3 = 0;
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -262,6 +358,7 @@ int main(void)
     case_tim7_tick_before_init();
     case_uart_isr_before_init();
     case_tx_timeout_floor();
+    case_rx_stream_really_circular();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

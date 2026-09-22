@@ -88,22 +88,10 @@ void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
         hdma_usart1_rx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
         hdma_usart1_rx.Init.Mode                = DMA_NORMAL;
         hdma_usart1_rx.Init.Priority            = DMA_PRIORITY_LOW;
-        /* **接收流开 FIFO** —— 手工改，不是 CubeMX 生成的。
-         *
-         * direct mode（FIFO 关）下，DMA 每个请求只搬 1 字节；**内存总线忙时那一次请求
-         * 会直接丢掉**，并置 DME（直接模式错误）。而 HAL 的 DMA 错误回调
-         * （`UART_DMAError`）会把接收通道**拆掉**：清 DMAR、清 EIE、RxState 置 READY ——
-         * 于是 UART 看起来一切正常（RE 还在、IDLEIE 还在），却再也收不到任何东西，
-         * 且没有任何报错。实测的快照正是这一组：
-         *     ISR SR=00F8 CR3=0000 CR1=201C RxState=32 DMAState=1
-         *     （DMAR=0、EIE=0，而两个状态机都是 READY）
-         * 开 FIFO 之后走的是另一种搬数机制，DME 不再适用。
-         *
-         * **CubeMX 重新生成会覆盖这一行**，改回来即可。
-         * （另注：本流的 Priority 是 LOW，仲裁时让给 ETH/SPI —— 那也会加剧请求延迟，
-         *   但这次只改一个变量，先看 FIFO 的效果。） */
-        hdma_usart1_rx.Init.FIFOMode            = DMA_FIFOMODE_ENABLE;
-        hdma_usart1_rx.Init.FIFOThreshold       = DMA_FIFO_THRESHOLD_1QUARTERFULL;
+        /* 接收流的 Mode 与 FIFO **由 pl_uart_start_rx 在运行期强制**（那里写着两条实测依据：
+           非循环模式会被 HAL 的完成路径清掉 DMAR；FIFO 模式让 NDTR 与内存不同步，
+           而分帧正是按 NDTR 算的）。这里保持 CubeMX 默认即可 —— 手工改过一版，重新生成时丢了。 */
+        hdma_usart1_rx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
         if (HAL_DMA_Init(&hdma_usart1_rx) != HAL_OK) {
             Error_Handler();
         }
