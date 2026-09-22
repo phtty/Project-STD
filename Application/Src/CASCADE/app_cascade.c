@@ -137,6 +137,13 @@ static osMessageQueueId_t s_casc_queue;
  * 枚举与画布无关，所以这两个变量放在守卫之外。 */
 static uint32_t s_enum_deadline;
 static bool     s_enum_seen;
+/** 本次枚举是不是**上电那一次** —— 只有它对"有没有应答"下判据。
+ *  周期性重新枚举也判的话，每分钟会多出 6 行"有卡应答"，把 1KB 的 RTT 缓冲冲掉，
+ *  而那个信息本来就没用（PRESENT 那行已经说明了）。 */
+static bool s_enum_verdict;
+
+/** 上电对齐是否已经起过 —— 放在守卫之外是因为 `_enum_start` 要读它 */
+static bool s_align_done;
 
 /* 上电枚举的剩余次数与下次发包时刻（0 = 枚举已收尾） */
 static uint8_t  s_ping_left;
@@ -160,9 +167,10 @@ static uint32_t s_bus_quiet_until;
 /** @brief 起一轮枚举；已在枚举中则不动 */
 static void _enum_start(uint32_t now)
 {
-    s_ping_left = CASC_PING_TRIES;
-    s_ping_next = now;
-    s_enum_seen = false; /* 只认这一轮发出去之后的应答 */
+    s_ping_left    = CASC_PING_TRIES;
+    s_ping_next    = now;
+    s_enum_seen    = false; /* 只认这一轮发出去之后的应答 */
+    s_enum_verdict = !s_align_done; /* 上电那一次才判"有没有卡应答" */
 }
 
 /* 上电对齐的剩余次数与下次尝试时刻（0 = 对齐已完成或尚未开始）。
@@ -171,8 +179,6 @@ static void _enum_start(uint32_t now)
 #if BOARD_SCREEN_CANVAS
 static uint8_t  s_align_left;
 static uint32_t s_align_next;
-/** 上电对齐是否已经起过 —— 见 _enum_finish 里的说明 */
-static bool s_align_done;
 #endif
 
 /** @brief 枚举收尾：不再发 PING，等最后一帧 PRESENT 走完就开对齐轮 */
@@ -880,6 +886,7 @@ static void casc_task(void *argument)
         /* 上电枚举的收卷：到点报一句"有没有卡应答" —— 没有应答时后面那些
            "本轮未完成 / 等应答超时"是必然的，这里先把话说在前面，免得白查协议。 */
         if (s_enum_deadline && (int32_t)(now - s_enum_deadline) >= 0) {
+            if (s_enum_verdict)
             CASC_LOG("[casc·主] 上电枚举：%s\n",
                      s_enum_seen ? "有卡应答（从卡在，链路通）"
                                  : "连发多次 PING 都没有应答 —— 从卡没上电/没接 485/没烧这份"
