@@ -49,6 +49,18 @@
 #define CASC_LOG(fmt, ...) ((void)0)
 #endif
 
+/* ================================================================
+ *  单卡板：本文件编译成空
+ *
+ *  见 app_cascade.h 的 `BOARD_CASCADE_ENABLED`。守卫放在 include 之后、所有
+ *  静态量与函数之前 —— 于是单卡板上这个翻译单元**一个字节都不产生**
+ *  （Flash、CCMRAM、以及"每 10 秒一次 PING"全都省掉），而两块板共用同一份
+ *  构建清单（Makefile / EIDE 都不用改）。
+ * ================================================================ */
+#if !BOARD_CASCADE_ENABLED
+/* 故意留空：本板不跑级联 */
+#else
+
 /* ---- 队列与缓冲区（容量取法见 app_iap.c / app_rls.c 的同名注释）---- */
 
 /* **本协议会发出的最长帧** = 一帧装下整块本卡位图（见 app_cascade.h 的 CASC_FRAME_MAX）。
@@ -1436,3 +1448,5 @@ static void _cascade_init(void)
     pl_task_new(casc_task, nullptr, &attr);
 }
 sw_post_initcall(_cascade_init);
+
+#endif /* BOARD_CASCADE_ENABLED */

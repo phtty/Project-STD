@@ -26,6 +26,7 @@
 /* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
 #include "app_cfg_sched.h"
 #include "dev_key.h"
+#define BOARD_CASCADE_ENABLED 1 /* 本套件测级联，强制编进来 */
 #include "app_cascade.h"
 #include "app_screen.h"
 #include "dev_display.h"

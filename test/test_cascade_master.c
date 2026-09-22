@@ -22,6 +22,7 @@
  */
 
 #define BOARD_SCREEN_CANVAS 1
+#define BOARD_CASCADE_ENABLED 1 /* 套件要测级联：单卡配置下也要把它编进来 */
 
 #include <stdbool.h>
 #include <stdint.h>

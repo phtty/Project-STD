@@ -45,6 +45,21 @@
 
 #pragma once
 
+/** @brief 本板跑不跑级联 —— **由网格形状推导**（单卡 = COLS×ROWS == 1 = 不跑）
+ *
+ *  单卡板上整个 `app_cascade.c` **编译成空**：不占 Flash、不占那 7KB CCMRAM
+ *  （协议环 4096 + 帧队列 2×1435）、不发每 10 秒一次的 PING、也不读身份记录与拨码。
+ *  与"没有级联之前的那套功能"逐字一致。
+ *
+ *  **刻意不走"从构建清单里删文件"那条路**：Makefile 的应用源清单是两块板共享的，
+ *  删掉会连 5006048 一起失去级联；而 EIDE 那份清单要用户手动维护。编译成空则两边
+ *  清单都不用动。
+ *
+ *  测试套件要跑级联：在 include 本头之前 `#define BOARD_CASCADE_ENABLED 1`。 */
+#ifndef BOARD_CASCADE_ENABLED
+#define BOARD_CASCADE_ENABLED (((BOARD_CASCADE_COLS) * (BOARD_CASCADE_ROWS)) > 1)
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -275,6 +290,8 @@ typedef struct [[gnu::packed]] {
  * 否则光传感器、以及将来任何"只有主卡该做"的事，都得去依赖级联协议。 */
 
 /* ---- 协议控制块（供板级 initcall 追加绑定用）---- */
+#if BOARD_CASCADE_ENABLED
+
 pcb_t *app_cascade_pcb(void);
 
 /** @brief 枚举：主卡广播一次 PING。上电初始化后与运行期都可以调。 */
@@ -282,10 +299,21 @@ int32_t app_cascade_ping(void);
 
 /** @brief 整屏调光：主卡广播一次亮度等级。从卡收到后写自己的 light_level。 */
 
+int32_t app_cascade_broadcast_bright(uint8_t level);
+
+#endif /* BOARD_CASCADE_ENABLED */
+
 /** @brief **认领主卡**：本卡成为主卡、写记录、并把识别帧发给其余每一张卡
  *
  *  由按键（TEST）触发。**只投递请求、立刻返回** —— 真正的动作（写 flash + 发帧 +
  *  等 ACK 最长约 1s）由级联任务做：`s_tx` 与轮次都是它的，按键所在的工厂测试任务
- *  不能碰。 */
+ *  不能碰。
+ *
+ *  **单卡板上是空函数**（没有级联可认领）：调用点因此不必带条件编译。 */
+#if BOARD_CASCADE_ENABLED
 void app_cascade_claim_master(void);
-int32_t app_cascade_broadcast_bright(uint8_t level);
+#else
+static inline void app_cascade_claim_master(void)
+{
+}
+#endif
