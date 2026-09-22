@@ -37,7 +37,12 @@ typedef struct {
     uint32_t dummy;
     /* pl_uart 报"DMA 发送没起来"时会打它（诊断用），桩不推进这个状态 */
     uint32_t State;
+    struct {
+        uint32_t Mode; /* pl_uart 把接收流改成循环模式 */
+    } Init;
 } DMA_HandleTypeDef;
+
+#define DMA_CIRCULAR (1U << 8)
 
 typedef struct {
     TIM_TypeDef *Instance;

@@ -24,6 +24,7 @@ typedef struct {
     pl_uart_dir_fn_t dir_cb;   /* Device 层注入的 RS485 方向控制，无则为 NULL */
     uint8_t *rx_buf;
     uint16_t rx_buf_size;
+    uint16_t rx_pos; /* 循环 DMA 里"已经交出去到哪了"（相对缓冲起点） */
     /* ---- TX 串行化与完成通知 ----
      * 锁是**两种发送模式共用**的（见 pl_uart_send_ex 的说明），不是 DMA 专用。 */
     osMutexId_t     tx_lock;
@@ -56,6 +57,16 @@ static uint32_t _wire_ms(uint32_t baud, size_t len)
     return (uint32_t)(((uint64_t)len * 10U * 1000U) / baud) + 2U;
 }
 
+/* ---- 接收侧诊断开关（限次）----
+ * "HAL 之后补武装"那一行：HAL 的溢出路径会中止接收 DMA 且不重新武装，
+ * 补上它才不会让接收永久停摆。查完把这个开关连同那几行一起删掉。 */
+#define PL_UART_RX_DIAG 1
+#if PL_UART_RX_DIAG
+#define PLU_LOG(...) printf(__VA_ARGS__)
+#else
+#define PLU_LOG(...) ((void)0)
+#endif
+
 /* ---- 重新武装接收 DMA ----
  *
  * **返回值必须看**：重启失败 = 这一路**从此再也收不到任何东西**，而且一声不响。
@@ -66,6 +77,10 @@ static uint32_t _wire_ms(uint32_t baud, size_t len)
  * 就走一次这个函数。任何一次没武装上，后面就全哑了。 */
 static bool _rx_rearm(uart_ctx_t *ctx)
 {
+    /* 重新武装 = DMA 从缓冲起点重新转，已交付位置随之归零（错误路径里
+       丢掉的字节只能丢，不能重放） */
+    ctx->rx_pos = 0;
+
     if (HAL_UART_Receive_DMA(ctx->huart, ctx->rx_buf, ctx->rx_buf_size) == HAL_OK) return true;
 
     /* 兜一次：把接收 DMA 流与 UART 的接收状态都拽回可用再试。
@@ -81,51 +96,37 @@ static bool _rx_rearm(uart_ctx_t *ctx)
     return false;
 }
 
-/* ---- 内部：UART 空闲中断处理 ---- */
-/* ---- 接收侧诊断（限次）----
- * 要回答的是"突发中停止交付"那段时间里**中断到底有没有进来**：
- *  · 进来了但没有 IDLE 标志 → 是标志被谁清了/没置位；
- *  · 根本没进来 → 是 DMA 或 IDLEIE 停了。
- * 这两者的修法完全不同，不量就分不开。查完删掉。 */
-#define PL_UART_RX_DIAG 1
-#if PL_UART_RX_DIAG
-#define PLU_LOG(...) printf(__VA_ARGS__)
-#else
-#define PLU_LOG(...) ((void)0)
-#endif
-
+/* ---- 内部：UART 空闲中断处理 ----
+ *
+ * **接收 DMA 跑循环模式**，这里只做一件事：算出"从上次交出去到现在又收了多少"。
+ *
+ * 为什么不用"中止 → 取长度 → 重开"那个经典写法：中止窗口里到达的字节必然丢失，
+ * 而且**一旦发生溢出（ORE），IDLE 位就不再置位** —— 空闲交付这条路彻底断掉，
+ * 中断从此只被 EIE 驱动、空转，接收再也起不来。实测就是这样：突发帧期间一溢出，
+ * 从卡收不到任何东西，直到十几秒后偶然恢复；全程零报错、CR3 也一切正常
+ * （DMAR/EIE 都在），从寄存器上完全看不出问题。
+ *
+ * 循环模式没有中止动作，也就没有那个窗口。 */
 static void uart_idle_handle(uart_ctx_t *ctx)
 {
-    if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) {
-        static uint8_t n;
-        if (n < 8) {
-            n++;
-            PLU_LOG("[pl_uart] ISR 进来了但**无 IDLE 标志**（第 %u 次，CR3=%08X）\n", (unsigned)n,
-                   (unsigned)ctx->huart->Instance->CR3);
-        }
-        return;
-    }
+    if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) return;
     __HAL_UART_CLEAR_IDLEFLAG(ctx->huart);
 
-    /* **只停接收，绝不能用 HAL_UART_DMAStop()** —— 那个函数在 gState 是 BUSY_TX 时
-     * 会把**发送** DMA 一并中止（见 HAL 源码里那两段对称的 dmarequest 判断）。
-     *
-     * 而接收侧的这个中断随时可能落在一次发送进行中：半双工收发器切回接收那一刻，
-     * 线路本来就是空闲的，IDLE 会立刻置位。此时若把发送 DMA 中止掉，这一帧就永远
-     * 等不到 TC —— 表现为 `[pl_uart] DMA 发送超时（N 字节）`，丢的却是**与接收毫无
-     * 关系的那一帧**，且丢哪一帧取决于时序，看上去随机。
-     *
-     * 症状第一次出现在级联开轮时：主卡发完 PING 紧接着就发 BEGIN，两帧首尾相接，
-     * 接收侧的中断正好压在 BEGIN 的发送中间。此前 PING 是孤立的一帧，撞不上。 */
-    HAL_UART_AbortReceive(ctx->huart);
+    const uint16_t pos =
+        (uint16_t)(ctx->rx_buf_size - __HAL_DMA_GET_COUNTER(ctx->huart->hdmarx));
+    if (pos == ctx->rx_pos) return; /* 没有新数据 */
 
-    uint16_t len = ctx->rx_buf_size - __HAL_DMA_GET_COUNTER(ctx->huart->hdmarx);
-
-    if (ctx->rx_cb && len > 0)
-        ctx->rx_cb(ctx->rx_buf, len, ctx->rx_cb_ctx);
-
-    (void)_rx_rearm(ctx);
-    __HAL_UART_ENABLE_IT(ctx->huart, UART_IT_IDLE);
+    if (pos > ctx->rx_pos) {
+        const uint16_t n = (uint16_t)(pos - ctx->rx_pos);
+        if (ctx->rx_cb) ctx->rx_cb(&ctx->rx_buf[ctx->rx_pos], n, ctx->rx_cb_ctx);
+    } else {
+        /* 绕过缓冲末尾：**分两段交**。协议侧的环形缓冲区本来就是流式的，
+           一帧被拆成两次交付无妨（它按字节累积）。 */
+        const uint16_t n1 = (uint16_t)(ctx->rx_buf_size - ctx->rx_pos);
+        if (n1 && ctx->rx_cb) ctx->rx_cb(&ctx->rx_buf[ctx->rx_pos], n1, ctx->rx_cb_ctx);
+        if (pos && ctx->rx_cb) ctx->rx_cb(ctx->rx_buf, pos, ctx->rx_cb_ctx);
+    }
+    ctx->rx_pos = pos;
 }
 
 /* ---- initcall ---- */
@@ -275,6 +276,12 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
 
     ctx->rx_buf      = buf;
     ctx->rx_buf_size = len;
+    ctx->rx_pos      = 0;
+
+    /* **循环模式**：DMA 一直转，空闲中断只用来算长度（见 uart_idle_handle 的说明）。
+       在这里改而不是在板级 usart.c 里改 —— 那是 CubeMX 产物、用户手工维护，
+       而"这一路接收用循环 DMA"是平台层的机制选择。 */
+    ctx->huart->hdmarx->Init.Mode = DMA_CIRCULAR;
 
     if (!_rx_rearm(ctx)) return -1;
 
