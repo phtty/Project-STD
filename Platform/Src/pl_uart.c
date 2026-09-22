@@ -86,7 +86,10 @@ static bool _rx_rearm(uart_ctx_t *ctx)
     /* 兜一次：把接收 DMA 流与 UART 的接收状态都拽回可用再试。
        HAL_UART_AbortReceive 正常会把两者都复位；走到这儿说明有一步没成。 */
     HAL_DMA_Abort(ctx->huart->hdmarx);
-    ctx->huart->RxState = HAL_UART_STATE_READY;
+    /* HAL_DMA_Abort 对**非 BUSY** 的流只返回错误、不改状态（中止路径留下的
+       HAL_DMA_STATE_ABORT 正是这种），所以这里显式拽回 READY —— 否则永远武装不上。 */
+    ctx->huart->hdmarx->State = HAL_DMA_STATE_READY;
+    ctx->huart->RxState       = HAL_UART_STATE_READY;
     if (HAL_UART_Receive_DMA(ctx->huart, ctx->rx_buf, ctx->rx_buf_size) == HAL_OK) return true;
 
     printf("[pl_uart] **接收重启失败**（uart RxState=%u，RX DMA State=%u）—— "
@@ -318,6 +321,23 @@ void pl_uart_irq_handler(uint8_t id)
      * 这一条不改"无条件清标志"的性质：HAL 照样无条件执行，只是挪到后面。
      * 初始化期 ctx 还是空的，这里照旧跳过（HAL 那一步会清掉标志，不会成风暴）。 */
     if (g_uart_ctx[id].huart) uart_idle_handle(&g_uart_ctx[id]);
+
+    /* ---- **自己清掉错误标志，不让 HAL 的错误路径跑起来** ----
+     *
+     * HAL 处理溢出等错误时会**中止接收 DMA**，并把它留在 `HAL_DMA_STATE_ABORT` 上；
+     * 而 `HAL_DMA_Abort` 对非 BUSY 的流只返回错误、**不改状态** —— 于是这一路
+     * **再也武装不回来**，永久哑掉。实测原话：
+     *     **接收重启失败**（uart RxState=32，RX DMA State=5）—— 本路从此收不到任何数据
+     *
+     * 而溢出本身根本不该是致命的：丢一个字节，帧的 CRC 会拒掉它，协议层重新同步；
+     * 整路停摆才是灾难。所以在这里把错误标志清掉（读 SR + 读 DR），HAL 就看不到错误，
+     * 也就不会去动 DMA。
+     *
+     * **只在真的出错时才清** —— 那个序列会读走 DR，正常情况下会从 DMA 嘴里抢走一个字节。 */
+    if (__HAL_UART_GET_FLAG(h, UART_FLAG_ORE) || __HAL_UART_GET_FLAG(h, UART_FLAG_FE) ||
+        __HAL_UART_GET_FLAG(h, UART_FLAG_NE) || __HAL_UART_GET_FLAG(h, UART_FLAG_PE)) {
+        __HAL_UART_CLEAR_PEFLAG(h);
+    }
 
     HAL_UART_IRQHandler(h);
 

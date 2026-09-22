@@ -140,6 +140,13 @@ extern uint32_t s_fake_reg;
 #define __HAL_DBGMCU_FREEZE_TIM7() ((void)0)
 
 #define UART_FLAG_IDLE (1U << 0)
+#define UART_FLAG_ORE  (1U << 1)
+#define UART_FLAG_FE   (1U << 2)
+#define UART_FLAG_NE   (1U << 3)
+#define UART_FLAG_PE   (1U << 4)
+#define HAL_UART_STATE_ERROR (0x20U)
+#define HAL_DMA_STATE_READY  (0x01U)
+#define __HAL_UART_CLEAR_PEFLAG(h)     ((void)(h))
 #define UART_IT_IDLE   (1U << 1)
 
 #define __HAL_UART_GET_FLAG(h, f)      ((s_fake_reg & (f)) != 0)
