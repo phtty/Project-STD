@@ -90,9 +90,19 @@ static osMessageQueueId_t s_casc_queue;
 /* 亮度待下发的轮询周期 */
 #define CASC_BRIGHT_POLL_MS (100U)
 
-/* 等一条 ACK 的上限。40ms @115200 约合 460 字节的往返余量：一帧 ACK 只有 17 字节，
-   剩下的都是对端的转发与任务调度延迟。 */
-#define CASC_ACK_TIMEOUT_MS (40U)
+/* 等一条 ACK 的上限。
+ *
+ * 原定 40ms，是按"一帧 ACK 只有 17 字节 + 转发与调度延迟"估的 —— **估小了**。
+ * 实测从卡从"收到 COMMIT"到"应答上总线"的时延在 3ms 到 87ms 之间波动：87ms 那次
+ * 主卡必然超时，而从卡那边 `sta=0`、它认为自己一切正常 —— 于是两块屏不同步，
+ * 且从卡那一侧看不出任何异常。这是这套协议里最坏的失配形态。
+ *
+ * 200ms 留了足够余量。代价：卡真的掉线时每轮要等 3×200ms，配合 CASC_FAIL_RUN_MAX
+ * 的剔除，最坏 3 秒把它摘掉 —— 可接受。
+ *
+ * 那段波动的来源还没查清（`prepare` 只要 ~2ms，不是它）。主卡的日志会把每次
+ * 实际等待时长打出来，够了就能看出分布。 */
+#define CASC_ACK_TIMEOUT_MS (200U)
 
 /* 等 ACK 期间的轮询周期。只在一轮进行中才跑这么密，空闲时任务阻塞在队列上。 */
 #define CASC_ACK_POLL_MS (1U)
@@ -688,9 +698,16 @@ static void _casc_drain(void)
  *  按 (seq, src) 双重匹配：总线上会有别张卡的应答与上一轮的迟到应答。 */
 static bool _wait_ack(uint8_t from, uint16_t seq, uint32_t deadline)
 {
+    const uint32_t t0 = osKernelGetTickCount();
+
     for (;;) {
         _casc_drain();
-        if (s_ack.valid && s_ack.seq == seq && s_ack.src == from) return true;
+        if (s_ack.valid && s_ack.seq == seq && s_ack.src == from) {
+            /* **把等了多少打出来**：这是"超时该定多少"的唯一依据。40ms 那个数当初是
+               估的，结果实测有 87ms 的回合 —— 以后照这行调，不再拍脑袋。 */
+            CASC_LOG("[casc·主] ← 等应答 %u ms\n", (unsigned)(osKernelGetTickCount() - t0));
+            return true;
+        }
         if ((int32_t)(osKernelGetTickCount() - deadline) >= 0) return false;
         osDelay(CASC_ACK_POLL_MS);
     }
