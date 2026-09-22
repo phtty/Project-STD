@@ -12,6 +12,7 @@
 #include "dev_key.h"
 #include "app_cascade.h" /* 首次按键时认领主卡 */
 #include "app_render.h"
+#include "app_screen.h" /* app_screen_rows/cols：渲染要用**逻辑屏**几何，不是实屏 */
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
 #include "pl_task.h"
@@ -50,15 +51,29 @@ static volatile bool s_factory_active;
 /* ---- 老化辅助 ---- */
 static void _aging_fill_screen(font_size_t size, font_type_t type, const char *ch_utf8, uint8_t ch_len)
 {
-    dev_display_t *dsp = dev_display_get();
+    /* **一律用逻辑屏几何**（`app_screen_rows/cols`），不用实屏（`dsp->screen_*`）：
+       多卡时逻辑屏是整台设备（如 224×100），实屏只是本卡那半幅（224×50）。
+       用实屏的话内容会落到整屏的左上角那一格 —— 也就是**从卡那一格**，
+       于是"主卡按一下、整设备一起老化"变成"主卡自己黑屏、从卡显示内容"。
 
-    uint8_t cols = dsp->screen_cols / size;
-    uint8_t rows = dsp->screen_rows / size;
+       `app_screen_rows/cols` 在门面停用（单卡、地址不在表里）时会回落到本卡屏几何，
+       所以这段在哪种形态下都对。 */
+    const uint16_t sw = app_screen_rows();
+    const uint16_t sh = app_screen_cols();
+
+    uint8_t cols = (uint8_t)(sh / size);
+    uint8_t rows = (uint8_t)(sw / size);
     if (cols == 0) cols = 1;
     if (rows == 0) rows = 1;
 
-    dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
-    dsp->dirty = false; /* 防止 scan 在 fill 和 render 之间输出全黑帧 */
+    /* 清屏也走逻辑屏：`dev_display_fill(dsp, …)` 清的是**本卡实屏缓冲**，
+       多卡主卡上它与画布是两回事（清了也白清，下一轮提交又覆盖回去） */
+    app_render(&(render_cfg_t){
+        .type  = RENDER_FILL,
+        .x     = 0,
+        .y     = 0,
+        .color = COLOR_BLACK,
+    });
 
     /* 把字符重复 cols×rows 份放缓冲区，word_wrap 自动分行 */
     static char buf[256];
@@ -73,8 +88,8 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
         .type      = RENDER_TEXT,
         .x         = 0,
         .y         = 0,
-        .w         = dsp->screen_rows,
-        .h         = dsp->screen_cols,
+        .w         = sw,
+        .h         = sh,
         .color     = COLOR_WHITE,
         .text      = buf,
         .len       = pos,
@@ -114,13 +129,20 @@ static void factory_monitor_task(void *argument)
         app_cascade_claim_master();
 
         /* ===== SHOW_CODE ===== */
-        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
+        /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）
+           —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格） */
+        app_render(&(render_cfg_t){
+            .type  = RENDER_FILL,
+            .x     = 0,
+            .y     = 0,
+            .color = COLOR_BLACK,
+        });
         app_render(&(render_cfg_t){
             .type      = RENDER_TEXT,
             .x         = 0,
             .y         = 0,
-            .w         = dsp->screen_rows,
-            .h         = dsp->screen_cols,
+            .w         = app_screen_rows(),
+            .h         = app_screen_cols(),
             .color     = COLOR_GREEN,
             .text      = PROGRAM_CODE,
             .len       = strlen(PROGRAM_CODE),
@@ -139,7 +161,14 @@ static void factory_monitor_task(void *argument)
         osThreadSuspend(g_light_sensor_task_handle);
         dev_display_set_brightness(dsp, 7);
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
-            dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, s_dead_pixel_colors[i]);
+            /* 同样走逻辑屏：多卡时这一下把**两块屏**一起点亮（单卡就是本卡那块）——
+               整设备老化要的正是这个，而不是只点亮主卡自己那半幅 */
+            app_render(&(render_cfg_t){
+                .type  = RENDER_FILL,
+                .x     = 0,
+                .y     = 0,
+                .color = s_dead_pixel_colors[i],
+            });
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
 
@@ -157,7 +186,9 @@ static void factory_monitor_task(void *argument)
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
             for (uint8_t size_idx = 0; size_idx < AGING_SIZE_COUNT; size_idx++) {
                 font_size_t fsize = s_aging_sizes[size_idx];
-                if (fsize > dsp->screen_rows || fsize > dsp->screen_cols) continue;
+                /* 字号能不能放下，判的是**逻辑屏**（多卡时整台设备更大，
+                   大字在上面才排得开） */
+                if (fsize > app_screen_rows() || fsize > app_screen_cols()) continue;
 
                 const char *ch_ptr = AGING_TEXT;
                 while (*ch_ptr) {
@@ -178,9 +209,14 @@ static void factory_monitor_task(void *argument)
             if (aging_exit) break;
         }
 
-        /* 退出工厂模式 */
+        /* 退出工厂模式 —— 同样清**逻辑屏**（多卡时两块一起清空） */
         s_factory_active = false;
-        dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
+        app_render(&(render_cfg_t){
+            .type  = RENDER_FILL,
+            .x     = 0,
+            .y     = 0,
+            .color = COLOR_BLACK,
+        });
     }
 }
 

@@ -249,6 +249,15 @@ void frame_dispatch_task(void *argument)
                                             (unsigned)frame_len);
                         }
                     }
+
+                    /* ---- 接收事件监听：**在这里**通知，而不是在通道收字节那一层 ----
+                       两个差别都是现场踩出来的：
+                        · 只有到这一步才知道这帧属于**哪个协议** —— 设备内部总线（级联）
+                         的 ACK/PRESENT 不是"上位机来数据"，不能算（它会把正在跑的工厂
+                         测试反复打断：按第一下之后再也推不动）。
+                        · 到了这一步说明**一整帧已经收齐并通过了本协议的帧头校验** ——
+                         半帧、伪帧、别人的帧都不算"上位机下发了指令"。 */
+                    if (s_rx_listener && !p->internal_bus) s_rx_listener();
                     goto account;
                 }
 
@@ -341,8 +350,6 @@ void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *dat
         }
         rb_unlock(rb);
     }
-
-    if (s_rx_listener) s_rx_listener();
 
     /* 通知帧分发任务：来源在此拷进框架自有存储，调用方的指针随后即可失效 */
     ccb_notify_t notify = {.ccb = (ccb_t *)ccb, .len = len, .topic = {0}};

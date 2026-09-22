@@ -443,16 +443,87 @@ static void rx_listener(void)
     s_listener_calls++;
 }
 
+/** 接收事件监听 —— 语义是"**上位机下发了一条指令**"（工厂模式据此退出）
+ *
+ *  两条边界都是现场踩出来的，不是推演出来的：
+ *   · **半帧不算**：字节到了、帧没齐 → 不触发（调用方拿到的必须是"一条指令"）；
+ *   · **设备内部总线不算**：级联的 PRESENT/ACK 在老化测试期间每轮都有，
+ *     让它们触发监听会把正在跑的工厂测试反复打断 —— 现场表现就是
+ *     "按第一下之后测试再也推不动"。
+ *
+ *  反向验证：把监听点退回 `app_ccb_dispatch`（收到字节就通知），
+ *  或去掉 `!p->internal_bus` 那个条件，③ 会立刻红。 */
 static void test_rx_listener(void)
 {
-    TEST_BEGIN("接收事件监听：每次通道收数据触发一次");
+    TEST_BEGIN("接收事件监听：只在**非内部总线协议的有效帧**上触发");
+
+    /* **同步点变了**：通知发生在帧分发任务里（收到整帧之后），不再是
+       `app_ccb_dispatch` 里同步做的 —— 所以每条都要先 `wait_frame` 等到那一帧
+       投递出来，再断言监听次数。少了这一步，断言会在任务还没跑到时就下结论。 */
+
+    /* ① 外部协议、一整帧 → 触发一次 */
     scenario_begin();
+    s_pa.base.internal_bus = false;
     app_proto_bind(&s_pa.base, &s_chan_a);
     script(&s_pa, PCB_PROBE_READY, 1);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "Z", 1);
-    CHECK(s_listener_calls == 1);
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK_MSG(s_listener_calls == 1, "一整帧应触发一次，得到 %d", s_listener_calls);
+
+    /* ② 半帧（WAIT）不算，补齐成整帧才算 —— 半帧那一下**不许**提前通知 */
+    scenario_begin();
+    app_proto_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, PCB_PROBE_WAIT, 0);
+
+    s_listener_calls = 0;
+    feed(&s_chan_a, "A", 1); /* 只有半帧 */
+
+    script_begin(&s_pa);
+    script(&s_pa, PCB_PROBE_READY, 2);
+    feed(&s_chan_a, "B", 1); /* 补齐 */
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK_MSG(s_listener_calls == 1, "半帧不该通知、整帧才通知：共应 1 次，得到 %d",
+              s_listener_calls);
+
+    /* ③ 设备内部总线（级联）：整帧也不触发 */
+    scenario_begin();
+    s_pa.base.internal_bus = true;
+    app_proto_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, PCB_PROBE_READY, 1);
+    script(&s_pa, PCB_PROBE_READY, 1);
+
+    s_listener_calls = 0;
+    feed(&s_chan_a, "ZZ", 2);
+    CHECK(wait_frame(&s_pa, 500)); /* 两帧都投递出来（同步点） */
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK_MSG(s_listener_calls == 0, "内部总线协议的帧不该触发监听，得到 %d", s_listener_calls);
+    s_pa.base.internal_bus = false; /* 还原，别影响后面的用例 */
+
+    /* ④ 伪帧（FAKE）：跳 1 字节重试，谁都还没收下 → 不触发 */
+    scenario_begin();
+    app_proto_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, PCB_PROBE_FAKE, 0);
+    script(&s_pa, PCB_PROBE_READY, 1);
+
+    s_listener_calls = 0;
+    feed(&s_chan_a, "xZ", 2); /* 先一个伪字节，再一整帧 */
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK_MSG(s_listener_calls == 1, "伪帧不该通知，只有后面那整帧算：应 1 次，得到 %d",
+              s_listener_calls);
+
+    /* ⑤ 一批里的两条帧 → 两次（**每帧**一次，不是每批一次） */
+    scenario_begin();
+    app_proto_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, PCB_PROBE_READY, 1);
+    script(&s_pa, PCB_PROBE_READY, 1);
+
+    s_listener_calls = 0;
+    feed(&s_chan_a, "ZZ", 2);
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK(wait_frame(&s_pa, 500));
+    CHECK_MSG(s_listener_calls == 2, "两条帧应触发两次，得到 %d", s_listener_calls);
 }
 
 static void test_ccb_send(void)

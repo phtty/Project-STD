@@ -122,6 +122,13 @@ struct pcb {
     ring_buffer_t     *rb;          /**< 协议自有缓冲区（须先 rb_init）*/
     osMessageQueueId_t queue;       /**< 协议自有帧队列，在 sw initcall 中创建 */
     uint16_t           payload_max; /**< 本协议最长帧，须 ≤ FRAME_DATA_MAX_LEN */
+    /** @brief 本协议的流量走的是**设备内部总线**（如级联的板间 485），不是上位机下发
+     *
+     *  置位的协议**不触发**接收事件监听（`app_dispatch_register_rx_listener`）——
+     *  那个监听的语义是"上位机来数据了"（工厂模式据此退出），而级联的 ACK/PRESENT
+     *  是设备自己的心跳：老化测试跑起来之后每轮都有，会把它反复打断
+     *  （现场表现：按第一下之后测试再也推不动）。 */
+    bool               internal_bus;
 };
 
 /* ---- 通道抽象（OCP 虚表）---- */
@@ -202,7 +209,11 @@ int32_t ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint1
 /** @brief 回复到本帧来源（ccb_send_to(ccb, nullptr, ...) 的便捷形式） */
 int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len);
 
-/** @brief 注册接收事件监听（每收到一段数据触发一次）*/
+/** @brief 注册接收事件监听：收到一条**非设备内部总线**协议的**有效帧**时触发一次
+ *
+ *  **不再是"每收到一段字节"**：字节级的通知会把"半帧"和"设备自己的内部流量"都算进来，
+ *  而这条监听的语义是"上位机下发了指令"（工厂模式据此退出）。判定点在帧分发那一层 ——
+ *  只有到那里才知道这一帧属于哪个协议、是不是完整的帧。 */
 void app_dispatch_register_rx_listener(dispatch_rx_listener_t fn);
 
 void frame_dispatch_task(void *argument);
