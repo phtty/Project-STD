@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "app_cascade.h"
+#include "app_screen.h" /* 新桩要用到 screen_card_state_t */
 #include "app_dispatch.h"
 #include "dev_display.h" /* dev_display_get 的桩要用到类型 */
 #include "ring_buffer.h"
@@ -31,6 +32,12 @@ void     app_screen_set_brightness(uint8_t l) { (void)l; }
 uint8_t  app_screen_get_brightness(void) { return 0; }
 bool     app_screen_brightness_take_pending(uint8_t *l) { (void)l; return false; }
 dev_display_t *dev_display_get(void) { return nullptr; } /* PRESENT 用，本套件不测那条 */
+uint8_t app_screen_index_of_addr(uint8_t a) { (void)a; return 0xFF; }
+screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return SCREEN_CARD_ONLINE; }
+void app_screen_card_set_state(uint8_t i, screen_card_state_t st) { (void)i; (void)st; }
+void app_screen_note_round(uint16_t seq) { (void)seq; }
+void app_screen_note_retrans(void) {}
+
 
 int32_t  ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
 {

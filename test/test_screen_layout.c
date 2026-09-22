@@ -524,6 +524,77 @@ static void case_addr_index_mapping(void)
     CHECK_MSG(app_screen_index_of_addr(9) == 0xFF, "表中没有的地址应返回 0xFF");
 }
 
+/* ---- 告警监听：只记调用，不做任何事 ---- */
+static int     s_alarm_calls;
+static uint8_t s_alarm_addr;
+static uint8_t s_alarm_st;
+
+static void on_alarm(uint8_t addr, uint8_t st)
+{
+    s_alarm_calls++;
+    s_alarm_addr = addr;
+    s_alarm_st   = st;
+}
+
+/** 状态快照与可选告警：**不注册就完全静默**，注册后只在跳变时触发 */
+static void case_status_and_alarm(void)
+{
+    TEST_BEGIN("状态快照与告警：不注册完全静默；注册后只在状态真的变了时触发");
+
+    canvas_reset_mc(48, 16, 1, 2, 1); /* 下标 0 = addr 1（从卡），下标 1 = addr 0（本卡） */
+
+    app_screen_status_t st;
+    app_screen_status(&st);
+    CHECK_MSG(st.online_mask == 0, "刚建表谁都不在线，online_mask 应为 0，得到 %02X",
+              (unsigned)st.online_mask);
+    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_MISSING,
+              "建表初值应是 MISSING（= 从未应答过，多半是配置错），得到 %u",
+              (unsigned)app_screen_card_state(0));
+
+    /* **没注册监听：改状态不产生任何回调** —— 这是"上报是可选的"那条决策的落点 */
+    app_screen_register_alarm(nullptr);
+    s_alarm_calls = 0;
+    app_screen_card_set_state(0, SCREEN_CARD_ONLINE);
+    CHECK_MSG(s_alarm_calls == 0, "没注册监听时不该触发任何回调");
+
+    app_screen_status(&st);
+    CHECK_MSG(st.online_mask == 0x01, "addr 1 在线 → online_mask 的位 0 置起，得到 %02X",
+              (unsigned)st.online_mask);
+    CHECK_MSG(st.evict_cnt == 0, "上线不算剔除");
+
+    app_screen_register_alarm(on_alarm);
+
+    s_alarm_calls = 0;
+    app_screen_card_set_state(0, SCREEN_CARD_ONLINE); /* 状态没变 */
+    CHECK_MSG(s_alarm_calls == 0, "状态没变不该触发告警 —— 否则上位机会被同一件事反复打扰");
+
+    app_screen_card_set_state(0, SCREEN_CARD_OFFLINE);
+    CHECK_MSG(s_alarm_calls == 1 && s_alarm_addr == 1 && s_alarm_st == SCREEN_CARD_OFFLINE,
+              "剔除应触发一次告警（addr=1, OFFLINE），得到 %d 次 addr=%u st=%u", s_alarm_calls,
+              (unsigned)s_alarm_addr, (unsigned)s_alarm_st);
+
+    app_screen_status(&st);
+    CHECK_MSG(st.online_mask == 0, "剔除后应不在线");
+    CHECK_MSG(st.evict_cnt == 1, "剔除计数应为 1，得到 %u", (unsigned)st.evict_cnt);
+    CHECK_MSG(st.last_alarm == 1, "last_alarm 应是刚跳变的卡地址，得到 %u",
+              (unsigned)st.last_alarm);
+
+    app_screen_note_retrans();
+    app_screen_note_retrans();
+    app_screen_note_round(0x1234);
+    app_screen_status(&st);
+    CHECK_MSG(st.retrans_cnt == 2, "重传计数应为 2，得到 %u", (unsigned)st.retrans_cnt);
+    CHECK_MSG(st.seq_lo == 0x34, "序号只取低 8 位，应为 34，得到 %02X", (unsigned)st.seq_lo);
+
+    /* 越界一律安全返回，不越界读 */
+    CHECK_MSG(app_screen_card_state(9) == SCREEN_CARD_MISSING, "越界下标应返回 MISSING");
+    app_screen_card_set_state(9, SCREEN_CARD_OFFLINE); /* 不该崩、不该改到别的卡 */
+    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_OFFLINE, "越界写入不该动到别的卡");
+    app_screen_status(nullptr); /* 空指针不该崩 */
+
+    app_screen_register_alarm(nullptr); /* 别影响后面的用例 */
+}
+
 /** 地址不在切分表里：停用门面，**不静默降级**成"单卡占满" */
 static void case_self_addr_not_in_table(void)
 {
@@ -551,6 +622,7 @@ int main(void)
     case_commit_self_matches_canvas();
     case_master_below();
     case_addr_index_mapping();
+    case_status_and_alarm();
     case_self_addr_not_in_table();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

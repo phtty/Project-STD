@@ -81,6 +81,12 @@ bool    app_screen_brightness_take_pending(uint8_t *l)
     (void)l;
     return false;
 }
+uint8_t app_screen_index_of_addr(uint8_t a) { (void)a; return 0xFF; }
+screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return SCREEN_CARD_ONLINE; }
+void app_screen_card_set_state(uint8_t i, screen_card_state_t st) { (void)i; (void)st; }
+void app_screen_note_round(uint16_t seq) { (void)seq; }
+void app_screen_note_retrans(void) {}
+
 
 /* 本卡实屏：几何必须与 BEGIN 里的矩形一致，否则从卡回 NACK —— 这正是被测行为之一 */
 #define DEV_W (48U)

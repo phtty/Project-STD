@@ -92,6 +92,77 @@ const screen_card_t *app_screen_card(uint8_t card_idx)
     return (card_idx < s_layout.count) ? &s_layout.cards[card_idx] : nullptr;
 }
 
+/* ================================================================
+ *  卡片状态与整屏状态快照
+ * ================================================================ */
+
+/* 最近一轮序号：**只存低 8 位**，只为日志对照，不参与任何判断 */
+static uint8_t s_status_seq_lo;
+
+static app_screen_alarm_fn_t s_alarm;
+static uint16_t              s_retrans_cnt;
+static uint8_t               s_evict_cnt;
+static uint8_t               s_last_alarm;
+
+screen_card_state_t app_screen_card_state(uint8_t card_idx)
+{
+    const screen_card_t *c = app_screen_card(card_idx);
+    return c ? (screen_card_state_t)c->state : SCREEN_CARD_MISSING;
+}
+
+void app_screen_card_set_state(uint8_t card_idx, screen_card_state_t st)
+{
+    /* **必须走 s_cards[] 而不是 s_layout.cards** —— 后者是 const 指针（表对外只读），
+       从这里改会被编译器拦下（或悄悄写进只读段）。 */
+    screen_card_t *c = (card_idx < s_layout.count) ? &s_cards[card_idx] : nullptr;
+    if (!c || c->state == (uint8_t)st) return; /* 没变就不算一次跳变 */
+
+    const uint8_t addr = c->addr;
+    c->state           = (uint8_t)st;
+
+    if (st == SCREEN_CARD_OFFLINE) s_evict_cnt++;
+    s_last_alarm = addr;
+
+    /* **不注册就什么都不发生** —— 协议只暴露状态，不决定去向，也不认识任何上层协议。
+       要报的产品自己注册；不报的产品一个字节都不产生。 */
+    if (s_alarm) s_alarm(addr, (uint8_t)st);
+}
+
+void app_screen_register_alarm(app_screen_alarm_fn_t fn)
+{
+    s_alarm = fn;
+}
+
+void app_screen_note_retrans(void)
+{
+    s_retrans_cnt++;
+}
+
+void app_screen_note_round(uint16_t seq)
+{
+    s_status_seq_lo = (uint8_t)seq;
+}
+
+void app_screen_status(app_screen_status_t *out)
+{
+    if (!out) return;
+
+    out->seq_lo      = s_status_seq_lo;
+    out->online_mask = 0;
+    out->retrans_cnt = s_retrans_cnt;
+    out->evict_cnt   = s_evict_cnt;
+    out->last_alarm  = s_last_alarm;
+
+    /* 位 i ↔ 地址 i+1：地址 0 是本卡，不进掩码。从卡地址上限 0x1F，8 位够放
+       （本工程 SCREEN_CARD_MAX=4，实际只用到低 3 位）。 */
+    for (uint8_t i = 0; i < s_layout.count; i++) {
+        const screen_card_t *c = &s_layout.cards[i];
+        if (c->addr >= 1U && c->addr <= 8U && c->state == (uint8_t)SCREEN_CARD_ONLINE)
+            out->online_mask |= (uint8_t)(1U << (c->addr - 1U));
+    }
+}
+
+
 uint8_t app_screen_index_of_addr(uint8_t addr)
 {
     for (uint8_t i = 0; i < s_layout.count; i++)
@@ -154,6 +225,9 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
                 .y     = (uint16_t)(r * ch),
                 .w     = cw,
                 .h     = ch,
+                /* 运行期状态：建表时谁都没应答过 —— MISSING 与 OFFLINE 的区别
+                   就在这里起步（从卡根本没起来 vs 曾经在线后掉线）。 */
+                .state = SCREEN_CARD_MISSING,
             };
         }
     return true;

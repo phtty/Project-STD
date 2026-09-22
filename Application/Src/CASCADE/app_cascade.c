@@ -120,6 +120,15 @@ static osMessageQueueId_t s_casc_queue;
 #define CASC_BOOT_ALIGN_TRIES    (5U)
 #define CASC_BOOT_ALIGN_RETRY_MS (1000U)
 
+/* **连续**几轮未完成才剔除。不能一失败就剔 —— 单轮失败多半是总线上的偶发冲突，
+   下一轮自己就好了；剔了反而要等下一次枚举才叫得回来（更慢）。 */
+#define CASC_FAIL_RUN_MAX (5U)
+
+/* 运行期重新枚举的周期。**这是发现"卡回来了"的唯一途径** —— 从卡不会主动说话，
+   掉线后重新上电，只有靠主卡去问才知道。代价是一帧 15 字节的 PING；从卡在线时
+   第一帧 PRESENT 就结束枚举，不会把重试次数耗完。 */
+#define CASC_REENUM_MS (10000U)
+
 /* 上电枚举的收卷时刻（0 = 不判定）与"是否见到过应答"。
  *
  * **为什么要专门报一句**：主卡收不到任何应答时，日志里只是"静悄悄地没有 PRESENT"，
@@ -132,6 +141,29 @@ static bool     s_enum_seen;
 /* 上电枚举的剩余次数与下次发包时刻（0 = 枚举已收尾） */
 static uint8_t  s_ping_left;
 static uint32_t s_ping_next;
+
+/* 下一次重新枚举的时刻 —— 见 CASC_REENUM_MS 的说明 */
+static uint32_t s_reenum_at;
+
+/* 每张从卡的**连续失败轮数**：成功一轮即清零。放协议侧而不是切分表里 ——
+   "失败几轮算掉线"是本协议自己的策略，不是"这张卡长什么样"的部署事实。 */
+static uint8_t s_fail_run[SCREEN_CARD_MAX];
+
+/* 需要立刻开一轮：**刚上线的卡要马上拿到当前内容**。它可能刚插回来，
+   屏上还是掉线前那幅旧的，而等下一次内容更新可能要几分钟。 */
+static bool s_force_round;
+
+/* 发完 PING 之后的"总线安静期"截止时刻 —— 半双工，从卡回 PRESENT 时主卡不能
+   同时在发分片，否则两个节点同时驱动总线，两边都成乱码。 */
+static uint32_t s_bus_quiet_until;
+
+/** @brief 起一轮枚举；已在枚举中则不动 */
+static void _enum_start(uint32_t now)
+{
+    s_ping_left = CASC_PING_TRIES;
+    s_ping_next = now;
+    s_enum_seen = false; /* 只认这一轮发出去之后的应答 */
+}
 
 /* 上电对齐的剩余次数与下次尝试时刻（0 = 对齐已完成或尚未开始）。
    放在这儿（而不是 _round_run 旁边）是因为 _enum_finish 也要写它。
@@ -146,6 +178,7 @@ static void _enum_finish(uint32_t now)
 {
     s_ping_left     = 0;
     s_enum_deadline = now + CASC_BOOT_ALIGN_PING_GAP_MS;
+    s_reenum_at     = now + CASC_REENUM_MS; /* 到点再问一次：卡回来了只有靠问才知道 */
 #if BOARD_SCREEN_CANVAS
     s_align_left = CASC_BOOT_ALIGN_TRIES;
     s_align_next = s_enum_deadline;
@@ -357,6 +390,16 @@ static void _cmd_present(frame_msg_t *msg)
     const casc_present_t *p = (const casc_present_t *)(msg->data + sizeof(casc_hdr_t));
 
     s_enum_seen = true; /* 上电枚举据此判"有没有卡应答" */
+
+    /* **建表**：这张卡在线了。刚上线要**立刻**给它一轮 —— 它可能刚插回来，
+       屏上还是掉线前那幅旧内容，而等下一次内容更新可能要几分钟。
+       这也是"拔线→插回"能自愈的关键一步：枚举把状态改回 ONLINE，这一轮把内容补齐。 */
+    const uint8_t i = app_screen_index_of_addr(p->addr);
+    if (i != 0xFF && app_screen_card_state(i) != SCREEN_CARD_ONLINE) {
+        app_screen_card_set_state(i, SCREEN_CARD_ONLINE);
+        s_fail_run[i] = 0;
+        s_force_round = true;
+    }
 
     printf("[casc] PRESENT addr=%u %ux%u bright=%u ver=%u\n", (unsigned)p->addr,
            (unsigned)casc_get_u16(p->w), (unsigned)casc_get_u16(p->h), (unsigned)p->bright,
@@ -721,6 +764,7 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
         if (attempt) {
             if (!mask) break;
             /* **定向重传**：只补 ACK 报缺的那几片，不是重发整轮 */
+            app_screen_note_retrans();
             _send_frags(c, seq, bmp_len, frag_n, mask);
         }
         CASC_LOG("[casc·主] seq=%u 卡%u 第%u次：发 %02X 那几片 + COMMIT\n", (unsigned)seq,
@@ -762,6 +806,7 @@ static bool _round_run(void)
 
     CASC_LOG("[casc·主] 开轮 seq=%u（共 %u 卡，本卡 addr=%u）\n", (unsigned)seq,
              (unsigned)L->count, (unsigned)me);
+    app_screen_note_round(seq);
 
     for (uint8_t i = 0; i < L->count; i++) {
         const screen_card_t *c = app_screen_card(i);
@@ -769,7 +814,25 @@ static bool _round_run(void)
            （主卡在下时 addr 与下标相反），拿地址当下标会把两块屏的内容对调。
            本卡那块不下发，由下面的本地提交处理。 */
         if (!c || c->addr == me) continue;
-        if (!_round_one_card(i, seq, bright)) all_ok = false;
+
+        /* **不在线的卡直接跳过**：发过去也要等满重试与超时（一轮从 ~130ms 涨到
+           ~250ms），而它那块屏本来就不会更新 —— 各卡各带一整块屏，主卡既改不到
+           别人的屏，也没法命令一张掉线的卡清屏。"替它涂黑"在这里是做不到的事，
+           做了只会把内容毁掉（卡回来时拿到的是黑的）。
+           让它回来的是枚举，不是往黑洞里发数据。 */
+        if (app_screen_card_state(i) != SCREEN_CARD_ONLINE) continue;
+
+        if (_round_one_card(i, seq, bright)) {
+            s_fail_run[i] = 0;
+        } else {
+            all_ok = false; /* 上电对齐据此重试；剔除与否是另一件事 */
+            if (++s_fail_run[i] >= CASC_FAIL_RUN_MAX) {
+                CASC_LOG("[casc·主] 卡 %u 连续 %u 轮未完成 → 剔除（不再发数据，等枚举找回来）\n",
+                         (unsigned)c->addr, (unsigned)s_fail_run[i]);
+                app_screen_card_set_state(i, SCREEN_CARD_OFFLINE);
+                s_fail_run[i] = 0;
+            }
+        }
     }
 
     /* **本地提交放在最后**：主卡自己那块也换到新画面。走的是与从卡完全相同的
@@ -794,8 +857,8 @@ static void casc_task(void *argument)
 {
     (void)argument;
 
-    s_ping_left = CASC_PING_TRIES;
-    s_ping_next = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
+    /* 上电先等 3 秒（从卡通常比主卡晚就绪），之后由"到点重新枚举"那条驱动 */
+    s_reenum_at = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
 
     for (;;) {
         /* 阻塞等第一条（超时取轮询周期而不是 osWaitForever：本任务还兼着周期活，
@@ -817,11 +880,17 @@ static void casc_task(void *argument)
         /* 上电枚举：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒起发，
            没等到应答就再发 —— 见 CASC_PING_TRIES 的说明。
            运行期的重新枚举（拔插、掉线恢复）留到 P4。 */
+        if (app_screen_is_master() && !s_ping_left && s_enum_deadline == 0 &&
+            (int32_t)(now - s_reenum_at) >= 0) {
+            _enum_start(now);
+        }
         if (app_screen_is_master() && s_ping_left && (int32_t)(now - s_ping_next) >= 0) {
             s_ping_left--;
             s_enum_seen = false; /* 只认**这一轮**发出去之后的应答 */
             (void)app_cascade_ping();
-            s_ping_next = now + CASC_PING_RETRY_MS;
+            /* 从卡马上会回 PRESENT —— 这段时间主卡不能再发别的（半双工） */
+            s_bus_quiet_until = now + CASC_BOOT_ALIGN_PING_GAP_MS;
+            s_ping_next       = now + CASC_PING_RETRY_MS;
             if (!s_ping_left) _enum_finish(now); /* 次数用尽：不再等 */
         }
         /* 收到应答就提前收尾，不必把重试次数耗完 */
@@ -840,11 +909,16 @@ static void casc_task(void *argument)
            静默期任务在多卡时不启动，见 app_screen.c 的 _screen_init）。
            单卡时整屏就是本卡自己，走那个任务更直接，这儿不成立。
            放在周期活之后：一轮约 130ms/卡，跑起来本任务就顾不上别的了。 */
-        if (app_screen_is_master() && app_screen_layout()->count > 1) {
+        /* 总线安静期内不开轮：见 s_bus_quiet_until 的说明 */
+        if (app_screen_is_master() && app_screen_layout()->count > 1 &&
+            (int32_t)(now - s_bus_quiet_until) >= 0) {
             bool go = false;
 
             if (s_align_left && (int32_t)(now - s_align_next) >= 0) {
                 go = true; /* 上电对齐到点了 */
+            } else if (!s_align_left && s_force_round) {
+                s_force_round = false;
+                go            = true; /* 有卡刚上线，立刻给它当前内容 */
             } else if (!s_align_left && app_screen_take_pending_settled()) {
                 go = true; /* 画布有新内容且已过静默期 */
             }

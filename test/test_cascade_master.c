@@ -80,6 +80,31 @@ const screen_card_t   *app_screen_card(uint8_t idx) { return (idx < 2) ? &s_card
 uint16_t               app_screen_card_bm_len(uint8_t idx) { return (idx < 2) ? CARD_BM : 0; }
 uint8_t                app_screen_self_index(void) { return SELF_IDX; }
 
+/* ---- 卡片状态：**忠实实现**，不是空桩 ----
+ *
+ * P4 的策略（不在线就跳过、连续失败到阈值剔除、收到 PRESENT 就回到在线）全靠这几个
+ * 函数与轮次配合。给空桩的话，那几条策略在这套用例里就一条也测不到。 */
+static uint8_t s_state[2] = {SCREEN_CARD_MISSING, SCREEN_CARD_MISSING};
+static uint16_t s_last_seq;
+static int      s_retrans_cnt;
+
+screen_card_state_t app_screen_card_state(uint8_t i)
+{
+    return (i < 2) ? (screen_card_state_t)s_state[i] : SCREEN_CARD_MISSING;
+}
+void app_screen_card_set_state(uint8_t i, screen_card_state_t st)
+{
+    if (i < 2) s_state[i] = (uint8_t)st;
+}
+uint8_t app_screen_index_of_addr(uint8_t a)
+{
+    for (uint8_t i = 0; i < 2; i++)
+        if (s_cards[i].addr == a) return i;
+    return 0xFF;
+}
+void app_screen_note_round(uint16_t seq) { s_last_seq = seq; }
+void app_screen_note_retrans(void) { s_retrans_cnt++; }
+
 /** 每张卡一块可辨认的图案 —— 张冠李戴（把 A 卡的矩形发给 B 卡）当场露馅 */
 static void card_pattern(uint8_t idx, uint8_t *out, uint16_t len)
 {
@@ -211,6 +236,18 @@ static void slave_reply(uint8_t type, uint16_t seq, const void *payload, uint16_
     dispatch_pending();
 }
 
+static void slave_send_present(void)
+{
+    casc_present_t p;
+    memset(&p, 0, sizeof(p));
+    p.addr = 1;
+    casc_put_u16(p.w, CARD_W);
+    casc_put_u16(p.h, CARD_H);
+    p.bright    = 3;
+    p.proto_ver = CASC_PROTO_VER;
+    slave_reply(CASC_T_PRESENT, 1, &p, sizeof(p));
+}
+
 static void slave_send_ack(uint16_t seq, uint8_t sta, uint8_t miss)
 {
     const casc_ack_t a = {.sta = sta, .miss_mask = miss};
@@ -309,6 +346,17 @@ static void fixture_reset(void)
     s_extract_calls     = 0;
     s_commit_self_calls = 0;
     s_ack.valid         = false;
+
+    /* 默认：从卡在线。**不在线的卡会被轮次直接跳过**，所以每条用例都得先把它置在线，
+       否则测的就不是它本来要测的东西了。 */
+    s_state[0]      = SCREEN_CARD_ONLINE;
+    s_state[1]      = SCREEN_CARD_ONLINE;
+    s_last_seq      = 0;
+    s_retrans_cnt   = 0;
+    s_force_round   = false;
+    /* 失败计数是 app_cascade.c 的文件级静态，**跨用例会累积** —— 不重置的话
+       几条"让从卡不回 ACK"的用例合起来就把卡剔除了，后面的用例全跟着变。 */
+    for (uint8_t k = 0; k < SCREEN_CARD_MAX; k++) s_fail_run[k] = 0;
 
     s_dev.screen_rows = DEV_W;
     s_dev.screen_cols = DEV_H;
@@ -529,6 +577,65 @@ static void case_one_extract_per_card(void)
               s_extract_calls);
 }
 
+/** 不在线的卡一帧都不发；连续失败到阈值才剔除；PRESENT 回来立刻复在线 */
+static void case_evict_skip_recover(void)
+{
+    TEST_BEGIN("跳过不在线 / 连续失败才剔除 / 收到 PRESENT 立刻复在线");
+
+    /* ---- 从未应答过（MISSING）：一帧都不发 ---- */
+    fixture_reset();
+    s_state[0] = SCREEN_CARD_MISSING;
+    (void)_round_run();
+    CHECK_MSG(s_tx_count == 0, "不在线的卡不该收到任何帧，却发了 %u 帧", (unsigned)s_tx_count);
+    CHECK_MSG(s_commit_self_calls == 1, "没有从卡可发时，主卡自己也该照常更新");
+
+    /* ---- 连续失败到阈值才剔除 ---- */
+    fixture_reset();
+    s_slave.silent = true;
+    for (uint8_t r = 1; r < CASC_FAIL_RUN_MAX; r++) {
+        (void)_round_run();
+        CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_ONLINE,
+                  "第 %u 轮后不该剔除 —— 单轮失败多半是偶发冲突，下一轮自己就好，"
+                  "剔了反而要等下一次枚举才叫得回来",
+                  (unsigned)r);
+    }
+    (void)_round_run();
+    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_OFFLINE, "连续 %u 轮未完成应剔除",
+              (unsigned)CASC_FAIL_RUN_MAX);
+
+    /* ---- 被剔除的卡：**一帧都不再发**（这是剔除的全部收益）---- */
+    const uint8_t before = s_tx_count;
+    (void)_round_run();
+    CHECK_MSG(s_tx_count == before, "被剔除的卡不该再收到任何帧，却发了 %u 帧",
+              (unsigned)(s_tx_count - before));
+    CHECK_MSG(s_commit_self_calls >= 1, "剔除一张卡不该拖住主卡自己的更新");
+
+    /* ---- 它回来了：PRESENT → 立刻复在线，并要求马上开一轮 ---- */
+    s_state[0]    = SCREEN_CARD_OFFLINE;
+    s_force_round = false;
+    slave_send_present();
+    _casc_drain();
+    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_ONLINE, "收到 PRESENT 应复在线");
+    CHECK_MSG(s_force_round,
+              "刚上线的卡应请求**立刻**开一轮 —— 它屏上还是掉线前那幅旧的，"
+              "等下一次内容更新可能要几分钟");
+}
+
+/** 定向重传会计数 —— 状态快照要用它 */
+static void case_retrans_counted(void)
+{
+    TEST_BEGIN("定向重传计入快照计数器");
+
+    fixture_reset();
+    s_slave.drop_mask = 0x01;
+    (void)_round_run();
+    CHECK_MSG(s_retrans_cnt == 1, "补了一次片，计数应为 1，得到 %d", s_retrans_cnt);
+
+    fixture_reset();
+    (void)_round_run();
+    CHECK_MSG(s_retrans_cnt == 0, "没补片时不该有计数，得到 %d", s_retrans_cnt);
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -546,6 +653,8 @@ int main(void)
     case_permanent_loss_gives_up();
     case_nack_gives_up();
     case_one_extract_per_card();
+    case_evict_skip_recover();
+    case_retrans_counted();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

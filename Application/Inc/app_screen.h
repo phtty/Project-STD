@@ -39,6 +39,18 @@
 /** @brief 切分表最多几张卡（4 卡横排是已知的最大部署规模） */
 #define SCREEN_CARD_MAX (4U)
 
+/** @brief 一张卡的**运行期**状态 —— 由枚举与轮次结果驱动
+ *
+ *  **MISSING 与 OFFLINE 必须分开**，因为现场处置完全不同：
+ *   · MISSING = 表里有、**从未**应答过 → 多半是**配置错**（没上电 / 地址写重 / A-B 接反）
+ *   · OFFLINE = 曾经在线、后连续失败被剔除 → 多半是**故障**（线松 / 供电 / 卡死）
+ *  合成一个值的话，现场分不清该去查接线还是查配置 —— 而这两件事的代价差很远。 */
+typedef enum {
+    SCREEN_CARD_MISSING = 0, /**< 建表初值；也可能是从卡根本没起来 */
+    SCREEN_CARD_ONLINE  = 1,
+    SCREEN_CARD_OFFLINE = 2,
+} screen_card_state_t;
+
 /** @brief 一张卡在整屏里占的矩形 */
 typedef struct {
     uint8_t  addr;  /**< 总线地址：0 = 主卡，1..0x1F = 从卡。
@@ -48,6 +60,9 @@ typedef struct {
     uint8_t  color; /**< 该卡的显示颜色（display_color_t）—— 卡间可不同，见 design */
     uint16_t x, y;  /**< 矩形左上角（整屏逻辑坐标，像素） */
     uint16_t w, h;  /**< 矩形尺寸。**本工程要求它 == 该卡自己的屏几何**（见下） */
+
+    /* ---- 以下由运行期填（建表时是"表里的静态事实"，之后被枚举与轮次改写）---- */
+    uint8_t state; /**< screen_card_state_t。建表初值 MISSING */
 } screen_card_t;
 
 /** @brief 切分表。
@@ -98,6 +113,50 @@ const screen_card_t *app_screen_card(uint8_t card_idx);
 
 /** @brief 总线地址 → 切分表下标；表中没有该地址返回 0xFF */
 uint8_t app_screen_index_of_addr(uint8_t addr);
+
+/* ================================================================
+ *  卡片状态与整屏状态快照
+ *
+ *  归属在整屏门面而不是级联协议：状态描述的是"这张卡在不在"，与用哪种总线、
+ *  哪个协议探活无关。协议只**驱动**它（收到应答 / 轮次成败），不拥有它。
+ * ================================================================ */
+
+/** @brief 某张卡的当前状态；下标越界返回 MISSING */
+screen_card_state_t app_screen_card_state(uint8_t card_idx);
+
+/** @brief 改写某张卡的状态；**状态真的变了才会触发告警回调**
+ *
+ *  由驱动方（级联协议）在"收到应答""轮次成功/失败到阈值"时调用。 */
+void app_screen_card_set_state(uint8_t card_idx, screen_card_state_t st);
+
+/** @brief 整屏状态快照 —— **轮询式，取数据不产生任何副作用**
+ *
+ *  给"上位机主动来问"的产品用：它自己取快照塞进自己的应答里。
+ *  地址位序：位 i 对应**地址 i+1**（地址 0 是本卡，不进掩码）。 */
+typedef struct {
+    uint8_t  seq_lo;      /**< 最近一轮的序号低 8 位，供日志对照 */
+    uint8_t  online_mask; /**< 位 i = 地址 i+1 在线 */
+    uint16_t retrans_cnt; /**< 累计定向重传次数 */
+    uint8_t  evict_cnt;   /**< 累计剔除次数 */
+    uint8_t  last_alarm;  /**< 最近一次状态跳变的卡地址；0 = 尚未有过 */
+} app_screen_status_t;
+
+void app_screen_status(app_screen_status_t *out);
+
+/** @brief 状态跳变时的告警回调；**不注册 = 完全静默，一个字节都不产生**
+ *
+ *  **故障处理与故障上报是两件事**：重传 / 本轮放弃 / 剔除是本协议必须自己做完的，
+ *  不做则同步显示本身不成立；而上报是**可选的** —— 有的上位机根本不问，
+ *  出问题静默即可。所以这里只暴露状态，不决定去向，也不依赖任何上层协议。 */
+typedef void (*app_screen_alarm_fn_t)(uint8_t card_addr, uint8_t new_st);
+
+void app_screen_register_alarm(app_screen_alarm_fn_t fn);
+
+/** @brief 记一次定向重传（计数器，供状态快照用） */
+void app_screen_note_retrans(void);
+
+/** @brief 记一轮的序号（供状态快照用） */
+void app_screen_note_round(uint16_t seq);
 
 /** @brief 本卡在切分表里的下标；本卡地址不在表中返回 0xFF（配置错误） */
 uint8_t app_screen_self_index(void);
