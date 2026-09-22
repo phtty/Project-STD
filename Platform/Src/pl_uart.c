@@ -82,9 +82,29 @@ static bool _rx_rearm(uart_ctx_t *ctx)
 }
 
 /* ---- 内部：UART 空闲中断处理 ---- */
+/* ---- 接收侧诊断（限次）----
+ * 要回答的是"突发中停止交付"那段时间里**中断到底有没有进来**：
+ *  · 进来了但没有 IDLE 标志 → 是标志被谁清了/没置位；
+ *  · 根本没进来 → 是 DMA 或 IDLEIE 停了。
+ * 这两者的修法完全不同，不量就分不开。查完删掉。 */
+#define PL_UART_RX_DIAG 1
+#if PL_UART_RX_DIAG
+#define PLU_LOG(...) printf(__VA_ARGS__)
+#else
+#define PLU_LOG(...) ((void)0)
+#endif
+
 static void uart_idle_handle(uart_ctx_t *ctx)
 {
-    if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) return;
+    if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) {
+        static uint8_t n;
+        if (n < 8) {
+            n++;
+            PLU_LOG("[pl_uart] ISR 进来了但**无 IDLE 标志**（第 %u 次，CR3=%08X）\n", (unsigned)n,
+                   (unsigned)ctx->huart->Instance->CR3);
+        }
+        return;
+    }
     __HAL_UART_CLEAR_IDLEFLAG(ctx->huart);
 
     /* **只停接收，绝不能用 HAL_UART_DMAStop()** —— 那个函数在 gState 是 BUSY_TX 时
@@ -296,8 +316,14 @@ void pl_uart_irq_handler(uint8_t id)
 
     /* HAL 可能刚把接收 DMA 中止掉（错误路径）。**DMA 的接收请求还在不在**是判断依据；
      * 不在就武装回去 —— 否则接收就此停摆，而这一点不会有任何报错。 */
-    if (g_uart_ctx[id].huart && !(h->Instance->CR3 & USART_CR3_DMAR))
+    if (g_uart_ctx[id].huart && !(h->Instance->CR3 & USART_CR3_DMAR)) {
+        static uint8_t n;
+        if (n < 8) {
+            n++;
+            PLU_LOG("[pl_uart] HAL 之后接收 DMA 已不在，补武装（第 %u 次）\n", (unsigned)n);
+        }
         (void)_rx_rearm(&g_uart_ctx[id]);
+    }
 }
 
 void pl_uart_dma_irq_handler(uint8_t id)
