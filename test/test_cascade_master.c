@@ -824,13 +824,27 @@ static void case_id_resolve_sources(void)
 {
     TEST_BEGIN("身份来源：拨码 > 记录 > 板级默认（出厂态 = 主卡）");
 
-    /* ① 出厂态：无记录、无拨码 → 板级默认 */
+    /* ① 出厂态：无记录、无拨码 → 板级默认（= 主卡）。
+       这一档通常**与本机现状一致**（夹具的初值就是出厂态）→ 不该重装门面：
+       重装会清画布与"画布被写过"的闩，那正是"按一下键、屏上内容消失"。 */
     fixture_reset();
+    /* 先把本机摆成"出厂态"，才能验证"没变就不重装"这一条 —— 夹具的主卡格默认是 1
+       （与它自己的卡表一致），而 3833024 板级配的 MASTER_CELL 是 0 */
+    s_self_addr   = (uint8_t)BOARD_CASCADE_ADDR;
+    s_master_cell = (uint8_t)BOARD_CASCADE_MASTER_CELL;
     _casc_id_boot();
     CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASCADE_ADDR,
               "出厂态应取板级默认 %u，得到 %u", (unsigned)BOARD_CASCADE_ADDR,
               (unsigned)s_self_addr);
-    CHECK_MSG(s_reinit_calls == 1, "解析出身份后必须重装门面一次，得到 %d 次", s_reinit_calls);
+    CHECK_MSG(s_reinit_calls == 0,
+              "身份与本机现状一致时不该重装门面（会清掉屏上内容），得到 %d 次", s_reinit_calls);
+
+    /* ①b 本机现状与解析结果不同 → **必须**重装（这才是"换身份"那条路） */
+    fixture_reset();
+    s_self_addr = 1; /* 摆成与出厂默认不同的值 */
+    _casc_id_boot();
+    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASCADE_ADDR && s_reinit_calls == 1,
+              "身份真的变了就要重装门面一次，得到 %d 次", s_reinit_calls);
 
     /* ② 有记录 → 记录优先于默认（先把本机摆成别的，证明真的读了记录） */
     fixture_reset();
