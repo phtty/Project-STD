@@ -20,8 +20,23 @@
 #include "initcall.h"
 #include "pl_mem.h"
 
+#include <stdio.h> /* 诊断输出（限次，查完连着开关一起删） */
 #include <string.h>
 #include "pl_task.h"
+
+/* ---- 分发层诊断（限次）----
+ *
+ * **为什么要有**：本层有两条**静默**路径会把一整帧吞掉 —— 探针判 WAIT（帧明明在
+ * 缓冲里）、以及 `frame_len` 越界被逐字节跳掉。两者与"字节根本没到"在现场完全分不开，
+ * 而排查方向相反。**默认关**（每行都不小，RTT 缓冲只有 1KB）；再遇到"帧到了却没被解析"把它置 1。 */
+#ifndef DISPATCH_DIAG
+#define DISPATCH_DIAG (0)
+#endif
+#if DISPATCH_DIAG
+#define PRINTF_DISPATCH(...) printf(__VA_ARGS__)
+#else
+#define PRINTF_DISPATCH(...) ((void)0)
+#endif
 
 /* frame_msg_t 的 data 必须 4 字节对齐：探针会把 scratch 直接 cast 成
  * uint32 字段的帧结构体（如 IAP）访问。 */
@@ -179,6 +194,27 @@ void frame_dispatch_task(void *argument)
                 pcb_probe_sta_t state = p->ops->probe(p, ccb, psrc, msg->data,
                                                       FRAME_DATA_MAX_LEN, &frame_len, &aux);
 
+#if DISPATCH_DIAG
+                /* 诊断（限次）：**大段数据**在这一层有两条静默路径会把它吞掉 ——
+                   判 WAIT（帧在缓冲里却被认为没到齐）与 frame_len 越界被逐字节跳掉。
+                   把 head / 声明长度 / avail 打出来，这两条与"字节根本没到"才能一刀切开。
+                   **只报 READY/WAIT**：伪帧逐字节重跳会刷满屏（实测把 RTT 冲垮，
+                   反而把要看的 IMAGE/交付行挤掉了），而那不是要找的东西。用完置 0。 */
+                if (state <= PCB_PROBE_WAIT && rb_avail(p->rb, nullptr) >= 256U) {
+                    static uint8_t s_diag;
+                    if (s_diag < 8U) {
+                        s_diag++;
+                        PRINTF_DISPATCH("[disp] %s state=%u avail=%u head=%02X%02X%02X%02X "
+                                        "flen=%u budget=%u/%u\n",
+                                        p->name, (unsigned)state,
+                                        (unsigned)rb_avail(p->rb, nullptr), msg->data[0],
+                                        msg->data[1], msg->data[2], msg->data[3],
+                                        (unsigned)frame_len, (unsigned)budget,
+                                        (unsigned)notify.len);
+                    }
+                }
+#endif
+
                 if (state == PCB_PROBE_WAIT) break; /* 数据不足：等下一批数据 */
 
                 if (state == PCB_PROBE_READY) {
@@ -186,18 +222,33 @@ void frame_dispatch_task(void *argument)
                      * 违规时丢弃 1 字节并继续，避免零进度死循环。 */
                     if (frame_len == 0 || frame_len > p->payload_max ||
                         frame_len > FRAME_DATA_MAX_LEN) {
+                        PRINTF_DISPATCH("[disp] %s READY 但长度越界 flen=%u payload_max=%u —— "
+                                        "逐字节跳掉（静默丢整帧）\n",
+                                        p->name, (unsigned)frame_len, (unsigned)p->payload_max);
                         rb_skip(p->rb, 1, nullptr);
                         goto account; /* 违规帧：丢弃 1 字节，避免零进度死循环 */
                     }
                     /* 读出长度以 rb_read 的返回值为准（与窥视内容一致） */
                     uint16_t actual = rb_read(p->rb, msg->data, (uint16_t)frame_len, nullptr);
-                    if (actual != frame_len)
+                    if (actual != frame_len) {
+                        PRINTF_DISPATCH("[disp] %s rb_read 只读出 %u/%u 字节 —— 这帧丢了\n",
+                                        p->name, (unsigned)actual, (unsigned)frame_len);
                         goto account; /* 已消费 actual 字节，无零进度风险 */
+                    }
 
                     msg->data_len = (uint16_t)frame_len;
                     msg->aux      = aux;
                     msg->ccb      = ccb;
-                    osMessageQueuePut(p->queue, msg, 0, 0);
+                    /* **返回值必须看**：队列满时 Put 失败（超时 0）—— 帧就这么没了，
+                       而调用方与协议侧都看不出任何异常（与 RS485 槽位那次同一个坑）。 */
+                    if (osMessageQueuePut(p->queue, msg, 0, 0) != osOK) {
+                        static uint8_t s_drop_logged;
+                        if (s_drop_logged < 4U) {
+                            s_drop_logged++;
+                            PRINTF_DISPATCH("[disp] %s 帧队列满，丢弃一帧 %u 字节\n", p->name,
+                                            (unsigned)frame_len);
+                        }
+                    }
                     goto account;
                 }
 
@@ -272,8 +323,22 @@ void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *dat
            注：len 超过缓冲区总容量时怎么都装不下，那属于 RB 定容错误 ——
            RB 容量必须 ≥ 传输层单次最大写入。 */
         rb_lock(rb);
-        if (rb_space(rb, nullptr) < len) rb_flush(rb, nullptr);
-        rb_write(rb, data, len, nullptr);
+        if (rb_space(rb, nullptr) < len) {
+            /* **诊断（限次）**：这一次 flush 会把缓冲里**没解析完的半帧**一起丢掉，
+               而且一声不响 —— 现场就是"字节明明到了、协议层却一行都没有"。 */
+            if (rb_avail(rb, nullptr) > 64U) {
+                PRINTF_DISPATCH("[disp] %s 装不下：清掉 %u 字节旧数据，再写 %u 字节\n",
+                                ccb->protos[i]->name, (unsigned)rb_avail(rb, nullptr),
+                                (unsigned)len);
+            }
+            rb_flush(rb, nullptr);
+        }
+        /* **返回值必须看**：写不进就是静默截断（rb_write 会按剩余空间截短）。 */
+        const uint16_t wrote = rb_write(rb, data, len, nullptr);
+        if (wrote != len) {
+            PRINTF_DISPATCH("[disp] %s rb_write 只写进 %u/%u 字节（空间不足，帧被截断）\n",
+                            ccb->protos[i]->name, (unsigned)wrote, (unsigned)len);
+        }
         rb_unlock(rb);
     }
 
