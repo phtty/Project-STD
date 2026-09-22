@@ -111,7 +111,6 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
 static void factory_monitor_task(void *argument)
 {
     (void)argument;
-    dev_display_t *dsp = dev_display_get();
 
     for (;;) {
         /* IDLE: 等待 TEST 激活 */
@@ -159,7 +158,10 @@ static void factory_monitor_task(void *argument)
 
         /* ===== DEAD_PIXEL ===== */
         osThreadSuspend(g_light_sensor_task_handle);
-        dev_display_set_brightness(dsp, 7);
+        /* 亮度走**整屏**那个入口：`dev_display_set_brightness` 只设本卡实屏，
+           从卡拿到的仍是每轮 IMAGE 里带的旧亮度 → 一块亮一块暗。
+           `app_screen_set_brightness` 本地 + 置"待下发"，由级联广播给从卡。 */
+        app_screen_set_brightness(7);
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
             /* 同样走逻辑屏：多卡时这一下把**两块屏**一起点亮（单卡就是本卡那块）——
                整设备老化要的正是这个，而不是只点亮主卡自己那半幅 */
