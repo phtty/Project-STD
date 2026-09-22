@@ -6,6 +6,8 @@
  * scan_task 负责调度，不被任何其他任务抢占（osPriorityRealtime）。
  */
 
+#include <stdio.h>
+
 #include "dev_display.h"
 
 #include <string.h>
@@ -59,8 +61,16 @@ static void scan_task(void *arg)
         /* 脏标记 → 预计算（off critical path） */
         if (dev->dirty) {
             dev->dirty = false;
-            if (dev->ops->prepare)
+            if (dev->ops->prepare) {
+                /* **量一下它到底多久**：这段跑在 osPriorityRealtime 的 scan_task 里，
+                   期间**所有 Normal 任务都上不来**（协议任务就在那一档）。
+                   估算过一次（~10ms）与实测差一个数量级，所以直接量，不再估。
+                   查完把这几行去掉。 */
+                const uint32_t t0 = osKernelGetTickCount();
                 dev->ops->prepare(dev);
+                printf("[display] prepare 耗时 %u ms\n",
+                       (unsigned)(osKernelGetTickCount() - t0));
+            }
         }
 
         /* 模组专用扫描输出 */
