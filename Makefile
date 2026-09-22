@@ -585,6 +585,14 @@ TEST_CASCADE_FRAME_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件十五：RS485 收包槽位（环回拆帧 / 投递失败不漏槽）
+# 用例 include app_rs485.c（rs485_isr_cb 与槽位都是 static），只把 HAL 替身接上；
+# 队列用**生产的那份属性**，所以深度与缓冲定容写错也会被发现。
+TEST_RS485_SLOTS_SRCS = \
+	test/test_rs485_slots.c \
+	test/stubs/os_stub.c \
+	Kernel/Src/ring_buffer.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
@@ -592,7 +600,8 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_cascade_frame $(TEST_BUILD)/test_screen_layout \
-      $(TEST_BUILD)/test_cascade_round $(TEST_BUILD)/test_cascade_master
+      $(TEST_BUILD)/test_cascade_round $(TEST_BUILD)/test_cascade_master \
+      $(TEST_BUILD)/test_rs485_slots
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -634,6 +643,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 级联图传 · 主卡侧 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_master
+	@echo ""
+	@echo "──── RS485 收包槽位 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rs485_slots
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -699,6 +711,13 @@ $(TEST_BUILD)/test_cascade_master: $(TEST_CASCADE_MASTER_SRCS) \
 
 $(TEST_BUILD)/test_cascade_master: Application/Src/CASCADE/app_cascade.c \
 	Application/Inc/CASCADE/app_cascade.h $(BOARD_DIR)/board.h
+
+# 同理：用例 TU-include 了 app_rs485.c，它不在 SRCS 里，必须单独挂依赖。
+$(TEST_BUILD)/test_rs485_slots: $(TEST_RS485_SLOTS_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RS485_SLOTS_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_rs485_slots: Application/Src/Channel/app_rs485.c
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
