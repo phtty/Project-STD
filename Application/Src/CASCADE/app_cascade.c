@@ -1,9 +1,9 @@
 /**
  * @file    app_cascade.c
- * @brief   多控制卡级联同步显示协议 —— 探针、任务、枚举、整屏调光
+ * @brief   多控制卡级联同步显示协议 —— 探针、任务、枚举、整屏调光、一帧一轮的图传
  *
- * P2 阶段：**只做骨架与不依赖轮次机制的两条命令**（PING/PRESENT 枚举、
- * SET_BRIGHT 整屏调光）。位图传输、分片、应答、剔除留到 P3/P4。
+ * **一轮 = 一条 IMAGE 帧**：主卡把每张从卡那一块整块位图（一帧装得下，不再分片）
+ * 单播过去，从卡收下即落屏并回 ACK。逐卡走完再下一张，最后主卡本地提交。
  *
  * 骨架照 `Application/Src/RLS/app_rls.c`（收-only 最干净的那个）：
  * RB_DEFINE_ATTR → 静态 pcb_t → sw_post_initcall 里 rb_init / 建队列 / 绑通道 / 起任务。
@@ -48,26 +48,38 @@
 
 /* ---- 队列与缓冲区（容量取法见 app_iap.c / app_rls.c 的同名注释）---- */
 
-/* **本协议真正会发出的最长帧**：分片帧 = 头 15 + CASC_FRAG_BYTES。不是 CASC_FRAME_MAX
- * （那是探针允许的最大帧长）—— 队列元素按后者算是 1052 字节，深 8 就要 8.2KB CCMRAM，
- * 而实际最大的一帧只有 527。把它同时设成 pcb.payload_max，框架就会把"超出本协议
- * 实际会发的长度"的帧判为违规并丢弃，队列元素因此有硬上界。 */
-#define CASC_MSG_MAX (CASC_OVERHEAD + CASC_FRAG_BYTES)
+/* **本协议会发出的最长帧** = 一帧装下整块本卡位图（见 app_cascade.h 的 CASC_FRAME_MAX）。
+ * 它同时是 `pcb.payload_max`：框架据此拒收超长的帧，队列元素也因此有硬上界。 */
+#define CASC_MSG_MAX CASC_FRAME_MAX
 
-_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_sync_begin_t),
-               "SYNC_BEGIN 比「最长帧」还长 —— 队列元素装不下");
-_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_ack_t), "ACK 装不下");
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_present_t), "PRESENT 装不下");
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_nack_t), "NACK 装不下");
 
 #define CASC_MSG_SIZE (sizeof(frame_msg_t) + CASC_MSG_MAX)
 
-/* **深度 8 是照着一轮的连发算出来的，不是随手取的**：一轮 = BEGIN + N 片 + COMMIT，
-   最多 5 帧（3 片）在 4ms 内连发完。而 ISR → rs485_task → frame_dispatch_task →
-   本协议任务**四跳全是 Normal 优先级**，每跳最多等一个 tick，端到端几毫秒 ——
-   深 2 的队列（P2 时期帧很稀疏，够用）在这中间是**静默丢帧**（框架的 Put 超时为 0），
-   现场表现为"总缺中间那几片"，且两侧都看不出原因。
+/* **深度 2**。P2 时期是 2（帧稀疏，够用），P3 分片时被抬到 8 —— 因为一轮连发 4~5 帧，
+   而 ISR → rs485_task → frame_dispatch_task → 本协议任务四跳都是 Normal 优先级，
+   队列一满框架就**静默丢帧**（Put 超时为 0），现场表现为"总缺中间那几片"。
 
-   实测就是这样：从卡回过一次 `缺片位 03`（只有第 2 片到了），而它本身工作正常。 */
-#define CASC_QUEUE_DEPTH (8U)
+   一帧一轮之后连发没了：主卡发一条、从卡回一条，**任何时刻队列里最多一条**，
+   2 就是留一格的余量。而深度现在也不是能随便加的 —— 队列元素 = 8 + 1427 = 1435 字节
+   （位图整块进队列），深 8 要 11.5KB CCMRAM，而 CCMRAM 总共只剩 2.2KB 空闲。 */
+#define CASC_QUEUE_DEPTH (2U)
+
+/* **发送缓冲**：组帧与 DMA 发送共用这一块。
+ *
+ * 必须在 **.bss（SRAM）**：RS485 通道按"指针是否落 CCMRAM"在 DMA 与轮询之间二选一
+ * （app_rs485.c 的 rs485_send），挪进 CCMRAM 不会报错，只会**静默退化成轮询发送** ——
+ * 一帧 1427 字节 @115200 就是 124ms 的 CPU 被烧在这条任务里。`_cascade_init` 里有
+ * 一次性校验，真被挪了会打出来。
+ *
+ * 一块够所有卡轮着用：`ccb_send` 是**阻塞**语义（DMA 等 TC、轮询等发完），返回即发完。
+ *
+ * **接收侧一律不碰它**（`_cmd_ack`/`_cmd_nack`/`_cmd_present` 只读 `msg->data`）——
+ * 这是"位图能一直躺在 s_tx 里等应答"的前提：主卡把整块位图抽进 s_tx 之后要等最多
+ * 200ms 的应答，这期间收进来的帧若也往 s_tx 写，等到的应答会把还没发出去的位图冲掉，
+ * 或者重发的帧发出去的是应答的字节。**加新的接收处理函数时别用 s_tx。** */
+static uint8_t s_tx[CASC_FRAME_MAX];
 
 static StaticQueue_t s_casc_queue_cb;
 static uint8_t       s_casc_queue_buf[CASC_QUEUE_DEPTH * CASC_MSG_SIZE] PL_CCMRAM;
@@ -80,8 +92,15 @@ static const osMessageQueueAttr_t s_casc_queue_attr = {
 };
 
 /* 必须**严格大于**传输层单次最大写入（RS485 的 DMA 缓冲 2048）；
-   相等或更小会静默丢掉最后一字节 —— 见 app_iap.c 的说明。 */
-RB_DEFINE_ATTR(s_casc_rb, 2112, PL_CCMRAM);
+   相等或更小会静默丢掉最后一字节 —— 见 app_iap.c 的说明。
+ *
+ * **取 4096 而不是够用就行的 2112**：`app_ccb_dispatch` 在"装不下"时的策略是
+ * **丢旧留新**（整段 flush 再写），而它分不清"旧数据是半截帧"与"旧数据是一条完整
+ * 但还没轮到解析的帧"。实测就撞上了：帧分发任务被同一条总线上别的协议的探针拖住
+ * 几十毫秒（见 casc_probe_frame 里那段 O(n²) 的说明），这期间**下一条帧的第一段**
+ * 就到了 —— 2112 装不下 1427 + 1211，于是那条完整帧被 flush 掉，主卡只能重发。
+ * 留够"两帧"的余量，这种抢占就不会发生（仍留有 flush 兜底，只是不再误伤整帧）。 */
+RB_DEFINE_ATTR(s_casc_rb, 4096, PL_CCMRAM);
 
 static osMessageQueueId_t s_casc_queue;
 
@@ -107,8 +126,12 @@ static osMessageQueueId_t s_casc_queue;
 /* 等 ACK 期间的轮询周期。只在一轮进行中才跑这么密，空闲时任务阻塞在队列上。 */
 #define CASC_ACK_POLL_MS (1U)
 
-/* **定向重传**次数上限。重传只补缺的那几片，所以多试一次很便宜；但也不能无限试 ——
-   卡真的掉线时，每轮都卡在这儿会拖长整轮时间（其余卡与主卡本来不用等它）。 */
+/* **整帧重传**次数上限（一封帧最多发 1 + 本值 次）。
+ *
+ * 一帧就是一幅完整画面，所以"重传"没有"只补缺的那几片"这种粒度可言 —— 整帧重发。
+ * 一条 1427 字节的重发（124ms）换掉整套缺片追踪，值。
+ * 但不能无限试：卡真的掉线时，每轮都卡在这儿会拖长整轮时间（其余卡与主卡本来不用等它），
+ * 所以上限 2 次 ≈ 3×(124ms 发送 + 200ms 等应答)，之后交 `CASC_FAIL_RUN_MAX` 去剔除。 */
 #define CASC_RETRY_MAX (2U)
 
 /* 上电枚举：发 PING 等 PRESENT，**没等到就再发**，最多这么多轮、每轮隔这么久。
@@ -262,8 +285,19 @@ static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb
     (void)ccb;
     (void)src; /* RS485 无来源概念 */
 
-    uint16_t avail = rb_peek_capped(self->rb, 0, scratch, scratch_size, nullptr);
-    if (avail < sizeof(casc_hdr_t)) return PCB_PROBE_WAIT;
+    /* ---- **先只窥视帧头，别一上来就拷整帧** ----
+     *
+     * 伪帧时框架会"跳 1 字节再探"，于是"每次探都把整帧拷进暂存区"就成了 O(n²)：
+     * 实测一条 1427 字节的杂物要拷 ~2MB（1427 次 × 每次 ~1428 字节），×3 个协议 = ~6MB，
+     * 把帧分发任务拖住**四十多毫秒** —— 而这段时间里同一条总线上后到的帧会把前一条
+     * **完整但还没轮到解析的**帧从协议缓冲里挤掉（丢旧留新），现场表现就是
+     * "跨回绕拆成两段的帧总是丢、一次发完的就成"。所以头没对上就直接 FAKE，
+     * 一个字节都不多拷；只有确认是真帧、且整帧到齐，才拷进来算 CRC。
+     *
+     * 顺带：`avail` 用 rb_avail 问，不靠窥视的返回值（那次窥视只拷了 11 字节）。 */
+    if (rb_peek_capped(self->rb, 0, scratch, (uint16_t)sizeof(casc_hdr_t), nullptr) <
+        sizeof(casc_hdr_t))
+        return PCB_PROBE_WAIT;
 
     casc_hdr_t *h = (casc_hdr_t *)scratch;
     if (h->sof[0] != CASC_SOF0 || h->sof[1] != CASC_SOF1) return PCB_PROBE_FAKE;
@@ -275,12 +309,15 @@ static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb
     if (len < CASC_FRAME_MIN || len > CASC_FRAME_MAX) return PCB_PROBE_FAKE;
 
     /* 整帧到齐前不碰帧尾/CRC —— 否则读到的是后续字节 */
-    if (avail < len) return PCB_PROBE_WAIT;
+    if (rb_avail(self->rb, nullptr) < len) return PCB_PROBE_WAIT;
 
     if (len > scratch_size) {
         *total_len = len;
         return PCB_PROBE_SKIP; /* 本设计下不可达（static_assert 保证），按契约保留 */
     }
+
+    /* 到这里才需要整帧（CRC 要覆盖到帧尾） */
+    if (rb_peek_capped(self->rb, 0, scratch, len, nullptr) < len) return PCB_PROBE_WAIT;
 
     /* CRC32 覆盖 [2, len-4)：不含 SOF（恒定值不增加信息量）、不含 CRC 自身。
        走硬件单元（1KB 约 9µs；软件 CRC16 要 71µs）。
@@ -304,14 +341,14 @@ static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb
  *  发送
  * ================================================================ */
 
-/** @brief 组一帧到 buf，返回整帧长度；0 表示载荷放不下
+/** @brief 给**载荷已在位**的缓冲补上帧头与 CRC；返回整帧长度，0 = 放不下
  *
- *  `idx`/`frag_n` 只有分片命令（SYNC_DATA）才非 0，其余一律 0 —— 但反正帧头里
- *  就有这两个字段，与其分两条组帧路径，不如让调用方显式给。 */
-static uint16_t _build(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint8_t dst, uint16_t seq,
-                       uint8_t idx, uint8_t frag_n, const void *payload, uint16_t payload_len)
+ *  之所以要"载荷已在位"这条路径：位图是**直接抽进发送帧的载荷位置**的（见
+ *  `_round_one_card`），不能先抽到别处再 memcpy 一次 —— 那是每卡每轮白搬 1400 字节。 */
+static uint16_t _finish_frame(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint8_t dst,
+                              uint16_t seq, uint16_t payload_len)
 {
-    uint16_t len = (uint16_t)(CASC_OVERHEAD + payload_len);
+    const uint16_t len = (uint16_t)(CASC_OVERHEAD + payload_len);
     if (len > buf_cap || len > CASC_FRAME_MAX) return 0;
 
     casc_hdr_t *h = (casc_hdr_t *)buf;
@@ -321,32 +358,32 @@ static uint16_t _build(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint8_t dst
     h->dst        = dst;
     h->src        = app_screen_self_addr();
     casc_put_u16(h->seq, seq);
-    h->idx    = idx;
-    h->frag_n = frag_n;
+    h->idx        = 0; /* 保留字段：一帧一轮，不再有分片号 */
+    h->frag_n     = 0; /* 保留字段：同上 */
     casc_put_u16(h->len, len);
 
-    if (payload_len) memcpy(buf + sizeof(casc_hdr_t), payload, payload_len);
-
-    uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), buf + 2, (size_t)(len - 6U));
+    const uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), buf + 2, (size_t)(len - 6U));
     casc_put_u32(buf + len - 4U, crc);
     return len;
 }
 
-/** @brief 发一帧，**序号由调用方给**。
- *
- *  轮次类命令（BEGIN/DATA/COMMIT）与应答（ACK/NACK）必须用**本轮那个 seq**，
- *  不能用发送方自己的计数器：主卡靠 seq 认"这条 ACK 是答哪一轮的"，从卡回的 ACK
- *  若带自己的序号，主卡永远匹配不上，表现是"每张卡都超时"。
- *
- *  **缓冲必须 DMA 可达**（RS485 走 DMA 发送），所以用静态 SRAM 缓冲而不是栈上数组 ——
- *  栈在 SRAM 里其实也够得到，但要留一份给将来"发送期间缓冲必须一直有效"的余量，
- *  且静态缓冲让 ccb_send 的阻塞语义不依赖调用栈深度。 */
-static int32_t _send_seq(uint8_t type, uint8_t dst, uint16_t seq, uint8_t idx, uint8_t frag_n,
-                         const void *payload, uint16_t payload_len)
+/** @brief 组一帧到 buf（把 payload 拷进载荷区）；返回整帧长度，0 = 放不下 */
+static uint16_t _build(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint8_t dst, uint16_t seq,
+                       const void *payload, uint16_t payload_len)
 {
-    static uint8_t s_tx[CASC_FRAME_MAX];
+    const uint16_t len = (uint16_t)(CASC_OVERHEAD + payload_len);
+    if (len > buf_cap || len > CASC_FRAME_MAX) return 0; /* 先判再拷，不能让 memcpy 越界 */
 
-    uint16_t len = _build(s_tx, sizeof(s_tx), type, dst, seq, idx, frag_n, payload, payload_len);
+    if (payload_len) memcpy(buf + sizeof(casc_hdr_t), payload, payload_len);
+    return _finish_frame(buf, buf_cap, type, dst, seq, payload_len);
+}
+
+/** @brief 发一条**已组好**的帧（内容在 s_tx 里就位）；返回整帧长度，组帧失败为 -1
+ *
+ *  `ccb_send` 是阻塞的（DMA 等 TC / 轮询等发完），返回即代表已发完 —— 所以 s_tx
+ *  在返回后可以立刻被下一次组帧覆盖。 */
+static int32_t _send_tx(uint16_t len, uint8_t type)
+{
     if (!len) return -1;
 
     const int32_t r = ccb_send(app_rs485_ccb(), s_tx, len);
@@ -363,11 +400,22 @@ static int32_t _send_seq(uint8_t type, uint8_t dst, uint16_t seq, uint8_t idx, u
     return (int32_t)len;
 }
 
+/** @brief 组一帧（载荷拷进 s_tx）并发出；**序号由调用方给**。
+ *
+ *  轮次类命令（IMAGE）与应答（ACK/NACK）必须用**本轮那个 seq**，不能用发送方自己的
+ *  计数器：主卡靠 seq 认"这条 ACK 是答哪一轮的"，从卡回的 ACK 若带自己的序号，
+ *  主卡永远匹配不上，表现是"每张卡都超时"。 */
+static int32_t _send_seq(uint8_t type, uint8_t dst, uint16_t seq, const void *payload,
+                         uint16_t payload_len)
+{
+    return _send_tx(_build(s_tx, sizeof(s_tx), type, dst, seq, payload, payload_len), type);
+}
+
 /** @brief 发一帧不需要轮次序号的（PING/PRESENT/SET_BRIGHT），序号取自增计数器 */
 static int32_t _send(uint8_t type, uint8_t dst, const void *payload, uint16_t payload_len)
 {
     static uint16_t s_seq;
-    return _send_seq(type, dst, s_seq++, 0, 0, payload, payload_len);
+    return _send_seq(type, dst, s_seq++, payload, payload_len);
 }
 
 int32_t app_cascade_ping(void)
@@ -451,150 +499,98 @@ static void _cmd_set_bright(frame_msg_t *msg)
 }
 
 /* ================================================================
- *  图传（从卡侧）—— 收分片、暂存、收到 COMMIT 且收齐才落屏
+ *  图传（从卡侧）—— 收一条 IMAGE：校验、落屏、应答
  *
- *  **先攒后换**，不边收边画：边收边落会出半幅画面（片上去了、下一片还没来），
- *  而半双工总线上这个窗口是毫秒级、肉眼可见。
+ *  **没有暂存、没有状态机**：一帧就是一幅完整画面，收下即落屏。
+ *  于是"先攒后换"那一套（分片暂存 + have_mask + 收齐才换帧）整个不需要了 ——
+ *  半幅画面的窗口本来只在"边收边画"时才存在。
+ *
+ *  **幂等**：主卡没收到 ACK 会把同一条帧重发，本函数把同一份内容再落一次，无副作用。
+ *  所以从卡不必记住"这一轮处理过没有"，也不必靠 seq 拦陈旧帧 ——
+ *  主卡对同一张卡是**等到应答才发下一轮**的，帧不会乱序。
  * ================================================================ */
 
-static struct {
-    uint8_t  stage[BOARD_CASCADE_BAND_MAX]; /**< 本轮位图暂存 */
-    uint16_t seq;        /**< 本轮的轮次序号；**陈旧分片靠它丢** */
-    uint16_t bmp_len;    /**< 本轮位图总字节数 */
-    uint16_t frag_bytes; /**< 每片载荷字节数 */
-    uint8_t  frag_n;     /**< 本轮分片数 */
-    uint8_t  have_mask;  /**< 位 i = 第 i 片已收到 */
-    uint8_t  color;      /**< 本卡颜色 */
-    uint8_t  bright;     /**< 最近一次 BEGIN 断言的亮度（诊断用） */
-    bool     active;     /**< 收到过本轮 BEGIN */
-} s_rx;
-
-static void _cmd_sync_begin(frame_msg_t *msg)
+/** @brief 从卡：拒收本轮，并明确回绝（配置错，重发也没用 → 主卡据此放弃本卡本轮）
+ *
+ *  与"超时"分开是**有意的**：超时的排查方向是链路，拒绝的排查方向是配置
+ *  （格号写重、切分表不一致），而把两者混成一个静默超时，现场只能靠猜。 */
+static void _nack(uint16_t seq, uint8_t err, const char *why)
 {
-    /* 主卡不该收到发给从卡的 BEGIN（半双工回声、或两张卡地址配重时会）。
-       不应答、不入暂存 —— 否则总线上会多出一个应答源，主卡把自己当从卡。 */
+    const casc_nack_t nack = {.err = err};
+
+    CASC_LOG("[casc·从] 拒绝 IMAGE seq=%u：%s\n", (unsigned)seq, why);
+    (void)_send_seq(CASC_T_NACK, CASC_ADDR_MASTER, seq, &nack, sizeof(nack));
+}
+
+static void _cmd_image(frame_msg_t *msg)
+{
+    /* 主卡不该收到发给从卡的帧（半双工回声、或两张卡地址配重时会）。
+       不应答、不落屏 —— 否则总线上会多出一个应答源，主卡把自己当从卡。 */
     if (app_screen_is_master()) return;
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_sync_begin_t))) return;
 
-    const casc_hdr_t        *h = (const casc_hdr_t *)msg->data;
-    const casc_sync_begin_t *p = (const casc_sync_begin_t *)(msg->data + sizeof(casc_hdr_t));
-
-    const dev_display_t *d      = dev_display_get();
-    const uint16_t       w      = casc_get_u16(p->w);
-    const uint16_t       hh     = casc_get_u16(p->h);
-    const uint16_t       bm_len = casc_get_u16(p->bmp_len);
-    const uint16_t       frag_b = casc_get_u16(p->frag_bytes);
-
-    /* 几何/参数不符 → 明确回 NACK，**不将就**。将就的后果是错位画面，而从卡自己
-       不知道错位了（它会以为一切正常地把半幅图显示出去）。
-       本工程的部署形态是"每张卡各带一整块屏"，所以矩形尺寸必须 == 本卡屏几何。 */
-    if (!d || w != d->screen_rows || hh != d->screen_cols || bm_len == 0 ||
-        bm_len > sizeof(s_rx.stage) || p->frag_n == 0 || p->frag_n > CASC_FRAG_MAX ||
-        frag_b == 0 || (uint32_t)frag_b * p->frag_n < bm_len) {
-        const casc_nack_t nack = {.err = CASC_NACK_GEOM};
-        s_rx.active            = false;
-        CASC_LOG("[casc·从] 拒绝 BEGIN：矩形 %ux%u 或分片参数不符（本卡屏 %ux%u，暂存 %u）\n",
-                 (unsigned)w, (unsigned)hh, (unsigned)(d ? d->screen_rows : 0),
-                 (unsigned)(d ? d->screen_cols : 0), (unsigned)sizeof(s_rx.stage));
-        /* 回带**本轮序号**：主卡靠它认"这条 NACK 是答哪一轮的" */
-        (void)_send_seq(CASC_T_NACK, CASC_ADDR_MASTER, casc_get_u16(h->seq), 0, 0, &nack,
-                        sizeof(nack));
+    /* **长度先判，再碰任何内容**：这样"两块板烧了不同版本固件"退化成一条 NACK，
+       而不是按旧帧的偏移去读位图越界。（帧长上界由框架的 payload_max 兜着。） */
+    if (msg->data_len < (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t))) {
+        /* **静默返回是最坏的一种**：主卡只会超时重发，而两侧日志都看不出哪里不对。
+           真出现这行说明"探针给的 aux 是 IMAGE，但帧短得装不下头" —— 多半是版本或
+           长度域的错，所以必须报出来（限次，免得刷屏）。 */
+        static uint8_t s_short_logged;
+        if (s_short_logged < 4U) {
+            s_short_logged++;
+            CASC_LOG("[casc·从] IMAGE 帧太短（%u 字节 < %u）—— 长度域或版本不符？\n",
+                     (unsigned)msg->data_len,
+                     (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t)));
+        }
         return;
     }
 
-    s_rx.seq        = casc_get_u16(h->seq);
-    s_rx.bmp_len    = bm_len;
-    s_rx.frag_bytes = frag_b;
-    s_rx.frag_n     = p->frag_n;
-    s_rx.have_mask  = 0;
-    s_rx.color      = p->color;
-    s_rx.bright     = p->bright;
-    s_rx.active     = true;
+    const casc_hdr_t   *h       = (const casc_hdr_t *)msg->data;
+    const casc_image_t *p       = (const casc_image_t *)(msg->data + sizeof(casc_hdr_t));
+    const uint16_t      seq     = casc_get_u16(h->seq);
+    const uint16_t      bmp_len = casc_get_u16(p->bmp_len);
 
-    CASC_LOG("[casc·从] BEGIN seq=%u %ux%u@(%u,%u) 位图%u=%u片×%u bright=%u\n", (unsigned)s_rx.seq,
-             (unsigned)w, (unsigned)hh, (unsigned)casc_get_u16(p->x), (unsigned)casc_get_u16(p->y),
-             (unsigned)bm_len, (unsigned)p->frag_n, (unsigned)frag_b, (unsigned)p->bright);
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + bmp_len)) {
+        _nack(seq, CASC_NACK_LEN, "帧长与 bmp_len 不符");
+        return;
+    }
+
+    /* 矩形必须与**本卡在本地切分表里那一项**逐字段相符（含 x/y）。核对的是
+       "主卡与我对整屏切分的认识一致"，而不只是"这张图装得进我的屏"。
+       两块板若烧了不同的 BOARD_CASCADE_MASTER_CELL，同一地址对应的格子就相反 ——
+       旧的校验只比 w/h，那种情形下两块屏内容会**悄悄互换而所有检查通过**。 */
+    const uint8_t        self = app_screen_self_index();
+    const screen_card_t *me   = app_screen_card(self);
+
+    if (!me) {
+        _nack(seq, CASC_NACK_GEOM, "本卡地址不在切分表里");
+        return;
+    }
+    if (casc_get_u16(p->x) != me->x || casc_get_u16(p->y) != me->y || casc_get_u16(p->w) != me->w ||
+        casc_get_u16(p->h) != me->h) {
+        _nack(seq, CASC_NACK_GEOM, "矩形与本卡切分表不符");
+        return;
+    }
+    if (!bmp_len || bmp_len != app_screen_card_bm_len(self)) {
+        _nack(seq, CASC_NACK_GEOM, "位图长度与本卡矩形不符");
+        return;
+    }
 
     /* **每一轮都重新断言亮度**。SET_BRIGHT 是单次广播、没有重传，而本帧是每轮必发、
        丢一轮就自己自愈的一字节 —— 这是"从卡永久停在旧亮度上"的唯一防线。 */
     app_screen_set_brightness(p->bright);
-}
 
-static void _cmd_sync_data(frame_msg_t *msg)
-{
-    if (app_screen_is_master()) return;
+    /* 位图**直接从队列元素里落屏**：它的载荷区就是线上那串字节，与 draw_bitmap 的
+       入参格式逐位一致，零转码、零拷贝。落屏走的是与主卡本地提交完全相同的那个函数。 */
+    const uint32_t c0 = osKernelGetTickCount();
+    app_screen_commit_bitmap(p->bitmap, bmp_len, p->color);
 
-    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
-    const uint16_t    seq = casc_get_u16(h->seq);
+    CASC_LOG("[casc·从] IMAGE seq=%u %ux%u@(%u,%u) 位图%u bright=%u 落屏 %u ms\n", (unsigned)seq,
+             (unsigned)me->w, (unsigned)me->h, (unsigned)me->x, (unsigned)me->y, (unsigned)bmp_len,
+             (unsigned)p->bright, (unsigned)(osKernelGetTickCount() - c0));
 
-    /* **陈旧分片必须丢**：上一轮的迟到分片帧头完好、CRC 也是对的，探针照常放行 ——
-       只能靠 seq 拦。放进去的后果是画面"一半旧内容一半新内容"，且从卡不知道自己错了。 */
-    if (!s_rx.active || seq != s_rx.seq || h->frag_n != s_rx.frag_n) return;
-
-    const uint8_t idx = h->idx;
-    if (idx >= s_rx.frag_n) return;
-
-    const uint16_t off = (uint16_t)((uint32_t)idx * s_rx.frag_bytes);
-    if (off >= s_rx.bmp_len) return;
-
-    const uint16_t n = (uint16_t)(msg->data_len - CASC_OVERHEAD);
-    const uint16_t want =
-        (uint16_t)(((uint32_t)s_rx.bmp_len - off > s_rx.frag_bytes)
-                       ? s_rx.frag_bytes
-                       : (s_rx.bmp_len - off));
-
-    /* 长度必须**正好**是这一片该有的字节数。短一截的分片若不拒，会静默留下上一轮的
-       旧字节，而 have_mask 记成"这片到了" —— 主卡便再也不会补发，错内容永久留在屏上。 */
-    if (n != want) return;
-
-    memcpy(&s_rx.stage[off], msg->data + sizeof(casc_hdr_t), n);
-    s_rx.have_mask |= (uint8_t)(1U << idx);
-}
-
-static void _cmd_sync_commit(frame_msg_t *msg)
-{
-    if (app_screen_is_master()) return;
-
-    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
-    casc_ack_t        ack = {.sta = CASC_ACK_OK, .miss_mask = 0};
-
-    if (!s_rx.active || casc_get_u16(h->seq) != s_rx.seq) {
-        /* 没收到 BEGIN：本轮的 DATA 也全被丢了，所以让主卡**整轮重来**，
-           而不是只补几片（补片也没意义 —— 暂存是空的） */
-        ack.sta = CASC_ACK_NOBEGIN;
-    } else {
-        const uint8_t full = (uint8_t)((1U << s_rx.frag_n) - 1U);
-        ack.miss_mask      = (uint8_t)(full & ~s_rx.have_mask);
-        if (ack.miss_mask) {
-            ack.sta = CASC_ACK_MISS;
-        } else {
-            /* 收齐了才落屏。**幂等**：主卡没收到 ACK 会重发 COMMIT，重落同一份内容
-               没有副作用 —— 所以这里**不清** active/have_mask。清了的话第二次 COMMIT
-               要回 NOBEGIN，主卡会以为整轮白做、重发 3 片。下一轮的 BEGIN 会重置它们。 */
-            const uint32_t c0 = osKernelGetTickCount();
-            app_screen_commit_bitmap(s_rx.stage, s_rx.bmp_len, s_rx.color);
-            /* **单独量落屏本身**：它与"帧在队列里等了多久"是两回事，
-               而 246ms 那个数必须劈开才知道该去查哪一边。 */
-            CASC_LOG("[casc·从] 落屏耗时 %u ms\n",
-                     (unsigned)(osKernelGetTickCount() - c0));
-        }
-    }
-
-    CASC_LOG("[casc·从] COMMIT seq=%u 收到片=%02X → sta=%u 缺=%02X\n",
-             (unsigned)casc_get_u16(h->seq), (unsigned)s_rx.have_mask, (unsigned)ack.sta,
-             (unsigned)ack.miss_mask);
-
-    /* 回带**本轮序号**（不是自己的发送计数器）—— 主卡的等待循环按 (seq, src) 匹配 */
-    (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, casc_get_u16(h->seq), 0, 0, &ack, sizeof(ack));
-}
-
-static void _cmd_sync_abort(frame_msg_t *msg)
-{
-    (void)msg;
-    if (app_screen_is_master()) return;
-    /* 主卡放弃本轮：清掉暂存，免得半份内容留在那儿被下一轮的 COMMIT 误用 */
-    s_rx.active    = false;
-    s_rx.have_mask = 0;
+    /* 回带**本轮序号**（不是自己的发送计数器）—— 主卡的等待循环按 (seq, src) 匹配。
+       ACK 无载荷："收下并落屏"就是它唯一的意思，拒绝走 NACK 那条类型。 */
+    (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
 }
 
 /* ================================================================
@@ -605,34 +601,34 @@ static void _cmd_sync_abort(frame_msg_t *msg)
  *  落进这里，只按 sta 判会把它们当成当前这张卡的答复。
  * ================================================================ */
 
-#define CASC_STA_NACK (0xFFU) /**< 内部用：本帧是 NACK 而不是 ACK（不在 casc_ack_sta_t 里） */
+#define CASC_STA_ACK  (0x00U) /**< 从卡收下并落屏了 */
+#define CASC_STA_NACK (0xFFU) /**< 从卡明确回绝（配置错，重发没用）—— 不在线上出现，只在 s_ack 里 */
 
 static struct {
-    uint16_t seq;       /**< 应答回带的轮次序号 */
-    uint8_t  src;       /**< 谁答的（总线地址） */
-    uint8_t  sta;       /**< casc_ack_sta_t，或 CASC_STA_NACK */
-    uint8_t  miss_mask; /**< sta == CASC_ACK_MISS 时有效 */
+    uint16_t seq;   /**< 应答回带的轮次序号 */
+    uint8_t  src;   /**< 谁答的（总线地址） */
+    uint8_t  sta;   /**< CASC_STA_ACK / CASC_STA_NACK */
+    uint8_t  err;   /**< sta == CASC_STA_NACK 时是 casc_nack_err_t，否则 0 */
     bool     valid;
 } s_ack;
 
 static void _cmd_ack(frame_msg_t *msg)
 {
-    if (!app_screen_is_master()) return; /* 从卡只发不收 */
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_ack_t))) return;
+    if (!app_screen_is_master()) return;        /* 从卡只发不收 */
+    if (msg->data_len != CASC_OVERHEAD) return; /* ACK 无载荷 */
 
-    const casc_hdr_t  *h = (const casc_hdr_t *)msg->data;
-    const casc_ack_t  *a = (const casc_ack_t *)(msg->data + sizeof(casc_hdr_t));
+    const casc_hdr_t *h = (const casc_hdr_t *)msg->data;
 
     /* **收到就打**，不等匹配：只有这一行能把"字节根本没到"与"到了但没对上"分开，
        而这两者排查方向相反（查接收链路 vs 查匹配条件）。 */
-    CASC_LOG("[casc·主] ← 收到 ACK seq=%u src=%u sta=%u 缺=%02X\n", (unsigned)casc_get_u16(h->seq),
-             (unsigned)h->src, (unsigned)a->sta, (unsigned)a->miss_mask);
+    CASC_LOG("[casc·主] ← 收到 ACK seq=%u src=%u\n", (unsigned)casc_get_u16(h->seq),
+             (unsigned)h->src);
 
-    s_ack.seq       = casc_get_u16(h->seq);
-    s_ack.src       = h->src;
-    s_ack.sta       = a->sta;
-    s_ack.miss_mask = a->miss_mask;
-    s_ack.valid     = true;
+    s_ack.seq   = casc_get_u16(h->seq);
+    s_ack.src   = h->src;
+    s_ack.sta   = CASC_STA_ACK;
+    s_ack.err   = 0;
+    s_ack.valid = true;
 }
 
 static void _cmd_nack(frame_msg_t *msg)
@@ -640,40 +636,40 @@ static void _cmd_nack(frame_msg_t *msg)
     if (!app_screen_is_master()) return;
     if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_nack_t))) return;
 
-    const casc_hdr_t *h = (const casc_hdr_t *)msg->data;
+    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
+    const uint8_t     err = msg->data[sizeof(casc_hdr_t)];
 
     CASC_LOG("[casc·主] ← 收到 NACK seq=%u src=%u err=%u\n", (unsigned)casc_get_u16(h->seq),
-             (unsigned)h->src, (unsigned)msg->data[sizeof(casc_hdr_t)]);
+             (unsigned)h->src, (unsigned)err);
 
-    s_ack.seq       = casc_get_u16(h->seq);
-    s_ack.src       = h->src;
-    s_ack.sta       = CASC_STA_NACK;
-    s_ack.miss_mask = msg->data[sizeof(casc_hdr_t)]; /* err */
-    s_ack.valid     = true;
+    s_ack.seq   = casc_get_u16(h->seq);
+    s_ack.src   = h->src;
+    s_ack.sta   = CASC_STA_NACK;
+    s_ack.err   = err;
+    s_ack.valid = true;
 }
 
 typedef void (*casc_cmd_fn_t)(frame_msg_t *msg);
 
 /* 按帧类型索引。0 项留空 = 未实现或不支持（SET_COLOR/SET_LAYOUT/BLANK 归后续期）。 */
 static const casc_cmd_fn_t g_casc_cmd[CASC_TYPE_MASK + 1U] = {
-    [CASC_T_SYNC_BEGIN]  = _cmd_sync_begin,
-    [CASC_T_SYNC_DATA]   = _cmd_sync_data,
-    [CASC_T_SYNC_COMMIT] = _cmd_sync_commit,
-    [CASC_T_SYNC_ABORT]  = _cmd_sync_abort,
-    [CASC_T_PING]        = _cmd_ping,
-    [CASC_T_PRESENT]     = _cmd_present,
-    [CASC_T_SET_BRIGHT]  = _cmd_set_bright,
-    [CASC_T_ACK]         = _cmd_ack,
-    [CASC_T_NACK]        = _cmd_nack,
+    [CASC_T_IMAGE]      = _cmd_image,
+    [CASC_T_PING]       = _cmd_ping,
+    [CASC_T_PRESENT]    = _cmd_present,
+    [CASC_T_SET_BRIGHT] = _cmd_set_bright,
+    [CASC_T_ACK]        = _cmd_ack,
+    [CASC_T_NACK]       = _cmd_nack,
 };
 
 /* ================================================================
  *  取帧与排空
  *
- *  **必须主动排空**：队列深度只有 2，而框架在队列满时**静默丢帧**
- *  （app_dispatch.c 的 osMessageQueuePut 超时为 0）。一轮图传是"每毫秒一帧"地
- *  连发，处理一条就回去睡的话从第 3 帧起全被丢掉 —— 现场表现是"总缺第 2、3 片"，
- *  且两侧都看不出原因。
+ *  **等待期间必须主动排空**：队列深度 2，而框架在队列满时**静默丢帧**
+ *  （app_dispatch.c 的 osMessageQueuePut 超时为 0）—— 丢掉的若是 ACK，
+ *  现场表现与"从卡没应答"完全一样，只能白等一轮重传。
+ *
+ *  一帧一轮之后实际压力很小（主卡那边任何时刻最多一条 ACK 在队列里），
+ *  所以排空只是"等应答时顺手做掉的事"，不再是分片时期那种必须连轴转的节奏。
  * ================================================================ */
 
 /** @brief 取一条帧（最多等 timeout_ms）并按类型分派；返回是否有帧被处理 */
@@ -721,122 +717,78 @@ static bool _wait_ack(uint8_t from, uint16_t seq, uint32_t deadline)
 /* ================================================================
  *  开轮（主卡侧）
  *
- *  一轮 = 把**整屏**的新内容分发给每张从卡（各发它那一块），全部结算完后
- *  主卡自己也换帧。刷新需求是指令式的（几秒~几分钟一次），所以一轮 ~130ms/卡
- *  完全够用 —— 这也是不做差分模式的前提。
+ *  一轮 = 把**整屏**的新内容分发给每张从卡（各发它那一块，一帧装下），全部结算完后
+ *  主卡自己也换帧。刷新需求是指令式的（几秒~几分钟一次），所以一轮 ~135ms/卡
+ *  （1427 字节 @115200 的 124ms + 应答往返）完全够用 —— 这也是不做差分模式的前提。
  * ================================================================ */
-
-/* 主卡下发用的矩形缓冲。**与 s_rx.stage 分开**：一张卡要么是主卡要么是从卡，
-   理论上能复用一块内存，但把两种角色的缓冲分开不容易出"串味"的错，代价只有 1.4KB。 */
-static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
 
 static uint16_t s_round_seq;
 
-
-/** @brief 把 `mask` 位选中的分片发出去（每片 CASC_FRAG_BYTES 字节）
+/** @brief 单张从卡的一轮：发一条 IMAGE（含整块位图）→ 等应答 → 失败则整帧重发
  *
- *  **每片之间 osDelay(1)**：对端的 UART 靠**空闲中断**分帧（pl_uart.c 的
- *  HAL_UART_Receive_DMA 是非循环模式），帧连着发、线路一直不空闲，对端就永远
- *  等不到 IDLE，DMA 缓冲填满后接收直接停摆 —— 表现是"整轮一片都没收到"。
- *  1ms @115200 ≈ 11.5 个字节时间，足够 IDLE 判定；代价约 4%。 */
-static void _send_frags(const screen_card_t *c, uint16_t seq, uint16_t bmp_len, uint8_t frag_n,
-                        uint8_t mask)
-{
-    for (uint8_t k = 0; k < frag_n; k++) {
-        if (!(mask & (uint8_t)(1U << k))) continue;
-
-        const uint16_t off   = (uint16_t)(k * CASC_FRAG_BYTES);
-        const uint32_t left  = (uint32_t)bmp_len - off; /* 无符号，避免与 CASC_FRAG_BYTES 的符号比较 */
-        const uint16_t n     = (uint16_t)((left > CASC_FRAG_BYTES) ? CASC_FRAG_BYTES : left);
-
-        (void)_send_seq(CASC_T_SYNC_DATA, c->addr, seq, k, frag_n, &s_band[off], n);
-        osDelay(1);
-    }
-}
-
-/** @brief 单张从卡的一轮：BEGIN → 分片 → 结算（含定向重传）
+ *  **逐卡走完再下一张**：位图要占住发送帧里那块 1400 字节，逐卡走完就只需一块缓冲。
  *
- *  **逐卡走完再下一张**（而不是"以分片为主序、每片发给所有卡"）：一张卡的矩形要
- *  抽进 s_band，逐卡走完只需一块缓冲；分片为主序则每发一片都要重抽一次。代价是
- *  卡与卡之间多一次应答往返，3 卡约 120ms，对指令式刷新无所谓。 */
+ *  **失败是怎么被看见的**：ACK 到不了、NACK 被明确回绝、超时 —— 三种都归结为
+ *  "这一轮这张卡没对齐"，由 `_round_run` 记失败轮数、到阈值剔除。 */
 static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright)
 {
     const screen_card_t *c       = app_screen_card(idx);
     const uint16_t       bmp_len = app_screen_card_bm_len(idx);
-    if (!c || !bmp_len || bmp_len > sizeof(s_band)) return false;
+    if (!c || !bmp_len) return false;
 
-    if (!app_screen_extract(idx, s_band, sizeof(s_band))) return false;
+    /* **位图直接抽进发送帧的载荷位置**：抽出来的格式（1bpp、行优先、MSB-first、
+       末字节补位归零）与线上格式逐位一致，所以既不需要中间缓冲，也不用再 memcpy 一次。 */
+    casc_image_t  *p   = (casc_image_t *)(s_tx + sizeof(casc_hdr_t));
+    const uint16_t cap = (uint16_t)(sizeof(s_tx) - sizeof(casc_hdr_t) - sizeof(casc_image_t));
 
-    const uint8_t frag_n = (uint8_t)((bmp_len + CASC_FRAG_BYTES - 1U) / CASC_FRAG_BYTES);
-    if (frag_n == 0 || frag_n > CASC_FRAG_MAX) {
-        printf("[casc] 卡 %u 的位图 %u 字节需 %u 片，超出 CASC_FRAG_MAX=%u，本轮跳过\n",
-               (unsigned)c->addr, (unsigned)bmp_len, (unsigned)frag_n, (unsigned)CASC_FRAG_MAX);
-        return false;
-    }
-    const uint8_t full = (uint8_t)((1U << frag_n) - 1U);
+    if (cap < bmp_len || !app_screen_extract(idx, p->bitmap, cap)) return false;
 
-    casc_sync_begin_t p;
-    casc_put_u16(p.x, c->x);
-    casc_put_u16(p.y, c->y);
-    casc_put_u16(p.w, c->w);
-    casc_put_u16(p.h, c->h);
-    casc_put_u16(p.bmp_len, bmp_len);
-    casc_put_u16(p.frag_bytes, CASC_FRAG_BYTES);
-    p.frag_n = frag_n;
-    p.bright = bright;
-    p.color  = c->color;
+    casc_put_u16(p->x, c->x);
+    casc_put_u16(p->y, c->y);
+    casc_put_u16(p->w, c->w);
+    casc_put_u16(p->h, c->h);
+    casc_put_u16(p->bmp_len, bmp_len);
+    p->bright = bright;
+    p->color  = c->color;
 
-    s_ack.valid = false;
-    (void)_send_seq(CASC_T_SYNC_BEGIN, c->addr, seq, 0, 0, &p, sizeof(p));
+    const uint16_t len = _finish_frame(s_tx, sizeof(s_tx), CASC_T_IMAGE, c->addr, seq,
+                                       (uint16_t)(sizeof(casc_image_t) + bmp_len));
+    if (!len) return false;
 
-    /* **BEGIN 与第一片之间也要留一个间隔**，与其余分片一样。
-     * 对端靠**空闲中断**分帧：两帧首尾相接时线路上不出现空闲，对端会把它们当成
-     * **一个块**收下来 —— 接收侧要在一瞬间处理两条帧（这正是当初把深 2 队列压垮的
-     * 形态），而且"每帧间隔 1ms"这个前提对第一对不成立，时序再也推不准。
-     * 代价 1ms/轮。 */
-    osDelay(1);
-    _send_frags(c, seq, bmp_len, frag_n, full);
-    _casc_drain(); /* NACK（几何不符）可能已经回来了，下面第一圈就会看到 */
-
-    uint8_t mask = full;
     for (uint8_t attempt = 0; attempt <= CASC_RETRY_MAX; attempt++) {
-        /* 早先回来的 NACK：几何/参数不符，重发没用 —— 放弃这张卡 */
-        if (s_ack.valid && s_ack.src == c->addr && s_ack.seq == seq && s_ack.sta == CASC_STA_NACK) {
-            printf("[casc] 卡 %u 拒绝本轮（err=%u），本轮不更新它\n", (unsigned)c->addr,
-                   (unsigned)s_ack.miss_mask);
-            return false;
-        }
         if (attempt) {
-            if (!mask) break;
-            /* **定向重传**：只补 ACK 报缺的那几片，不是重发整轮 */
+            /* **整帧重传**：一帧就是一幅完整画面，没有"只补缺的那几片"这种粒度。
+               代价 124ms 的总线时间，换掉整套缺片追踪与缺片位图。 */
             app_screen_note_retrans();
-            _send_frags(c, seq, bmp_len, frag_n, mask);
+            CASC_LOG("[casc·主] seq=%u 卡%u 第%u次整帧重发\n", (unsigned)seq, (unsigned)c->addr,
+                     (unsigned)(attempt + 1));
         }
-        CASC_LOG("[casc·主] seq=%u 卡%u 第%u次：发 %02X 那几片 + COMMIT\n", (unsigned)seq,
-                 (unsigned)c->addr, (unsigned)(attempt + 1), (unsigned)mask);
-        (void)_send_seq(CASC_T_SYNC_COMMIT, c->addr, seq, 0, 0, nullptr, 0);
+
+        /* 应答槽要在**发之前**清：ACK 可能在这条帧还没收完时就回来了，而它是被
+           `_wait_ack` 取走的 —— 若在发之后清，清掉的正是刚收到的那一条。 */
+        s_ack.valid = false;
+        (void)_send_tx(len, CASC_T_IMAGE);
 
         if (!_wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS)) {
+            /* 超时 = 这张卡没应答，或者 ACK 丢了 —— 现场分不开，只能整帧重发 */
             CASC_LOG("[casc·主] seq=%u 卡%u ← 等应答超时（%ums）\n", (unsigned)seq,
                      (unsigned)c->addr, (unsigned)CASC_ACK_TIMEOUT_MS);
-            /* 超时 = 这张卡没应答，或者 ACK 丢了 —— 现场分不开，只能整卡重来一次 */
-            mask = full;
             continue;
         }
-        CASC_LOG("[casc·主] seq=%u 卡%u ← sta=%u 缺=%02X\n", (unsigned)seq, (unsigned)c->addr,
-                 (unsigned)s_ack.sta, (unsigned)s_ack.miss_mask);
 
-        if (s_ack.sta == CASC_ACK_OK) return true; /* 本轮完成 */
-        if (s_ack.sta == CASC_ACK_MISS) {
-            mask = s_ack.miss_mask;
-            if (!mask) return true; /* 说没缺片却回了 MISS：当完成，别在这儿死循环 */
-            continue;
+        if (s_ack.sta == CASC_STA_NACK) {
+            /* 从卡明确回绝（矩形与本卡切分表不符 / 本卡地址不在表里）—— 重发没有意义。
+               它每回绝一次，`_round_run` 的失败计数照常累加，所以配置错的卡最终会被剔除；
+               而在此之前，这行日志是唯一能指出"是配置问题不是链路问题"的东西。 */
+            CASC_LOG("[casc·主] seq=%u 卡%u 拒绝本轮（err=%u）—— 多半是两块板的切分表/地址不一致\n",
+                     (unsigned)seq, (unsigned)c->addr, (unsigned)s_ack.err);
+            return false;
         }
-        break; /* NOBEGIN：BEGIN 都没到，多半是链路问题，留到下一轮比在这儿死磕省总线 */
+        return true; /* ACK：这一轮完成 */
     }
 
-    printf("[casc] 卡 %u 本轮未完成（最后已知缺片位 %02X）—— 其余卡与主卡照常更新\n",
-           (unsigned)c->addr, (unsigned)mask);
+    printf("[casc] 卡 %u 本轮未完成（重发 %u 次仍无应答）—— 其余卡与主卡照常更新\n",
+           (unsigned)c->addr, (unsigned)CASC_RETRY_MAX);
     return false;
 }
 
@@ -1010,9 +962,15 @@ static void _cascade_init(void)
     p->name        = "cascade";
     p->ops         = &s_casc_ops;
     p->rb          = &s_casc_rb;
-    /* 不是 CASC_FRAME_MAX：见 CASC_MSG_MAX 的说明 —— 队列元素按它定，设大了
-       要么白占 CCMRAM，要么被迫把队列做浅。本协议发出的最长帧就是分片帧。 */
+    /* 本协议最长的一帧 = 整块位图那一帧。队列元素按它定，见 CASC_QUEUE_DEPTH 的说明。 */
     p->payload_max = CASC_MSG_MAX;
+
+    /* 发送缓冲必须 DMA 可达（RS485 按这个在 DMA 与轮询之间二选一，见 app_rs485.c）。
+       真被挪进 CCMRAM 也不会报错，只会静默退化成 124ms 的轮询发送 —— 所以在这里
+       一次性地把它喊出来。 */
+    if (!pl_mem_is_dma_capable(s_tx, sizeof(s_tx))) {
+        printf("[casc] 发送缓冲不在 DMA 可达区（SRAM）—— 长帧会退化成轮询发送\n");
+    }
 
     rb_init(&s_casc_rb, "cascade");
 

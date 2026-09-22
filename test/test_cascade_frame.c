@@ -175,7 +175,9 @@ static void case_length_bounds(void)
 {
     TEST_BEGIN("长度域越界 → FAKE（不是 SKIP），后面的真帧仍能找回");
 
-    uint16_t bad_vals[] = {0, 1, 14, 1045, 0xFFFF};
+    /* **跟着宏走，不写裸字面量**：写死 1045/14 的话，帧长上限一改（1044→1427 那次
+       就是这样）这两条就再也测不到边界，而它们恰恰是"必须 FAKE 而不是 SKIP"的判据。 */
+    uint16_t bad_vals[] = {0, 1, CASC_FRAME_MIN - 1U, CASC_FRAME_MAX + 1U, 0xFFFF};
     for (unsigned i = 0; i < sizeof(bad_vals) / sizeof(bad_vals[0]); i++) {
         fixture_reset();
         uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
@@ -232,13 +234,13 @@ static void case_address_filter(void)
 
     /* 本机（从卡 1） */
     fixture_reset();
-    n = build(s_f, CASC_T_SYNC_BEGIN, 1, CASC_ADDR_MASTER, 1, nullptr, 0);
+    n = build(s_f, CASC_T_IMAGE, 1, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, n);
     CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "发给本机的帧应 READY");
 
     /* 别人（从卡 2）—— 本用例把本卡设成 1 */
     fixture_reset();
-    n = build(s_f, CASC_T_SYNC_BEGIN, 2, CASC_ADDR_MASTER, 1, nullptr, 0);
+    n = build(s_f, CASC_T_IMAGE, 2, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, n);
     tl = 0;
     CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_SKIP, "发给别人的帧应 SKIP");
@@ -313,6 +315,120 @@ static void case_sof_in_payload(void)
     CHECK_MSG(tl == n, "total_len 应为整帧 %u，得到 %u", (unsigned)n, (unsigned)tl);
 }
 
+/** @brief **一条帧分两段写入、且第二段让协议 RB 自己回绕** → 探针必须仍能 READY
+ *
+ *  这不是假想的场景，而是上机实测到的：接收侧的 DMA 缓冲环回处，`uart_idle_handle`
+ *  会把一段拆成两次回调（先交缓冲末尾那截、再交开头那截），于是传输层往协议 RB 里
+ *  **写两次**；而第二次写很可能让 RB 的写指针在内部绕回去 —— 整帧在 RB 里就不连续了。
+ *
+ *  实测现象：`590 + 837`（正好一条 1427 的帧）两段都交付了，协议层却一行都没有；
+ *  而**不跨回绕**的 1427 字节一次写进去就正常。所以这条用例把那个形态钉住：
+ *  先让读写指针前进到"半途"（模拟上一帧刚被消费掉），再分两段写这一帧。
+ *
+ *  **反向验证**：把 rb_peek/rb_read 的回绕处理去掉，本用例立刻红。
+ */
+static void case_split_across_rb_wrap(void)
+{
+    TEST_BEGIN("一条帧分两段写入、第二段让 RB 内部回绕 → 仍要能解析");
+
+    fixture_reset();
+
+    /* 造一条尽可能长的帧（位图整块），长度与真实场景同量级 */
+    static uint8_t bmp[CASC_FRAME_MAX];
+    for (uint16_t i = 0; i < sizeof(bmp); i++) bmp[i] = (uint8_t)(i * 7U + 3U);
+
+    uint16_t       plen = 0;
+    static uint8_t payload[CASC_FRAME_MAX];
+    payload[plen++] = 0x11; /* 载荷头随便填，探针不解释它 */
+    payload[plen++] = 0x22;
+    const uint16_t want = (uint16_t)(CASC_FRAME_MAX - CASC_OVERHEAD);
+    memcpy(&payload[plen], bmp, (size_t)(want - plen));
+    plen = want;
+
+    static uint8_t frame[CASC_FRAME_MAX];
+    const uint16_t n = build(frame, CASC_T_IMAGE, 1, CASC_ADDR_MASTER, 7, payload, plen);
+    CHECK_MSG(n == CASC_FRAME_MAX, "本用例要一条满长的帧（%u），得到 %u",
+              (unsigned)CASC_FRAME_MAX, (unsigned)n);
+
+    /* ① 先把读写指针推到"接近缓冲末尾"：这样第二段写**必然**让写指针绕回去。
+       推进的量按缓冲容量算，不写死 —— 否则换块板（帧长不同）就构造不出来，
+       甚至越界（这一版最初写死 590，在 3833024 上被 ASan 当场抓住）。 */
+    const uint16_t split   = (uint16_t)(n / 2U);
+    const uint16_t advance = (uint16_t)(s_rb.size - 1U - split);
+
+    static uint8_t junk[4096];
+    static uint8_t sink[4096];
+    memset(junk, 0xA5, sizeof(junk)); /* 内容无所谓：随后会被读走 */
+    feed(junk, advance);
+    CHECK_MSG(rb_read(&s_rb, sink, advance, nullptr) == advance, "预置：把指针推到接近末尾");
+    CHECK_MSG(rb_avail(&s_rb, nullptr) == 0, "预置：缓冲应为空");
+
+    /* ② 分两段写这一帧 */
+    const uint16_t w1 = rb_write(&s_rb, frame, split, nullptr);
+    const uint16_t w2 = rb_write(&s_rb, frame + split, (uint16_t)(n - split), nullptr);
+    CHECK_MSG(w1 == split && w2 == (uint16_t)(n - split), "两段都要完整写进去（%u + %u）",
+              (unsigned)w1, (unsigned)w2);
+    CHECK_MSG(rb_avail(&s_rb, nullptr) == n, "两段之后缓冲里应有整帧 %u 字节，得到 %u",
+              (unsigned)n, (unsigned)rb_avail(&s_rb, nullptr));
+
+    /* **自检**：写指针必须真的绕回去了（write < read）。没绕回就是空转。 */
+    CHECK_MSG(s_rb.write_index < s_rb.read_index,
+              "本用例要求第二段真的让写指针绕回（read=%u write=%u）—— 没绕回就测不到东西",
+              (unsigned)s_rb.read_index, (unsigned)s_rb.write_index);
+
+    /* ③ 探针必须能认出它，且读回来的字节与发出去的一模一样 */
+    uint32_t tl = 0;
+    uint8_t  ax = 0;
+    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY,
+              "分两段写入 + RB 内部回绕之后探针认不出这条帧 —— 现场就是协议层一行都没有");
+    CHECK_MSG(tl == n, "total_len 应为 %u，得到 %u", (unsigned)n, (unsigned)tl);
+    CHECK_MSG(ax == CASC_T_IMAGE, "aux 应为 IMAGE(%02X)，得到 %02X", CASC_T_IMAGE, ax);
+
+    CHECK_MSG(rb_read(&s_rb, sink, n, nullptr) == n, "整帧应能一次读出来");
+    CHECK_MSG(memcmp(sink, frame, n) == 0, "读回来的字节与写进去的不一致");
+}
+
+/** @brief **伪帧时不得把整帧拷进暂存区** —— 否则"逐字节重跳"是 O(n²) 的 memcpy
+ *
+ *  这不是优化洁癖，是实测出来的故障：框架对伪帧的做法是"跳 1 字节再探"，而探针若每次
+ *  都按 `scratch_size` 拷一遍，一条 1427 字节的杂物就要拷 ~2MB（1427 次 × 每次 ~1428 字节），
+ *  三个协议绑在同一条 485 上就是 ~6MB —— 在 168MHz 上把帧分发任务拖住**四十多毫秒**。
+ *  而这段时间里，同一条总线上后到的帧会把前一条**完整但还没轮到解析的**帧从协议缓冲里
+ *  挤掉（`app_ccb_dispatch` 装不下就"丢旧留新"），现场表现就是
+ *  "跨回绕被拆成两段的帧总是丢、一次发完的就成"。
+ *
+ *  **反向验证**：把探针改回"上来就 `rb_peek_capped(..., scratch_size, ...)`"，本用例立刻红。
+ */
+static void case_fake_does_not_copy_whole(void)
+{
+    TEST_BEGIN("伪帧时不得拷整帧（否则逐字节重跳退化成 O(n²)，实测拖住 40ms+）");
+
+    fixture_reset();
+
+    /* 一大段杂物，头一个字节就不是 A5 —— 探针看一眼帧头就该判 FAKE */
+    static uint8_t junk[1400];
+    memset(junk, 0x43, sizeof(junk));
+    feed(junk, sizeof(junk));
+
+    /* 暂存区铺哨兵：探针跑完之后，**帧头以外的字节必须原封不动** */
+    memset(s_scratch, 0xEE, sizeof(s_scratch));
+
+    uint32_t tl = 0;
+    uint8_t  ax = 0;
+    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_FAKE, "杂物应判 FAKE");
+
+    bool untouched = true;
+    for (uint16_t i = sizeof(casc_hdr_t); i < sizeof(s_scratch); i++) {
+        if (s_scratch[i] != 0xEE) {
+            untouched = false;
+            break;
+        }
+    }
+    CHECK_MSG(untouched,
+              "FAKE 却把整帧拷进了暂存区 —— 逐字节重跳会退化成 O(n²) 的 memcpy，"
+              "把帧分发任务拖住几十毫秒，下游协议缓冲在那期间被写满会冲掉完整帧");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -322,6 +438,8 @@ int main(void)
     case_address_filter();
     case_no_cross_poison();
     case_sof_in_payload();
+    case_split_across_rb_wrap();
+    case_fake_does_not_copy_whole();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

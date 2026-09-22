@@ -31,7 +31,17 @@
 /* ---- 常量 ---- */
 #define CCB_NOTIFY_MAX       (8U)     /**< 通道通知队列深度 */
 #define CCB_PROTO_MAX       (4U)     /**< 单个通道最多承载的协议数 */
-#define FRAME_DATA_MAX_LEN (1044U)  /**< 分发任务暂存上限（平台约束，非协议知识） */
+
+/** @brief 分发任务暂存上限（**平台约束，非协议知识**）
+ *
+ *  它是探针 scratch 的容量（`app_dispatch.c` 那份唯一的 `_msg_dispatch_buf`），
+ *  **与各协议自己声明的 `payload_max` 无关** —— 帧比它长就投递不上来。
+ *
+ *  原值 1044 是照 IAP 的最长帧定的；抬到 1440 是为了让级联协议**一帧发完一整块
+ *  卡位图**（单卡 224×50 1bpp = 1400，加帧头与载荷头共 1430）。
+ *  抬它的代价只有那一份静态缓冲（+396 字节 CCMRAM）；各协议的队列元素按各自的
+ *  `payload_max` 分配，不受影响。 */
+#define FRAME_DATA_MAX_LEN (1440U)
 
 /* ---- 通道连接状态 ---- */
 typedef enum {

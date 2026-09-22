@@ -1,16 +1,18 @@
 /**
  * @file    test_cascade_round.c
- * @brief   级联图传 · **从卡侧**：收分片 → 暂存 → 收齐才落屏 → 回 ACK/NACK
+ * @brief   级联图传 · **从卡侧**：收一条 IMAGE → 校验 → 落屏 → 回 ACK/NACK
  *
- * **为什么需要这个测试**：从卡这一侧错了，现场看到的是"某块屏上少一条"或"显示了
- * 上一轮的内容"，而两块屏分别在两台设备上，没有任何一处日志会指出是哪一步错的。
- * 尤其三条**静默错**，它们都不会报错、不会超时，只是画面不对：
+ * **为什么需要这个测试**：从卡这一侧错了，现场看到的是"某块屏上是别的内容"或
+ * "内容不更新"，而两块屏分别在两台设备上，没有任何一处日志会指出是哪一步错的。
+ * 三条**静默错**都不会报错、不会超时，只是画面不对：
  *
- *   1. **陈旧分片**——上一轮的迟到分片帧头完好、CRC 也对，探针照常放行。不靠 seq
- *      拦就会写进本轮暂存，画面变成"一半旧内容一半新内容"。
- *   2. **短分片**——长度短一截的分片若不拒，会静默留下旧字节，而 have_mask 记成
- *      "这片到了"，主卡便再也不补发，错内容永久留在屏上。
- *   3. **缺片落屏**——边收边落会出半幅画面。
+ *   1. **帧长与 bmp_len 自相矛盾**——两端固件不同版本时最常见（旧版发的是分片帧）。
+ *      不先按长度拦住，就会按新布局的偏移去读位图，读到的是帧外的东西。
+ *   2. **矩形不符却照落**——两块板烧了不同的切分表时，同一地址对应的格子相反，
+ *      结果两块屏内容**悄悄互换而所有检查通过**。所以矩形要逐字段核对，
+ *      不只是看"装不装得下"。
+ *   3. **回带的 seq 不是主卡发来的那个**——主卡的等待循环按 (seq, src) 匹配，
+ *      从卡若回自己的计数器，表现是"每张卡都超时"，而两侧日志都看不出问题。
  *
  * 用例走的是**真探针 + 真分派表**（`casc_probe_frame` → `g_casc_cmd[]`），
  * 只有总线与 app_screen 是替身；帧由用例独立构造，不复用被测的 `_build`。
@@ -51,7 +53,7 @@ static bool s_is_master;
 bool        app_screen_is_master(void) { return s_is_master; }
 uint8_t     app_screen_self_addr(void) { return 1; }
 
-/* 落屏替身：把内容留下来供断言 —— 从卡的落屏路径就是"收齐了调一次 commit_bitmap"，
+/* 落屏替身：把内容留下来供断言 —— 从卡的落屏路径就是"校验通过调一次 commit_bitmap"，
    留证比拉进真的 app_screen.c（要带上切分表与画布一整串）更直接。 */
 static uint8_t  s_commit_bm[256];
 static uint16_t s_commit_len;
@@ -87,14 +89,33 @@ void app_screen_card_set_state(uint8_t i, screen_card_state_t st) { (void)i; (vo
 void app_screen_note_round(uint16_t seq) { (void)seq; }
 void app_screen_note_retrans(void) {}
 
-
-/* 本卡实屏：几何必须与 BEGIN 里的矩形一致，否则从卡回 NACK —— 这正是被测行为之一 */
+/* 本卡实屏：几何必须与 IMAGE 里的矩形一致，否则从卡回 NACK —— 这正是被测行为之一 */
 #define DEV_W (48U)
 #define DEV_H (16U)
 static dev_display_t s_dev;
 static uint8_t       s_pixel_map[DEV_W * DEV_H];
 
 dev_display_t *dev_display_get(void) { return &s_dev; }
+
+/* 本卡切分表：一张卡，就是本卡自己。用例可以改它来构造"切分表不符"。
+   `app_screen_self_index()` 返回 0xFF 表示"本卡地址不在切分表里"（配置错）。 */
+static screen_card_t s_self_card = {.addr  = 1,
+                                    .color = COLOR_GREEN,
+                                    .x     = 0,
+                                    .y     = 0,
+                                    .w     = DEV_W,
+                                    .h     = DEV_H,
+                                    .state = SCREEN_CARD_ONLINE};
+static uint8_t       s_self_idx  = 0;
+
+const screen_card_t *app_screen_card(uint8_t idx) { return (idx == 0) ? &s_self_card : nullptr; }
+uint8_t              app_screen_self_index(void) { return s_self_idx; }
+
+uint16_t app_screen_card_bm_len(uint8_t idx)
+{
+    const screen_card_t *c = app_screen_card(idx);
+    return c ? (uint16_t)(((c->w + 7U) / 8U) * c->h) : 0;
+}
 
 /* ---- 被测：生产源码本体（探针与分派表都是 static） ---- */
 #include "../Application/Src/CASCADE/app_cascade.c"
@@ -108,24 +129,15 @@ RB_DEFINE(s_rb, 4096);
 static uint8_t s_msg_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
 static frame_msg_t *s_msg = (frame_msg_t *)s_msg_buf;
 
-#define BMP_LEN    (96U) /* ceil(48/8) × 16 */
-#define FRAG_BYTES (40U) /* 3 片：40 + 40 + 16（末片更短，专测那条路径） */
-#define FRAG_N     (3U)
-#define SEQ        (7U)
+#define BMP_LEN (96U) /* ceil(48/8) × 16 */
+#define SEQ     (7U)
 
 static uint8_t s_bmp[BMP_LEN];
-static uint8_t s_frag[FRAG_N][FRAG_BYTES];
 
-/** 位图图案：每字节都不同，缺片 / 错位 / 旧字节残留都会露出来 */
+/** 位图图案：每字节都不同，错位 / 少一截 / 旧内容残留都会露出来 */
 static void bmp_pattern(void)
 {
     for (uint16_t i = 0; i < BMP_LEN; i++) s_bmp[i] = (uint8_t)(i * 7U + 3U);
-    /* 按分片切开，便于逐片发送 */
-    for (uint8_t k = 0; k < FRAG_N; k++) {
-        const uint16_t off = (uint16_t)(k * FRAG_BYTES);
-        const uint16_t n   = (uint16_t)((BMP_LEN - off > FRAG_BYTES) ? FRAG_BYTES : (BMP_LEN - off));
-        memcpy(s_frag[k], &s_bmp[off], n);
-    }
 }
 
 static void fixture_reset(void)
@@ -133,9 +145,6 @@ static void fixture_reset(void)
     s_rb.read_index  = 0;
     s_rb.write_index = 0;
     s_casc_pcb.rb    = &s_rb;
-
-    s_rx.active    = false;
-    s_rx.have_mask = 0;
 
     s_tx_len   = 0;
     s_tx_count = 0;
@@ -151,6 +160,15 @@ static void fixture_reset(void)
     s_dev.screen_cols = DEV_H;
     s_dev.pixel_map   = s_pixel_map;
     memset(s_pixel_map, 0, sizeof(s_pixel_map));
+
+    s_self_idx  = 0;
+    s_self_card = (screen_card_t){.addr  = 1,
+                                  .color = COLOR_GREEN,
+                                  .x     = 0,
+                                  .y     = 0,
+                                  .w     = DEV_W,
+                                  .h     = DEV_H,
+                                  .state = SCREEN_CARD_ONLINE};
 
     bmp_pattern();
 }
@@ -184,92 +202,78 @@ static bool feed(const uint8_t *f, uint16_t len)
 
 /* ---- 帧构造：**独立**实现，不复用被测的 _build ---- */
 
-static uint16_t build(uint8_t *out, uint8_t type, uint16_t seq, uint8_t idx, uint8_t frag_n,
-                      const void *payload, uint16_t plen)
+/** @brief 按协议规则组一帧；载荷由调用方给（`payload` 与输出缓冲**必须分开**，
+ *         因为本函数会先 memset 输出缓冲） */
+static uint16_t build(uint8_t *out, uint8_t type, uint16_t seq, const void *payload, uint16_t plen)
 {
     const uint16_t len = (uint16_t)(CASC_OVERHEAD + plen);
     memset(out, 0, len);
     out[0] = CASC_SOF0;
     out[1] = CASC_SOF1;
     out[2] = (uint8_t)((CASC_PROTO_VER << 6) | type);
-    out[3] = 1;                    /* dst = 本卡（addr 1） */
-    out[4] = CASC_ADDR_MASTER;     /* src = 主卡 */
+    out[3] = 1;                /* dst = 本卡（addr 1） */
+    out[4] = CASC_ADDR_MASTER; /* src = 主卡 */
     casc_put_u16(out + 5, seq);
-    out[7] = idx;
-    out[8] = frag_n;
+    out[7] = 0; /* 保留字段 */
+    out[8] = 0;
     casc_put_u16(out + 9, len);
     if (plen) memcpy(out + 11, payload, plen);
     casc_put_u32(out + len - 4U, pl_crc32_calc(pl_crc_get_handle(), out + 2, len - 6U));
     return len;
 }
 
-static casc_sync_begin_t begin_payload(uint16_t w, uint16_t h, uint16_t bmp_len,
-                                       uint16_t frag_bytes, uint8_t frag_n, uint8_t bright,
-                                       uint8_t color)
+/** @brief 组一条 IMAGE 的载荷（12 字节头 + 位图），返回载荷长度
+ *
+ *  各项都可以给成"不对的值"，用例据此构造各种拒绝路径。 */
+static uint16_t image_payload(uint8_t *out, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                              uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp)
 {
-    casc_sync_begin_t p;
-    memset(&p, 0, sizeof(p));
-    casc_put_u16(p.x, 0);
-    casc_put_u16(p.y, 0);
-    casc_put_u16(p.w, w);
-    casc_put_u16(p.h, h);
-    casc_put_u16(p.bmp_len, bmp_len);
-    casc_put_u16(p.frag_bytes, frag_bytes);
-    p.frag_n = frag_n;
-    p.bright = bright;
-    p.color  = color;
-    return p;
+    casc_image_t *p = (casc_image_t *)out;
+    memset(p, 0, sizeof(*p));
+
+    casc_put_u16(p->x, x);
+    casc_put_u16(p->y, y);
+    casc_put_u16(p->w, w);
+    casc_put_u16(p->h, h);
+    casc_put_u16(p->bmp_len, bmp_len);
+    p->bright = bright;
+    p->color  = color;
+
+    if (bmp) memcpy(p->bitmap, bmp, BMP_LEN);
+    return (uint16_t)(sizeof(casc_image_t) + bmp_len);
 }
 
-/** @brief 发一帧 BEGIN（默认参数 = 本夹具的几何与分片） */
-static void send_begin(uint16_t seq, uint8_t bright)
+/** @brief 组一条 IMAGE 并喂进去
+ *
+ *  @param len_delta 把"整帧实际带的载荷"加减几个字节，用来构造"帧长与 bmp_len
+ *                   自相矛盾"的帧（跨版本固件的第一道防线就是拦它） */
+static void feed_image(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t bmp_len,
+                       uint8_t bright, uint8_t color, const uint8_t *bmp, int len_delta)
 {
-    uint8_t                 f[64];
-    const casc_sync_begin_t p =
-        begin_payload(DEV_W, DEV_H, BMP_LEN, FRAG_BYTES, FRAG_N, bright, COLOR_GREEN);
-    const uint16_t n = build(f, CASC_T_SYNC_BEGIN, seq, 0, 0, &p, sizeof(p));
-    feed(f, n);
+    static uint8_t pl[CASC_FRAME_MAX]; /* 载荷暂存：与整帧缓冲分开，见 build() 的说明 */
+    static uint8_t fr[CASC_FRAME_MAX];
+
+    const uint16_t plen = image_payload(pl, x, y, w, h, bmp_len, bright, color, bmp);
+    const uint16_t n    = build(fr, CASC_T_IMAGE, seq, pl, (uint16_t)(plen + len_delta));
+    feed(fr, n);
 }
 
-/** @brief 发一帧 DATA；plen 用来构造"长度不对的分片" */
-static void send_data(uint16_t seq, uint8_t idx, uint16_t plen)
+/** @brief 发一条正常的 IMAGE（本夹具的几何、位图、颜色） */
+static void send_image(uint16_t seq, uint8_t bright)
 {
-    uint8_t f[CASC_FRAME_MAX];
-    const uint16_t want =
-        (uint16_t)((BMP_LEN - idx * FRAG_BYTES > FRAG_BYTES) ? FRAG_BYTES
-                                                             : (BMP_LEN - idx * FRAG_BYTES));
-    const uint16_t n = (plen == 0) ? want : plen;
-    const uint16_t l = build(f, CASC_T_SYNC_DATA, seq, idx, FRAG_N, s_frag[idx], n);
-    feed(f, l);
-}
-
-static void send_commit(uint16_t seq)
-{
-    uint8_t        f[32];
-    const uint16_t n = build(f, CASC_T_SYNC_COMMIT, seq, 0, 0, nullptr, 0);
-    feed(f, n);
-}
-
-static void send_abort(uint16_t seq)
-{
-    uint8_t        f[32];
-    const uint16_t n = build(f, CASC_T_SYNC_ABORT, seq, 0, 0, nullptr, 0);
-    feed(f, n);
-}
-
-/** @brief 三次 DATA 全发 */
-static void send_all_data(uint16_t seq)
-{
-    for (uint8_t k = 0; k < FRAG_N; k++) send_data(seq, k, 0);
+    feed_image(seq, 0, 0, DEV_W, DEV_H, BMP_LEN, bright, COLOR_GREEN, s_bmp, 0);
 }
 
 /* ---- 收到的应答 ---- */
 
-static bool             last_is(uint8_t type)
+static bool last_is(uint8_t type)
 {
     return s_tx_len >= CASC_OVERHEAD && CASC_TYPE_OF(s_tx_frame[2]) == type;
 }
-static const casc_ack_t *last_ack(void) { return (const casc_ack_t *)(s_tx_frame + 11); }
+/** @brief 最近一条应答回带的 seq（从帧头读，不是载荷） */
+static uint16_t last_seq(void) { return casc_get_u16(s_tx_frame + 5); }
+/** @brief 最近一条 NACK 的 err；帧头 11 字节之后就是它 */
+static uint8_t last_nack_err(void) { return s_tx_frame[11]; }
 
 /* ---- 断言 ---- */
 static int g_pass;
@@ -291,207 +295,143 @@ static int g_fail;
 
 /* ================================================================ */
 
-/** 完整一轮：收齐三片 → COMMIT → 落屏内容与发出去的一致 */
-static void case_round_ok(void)
+/** 一条 IMAGE 就是完整一轮：收下即落屏，内容逐字节相等 */
+static void case_image_ok(void)
 {
-    TEST_BEGIN("完整一轮：三片收齐才落屏，内容逐字节相等");
+    TEST_BEGIN("一条 IMAGE：落屏一次，内容与颜色逐字节相等，回无载荷 ACK");
 
     fixture_reset();
-    send_begin(SEQ, 4);
-    CHECK_MSG(s_commit_count == 0, "BEGIN 之后不该落屏（那会落出全黑一帧）");
+    send_image(SEQ, 4);
 
-    send_all_data(SEQ);
-    CHECK_MSG(s_commit_count == 0, "DATA 阶段不该落屏（边收边落会出半幅画面）");
-    CHECK_MSG(s_rx.have_mask == 0x07, "三片应全部记到，have_mask=%02X", s_rx.have_mask);
-
-    send_commit(SEQ);
-    CHECK_MSG(s_commit_count == 1, "COMMIT 后应恰好落屏一次，得到 %d 次", s_commit_count);
+    CHECK_MSG(s_commit_count == 1, "一条 IMAGE 应恰好落屏一次，得到 %d 次", s_commit_count);
     CHECK_MSG(s_commit_len == BMP_LEN, "落屏长度应为 %u，得到 %u", (unsigned)BMP_LEN,
               (unsigned)s_commit_len);
     CHECK_MSG(memcmp(s_commit_bm, s_bmp, BMP_LEN) == 0, "落屏内容与发出去的不一致");
-    CHECK_MSG(s_commit_color == COLOR_GREEN, "落屏颜色应取 BEGIN 里的本卡颜色，得到 %u",
+    CHECK_MSG(s_commit_color == COLOR_GREEN, "落屏颜色应取 IMAGE 里的本卡颜色，得到 %u",
               (unsigned)s_commit_color);
 
     CHECK_MSG(last_is(CASC_T_ACK), "应回一帧 ACK");
-    CHECK_MSG(last_ack()->sta == CASC_ACK_OK, "应回 OK，得到 sta=%u",
-              (unsigned)last_ack()->sta);
-    CHECK_MSG(last_ack()->miss_mask == 0, "OK 时 miss_mask 应为 0");
+    CHECK_MSG(s_tx_len == CASC_OVERHEAD, "ACK 应无载荷（整帧 %u 字节），得到 %u",
+              (unsigned)CASC_OVERHEAD, (unsigned)s_tx_len);
 }
 
-/** 缺片 → 定向重传：ACK 报出缺哪片，补上后才落屏 */
-static void case_missing_fragment(void)
+/** 幂等：主卡没收到 ACK 会重发同一条帧，重落同一份内容无副作用 */
+static void case_image_idempotent(void)
 {
-    TEST_BEGIN("缺片：ACK 报出缺哪一片，补上后才落屏");
+    TEST_BEGIN("同一条 IMAGE 重发（ACK 丢了）幂等");
 
     fixture_reset();
-    send_begin(SEQ, 4);
-    send_data(SEQ, 0, 0);
-    send_data(SEQ, 2, 0); /* 故意不发第 1 片 */
-    send_commit(SEQ);
+    send_image(SEQ, 4);
+    send_image(SEQ, 4);
 
-    CHECK_MSG(last_is(CASC_T_ACK) && last_ack()->sta == CASC_ACK_MISS,
-              "缺片时应回 MISS（主卡据此只补那一片）");
-    CHECK_MSG(last_ack()->miss_mask == 0x02, "缺的应是第 1 片，miss_mask=%02X",
-              (unsigned)last_ack()->miss_mask);
-    CHECK_MSG(s_commit_count == 0, "缺片时绝不能落屏");
-
-    send_data(SEQ, 1, 0);
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->sta == CASC_ACK_OK, "补片后应回 OK");
-    CHECK_MSG(s_commit_count == 1, "补片后应落屏一次");
-    CHECK_MSG(memcmp(s_commit_bm, s_bmp, BMP_LEN) == 0, "补片后的内容仍应与发出去的一致");
+    CHECK_MSG(s_commit_count == 2, "两次应各落屏一次（内容相同，无副作用），得到 %d 次",
+              s_commit_count);
+    CHECK_MSG(memcmp(s_commit_bm, s_bmp, BMP_LEN) == 0, "第二次落屏的内容仍应与发出去的一致");
+    CHECK_MSG(last_is(CASC_T_ACK), "第二次仍应回 ACK");
 }
 
-/** 陈旧分片：上一轮的迟到分片必须被丢弃，绝不能写进本轮暂存 */
-static void case_stale_seq_dropped(void)
+/** ACK 必须回带**主卡发来的那个 seq** —— 回自己的计数器会让主卡永远匹配不上 */
+static void case_ack_echoes_seq(void)
 {
-    TEST_BEGIN("陈旧分片按 seq 丢弃（CRC 是好的，只能靠 seq 拦）");
+    TEST_BEGIN("ACK 回带 IMAGE 的 seq（主卡按 (seq, src) 匹配）");
 
     fixture_reset();
-    send_begin(SEQ, 4);
-    /* 上一轮（seq-1）的分片迟到。帧头完好、CRC 也对 —— 探针会正常放行 */
-    for (uint8_t k = 0; k < FRAG_N; k++) send_data((uint16_t)(SEQ - 1), k, 0);
+    send_image(0x1234, 4);
 
-    CHECK_MSG(s_rx.have_mask == 0, "陈旧分片被写进了本轮暂存，have_mask=%02X", s_rx.have_mask);
-
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->sta == CASC_ACK_MISS, "陈旧分片不算数，应回 MISS");
-    CHECK_MSG(last_ack()->miss_mask == 0x07, "三片都该算缺，得到 %02X",
-              (unsigned)last_ack()->miss_mask);
-
-    /* 旧帧头的 frag_n 也要拦：主卡换了分片方案后旧帧会带着旧 frag_n 进来 */
-    send_begin(SEQ, 4);
-    send_data(SEQ, 0, 0);
-    uint8_t        f[CASC_FRAME_MAX];
-    const uint16_t n = build(f, CASC_T_SYNC_DATA, SEQ, 1, (uint8_t)(FRAG_N + 1), s_frag[1],
-                             FRAG_BYTES);
-    feed(f, n);
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->miss_mask == 0x06, "frag_n 不符的分片也该丢，得到 %02X",
-              (unsigned)last_ack()->miss_mask);
+    CHECK_MSG(last_is(CASC_T_ACK), "应回 ACK");
+    CHECK_MSG(last_seq() == 0x1234, "ACK 应回带 0x1234，得到 0x%04X", (unsigned)last_seq());
 }
 
-/** 短分片：长度不是这一片该有的字节数，必须整片拒绝 */
-static void case_short_fragment_rejected(void)
+/** 帧长与 bmp_len 自相矛盾 —— 两端固件不同版本时最常见，必须回 NACK 而不是照读 */
+static void case_len_mismatch_nack(void)
 {
-    TEST_BEGIN("短分片被整片拒绝（否则旧字节会永久留在屏上）");
+    TEST_BEGIN("帧长与 bmp_len 不符 → NACK(LEN)，不落屏");
 
     fixture_reset();
-    send_begin(SEQ, 4);
-    send_data(SEQ, 0, (uint16_t)(FRAG_BYTES - 1)); /* 短一字节 */
-    send_data(SEQ, 1, 0);
-    send_data(SEQ, 2, 0);
-    send_commit(SEQ);
+    feed_image(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, -1);
 
-    CHECK_MSG(last_ack()->sta == CASC_ACK_MISS, "短分片不该被接受");
-    CHECK_MSG(last_ack()->miss_mask == 0x01, "只有第 0 片算缺，得到 %02X",
-              (unsigned)last_ack()->miss_mask);
-    CHECK_MSG(s_commit_count == 0, "缺片时绝不能落屏");
-
-    /* 末片比 frag_bytes 短是**正常**的（bmp_len 不是 frag_bytes 的整数倍），
-       上面那轮已经证明了这一点：第 2 片只有 16 字节却算收到了。 */
-    send_data(SEQ, 0, 0);
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->sta == CASC_ACK_OK, "补上完整的第 0 片后应 OK");
+    CHECK_MSG(last_is(CASC_T_NACK), "帧长不符应回 NACK（跨版本固件的第一道防线）");
+    CHECK_MSG(last_nack_err() == CASC_NACK_LEN, "NACK 原因应为 LEN，得到 %u",
+              (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "帧长不符时绝不能落屏");
 }
 
-/** 几何不符：明确回 NACK，而不是将就出一幅错位画面 */
+/** 矩形不符 → 明确回 NACK，而不是将就出一幅错位画面（两块屏互换就是这种） */
 static void case_geometry_nack(void)
 {
-    TEST_BEGIN("矩形尺寸与本卡屏不符 → NACK，且不进入本轮");
+    TEST_BEGIN("矩形与本卡切分表不符 → NACK(GEOM)，不落屏");
 
+    /* 尺寸不符 */
     fixture_reset();
-    const casc_sync_begin_t bad =
-        begin_payload((uint16_t)(DEV_W + 1), DEV_H, BMP_LEN, FRAG_BYTES, FRAG_N, 4, COLOR_GREEN);
-    uint8_t        f[64];
-    const uint16_t n = build(f, CASC_T_SYNC_BEGIN, SEQ, 0, 0, &bad, sizeof(bad));
-    feed(f, n);
+    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+              "尺寸不符应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "几何不符时绝不能落屏");
 
-    CHECK_MSG(last_is(CASC_T_NACK), "几何不符应回 NACK 而不是静默丢");
-    CHECK_MSG(s_tx_frame[11] == CASC_NACK_GEOM, "NACK 原因应为 GEOM，得到 %u",
-              (unsigned)s_tx_frame[11]);
-    CHECK_MSG(!s_rx.active, "NACK 之后不该处于本轮激活状态");
+    /* 尺寸对但**位置**不对：切分表不一致的典型形态（格子一样大、谁占哪格相反） */
+    fixture_reset();
+    feed_image(SEQ, 0, (uint16_t)(DEV_H + 1U), DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+              "y 偏移不符也应回 NACK(GEOM) —— 这才是「两块屏内容互换」的那条防线");
+    CHECK_MSG(s_commit_count == 0, "位置不符时绝不能落屏");
 
-    /* 主卡若仍发 COMMIT，从卡应说"我没有这一轮"，让主卡整轮重来 */
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->sta == CASC_ACK_NOBEGIN, "未 BEGIN 就 COMMIT 应回 NOBEGIN");
-    CHECK_MSG(s_commit_count == 0, "NOBEGIN 时绝不能落屏");
+    /* 本卡地址不在切分表里（配置错） */
+    fixture_reset();
+    s_self_idx = 0xFF;
+    send_image(SEQ, 4);
+    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+              "本卡地址不在切分表里应回 NACK(GEOM)");
+    CHECK_MSG(s_commit_count == 0, "配置错时绝不能落屏");
 }
 
-/** 重复 COMMIT 幂等：主卡没收到 ACK 会重发 COMMIT，不该被判成"整轮白做" */
-static void case_double_commit_idempotent(void)
+/** bmp_len 与本卡矩形算出来的长度不符 → NACK（否则会按错的长度读载荷） */
+static void case_bmp_len_nack(void)
 {
-    TEST_BEGIN("重复 COMMIT 幂等（ACK 丢了主卡会重发 COMMIT）");
+    TEST_BEGIN("bmp_len 与本卡矩形不符 → NACK(GEOM)");
 
     fixture_reset();
-    send_begin(SEQ, 4);
-    send_all_data(SEQ);
-    send_commit(SEQ);
-    send_commit(SEQ);
+    /* 声明 BMP_LEN+8，就真带 BMP_LEN+8 字节 —— 这样整帧长度是**自洽**的，
+       只有"与本卡矩形算出来的长度不符"这一条能拦住它 */
+    feed_image(SEQ, 0, 0, DEV_W, DEV_H, (uint16_t)(BMP_LEN + 8U), 4, COLOR_GREEN, s_bmp, 0);
 
-    CHECK_MSG(s_commit_count == 2, "两次 COMMIT 应各落屏一次（内容相同，无副作用）");
-    CHECK_MSG(last_ack()->sta == CASC_ACK_OK, "第二次 COMMIT 仍应回 OK，得到 sta=%u",
-              (unsigned)last_ack()->sta);
-}
-
-/** ABORT：主卡放弃本轮，暂存必须清掉 */
-static void case_abort_clears(void)
-{
-    TEST_BEGIN("ABORT 清掉暂存，其后的 COMMIT 不再落屏");
-
-    fixture_reset();
-    send_begin(SEQ, 4);
-    send_data(SEQ, 0, 0);
-    send_abort(SEQ);
-
-    CHECK_MSG(!s_rx.active, "ABORT 之后本轮应失效");
-
-    send_commit(SEQ);
-    CHECK_MSG(last_ack()->sta == CASC_ACK_NOBEGIN, "ABORT 后 COMMIT 应回 NOBEGIN");
-    CHECK_MSG(s_commit_count == 0, "ABORT 后绝不能落屏");
+    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+              "bmp_len 不符应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "bmp_len 不符时绝不能落屏");
 }
 
 /** 亮度每轮重新断言 —— "从卡永久停在旧亮度" 的唯一防线 */
 static void case_bright_asserted(void)
 {
-    TEST_BEGIN("每轮 BEGIN 都重新断言亮度");
+    TEST_BEGIN("每轮 IMAGE 都重新断言亮度");
 
     fixture_reset();
-    send_begin(SEQ, 5);
-    CHECK_MSG(s_bright_calls == 1 && s_bright_last == 5, "BEGIN 应把亮度断言到 5，得到 %u",
+    send_image(SEQ, 5);
+    CHECK_MSG(s_bright_calls == 1 && s_bright_last == 5, "IMAGE 应把亮度断言到 5，得到 %u",
               (unsigned)s_bright_last);
 
     /* 下一轮改亮度，必须跟着变（SET_BRIGHT 广播丢了就靠这里自愈） */
     fixture_reset();
-    send_begin(SEQ, 2);
+    send_image(SEQ, 2);
     CHECK_MSG(s_bright_calls == 1 && s_bright_last == 2, "下一轮应重新断言成 2，得到 %u",
               (unsigned)s_bright_last);
 
     /* 亮度断言在**参数校验之后**：几何不符时不改屏上任何东西 */
     fixture_reset();
-    const casc_sync_begin_t bad =
-        begin_payload((uint16_t)(DEV_W + 1), DEV_H, BMP_LEN, FRAG_BYTES, FRAG_N, 6, COLOR_GREEN);
-    uint8_t        f[64];
-    const uint16_t n = build(f, CASC_T_SYNC_BEGIN, SEQ, 0, 0, &bad, sizeof(bad));
-    feed(f, n);
-    CHECK_MSG(s_bright_calls == 0, "被 NACK 的 BEGIN 不该改亮度");
+    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 6, COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(s_bright_calls == 0, "被 NACK 的 IMAGE 不该改亮度");
 }
 
 /** 主卡收到发给从卡的帧：什么都不做（半双工回声 / 地址配重时会遇到） */
 static void case_master_ignores(void)
 {
-    TEST_BEGIN("本卡是主卡时，图传命令一律不应答、不落屏");
+    TEST_BEGIN("本卡是主卡时，IMAGE 一律不应答、不落屏");
 
     fixture_reset();
     s_is_master = true;
-
-    send_begin(SEQ, 4);
-    send_all_data(SEQ);
-    send_commit(SEQ);
+    send_image(SEQ, 4);
 
     CHECK_MSG(s_tx_count == 0, "主卡不该应答发给从卡的帧，却发了 %d 帧", s_tx_count);
     CHECK_MSG(s_commit_count == 0, "主卡不该按从卡路径落屏");
-    CHECK_MSG(!s_rx.active, "主卡不该进入本轮激活状态");
 }
 
 /* ================================================================ */
@@ -500,13 +440,12 @@ int main(void)
 {
     printf("\n\033[36m级联图传 · 从卡侧（本卡 %ux%u）\033[0m\n", (unsigned)DEV_W, (unsigned)DEV_H);
 
-    case_round_ok();
-    case_missing_fragment();
-    case_stale_seq_dropped();
-    case_short_fragment_rejected();
+    case_image_ok();
+    case_image_idempotent();
+    case_ack_echoes_seq();
+    case_len_mismatch_nack();
     case_geometry_nack();
-    case_double_commit_idempotent();
-    case_abort_clears();
+    case_bmp_len_nack();
     case_bright_asserted();
     case_master_ignores();
 

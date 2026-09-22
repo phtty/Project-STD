@@ -1,19 +1,19 @@
 /**
  * @file    test_cascade_master.c
- * @brief   级联图传 · **主卡侧**：一轮的开轮、分片下发、结算与定向重传
+ * @brief   级联图传 · **主卡侧**：一轮的开轮、整帧下发、结算与整帧重传
  *
  * **为什么需要这个测试**：主卡这一侧错了，现场看到的是"某块屏上不对"或"整轮变慢"，
  * 而没有任何日志会说是哪一步错的。三条只有在这儿才测得到：
  *
  *   1. **地址与矩形错配** —— 协议按地址寻址、切分表按下标索引，两者顺序**可以相反**
  *      （主卡在下时相反）。拿地址当下标就会把两块屏的内容**对调**，而 CRC、长度、
- *      几何校验**全部通过**。用例直接断言"发出去的 BEGIN 带的是那张卡自己的矩形"。
- *   2. **定向重传退化成熟重传** —— 丢一片就重发整轮，现场表现为"偶尔整屏闪一下"
- *      且一轮从 130ms 涨到 400ms。用例数每一片**被发了几次**。
+ *      几何校验**全部通过**。用例直接断言"发出去的那帧带的是那张卡自己的矩形"。
+ *   2. **重传退化成重开一轮** —— 一帧一轮之后重传就是整帧重发，但**次数必须封顶**，
+ *      否则一张掉线的卡会把每一轮都拖长。用例数它**发了几次整帧**。
  *   3. **从卡不回 ACK 时主卡冻结** —— 主卡自己的屏跟着一起不更新，是最坏的失效形态
  *      （整块屏全停）。用例断言"没有任何卡应答时主卡仍然提交本地"。
  *
- * 总线是假的：`ccb_send` 旁边坐着一个**假从卡**，它按协议收分片、组 ACK，再经
+ * 总线是假的：`ccb_send` 旁边坐着一个**假从卡**，它按协议收 IMAGE、组 ACK/NACK，再经
  * **真探针 + 真队列**喂回主卡 —— 所以走的是真的分帧、真的探针、真的等待循环。
  *
  * app_screen 是替身：抽带与落屏的**正确性**由 test_screen_layout.c 覆盖，
@@ -47,9 +47,9 @@
 _Static_assert(((CARD_W + 7U) / 8U) * CARD_H == CARD_BM,
                "本板的单卡几何与 BOARD_CASCADE_BAND_MAX 对不上 —— 新板要在这里补一行");
 
-/* 分片数：3833024 的卡位图正好是一片（512 == CASC_FRAG_BYTES），
-   5006048 是 1400 → 3 片。多片的用例在单片板上自动退化成单片。 */
-#define FRAG_N ((CARD_BM + CASC_FRAG_BYTES - 1U) / CASC_FRAG_BYTES)
+/* 一帧必须装得下整块位图 —— 这正是"一帧一轮"成立的前提，装不下就别谈删分片 */
+_Static_assert(CASC_FRAME_MAX >= CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM,
+               "本板位图一帧装不下");
 
 /* ---- 本卡：主卡（addr 0） ---- */
 static bool s_is_master = true;
@@ -65,7 +65,7 @@ uint8_t     app_screen_self_addr(void) { return 0; }
 #define SELF_IDX (1U) /* 本卡（主卡 addr 0）落在下标 1 */
 
 static screen_card_t s_cards[2] = {
-    {.addr = 1, .color = COLOR_RED, .x = 0, .y = 0, .w = CARD_W, .h = CARD_H},      /* 上：从卡 */
+    {.addr = 1, .color = COLOR_RED, .x = 0, .y = 0, .w = CARD_W, .h = CARD_H}, /* 上：从卡 */
     {.addr = 0, .color = COLOR_GREEN, .x = 0, .y = CARD_H, .w = CARD_W, .h = CARD_H}, /* 下：主卡 */
 };
 static const screen_layout_t s_layout = {
@@ -154,29 +154,29 @@ dev_display_t       *dev_display_get(void) { return &s_dev; }
 #include "../Application/Src/CASCADE/app_cascade.c"
 
 /* ================================================================
- *  假从卡 —— 坐在总线另一头，按协议收分片、组 ACK
+ *  假从卡 —— 坐在总线另一头，按协议收 IMAGE、组 ACK
  * ================================================================ */
 
 static struct {
-    bool     begun;
-    uint16_t seq;
-    uint8_t  frag_n;
-    uint16_t bmp_len;
-    uint8_t  stage[CARD_BM];
-    uint8_t  have;
+    /** 收到过几条 IMAGE（**重整帧重传靠它验证**：一帧一轮，重传就是整帧重发） */
+    int      image_rx;
+    uint16_t seq;     /**< 最近一条 IMAGE 的轮次序号 */
+    uint16_t bmp_len; /**< 最近一条 IMAGE 声明的位图长度 */
+    uint8_t  stage[CARD_BM]; /**< 收到的位图（与主卡抽给**本卡**的那块比对） */
+    bool     applied;        /**< 有内容落下来过 */
 
     /* 注入 */
-    uint8_t drop_mask;      /**< **只丢首发**的分片（模拟总线瞬时丢帧，重传能过） */
-    uint8_t perm_drop_mask; /**< 一直丢的分片（模拟持续干扰，重传也补不上） */
-    bool    silent;      /**< 永不回 ACK（模拟卡掉线） */
-    bool    nack_on_begin;
+    bool drop_first;  /**< **只丢首发**（模拟总线瞬时丢帧，重传能过） */
+    bool no_apply;    /**< 收到了但落不下去（也不回 ACK）—— 持续干扰/卡忙 */
+    bool silent;      /**< 连收都没收到（卡掉线）：一句话都不回 */
+    bool nack;        /**< 明确回绝（模拟矩形与本卡切分表不符） */
 
     /* 观察 */
-    int data_rx[CASC_FRAG_MAX]; /**< 每片**收到过几次** —— 定向重传靠它验证 */
-    int begin_rx;
-    int commit_rx;
-    uint8_t  last_begin_x[2]; /**< 最近一次 BEGIN 里的矩形 x（大端） */
-    uint8_t  last_begin_y[2]; /**< 最近一次 BEGIN 里的矩形 y（大端） */
+    uint8_t last_x[2]; /**< 最近一条 IMAGE 里的矩形 x（大端） */
+    uint8_t last_y[2];
+    uint8_t last_w[2];
+    uint8_t last_h[2];
+    uint16_t last_frame_len;
 } s_slave;
 
 static void slave_reset(void)
@@ -248,11 +248,8 @@ static void slave_send_present(void)
     slave_reply(CASC_T_PRESENT, 1, &p, sizeof(p));
 }
 
-static void slave_send_ack(uint16_t seq, uint8_t sta, uint8_t miss)
-{
-    const casc_ack_t a = {.sta = sta, .miss_mask = miss};
-    slave_reply(CASC_T_ACK, seq, &a, sizeof(a));
-}
+/** @brief 回一条 ACK（**无载荷**：主卡只按 (seq, src) 认它） */
+static void slave_send_ack(uint16_t seq) { slave_reply(CASC_T_ACK, seq, nullptr, 0); }
 
 static uint8_t s_tx_count; /**< 主卡一共发了多少帧 */
 
@@ -266,52 +263,35 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
        少了这条，"主卡把帧发给了自己（dst=0）"这种错会被当成正常收到。 */
     if (d[3] != 1) return;
 
-    switch (type) {
-    case CASC_T_SYNC_BEGIN: {
-        const casc_sync_begin_t *p = (const casc_sync_begin_t *)(d + 11);
-        s_slave.begun   = true;
-        s_slave.seq     = seq;
-        s_slave.frag_n  = p->frag_n;
-        s_slave.bmp_len = casc_get_u16(p->bmp_len);
-        s_slave.have    = 0;
-        s_slave.begin_rx++;
-        memcpy(s_slave.last_begin_x, p->x, 2);
-        memcpy(s_slave.last_begin_y, p->y, 2);
-        if (s_slave.nack_on_begin) {
-            const casc_nack_t n = {.err = CASC_NACK_GEOM};
-            slave_reply(CASC_T_NACK, seq, &n, sizeof(n));
-        }
-        break;
-    }
-    case CASC_T_SYNC_DATA: {
-        const uint8_t idx = d[7];
-        if (!s_slave.begun || idx >= CASC_FRAG_MAX) break;
-        s_slave.data_rx[idx]++;
+    if (type != CASC_T_IMAGE) return;
 
-        /* **只丢首发**（瞬时错误）：重传要能过，否则测的是"永久丢"而不是重传 */
-        if ((s_slave.drop_mask & (uint8_t)(1U << idx)) && s_slave.data_rx[idx] == 1) break;
-        /* 永久丢：连着丢到底，用来验证"重试次数封顶后放弃" */
-        if (s_slave.perm_drop_mask & (uint8_t)(1U << idx)) break;
+    s_slave.image_rx++;
+    s_slave.seq           = seq;
+    s_slave.last_frame_len = l;
 
-        const uint16_t off = (uint16_t)(idx * CASC_FRAG_BYTES);
-        const uint16_t n   = (uint16_t)(l - CASC_OVERHEAD);
-        if ((uint32_t)off + n <= sizeof(s_slave.stage)) {
-            memcpy(&s_slave.stage[off], d + 11, n);
-            s_slave.have |= (uint8_t)(1U << idx);
-        }
-        break;
+    const casc_image_t *p = (const casc_image_t *)(d + sizeof(casc_hdr_t));
+    s_slave.bmp_len       = casc_get_u16(p->bmp_len);
+    memcpy(s_slave.last_x, p->x, 2);
+    memcpy(s_slave.last_y, p->y, 2);
+    memcpy(s_slave.last_w, p->w, 2);
+    memcpy(s_slave.last_h, p->h, 2);
+
+    if (s_slave.nack) { /* 矩形与本卡切分表不符：明确拒绝，重发没用 */
+        const casc_nack_t n = {.err = CASC_NACK_GEOM};
+        slave_reply(CASC_T_NACK, seq, &n, sizeof(n));
+        return;
     }
-    case CASC_T_SYNC_COMMIT: {
-        s_slave.commit_rx++;
-        if (s_slave.silent) break; /* 卡掉线：一句话都不回 */
-        const uint8_t full = (uint8_t)((1U << s_slave.frag_n) - 1U);
-        const uint8_t miss = (uint8_t)(full & ~s_slave.have);
-        slave_send_ack(seq, miss ? CASC_ACK_MISS : CASC_ACK_OK, miss);
-        break;
-    }
-    default:
-        break;
-    }
+    if (s_slave.silent) return;              /* 卡掉线：连收都没收到 */
+    if (s_slave.no_apply) return;            /* 收到了但落不下去，也就不该回 ACK */
+    if (s_slave.drop_first && s_slave.image_rx == 1) return; /* 只丢首发 */
+
+    /* 校验帧长自洽（真从卡也会这么做），然后收下整幅 */
+    if (l != (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + s_slave.bmp_len)) return;
+    if (s_slave.bmp_len != CARD_BM) return;
+
+    memcpy(s_slave.stage, p->bitmap, s_slave.bmp_len);
+    s_slave.applied = true;
+    slave_send_ack(seq);
 }
 
 int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
@@ -382,72 +362,65 @@ static int g_fail;
 
 #define TEST_BEGIN(name) printf("\n\033[36m▶ %s\033[0m\n", name)
 
-/** 每一片各发了几次（按本板的分片数取前 FRAG_N 项） */
-static void check_data_counts(const int *want, const char *what)
+/** @brief 从卡收到的内容必须等于"主卡抽给**这张卡**的那一块" */
+static void check_content_is_card(uint8_t card_idx, const char *what)
 {
-    for (uint8_t k = 0; k < FRAG_N; k++) {
-        if (s_slave.data_rx[k] != want[k]) {
-            CHECK_MSG(0, "%s：第 %u 片发了 %d 次，期望 %d 次", what, (unsigned)k,
-                      s_slave.data_rx[k], want[k]);
-            return;
-        }
-    }
-    CHECK_MSG(1, "%s", what);
+    uint8_t expect[CARD_BM];
+    card_pattern(card_idx, expect, CARD_BM);
+    CHECK_MSG(s_slave.applied, "%s：从卡什么都没收到", what);
+    CHECK_MSG(memcmp(s_slave.stage, expect, CARD_BM) == 0, "%s：收到的内容与主卡抽出的不一致",
+              what);
 }
 
 /* ================================================================ */
 
-/** 正常一轮：分片逐片到齐，从卡收齐后主卡才提交本地 */
+/** 正常一轮：整块位图一条帧到齐，从卡收下并应答，主卡提交本地 */
 static void case_round_ok(void)
 {
-    TEST_BEGIN("正常一轮：分片到齐、从卡收齐、主卡提交本地");
+    TEST_BEGIN("正常一轮：一条 IMAGE 装下整块位图，从卡收下、主卡提交本地");
 
     fixture_reset();
     /* 返回值是给"上电对齐"用的：全部从卡都完成才算成 */
     CHECK_MSG(_round_run(), "全部从卡完成时应返回 true（上电对齐据此决定还要不要再试）");
 
-    CHECK_MSG(s_slave.begin_rx == 1, "从卡应收到 1 帧 BEGIN，得到 %d", s_slave.begin_rx);
-    CHECK_MSG(s_slave.commit_rx >= 1, "从卡应收到 COMMIT，得到 %d", s_slave.commit_rx);
-
-    int want[CASC_FRAG_MAX] = {0};
-    for (uint8_t k = 0; k < FRAG_N; k++) want[k] = 1;
-    check_data_counts(want, "每片只发一次");
-
-    /* 从卡拼出来的位图必须与"主卡抽给**它**的那块"逐字节相等 —— 抽的是下标 0
-       （从卡自己），不是下标 SELF_IDX（主卡自己） */
-    uint8_t expect[CARD_BM];
-    card_pattern(0, expect, CARD_BM);
+    CHECK_MSG(s_slave.image_rx == 1, "从卡应收到 1 条 IMAGE，得到 %d", s_slave.image_rx);
     CHECK_MSG(s_slave.bmp_len == CARD_BM, "从卡理解的位图长度应为 %u，得到 %u",
               (unsigned)CARD_BM, (unsigned)s_slave.bmp_len);
-    CHECK_MSG(memcmp(s_slave.stage, expect, CARD_BM) == 0, "从卡拼出来的内容与主卡抽出的不一致");
+    CHECK_MSG(s_slave.last_frame_len == (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM),
+              "整帧长度应为 %u，得到 %u",
+              (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM),
+              (unsigned)s_slave.last_frame_len);
+    check_content_is_card(0, "正常一轮");
 
     CHECK_MSG(s_commit_self_calls == 1, "主卡应提交本地一次，得到 %d", s_commit_self_calls);
 }
 
-/** 发出去的 BEGIN 必须带**那张卡自己**的矩形 —— 地址与下标不许错配 */
+/** 发出去的那帧必须带**那张卡自己**的矩形 —— 地址与下标不许错配 */
 static void case_rect_matches_addr(void)
 {
-    TEST_BEGIN("BEGIN 带的是该卡自己的矩形（地址与下标不许错配）");
+    TEST_BEGIN("IMAGE 带的是该卡自己的矩形（地址与下标不许错配）");
 
     fixture_reset();
     _round_run();
 
     /* 发给 addr 1 的必须是**它自己**那块（下标 0 = 上半屏 y=0），
        而不是主卡那块（下标 SELF_IDX = 下半屏 y=CARD_H）。 */
-    const uint16_t y = casc_get_u16(s_slave.last_begin_y);
+    const uint16_t y = casc_get_u16(s_slave.last_y);
     CHECK_MSG(y == 0, "发给 addr 1 的矩形 y 应为 0（上半屏），得到 %u（=%u 说明把主卡那块发过去了）",
               (unsigned)y, (unsigned)CARD_H);
+    CHECK_MSG(casc_get_u16(s_slave.last_w) == CARD_W && casc_get_u16(s_slave.last_h) == CARD_H,
+              "矩形尺寸应是该卡自己的屏几何");
 
-    const uint8_t  bm_idx = casc_get_u16(s_slave.last_begin_y) / CARD_H;
-    uint8_t        expect_self[CARD_BM];
+    /* 内容是"抽给这张卡的"而不是"抽给主卡自己的" —— 两张卡的图案不同，能分辨 */
+    uint8_t expect_self[CARD_BM];
+    uint8_t expect_slave[CARD_BM];
     card_pattern(SELF_IDX, expect_self, CARD_BM);
-    const uint8_t pattern_idx = (bm_idx == SELF_IDX) ? SELF_IDX : 0;
-    uint8_t       expect_recv[CARD_BM];
-    card_pattern(pattern_idx, expect_recv, CARD_BM);
+    card_pattern(0, expect_slave, CARD_BM);
+    CHECK_MSG(memcmp(expect_self, expect_slave, CARD_BM) != 0, "本夹具两张卡的图案必须不同");
+    check_content_is_card(0, "地址与下标错配的检查");
 
-    /* 自检：**本卡与从卡的图案必须不同、下标与地址必须不同** ——
+    /* 自检：**addr 与下标必须不同序、两卡矩形必须不同位** ——
        否则"发错卡"和"拿地址当下标"这两条根本测不出来。 */
-    CHECK_MSG(memcmp(expect_self, expect_recv, CARD_BM) != 0, "本夹具两张卡的图案必须不同");
     CHECK_MSG(s_cards[0].addr != 0 && s_cards[SELF_IDX].addr == 0,
               "本夹具必须让 addr 与下标**不同序**，否则这条用例没有分辨力");
     CHECK_MSG(s_cards[0].y != s_cards[SELF_IDX].y,
@@ -458,50 +431,22 @@ static void case_rect_matches_addr(void)
               s_extract_calls);
 }
 
-/** 丢一片：只补那一片，不是重发整轮 */
-static void case_targeted_retransmit(void)
+/** 丢一条：整帧重发（一帧一轮之后没有"只补某一片"这种粒度） */
+static void case_retransmit_whole_frame(void)
 {
-    TEST_BEGIN("丢一片 → 定向重传（只补缺的那片）");
+    TEST_BEGIN("丢一条 IMAGE → 整帧重发，补上后从卡内容正确");
 
     fixture_reset();
-    s_slave.drop_mask = 0x01; /* 只丢第 0 片 */
-    _round_run();
+    s_slave.drop_first = true;
+    (void)_round_run();
 
-    /* 第 0 片发两次（首发 + 补发），其余各一次 ——
-       3833024 的卡位图正好一片（FRAG_N==1），"只补缺的那片"在这儿退化成同一件事。 */
-    int want[CASC_FRAG_MAX] = {0};
-    for (uint8_t k = 0; k < FRAG_N; k++) want[k] = 1;
-    want[0] = 2;
-    check_data_counts(want, FRAG_N > 1 ? "只补了缺的那一片，其余没重发" : "单片板：补发那一片");
-
-    uint8_t expect[CARD_BM];
-    card_pattern(0, expect, CARD_BM); /* 从卡 = 下标 0 */
-    CHECK_MSG(memcmp(s_slave.stage, expect, CARD_BM) == 0, "补片后从卡的内容仍应与主卡抽出的一致");
-    CHECK_MSG(s_commit_self_calls == 1, "补片成功后主卡应提交本地");
+    CHECK_MSG(s_slave.image_rx == 2, "首发丢了应整帧重发一次（共 2 条），得到 %d",
+              s_slave.image_rx);
+    check_content_is_card(0, "整帧重发");
+    CHECK_MSG(s_commit_self_calls == 1, "重发成功后主卡应提交本地");
 }
 
-#if FRAG_N > 1
-/** 丢中间一片：确认补的是**中间那片**，不是从头重来 */
-static void case_targeted_retransmit_middle(void)
-{
-    TEST_BEGIN("丢中间那片 → 补的也是中间那片");
-
-    fixture_reset();
-    s_slave.drop_mask = 0x02;
-    _round_run();
-
-    int want[CASC_FRAG_MAX] = {0};
-    for (uint8_t k = 0; k < FRAG_N; k++) want[k] = 1;
-    want[1] = 2;
-    check_data_counts(want, "只有第 1 片被补发");
-
-    uint8_t expect[CARD_BM];
-    card_pattern(0, expect, CARD_BM); /* 从卡 = 下标 0 */
-    CHECK_MSG(memcmp(s_slave.stage, expect, CARD_BM) == 0, "补片后从卡的内容仍应与主卡抽出的一致");
-}
-#endif
-
-/** 从卡始终不回 ACK：主卡**不许冻结**，本地照常更新 */
+/** 从卡始终不回 ACK：主卡**不许冻结**，本地照常更新，且重试必须封顶 */
 static void case_silent_slave_master_still_commits(void)
 {
     TEST_BEGIN("从卡不回 ACK → 主卡仍提交本地（整块屏不许跟着停）");
@@ -517,63 +462,56 @@ static void case_silent_slave_master_still_commits(void)
               s_commit_self_calls);
 
     /* 重试有限度：一次首发 + CASC_RETRY_MAX 次重传，不能无限试下去 */
-    const int want_each = 1 + (int)CASC_RETRY_MAX;
-    int       want[CASC_FRAG_MAX] = {0};
-    for (uint8_t k = 0; k < FRAG_N; k++) want[k] = want_each;
-    check_data_counts(want, "重传次数被 CASC_RETRY_MAX 封顶");
-
-    CHECK_MSG(s_slave.commit_rx == want_each, "COMMIT 应发 %d 次，得到 %d", want_each,
-              s_slave.commit_rx);
+    const int want = 1 + (int)CASC_RETRY_MAX;
+    CHECK_MSG(s_slave.image_rx == want, "重传次数应被 CASC_RETRY_MAX 封顶：期望 %d 条，得到 %d",
+              want, s_slave.image_rx);
     CHECK_MSG(dt < 1000U, "一轮耗时应在一秒内（卡掉线时也不该拖长），实测 %ums",
               (unsigned)dt);
 }
 
-/** 一片**永久**丢：重试封顶后放弃该卡，主卡自己照常更新 */
+/** 一直落不下去：重试封顶后放弃该卡，主卡自己照常更新 */
 static void case_permanent_loss_gives_up(void)
 {
-    TEST_BEGIN("一片持续丢 → 重试封顶后放弃，主卡不跟着卡死");
+    TEST_BEGIN("持续落不下去 → 重试封顶后放弃，主卡不跟着卡死");
 
     fixture_reset();
-    s_slave.perm_drop_mask = 0x01;
+    s_slave.no_apply = true;
 
     const uint32_t t0 = osKernelGetTickCount();
-    _round_run();
+    (void)_round_run();
     const uint32_t dt = osKernelGetTickCount() - t0;
 
-    const int want_each = 1 + (int)CASC_RETRY_MAX;
-    int       want[CASC_FRAG_MAX] = {0};
-    for (uint8_t k = 0; k < FRAG_N; k++) want[k] = 1;
-    want[0] = want_each;
-    check_data_counts(want, "只反复补那一片，其余各一次");
-
+    CHECK_MSG(!s_slave.applied, "本用例里从卡不该落屏成功");
+    CHECK_MSG(s_slave.image_rx == 1 + (int)CASC_RETRY_MAX, "应重试到封顶，得到 %d 条",
+              s_slave.image_rx);
     CHECK_MSG(s_commit_self_calls == 1, "一张卡补不上不该拖住主卡自己的更新");
     CHECK_MSG(dt < 1000U, "放弃要及时（重试封顶），实测 %ums", (unsigned)dt);
 }
 
-/** 从卡回 NACK（几何不符）：立刻放弃这张卡，不再 COMMIT、不再重传 */
+/** 从卡回 NACK（几何不符）：立刻放弃这张卡，**不做无用的重传** */
 static void case_nack_gives_up(void)
 {
     TEST_BEGIN("从卡回 NACK → 立刻放弃该卡，不做无用的重传");
 
     fixture_reset();
-    s_slave.nack_on_begin = true;
-    _round_run();
+    s_slave.nack = true;
+    (void)_round_run();
 
-    CHECK_MSG(s_slave.commit_rx == 0, "被 NACK 的卡不该再收到 COMMIT，得到 %d 次",
-              s_slave.commit_rx);
+    CHECK_MSG(s_slave.image_rx == 1, "被 NACK 的卡不该收到重发的帧（重发也还是不符），得到 %d 条",
+              s_slave.image_rx);
     CHECK_MSG(s_commit_self_calls == 1, "一张卡参与不了，主卡自己仍要更新画面");
 }
 
-/** 整轮不许重复抽取：每张从卡一次 */
+/** 整轮不许重复抽取：每张从卡一次（重发用的是已经抽好的那帧） */
 static void case_one_extract_per_card(void)
 {
-    TEST_BEGIN("每张从卡只抽一次（重传用的是已经抽好的那块）");
+    TEST_BEGIN("每张从卡只抽一次（重发用的是已经组好的那帧）");
 
     fixture_reset();
-    s_slave.drop_mask = 0x01;
-    _round_run();
+    s_slave.drop_first = true;
+    (void)_round_run();
 
-    CHECK_MSG(s_extract_calls == 1, "一次抽取 + 一次重传也只该抽 1 次，抽了 %d 次",
+    CHECK_MSG(s_extract_calls == 1, "一次抽取 + 一次整帧重发也只该抽 1 次，抽了 %d 次",
               s_extract_calls);
 }
 
@@ -623,34 +561,31 @@ static void case_evict_skip_recover(void)
               "等下一次内容更新可能要几分钟");
 }
 
-/** 定向重传会计数 —— 状态快照要用它 */
+/** 整帧重传会计数 —— 状态快照要用它 */
 static void case_retrans_counted(void)
 {
-    TEST_BEGIN("定向重传计入快照计数器");
+    TEST_BEGIN("整帧重传计入快照计数器");
 
     fixture_reset();
-    s_slave.drop_mask = 0x01;
+    s_slave.drop_first = true;
     (void)_round_run();
-    CHECK_MSG(s_retrans_cnt == 1, "补了一次片，计数应为 1，得到 %d", s_retrans_cnt);
+    CHECK_MSG(s_retrans_cnt == 1, "重发了一次，计数应为 1，得到 %d", s_retrans_cnt);
 
     fixture_reset();
     (void)_round_run();
-    CHECK_MSG(s_retrans_cnt == 0, "没补片时不该有计数，得到 %d", s_retrans_cnt);
+    CHECK_MSG(s_retrans_cnt == 0, "没重发时不该有计数，得到 %d", s_retrans_cnt);
 }
 
 /* ================================================================ */
 
 int main(void)
 {
-    printf("\n\033[36m级联图传 · 主卡侧（本板单卡 %ux%u，%u 片/轮）\033[0m\n", (unsigned)CARD_W,
-           (unsigned)CARD_H, (unsigned)FRAG_N);
+    printf("\n\033[36m级联图传 · 主卡侧（本板单卡 %ux%u，一帧 %u 字节）\033[0m\n", (unsigned)CARD_W,
+           (unsigned)CARD_H, (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM));
 
     case_round_ok();
     case_rect_matches_addr();
-    case_targeted_retransmit();
-#if FRAG_N > 1
-    case_targeted_retransmit_middle();
-#endif
+    case_retransmit_whole_frame();
     case_silent_slave_master_still_commits();
     case_permanent_loss_gives_up();
     case_nack_gives_up();
