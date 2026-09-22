@@ -58,6 +58,8 @@ typedef struct dev_display {
     uint8_t    *pixel_map;
     uint8_t     light_level;
     bool        dirty;
+    bool        dirty_hold;    /* 与真头一致：见 dev_display_frame_begin */
+    bool        frame_touched;
 } dev_display_t;
 
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
@@ -66,4 +68,6 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                              const uint8_t *bitmap, display_color_t color);
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
+void dev_display_frame_begin(dev_display_t *dev);
+void dev_display_frame_end(dev_display_t *dev);
 dev_display_t *dev_display_get(void);

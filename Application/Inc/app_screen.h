@@ -212,7 +212,7 @@ bool app_screen_canvas_touched(void);
  *
  *  `len` 必须等于 `ceil(屏宽/8) × 屏高`，不符直接返回（换模组后的旧内容不适用）。
  *
- *  内部是 `fill(BLACK)` → `dirty=false` → `draw_bitmap`：
+ *  内部用 `dev_display_frame_begin/end` 把 `fill(BLACK)` + `draw_bitmap` 当成一帧：
  *  中间那段 `dirty` 为假，`scan_task` 的 prepare 不跑，屏上不会闪出全黑帧 ——
  *  这个手法在 `app_factory_test.c` 已有先例。 */
 void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color);

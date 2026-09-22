@@ -60,6 +60,11 @@ struct dev_display {
     /* 运行时 */
     volatile uint8_t light_level;
     volatile bool    dirty;
+    /** 见 `dev_display_frame_begin()`：这一段绘制当成一帧，期间不置脏标记 */
+    bool dirty_hold;
+    /** 压制期间**真的写过实屏缓冲**没有 —— `frame_end` 据此决定要不要输出
+     *  （画布路径整段都不碰实屏缓冲，那一段就不该触发 prepare） */
+    bool frame_touched;
 };
 
 /* ---- 通用 API ---- */
@@ -93,3 +98,18 @@ dev_display_t *dev_display_get(void);
 
 /** @brief 设置亮度 (0=最暗/关闭, 7=最亮)，PWM 粒度 1/8 */
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
+
+/** @brief 把接下来的若干次绘制**当成一帧**输出（期间不置脏标记，`_end` 时置一次）
+ *
+ *  为什么需要它：多步更新（清背景 + 画内容）之间，`scan_task` 是
+ *  `osPriorityRealtime`，完全可能在两步之间跑一次 `prepare` —— 屏上就闪出中间态
+ *  （一帧全黑、或半张新半张旧）。压住脏标记之后，屏上只出现最终那一帧。
+ *
+ *  **画布路径**（多卡主卡，渲染目标是 1bpp 画布）整段都不碰实屏缓冲 —— 那种情况下
+ *  `_end` 不会置脏标记（`frame_touched` 记着），不会白跑一次 prepare。
+ *
+ *  **必须成对**：忘了 `_end` 的表现是"这一段更新一直不上屏"，不报错。
+ *  与落屏路径原来那句 `dev->dirty = false` 是同一件事，这里提成显式接口 ——
+ *  上层不必再去摸 `dirty`。 */
+void dev_display_frame_begin(dev_display_t *dev);
+void dev_display_frame_end(dev_display_t *dev);

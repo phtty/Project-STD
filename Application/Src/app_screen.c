@@ -375,11 +375,12 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
         return;
     }
 
+    /* 清底 + 画内容**当成一帧**：中间不让 scan_task 跑 prepare（否则屏上闪一帧全黑）。
+       见 dev_display_frame_begin 的说明 —— 以前这里是手写 `d->dirty = false`。 */
+    dev_display_frame_begin(d);
     dev_display_fill(d, 0, 0, d->screen_rows, d->screen_cols, COLOR_BLACK);
-    /* fill 与 draw 之间把 dirty 压住：否则 scan_task 可能正好在两步之间跑 prepare，
-       屏上闪一帧全黑。draw_bitmap 结束时会把 dirty 置回，下一次 prepare 一次性换帧。 */
-    d->dirty = false;
     dev_display_draw_bitmap(d, 0, 0, d->screen_rows, d->screen_cols, bm, (display_color_t)color);
+    dev_display_frame_end(d);
 }
 
 /** @brief 把画布落到本地屏。

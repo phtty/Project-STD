@@ -49,19 +49,11 @@ osThreadId_t g_factory_test;
 static volatile bool s_factory_active;
 
 /* ---- 老化辅助 ---- */
-/** @brief 清屏，并把"清完马上还要画"这一对更新的中间帧压住
+/** @brief 清屏（走**逻辑屏**：多卡时是整台设备，单卡时就是本卡）
  *
- *  **有画布时**（多卡主卡）：清的是**画布**，实屏只在落屏那一刻被写 —— `_mark_dirty()`
- *  根本不碰 `dev->dirty`（见 app_screen.c），所以中间那一帧压根到不了屏上，这里不用管。
- *
- *  **没有画布时**（单卡、或门面停用）：渲染直写实屏缓冲并置 `dev->dirty`，而 scan_task
- *  是 `osPriorityRealtime` —— 它可能正好在"清完、字还没画"之间跑一次 prepare，
- *  屏上闪一帧全黑。`dirty = false` 把那一帧压住：紧接着的渲染会把 dirty 置回来，
- *  于是只输出最终那一帧（与 `app_screen_commit_bitmap` 里那道"fill 与 draw 之间
- *  压住 dirty"是同一手法）。
- *
- *  残留窗口：设 `false` 与 scan_task 读它之间仍有微秒级竞争，以及"刚好有一次已提交
- *  但还没 prepare 的更新"会被推迟到下一次 —— 两者都在 5ms 的扫描节拍里，可接受。 */
+ *  **它必须与紧随其后的那次渲染一起**被 `dev_display_frame_begin/end` 包住 ——
+ *  单独一次清屏会让屏上闪一帧全黑；包住之后只输出最终那一帧。
+ *  两处调用点（SHOW_CODE、老化逐字）都是这个写法。 */
 static void _clear_screen(void)
 {
     app_render(&(render_cfg_t){
@@ -70,8 +62,6 @@ static void _clear_screen(void)
         .y     = 0,
         .color = COLOR_BLACK,
     });
-    dev_display_t *d = dev_display_get();
-    if (d) d->dirty = false;
 }
 
 static void _aging_fill_screen(font_size_t size, font_type_t type, const char *ch_utf8, uint8_t ch_len)
@@ -91,8 +81,9 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
     if (cols == 0) cols = 1;
     if (rows == 0) rows = 1;
 
-    /* 清屏也走逻辑屏（多卡主卡上"本卡实屏缓冲"与画布是两回事），
-       并压住"清完、字还没画"那一帧 —— 见 _clear_screen 的说明 */
+    /* 清屏也走逻辑屏（多卡主卡上"本卡实屏缓冲"与画布是两回事） ——
+       与紧随的文字**当成一帧**输出，见 _clear_screen 的说明 */
+    dev_display_frame_begin(dev_display_get());
     _clear_screen();
 
     /* 把字符重复 cols×rows 份放缓冲区，word_wrap 自动分行 */
@@ -122,6 +113,7 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
             .word_wrap = true,
         },
     });
+    dev_display_frame_end(dev_display_get());
 }
 
 /* ================================================================
@@ -149,7 +141,9 @@ static void factory_monitor_task(void *argument)
 
         /* ===== SHOW_CODE ===== */
         /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）
-           —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格） */
+           —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格）。
+           两步**当成一帧**输出：中间不让 scan_task 跑 prepare（见 dev_display.h）。 */
+        dev_display_frame_begin(dev_display_get());
         _clear_screen();
         app_render(&(render_cfg_t){
             .type      = RENDER_TEXT,
@@ -168,6 +162,7 @@ static void factory_monitor_task(void *argument)
                 .v_align = ALIGN_CENTER,
             },
         });
+        dev_display_frame_end(dev_display_get());
 
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 

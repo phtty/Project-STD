@@ -95,6 +95,23 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
     if (level > 7) level = 7;
     dev->light_level = level;
 }
+/* ---- 多步绘制当成一帧：与生产同语义（test_screen_* 都 include app_screen.c）---- */
+void dev_display_frame_begin(dev_display_t *dev)
+{
+    if (!dev) return;
+    dev->dirty_hold    = true;
+    dev->frame_touched = false;
+}
+void dev_display_frame_end(dev_display_t *dev)
+{
+    if (!dev) return;
+    dev->dirty_hold = false;
+    if (dev->frame_touched) {
+        dev->dirty         = true;
+        dev->frame_touched = false;
+    }
+}
+
 
 /* ---- 被测：生产源码本体 ---- */
 #include "../Application/Src/app_screen.c"

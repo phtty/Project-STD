@@ -58,8 +58,16 @@ static void scan_task(void *arg)
     for (;;) {
         osEventFlagsWait(s_scan_evt, 0x01, osFlagsWaitAny, osWaitForever);
 
-        /* 脏标记 → 预计算（off critical path） */
-        if (dev->dirty) {
+        /* 脏标记 → 预计算（off critical path）
+         *
+         * **只能在帧首做**（`scan_line == 0`）：`prepare` 重建的是**整屏**的扫描表
+         * （P10 是 [扫行][时序步][端口] 三维表），而扫描是**逐行**输出的 ——
+         * 在行间做，前一行用旧表、后一行用新表，屏上就是**一帧撕裂**（新旧各半）。
+         * 现场表现：切换内容时屏幕"抖一下"，且抖的那一帧只出现在某些次更新上
+         * （取决于更新落在这个 5ms 窗口里的哪一段），很难复现。
+         * 挪到帧首之后，一帧要么全是旧的、要么全是新的；代价是更新最多晚一帧
+         * （P10 一帧 10ms），肉眼看不出来。 */
+        if (dev->dirty && scan_line == 0) {
             dev->dirty = false;
             if (dev->ops->prepare) {
                 /* **量一下它到底多久**：这段跑在 osPriorityRealtime 的 scan_task 里，
@@ -113,7 +121,29 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_c
 {
     if (x < dev->screen_rows && y < dev->screen_cols) {
         dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-        dev->dirty                               = true;
+        if (!dev->dirty_hold) dev->dirty = true;
+        else dev->frame_touched = true;
+    }
+}
+
+/* ---- 多步绘制当成一帧（见 dev_display.h 的说明）---- */
+
+void dev_display_frame_begin(dev_display_t *dev)
+{
+    if (!dev) return;
+    dev->dirty_hold    = true;
+    dev->frame_touched = false;
+}
+
+void dev_display_frame_end(dev_display_t *dev)
+{
+    if (!dev) return;
+    dev->dirty_hold = false;
+    /* **真的写过实屏缓冲才输出**：画布路径整段不碰实屏缓冲，那一段就不该触发 prepare
+       （多跑一次 prepare 在 P10 上是十几毫秒，本身就是一次看得见的刷新抖动）。 */
+    if (dev->frame_touched) {
+        dev->dirty         = true;
+        dev->frame_touched = false;
     }
 }
 
@@ -130,7 +160,8 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 
     for (uint16_t row = 0; row < h; row++)
         memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
-    dev->dirty = true;
+    if (!dev->dirty_hold) dev->dirty = true;
+    else dev->frame_touched = true;
 }
 
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, display_color_t color)
@@ -144,7 +175,8 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
                 dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
         }
     }
-    dev->dirty = true;
+    if (!dev->dirty_hold) dev->dirty = true;
+    else dev->frame_touched = true;
 }
 
 /* ---- TIM 周期回调（通过 pl_tim_register_period_cb 注册到 Platform 层）---- */
