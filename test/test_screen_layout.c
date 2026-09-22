@@ -30,11 +30,15 @@
 #define BOARD_CASCADE_ADDR  1 /* 本卡 = 第二张（网格下标 1，非原点矩形） */
 
 /* **钉住切分参数，不跟着 board.h 的现场配置变**：本用例用 _layout_build_grid()
-   显式指定网格，但 _screen_init() 走的是 board.h 的部署配置 —— 那是**现场**参数
-   （可能是 1×2、主卡在下）。跟着它变的话，同一份测试在不同板子上测出不同结论，
-   而且不报错，只是静默地少测几条。 */
+   显式指定网格，但 _screen_init() / 换身份重装走的是 board.h 的部署配置 —— 那是
+   **现场**参数（可能是 1×2、主卡在下）。跟着它变的话，同一份测试在不同板子上测出
+   不同结论，而且不报错，只是静默地少测几条。
+
+   钉成 **1×2**（不是 1×1）是为了让"主卡(格 0)/从卡(格 1)"**两种身份都在表里**：
+   换身份时"按新身份装卸钩子"的两条路都要走一遍，1×1 的话从卡只能落到"地址不在表里、
+   门面停用"那条路上，`_apply_identity` 里给从卡留的那一支就一条也测不到。 */
 #define BOARD_CASCADE_COLS        1
-#define BOARD_CASCADE_ROWS        1
+#define BOARD_CASCADE_ROWS        2
 #define BOARD_CASCADE_MASTER_CELL 0
 
 #include <stdbool.h>
@@ -57,8 +61,18 @@ osThreadId_t pl_task_new(osThreadFunc_t fn, void *arg, const osThreadAttr_t *att
     (void)attr;
     return nullptr;
 }
-void app_render_set_target(const render_target_t *t) { (void)t; }
-void app_render_set_persist_hook(const render_persist_hook_t *h) { (void)h; }
+/* 渲染目标 / 持久化钩子的装卸要能被看见：换身份的两条路（从主变从、从从变主）
+   都是靠这两个调用完成的，而**漏掉任何一边**在屏上都不报错（只是不落屏 / 画错地方）。 */
+static const render_target_t       *s_target_last;
+static const render_persist_hook_t *s_hook_last;
+static int                          s_target_calls;
+
+void app_render_set_target(const render_target_t *t)
+{
+    s_target_last = t;
+    s_target_calls++;
+}
+void app_render_set_persist_hook(const render_persist_hook_t *h) { s_hook_last = h; }
 /* 落盘计数：本套件要断言"**落屏之后**才存"（存早了存的就是上一帧） */
 static int  s_save_calls;
 void        app_render_save(void) { s_save_calls++; }
@@ -485,6 +499,62 @@ static void case_persist_after_commit(void)
     CHECK_MSG(s_save_calls == 1, "没有请求时不该落盘，得到 %d 次", s_save_calls);
 }
 
+/** 换身份重装门面：**两个方向**都要做，且画布闩与待落屏必须清零
+ *
+ *  身份现在可以运行期变（按键认领 / 收到识别帧），而门面是按身份装出来的：
+ *  渲染目标与持久化钩子只给主卡——从主变从要撤、从从变主要装，**漏掉哪一边**
+ *  在屏上都不报错（前者表现为"主卡的内容不落屏"，后者表现为"从卡画错地方"）。
+ *
+ *  画布与待落屏同样要清：身份一变，本卡那一块矩形就换了，留着旧内容 = 把别处的
+ *  画面推上屏；`s_pending` 留着更糟——会把一张刚被清空的画布立刻推下去。 */
+static void case_identity_reapply(void)
+{
+    TEST_BEGIN("换身份重装门面：钩子两个方向都动，画布闩与待落屏清零");
+
+    /* 板级网格钉在 1×2（见文件头）：格 0 = addr 0（主卡）、格 1 = addr 1（从卡）——
+       **两种身份都在表里**，于是 `_apply_identity` 的"装"与"撤"两条路都能走到。
+       而"s_grid 1×1 时从卡会落到门面停用"那条路由 case_self_addr_not_in_table 覆盖。 */
+    canvas_reset(44, 12, 1, 2);
+    s_target_last = nullptr;
+    s_hook_last   = nullptr;
+
+    /* ① 本卡 = 主卡（addr 0，格 0）→ 两种钩子都装上 */
+    app_screen_set_addr(0);
+    app_screen_reinit_identity();
+    CHECK_MSG(s_target_last != nullptr, "主卡必须装上渲染目标（画布要靠它接渲染）");
+    CHECK_MSG(s_hook_last != nullptr, "主卡必须装上持久化钩子");
+    CHECK_MSG(app_screen_is_master(), "addr=0 应判为主卡");
+    CHECK_MSG(app_screen_self_index() == 0, "本卡（addr 0）应落在格 0，得到 %u",
+              (unsigned)app_screen_self_index());
+
+    /* ② 写一次画布 → 闩与待落屏都置位（级联靠它们闸开轮） */
+    _sink_fill(nullptr, 0, 0, 4, 4, COLOR_RED);
+    CHECK_MSG(app_screen_canvas_touched(), "画布被写过之后闩应置位");
+    CHECK_MSG(s_pending, "写画布应留下「待落屏」");
+
+    /* ③ 变成从卡（addr 1，格 1，**仍在表里**）→ 两个钩子都要撤掉，画布与待落屏清零 */
+    app_screen_set_addr(1);
+    app_screen_reinit_identity();
+    CHECK_MSG(s_target_last == nullptr, "从主变从要撤掉渲染目标（从卡不画本地画布）");
+    CHECK_MSG(s_hook_last == nullptr, "从主变从也要撤掉持久化钩子");
+    CHECK_MSG(!app_screen_is_master(), "addr=1 应判为从卡");
+    CHECK_MSG(app_screen_self_index() == 1, "本卡（addr 1）应落在格 1，得到 %u",
+              (unsigned)app_screen_self_index());
+    CHECK_MSG(!app_screen_canvas_touched(), "换身份后画布闩要清零（新身份的画布是新的一份）");
+    CHECK_MSG(!s_pending, "待落屏也要清 —— 否则会立刻把一张刚清空的画布推给所有从卡");
+
+    /* ④ 再换回主卡 → 钩子必须**装回去**（漏了这半边：从卡按键之后主卡再也不落屏） */
+    app_screen_set_addr(0);
+    app_screen_reinit_identity();
+    CHECK_MSG(s_target_last != nullptr && s_hook_last != nullptr,
+              "从从变主必须重新装上钩子（漏了这半边，按过键之后就再也不落屏）");
+    CHECK_MSG(app_screen_is_master() && app_screen_self_index() == 0, "换回主卡后定位也要跟上");
+
+    /* 本用例动了全局身份 —— **必须还原**：后面几条用例依赖 BOARD_CASCADE_ADDR 那个值 */
+    app_screen_set_addr((uint8_t)BOARD_CASCADE_ADDR);
+    canvas_reset(44, 12, 1, 2);
+}
+
 static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
@@ -653,10 +723,14 @@ static void case_self_addr_not_in_table(void)
     display_reset(48, 16);
     s_display = &s_dev;
 
-    /* 板级网格是 1×1（只有 addr=0 一张卡），而本用例的本卡是 addr=1 */
+    /* 板级网格是 1×2（addr 0 与 1 两张卡），而本卡被摆成 addr=2 —— 表里没有它 */
+    app_screen_set_addr(2);
     _screen_init();
 
     CHECK_MSG(s_display == nullptr, "地址不在表里时整屏门面应停用，而不是自己占满整屏");
+
+    /* 本用例动了全局身份：还原（文件头钉的就是 BOARD_CASCADE_ADDR=1） */
+    app_screen_set_addr((uint8_t)BOARD_CASCADE_ADDR);
 }
 
 /* ================================================================ */
@@ -670,6 +744,7 @@ int main(void)
     case_extract_unaligned();
     case_extract_bounds();
     case_persist_after_commit();
+    case_identity_reapply();
     case_commit_self_matches_canvas();
     case_master_below();
     case_addr_index_mapping();

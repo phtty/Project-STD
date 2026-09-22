@@ -37,6 +37,18 @@ static uint8_t  s_tx_frame[CASC_FRAME_MAX];
 static uint16_t s_tx_len;
 static int      s_tx_count;
 
+/* ---- 发生顺序：'A' = 回了 ACK，'S' = 落盘 ----
+ *
+ * "先 ACK 再写 flash"是**必须**的（写一条记录几十~几百 ms，而主卡等 ACK 上限 200ms）。
+ * 只看"落盘调了几次"抓不住顺序错误，所以这里按事件顺序记下来。 */
+static char s_order[8];
+static int  s_order_n;
+
+static void order_push(char c)
+{
+    if (s_order_n < (int)sizeof(s_order)) s_order[s_order_n++] = c;
+}
+
 int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
@@ -44,6 +56,7 @@ int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
         memcpy(s_tx_frame, d, l);
         s_tx_len = l;
     }
+    if (l >= CASC_OVERHEAD && CASC_TYPE_OF(d[2]) == CASC_T_ACK) order_push('A');
     s_tx_count++;
     return (int32_t)l;
 }
@@ -110,7 +123,12 @@ int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
 dev_key_t *dev_key_get(dev_key_id_t id) { (void)id; return nullptr; } /* 两侧都没有拨码 */
 const screen_layout_t *app_screen_layout(void) { return nullptr; }
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
-void app_render_save(void) {}
+static int s_save_calls;
+void       app_render_save(void)
+{
+    s_save_calls++;
+    order_push('S');
+}
 bool app_render_peek_persist_req(void) { return false; }
 
 
@@ -173,6 +191,9 @@ static void fixture_reset(void)
 
     s_tx_len   = 0;
     s_tx_count = 0;
+    s_order_n  = 0;
+
+    s_save_calls = 0;
 
     s_commit_count = 0;
     s_commit_len   = 0;
@@ -251,7 +272,8 @@ static uint16_t build(uint8_t *out, uint8_t type, uint16_t seq, const void *payl
  *
  *  各项都可以给成"不对的值"，用例据此构造各种拒绝路径。 */
 static uint16_t image_payload(uint8_t *out, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                              uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp)
+                              uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp,
+                              uint8_t persist)
 {
     casc_image_t *p = (casc_image_t *)out;
     memset(p, 0, sizeof(*p));
@@ -261,26 +283,35 @@ static uint16_t image_payload(uint8_t *out, uint16_t x, uint16_t y, uint16_t w, 
     casc_put_u16(p->w, w);
     casc_put_u16(p->h, h);
     casc_put_u16(p->bmp_len, bmp_len);
-    p->bright = bright;
-    p->color  = color;
+    p->bright  = bright;
+    p->color   = color;
+    p->persist = persist;
 
     if (bmp) memcpy(p->bitmap, bmp, BMP_LEN);
     return (uint16_t)(sizeof(casc_image_t) + bmp_len);
 }
 
-/** @brief 组一条 IMAGE 并喂进去
+/** @brief 组一条 IMAGE 并喂进去（带 persist 的那一版）
  *
  *  @param len_delta 把"整帧实际带的载荷"加减几个字节，用来构造"帧长与 bmp_len
- *                   自相矛盾"的帧（跨版本固件的第一道防线就是拦它） */
-static void feed_image(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t bmp_len,
-                       uint8_t bright, uint8_t color, const uint8_t *bmp, int len_delta)
+ *                   自相矛盾"的帧（跨版本固件的第一道防线就是拦它）
+ *  @param persist   主卡带下来的"这次内容要长期保留" */
+static void feed_image_p(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp,
+                         int len_delta, uint8_t persist)
 {
     static uint8_t pl[CASC_FRAME_MAX]; /* 载荷暂存：与整帧缓冲分开，见 build() 的说明 */
     static uint8_t fr[CASC_FRAME_MAX];
 
-    const uint16_t plen = image_payload(pl, x, y, w, h, bmp_len, bright, color, bmp);
+    const uint16_t plen = image_payload(pl, x, y, w, h, bmp_len, bright, color, bmp, persist);
     const uint16_t n    = build(fr, CASC_T_IMAGE, seq, pl, (uint16_t)(plen + len_delta));
     feed(fr, n);
+}
+
+static void feed_image(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t bmp_len,
+                       uint8_t bright, uint8_t color, const uint8_t *bmp, int len_delta)
+{
+    feed_image_p(seq, x, y, w, h, bmp_len, bright, color, bmp, len_delta, 0);
 }
 
 /** @brief 发一条正常的 IMAGE（本夹具的几何、位图、颜色） */
@@ -459,6 +490,43 @@ static void case_master_ignores(void)
     CHECK_MSG(s_commit_count == 0, "主卡不该按从卡路径落屏");
 }
 
+/** @brief IMAGE 带 persist → 从卡**先回 ACK、再落盘**，且只落一次
+ *
+ *  **顺序是这条用例的全部**：写一条记录是整扇区读-改-写 + 擦除，几十~几百 ms，
+ *  而主卡等 ACK 的上限是 `CASC_ACK_TIMEOUT_MS`(200ms)。先写就成了"每轮都超时、
+ *  每轮都整帧重发"——现场表现为"级联特别慢 + 总线一直忙"，而两块屏的内容其实是对的，
+ *  所以只看画面完全看不出来。
+ *
+ *  **反向验证**：把 `_cmd_image` 末尾那句 `if (p->persist) app_render_save()` 挪到
+ *  回 ACK **之前**，本用例立刻红（"ACK 必须在落盘之前"）。
+ *
+ *  内容是否与上次一致、要不要真擦写由 cfg_record 那一层去重，不属于本套件。 */
+static void case_persist_slave_acks_before_saving(void)
+{
+    TEST_BEGIN("IMAGE 带 persist → 先 ACK、后落盘（一次）");
+
+    fixture_reset();
+    feed_image_p(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0, /*persist=*/1);
+
+    CHECK_MSG(s_commit_count == 1, "带 persist 的一轮照样要落屏，得到 %d 次", s_commit_count);
+    CHECK_MSG(last_is(CASC_T_ACK), "带 persist 的一轮必须回 ACK");
+    CHECK_MSG(s_save_calls == 1, "persist=1 应从卡落盘一次，得到 %d 次", s_save_calls);
+    CHECK_MSG(s_order_n == 2 && s_order[0] == 'A' && s_order[1] == 'S',
+              "ACK 必须在落盘之前（否则主卡每轮都超时重发）；实测顺序 %c%c",
+              s_order_n > 0 ? s_order[0] : '-', s_order_n > 1 ? s_order[1] : '-');
+
+    /* 不带 persist：一次都不许写（flash 每扇区约 10 万次擦写，内容却可能几秒一变） */
+    fixture_reset();
+    send_image(SEQ, 4);
+    CHECK_MSG(last_is(CASC_T_ACK), "不带 persist 的一轮同样要回 ACK");
+    CHECK_MSG(s_save_calls == 0, "persist=0 时不该落盘，得到 %d 次", s_save_calls);
+
+    /* 被拒绝的一轮更不该落盘（它连屏都没落） */
+    fixture_reset();
+    feed_image_p(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0, 1);
+    CHECK_MSG(s_save_calls == 0, "被 NACK 的一轮不该落盘，得到 %d 次", s_save_calls);
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -473,6 +541,7 @@ int main(void)
     case_bmp_len_nack();
     case_bright_asserted();
     case_master_ignores();
+    case_persist_slave_acks_before_saving();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
