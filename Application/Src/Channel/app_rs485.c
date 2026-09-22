@@ -99,7 +99,9 @@ static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
     static uint8_t s_logged;
     if (s_logged < RS485_RX_LOG_MAX) {
         s_logged++;
-        printf("[rs485] 收到 %u 字节\n", (unsigned)len);
+        /* **带 tick**：与 `[casc·从]` 那些行的 tick 一比，就把"帧在队列里等了多久"
+           与"处理本身花了多久"分开了 —— 从卡那 246ms 的延迟必须先切成这两段。 */
+        printf("[%8u] [rs485] 收到 %u 字节\n", (unsigned)osKernelGetTickCount(), (unsigned)len);
     }
 #endif
     osMessageQueuePut(self->rx_queue, &len, 0, 0);

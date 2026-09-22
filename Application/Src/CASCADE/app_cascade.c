@@ -571,7 +571,12 @@ static void _cmd_sync_commit(frame_msg_t *msg)
             /* 收齐了才落屏。**幂等**：主卡没收到 ACK 会重发 COMMIT，重落同一份内容
                没有副作用 —— 所以这里**不清** active/have_mask。清了的话第二次 COMMIT
                要回 NOBEGIN，主卡会以为整轮白做、重发 3 片。下一轮的 BEGIN 会重置它们。 */
+            const uint32_t c0 = osKernelGetTickCount();
             app_screen_commit_bitmap(s_rx.stage, s_rx.bmp_len, s_rx.color);
+            /* **单独量落屏本身**：它与"帧在队列里等了多久"是两回事，
+               而 246ms 那个数必须劈开才知道该去查哪一边。 */
+            CASC_LOG("[casc·从] 落屏耗时 %u ms\n",
+                     (unsigned)(osKernelGetTickCount() - c0));
         }
     }
 
