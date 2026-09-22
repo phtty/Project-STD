@@ -585,7 +585,9 @@ static void case_evict_skip_recover(void)
     /* ---- 从未应答过（MISSING）：一帧都不发 ---- */
     fixture_reset();
     s_state[0] = SCREEN_CARD_MISSING;
-    (void)_round_run();
+    /* **没上线的卡也算"这轮没对上"** —— 否则从卡晚几秒起来时，对齐全在"没人应答"
+       的状态下判成成功、只走一轮就收尾，上电同步永远不会发生。 */
+    CHECK_MSG(!_round_run(), "有卡还没上线时，这一轮不该算对齐完成");
     CHECK_MSG(s_tx_count == 0, "不在线的卡不该收到任何帧，却发了 %u 帧", (unsigned)s_tx_count);
     CHECK_MSG(s_commit_self_calls == 1, "没有从卡可发时，主卡自己也该照常更新");
 

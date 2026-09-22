@@ -117,7 +117,10 @@ static osMessageQueueId_t s_casc_queue;
  * 不会开，从卡会一直停在上电前它自己那幅旧画面上，直到有人下发一次。
  *
  * 首次可能撞上从卡还没起来，失败就隔 1 秒再来；试满仍不成则交给下一次真正的更新。 */
-#define CASC_BOOT_ALIGN_TRIES    (5U)
+/* 放宽到 10 次：**没上线的卡在轮次里是被跳过的，这种重试几乎不花时间**
+   （一轮只剩主卡自己的本地提交）。实测从卡从冷启动到 RS485 就绪要 ~7 秒，
+   5 次（5 秒）卡在边缘。 */
+#define CASC_BOOT_ALIGN_TRIES    (10U)
 #define CASC_BOOT_ALIGN_RETRY_MS (1000U)
 
 /* **连续**几轮未完成才剔除。不能一失败就剔 —— 单轮失败多半是总线上的偶发冲突，
@@ -836,7 +839,14 @@ static bool _round_run(void)
            别人的屏，也没法命令一张掉线的卡清屏。"替它涂黑"在这里是做不到的事，
            做了只会把内容毁掉（卡回来时拿到的是黑的）。
            让它回来的是枚举，不是往黑洞里发数据。 */
-        if (app_screen_card_state(i) != SCREEN_CARD_ONLINE) continue;
+        if (app_screen_card_state(i) != SCREEN_CARD_ONLINE) {
+            /* **没上线的卡也算"这轮没对上"**：否则从卡晚几秒起来时，对齐全在
+               "没人应答"的状态下判成成功、只走一轮就收尾 —— 上电同步就**永远不会发生**，
+               从卡要靠之后某次 force_round 碰巧补上（实测就是这样）。
+               代价是配置错（地址写重/卡没上电）时要白等满 5 次重试，5 秒，可接受。 */
+            all_ok = false;
+            continue;
+        }
 
         if (_round_one_card(i, seq, bright)) {
             s_fail_run[i] = 0;
@@ -904,7 +914,9 @@ static void casc_task(void *argument)
         if (app_screen_is_master() && s_ping_left && (int32_t)(now - s_ping_next) >= 0) {
             s_ping_left--;
             s_enum_seen = false; /* 只认**这一轮**发出去之后的应答 */
-            CASC_LOG("[casc·主] 枚举 PING（还剩 %u 次）\n", (unsigned)s_ping_left);
+            /* 只在上电那次报：周期性重新枚举每 10 秒一次，报出来会把 RTT 缓冲冲掉，
+               而那个信息本来也没用（PRESENT 那行说明了） */
+            if (s_enum_verdict) CASC_LOG("[casc·主] 枚举 PING（还剩 %u 次）\n", (unsigned)s_ping_left);
             (void)app_cascade_ping();
             /* 从卡马上会回 PRESENT —— 这段时间主卡不能再发别的（半双工） */
             s_bus_quiet_until = now + CASC_BOOT_ALIGN_PING_GAP_MS;
