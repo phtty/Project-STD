@@ -85,9 +85,10 @@ static const osMessageQueueAttr_t s_rs485_rx_attr = {
  *
  * **限次**：一次运行只报前 RS485_RX_LOG_MAX 条，不然会把 1KB 的 RTT 缓冲冲掉，
  * 反而看不到别的。查完把它置 0 关掉。 */
-/* **当前关着**：级联那轮已经查完（传输层的使命完成了），而它每条块打一行会把
-   1KB 的 RTT 缓冲占掉大半 —— 级联自己的日志更要紧。再查"帧到没到"时置 1 即可。 */
-#define RS485_RX_LOG 0
+/* **当前开着**：从卡→主卡方向的 ACK 仍在丢，而"主卡的 UART 到底收到几个块"是
+   唯一能把上游（收发器/接线/接收 DMA）与下游（探针/匹配）分开的判据。
+   查完置 0 —— 它每条块打一行，会把 1KB 的 RTT 缓冲占掉大半。 */
+#define RS485_RX_LOG 1
 #define RS485_RX_LOG_MAX 20U
 
 static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
