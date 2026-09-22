@@ -87,6 +87,14 @@
  * 注意 3833024 有 DIP1/DIP2 可以直接读出地址（2 bit = 4 码，恰好 1 主 + 3 从），
  * 而 5006048 只有 KEY_TST、没有拨码 —— 所以本参数不能做成"必须靠硬件读"，
  * 否则得给 5006048 改板。 */
+/* ---- 本板地址是否由拨码决定 ----
+ * 3833024 有 DIP1/DIP2（2bit=4 码，天然支持最多 4 卡）；5006048 没有拨码，靠 TEST 键
+ * 认领 + W25Qxx 记录。级联的身份解析据此选"从哪读"（见 app_cascade.c）。
+ * **拨码优先于记录**：现场拨一下即生效，不用工具。 */
+#ifndef BOARD_HAS_ADDR_DIP
+#define BOARD_HAS_ADDR_DIP (1)
+#endif
+
 #ifndef BOARD_CASCADE_ADDR
 #define BOARD_CASCADE_ADDR      (0) /* 0 = 主卡 */
 #endif

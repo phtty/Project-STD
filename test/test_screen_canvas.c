@@ -52,6 +52,9 @@ void app_render_set_target(const render_target_t *t) { (void)t; }
 void app_render_set_persist_hook(const render_persist_hook_t *h) { (void)h; }
 void app_render_save(void) {}
 bool app_render_restore(void) { return false; }
+/* "这一帧要落盘"的请求位：本套件桩成"从没有过请求"，落屏路径照跑 */
+bool app_render_take_persist_req(void) { return false; }
+bool app_render_peek_persist_req(void) { return false; }
 
 /* ---- dev_display 原语：本用例的参考实现 ----
  *

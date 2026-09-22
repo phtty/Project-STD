@@ -28,6 +28,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
+#include "app_cfg_sched.h"
+#include "dev_key.h"
 #include "app_cascade.h"
 #include "app_screen.h"
 #include "dev_display.h"
@@ -104,6 +107,27 @@ uint8_t app_screen_index_of_addr(uint8_t a)
 }
 void app_screen_note_round(uint16_t seq) { s_last_seq = seq; }
 void app_screen_note_retrans(void) { s_retrans_cnt++; }
+
+/* ---- 身份/记录/按键：本套件不测认领与落盘，桩成"不动作" ---- */
+void    app_screen_set_addr(uint8_t a) { (void)a; }
+void    app_screen_reinit_identity(void) {}
+bool    app_screen_canvas_touched(void) { return false; }
+uint8_t app_cfg_sched_register(const cfg_sched_desc_t *d) { (void)d; return 0xFF; }
+cfg_rec_sta_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
+{
+    (void)id; (void)p; (void)c; (void)l;
+    return CFG_REC_EMPTY; /* "没有记录" → 身份回落到板级默认 */
+}
+int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
+{
+    (void)id; (void)p; (void)n;
+    return 0;
+}
+dev_key_t *dev_key_get(dev_key_id_t id) { (void)id; return nullptr; } /* 两侧都没有拨码 */
+/* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
+void app_render_save(void) {}
+bool app_render_peek_persist_req(void) { return false; }
+
 
 /** 每张卡一块可辨认的图案 —— 张冠李戴（把 A 卡的矩形发给 B 卡）当场露馅 */
 static void card_pattern(uint8_t idx, uint8_t *out, uint16_t len)

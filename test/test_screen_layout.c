@@ -59,8 +59,19 @@ osThreadId_t pl_task_new(osThreadFunc_t fn, void *arg, const osThreadAttr_t *att
 }
 void app_render_set_target(const render_target_t *t) { (void)t; }
 void app_render_set_persist_hook(const render_persist_hook_t *h) { (void)h; }
-void app_render_save(void) {}
+/* 落盘计数：本套件要断言"**落屏之后**才存"（存早了存的就是上一帧） */
+static int  s_save_calls;
+void        app_render_save(void) { s_save_calls++; }
 bool app_render_restore(void) { return false; }
+/* "这一帧要落盘"的请求位：生产里由 app_render 置，本套件直接摆它 */
+static bool s_persist_req;
+bool app_render_take_persist_req(void)
+{
+    const bool r  = s_persist_req;
+    s_persist_req = false;
+    return r;
+}
+bool app_render_peek_persist_req(void) { return s_persist_req; }
 
 /* ---- dev_display 原语：与 test_screen_canvas.c 同一份参考实现 ---- */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color)
@@ -435,6 +446,45 @@ static void case_extract_bounds(void)
 }
 
 /** 本地落屏与抽带必须是同一份内容（主从两侧同步的前提） */
+/** 持久化必须发生在**落屏之后** —— 这是"存到上一帧"那个缺陷的守门
+ *
+ *  原来是"渲染完立刻 `app_render_save()`"，而那时内容还在画布上、没落屏，
+ *  `_persist_save` 读实屏存下去的是**上一帧**。改成"渲染只置请求位、落屏时才取走"。
+ *
+ *  **反向验证**：把 `commit_self` 里那句 `app_render_take_persist_req()` 挪回
+ *  "渲染之后立刻存"（或在渲染路径上直接调 `app_render_save()`），本用例立刻红。 */
+static void case_persist_after_commit(void)
+{
+    TEST_BEGIN("持久化发生在**落屏之后**（存这一帧，不是上一帧）");
+
+    canvas_reset(44, 12, 1, 2); /* 与落屏用例同一布局：本卡 = 1 号卡 */
+    paint_pattern();
+
+    /* 模拟"上位机要求这次内容长期保留" */
+    s_persist_req = true;
+    s_save_calls  = 0;
+
+    /* ① 只渲染（写画布）**不许**落盘：此刻实屏还是上一帧。
+       8×8 的区域 = (8+7)/8 × 8 = 8 字节位图（每行 1 字节）—— 少给会越界读。 */
+    static const uint8_t bm8[8] = {0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF};
+    _sink_bitmap(&s_target, 0, 0, 8, 8, bm8, COLOR_RED);
+    CHECK_MSG(s_save_calls == 0, "只渲染就落盘了 —— 存下去的是上一帧（得到 %d 次）", s_save_calls);
+
+    /* ② 画布闩此时应为真（级联靠它闸开轮：没渲染过就别把不全的画布推下去） */
+    CHECK_MSG(app_screen_canvas_touched(), "渲染之后画布闩应置位");
+
+    /* ③ 落屏 —— 这时才允许存，且恰好一次 */
+    CHECK_MSG(app_screen_commit_self(), "本卡落屏应成功");
+    CHECK_MSG(s_save_calls == 1, "落屏之后应恰好落盘一次，得到 %d", s_save_calls);
+
+    /* ④ 请求位被取走（不许反复存） */
+    CHECK_MSG(!app_render_peek_persist_req(), "请求位应已被取走");
+
+    /* ⑤ 没有请求时落屏不该存 */
+    CHECK_MSG(app_screen_commit_self(), "再落一次屏应成功");
+    CHECK_MSG(s_save_calls == 1, "没有请求时不该落盘，得到 %d 次", s_save_calls);
+}
+
 static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
@@ -619,6 +669,7 @@ int main(void)
     case_extract_grids();
     case_extract_unaligned();
     case_extract_bounds();
+    case_persist_after_commit();
     case_commit_self_matches_canvas();
     case_master_below();
     case_addr_index_mapping();

@@ -202,6 +202,12 @@ void app_screen_flush(void);
 /** @brief 画布内容代数（每次写入自增）。级联用它做"本轮内容是否已过期"的复检。 */
 uint32_t app_screen_generation(void);
 
+/** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
+ *
+ *  级联用它闸开轮：上电时画布上只有本卡那一块是从记录恢复来的，这时候开轮会把
+ *  一张**不全的画布**推下去、把从卡刚恢复的内容刷黑。 */
+bool app_screen_canvas_touched(void);
+
 /** @brief 把一张整屏 1bpp 位图落到本地实屏（主卡本地提交与从卡落屏共用的唯一路径）
  *
  *  `len` 必须等于 `ceil(屏宽/8) × 屏高`，不符直接返回（换模组后的旧内容不适用）。
@@ -238,3 +244,16 @@ uint8_t app_screen_self_addr(void);
 
 /** @brief 本卡是否主卡（地址 0） */
 bool app_screen_is_master(void);
+
+/** @brief 改写本机地址：**只改值，不落盘、不重应用**
+ *
+ *  持久化与重应用是调用方的事（见 app_cascade.c 的身份解析与 SET_ADDR 处理）。
+ *  改完必须调一次 `app_screen_reinit_identity()`，否则门面还按旧身份装着。 */
+void app_screen_set_addr(uint8_t addr);
+
+/** @brief 按当前地址**重装**整屏门面：重算几何、定位本卡、清画布、
+ *         按主/从注册或撤销渲染目标与持久化钩子
+ *
+ *  上电（`_screen_init`）与运行期换身份（按键认领 / 收到识别帧）走**同一条路**，
+ *  避免"上电装对了、运行期漏装一样"的漂移。必须在**任务上下文**调用。 */
+void app_screen_reinit_identity(void);

@@ -65,7 +65,13 @@ void app_boot(void)
 
 [[maybe_unused]] static void app_default_display(void)
 {
+    /* **多卡的从卡**：它要照常恢复自己那一块（各卡各存各的），但**不能画兜底文案** ——
+       "车道关闭"会正好盖掉刚从记录恢复出来的内容，而它的内容本该由主卡下发。 */
+    const bool slave_of_many = app_screen_layout()->count > 1 && !app_screen_is_master();
+
     if (!app_render_restore()) {
+        if (slave_of_many) return;
+
         app_render(&(render_cfg_t){
             .type  = RENDER_TEXT,
             .x     = 0,

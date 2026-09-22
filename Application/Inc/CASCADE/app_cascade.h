@@ -61,10 +61,11 @@
 
 /** @brief 协议版本（ver_type 的高 2 位）
  *
- *  **1 = 一帧一轮**（本文的形态）；0 是已废弃的分片形态（BEGIN + DATA×N + COMMIT）。
+ *  **2 = 一帧一轮 + 从卡可持久化**（本轮形态）；1 = 一帧一轮（无 persist 字段）；
+ *  0 = 已废弃的分片形态（BEGIN + DATA×N + COMMIT）。
  *  `PRESENT` 回带本值，主卡那行 `[casc] PRESENT … ver=N` 于是能一眼看出两块卡是不是
  *  同批固件 —— 混烧时的表现是"从卡静默不响应"，只看日志很难往固件版本上想。 */
-#define CASC_PROTO_VER (1U)
+#define CASC_PROTO_VER (2U)
 
 /* ---- 地址 ---- */
 #define CASC_ADDR_MASTER (0x00U)
@@ -72,28 +73,15 @@
 
 /* ---- 帧类型（ver_type 的低 6 位）----
  *
- * **下面三个值只占位、没实现，而且它们的代价差得很远** —— 别当成"同一批小活"：
- *
- *   SET_COLOR   单独改某卡颜色。**不便宜**：从卡现在是"收到即落屏、不留位图"
- *               （省略化时删掉的 `s_rx.stage`），要"只换色不重传位图"就得先让它
- *               留住当前那一块（+1400B），否则它无从重绘。而本工程的颜色本来就随
- *               每轮 IMAGE 一起下发（`casc_image_t.color`）—— 所以只在"不重传位图
- *               就要换色"这一个场景下它才有价值。没有那个场景就别实现它。
- *   SET_LAYOUT  下发切分表 —— 与"切分表持久化 + 上位机写址"**是同一件事**（P5）。
- *               要 W25Qxx 记录（`app_cfg_sched`）、加载时机（必须早于建表）、
- *               以及与 `BOARD_CASCADE_*` 的优先级规则。**产品化最实的一条**：
- *               现在 2/3/4 卡部署要给每块板烧不同的固件。
- *   BLANK       令该卡清屏。主卡本来每轮都发整块位图，"清屏"就是"发一块全黑的"，
- *               已有路径 —— 除非产品要一条**命令式**的清屏（检修模式之类，那得先
- *               有触发点），否则是冗余的。
+ * 0x05 / 0x08 两个值**空出来了**（原 SET_COLOR / SET_BLANK 的占位，2026-09-22 裁掉）：
+ * 颜色本来就随每轮 IMAGE 一起下发（见 `casc_image_t.color`），"清屏"就是"发一块全黑的
+ * 位图"（主卡每轮都发整块位图）—— 两条都是冗余的命令，留着只会让人以为有别的语义。
  */
 typedef enum {
     /* 主 → 从 */
     CASC_T_IMAGE      = 0x01, /**< 一轮就是这一条：本卡那一块整块位图 + 本轮参数 */
-    CASC_T_SET_COLOR  = 0x05, /**< 单独改某卡颜色（占位，见上：实现它要动数据面） */
     CASC_T_PING       = 0x06, /**< 探活/枚举，广播 */
-    CASC_T_SET_LAYOUT = 0x07, /**< 下发切分表（占位，见上：P5 的持久化+写址） */
-    CASC_T_BLANK      = 0x08, /**< 令该卡清屏（占位，见上：与"发黑图"重复） */
+    CASC_T_SET_ADDR   = 0x07, /**< 识别帧：主 → 卡，"我是主卡，你的地址改成 X" */
     CASC_T_SET_BRIGHT = 0x09, /**< 整屏调光，广播 */
 
     /* 从 → 主 —— 0x20 位是方向标记。
@@ -167,6 +155,23 @@ typedef struct [[gnu::packed]] {
     uint8_t level; /**< 0..7 */
 } casc_set_bright_t;
 
+/** @brief 识别帧：主 → 某张卡，"我（自称）是主卡，你是 X 号"
+ *
+ *  语义是**单向**的：只有"按下按键的那张卡"是发起者，**接收方从不自封主卡**
+ *  （`yours` 恒不为 0）—— 所以一条被重放、迟到、或半双工回声回来的帧，
+ *  都不可能造出第二张主卡。这是"两块都成主卡"的第一道防线。
+ *
+ *  `claim` 是发送方**按下按键那一刻的内核 tick**，用来裁决"两张卡都自称主卡"：
+ *  更早者胜。两张卡对同一对数做同一个比较，**结论一致且不依赖时钟同步**
+ *  （两卡同一次上电，tick 原点差几秒，而 `(int32_t)(a-b)` 在 ±24 天内有效）。 */
+typedef struct [[gnu::packed]] {
+    uint8_t mine;     /**< 发送方自称的地址；**只有 0 会被采纳** */
+    uint8_t yours;    /**< 接收方应改成的地址；0 = 不改地址，只按 mine 处理角色 */
+    uint8_t claim[4]; /**< 认领时刻（内核 tick），大端 */
+} casc_set_addr_t;
+
+_Static_assert(sizeof(casc_set_addr_t) == 6, "SET_ADDR 载荷必须是 6 字节");
+
 /* ================================================================
  *  图传：一帧一轮
  *
@@ -190,22 +195,29 @@ typedef struct [[gnu::packed]] {
  *  `bright` **每一轮都重新断言**：`SET_BRIGHT` 是单次广播、没有重传，而本帧是每轮必发、
  *  丢一轮下一轮就自愈的一字节 —— 这是"从卡永久停在旧亮度上"的唯一防线。
  *
- *  `bitmap[]` 紧跟在头后面（帧内偏移 `sizeof(casc_hdr_t) + sizeof(casc_image_t)` = 23），
+ *  `bitmap[]` 紧跟在头后面（帧内偏移 `sizeof(casc_hdr_t) + sizeof(casc_image_t)` = 24），
  *  长度由 `bmp_len` 给出：1bpp、行优先、MSB-first、bit=1 上色、末字节补位归零 ——
  *  与 `app_screen_extract` 的输出、与从卡 `app_screen_commit_bitmap` 的输入**逐位一致**，
  *  所以两侧零转码。
  *
- *  整帧 = 11 帧头 + 12 本头 + bmp_len + 4 CRC；本板满幅即 1427 字节。 */
+ *  整帧 = 11 帧头 + 13 本头 + bmp_len + 4 CRC；本板满幅即 **1428** 字节。 */
 typedef struct [[gnu::packed]] {
     uint8_t x[2], y[2];  /**< 本卡矩形左上角（整屏坐标），大端 */
     uint8_t w[2], h[2];  /**< 本卡矩形尺寸，大端 */
     uint8_t bmp_len[2];  /**< 位图字节数 = ceil(w/8)*h，大端 */
     uint8_t bright;      /**< 本轮亮度断言 0..7 */
     uint8_t color;       /**< 本卡颜色（display_color_t）*/
+    /** @brief 本轮内容要不要在**从卡**落盘（掉电再上电自动恢复）。0/1。
+     *
+     *  由主卡决定：它那一轮的渲染带了 `persist` 就置 1 —— 这样上位机
+     *  "这次内容要长期保留"的意图会原样传到每张从卡，各卡各存自己那一块。
+     *  **用整字节不用位域**：本文件开头就写明"不写 uint16_t 成员、避开打包结构的
+     *  对齐与字节序陷阱"，位域是同一类陷阱且收益只有 1 字节。 */
+    uint8_t persist;
     uint8_t bitmap[];    /**< bmp_len 字节 */
 } casc_image_t;
 
-_Static_assert(sizeof(casc_image_t) == 12, "IMAGE 载荷头必须是 12 字节");
+_Static_assert(sizeof(casc_image_t) == 13, "IMAGE 载荷头必须是 13 字节");
 
 /* ---- 帧长上限 ----
  *
@@ -237,6 +249,7 @@ _Static_assert(CASC_FRAME_MAX <= FRAME_DATA_MAX_LEN,
 typedef enum {
     CASC_NACK_GEOM = 1, /**< 矩形与本卡切分表不符，或本卡地址不在切分表里 */
     CASC_NACK_LEN  = 2, /**< 帧长与 bmp_len 自相矛盾（多半是两端固件版本不同） */
+    CASC_NACK_ADDR = 3, /**< 识别帧与本板定址冲突（本板有拨码、以拨码为准） */
 } casc_nack_err_t;
 
 typedef struct [[gnu::packed]] {
@@ -254,4 +267,11 @@ pcb_t *app_cascade_pcb(void);
 int32_t app_cascade_ping(void);
 
 /** @brief 整屏调光：主卡广播一次亮度等级。从卡收到后写自己的 light_level。 */
+
+/** @brief **认领主卡**：本卡成为主卡、写记录、并把识别帧发给其余每一张卡
+ *
+ *  由按键（TEST）触发。**只投递请求、立刻返回** —— 真正的动作（写 flash + 发帧 +
+ *  等 ACK 最长约 1s）由级联任务做：`s_tx` 与轮次都是它的，按键所在的工厂测试任务
+ *  不能碰。 */
+void app_cascade_claim_master(void);
 int32_t app_cascade_broadcast_bright(uint8_t level);

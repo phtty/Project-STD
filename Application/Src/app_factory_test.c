@@ -10,6 +10,7 @@
 #include "initcall.h"
 #include "dev_display.h"
 #include "dev_key.h"
+#include "app_cascade.h" /* 首次按键时认领主卡 */
 #include "app_render.h"
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
@@ -102,6 +103,15 @@ static void factory_monitor_task(void *argument)
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         s_factory_active = true;
+
+        /* ===== 主从识别（并入"第一次按键"这一步）=====
+         * 用户定的口径：老化测试走 render API、而 render 已兼容级联，所以按主卡
+         * 一个键就能触发整设备老化 —— **不必区分老化与主副卡识别**。
+         *
+         * **只投递请求**：写身份记录要几十毫秒、发识别帧要占 s_tx 并等 ACK（最长约
+         * 1s）——那些必须由**级联任务**做（s_tx 与轮次都是它的）。本任务是
+         * factory_monitor_task，而 TEST 键只有它一个消费者，在这里投递不会冲突。 */
+        app_cascade_claim_master();
 
         /* ===== SHOW_CODE ===== */
         dev_display_fill(dsp, 0, 0, dsp->screen_rows, dsp->screen_cols, COLOR_BLACK);
