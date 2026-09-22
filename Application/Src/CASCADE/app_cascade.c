@@ -202,6 +202,15 @@ static uint32_t s_bus_quiet_until;
  *  也用同一个序号源 —— ACK 一律按 (seq, src) 匹配，序号源分开会让匹配更难看出规律。 */
 static uint16_t s_round_seq;
 
+/** 本轮开始时**本卡的身份** —— 身份可以在一轮中途被改（按键认领 / 收到识别帧），
+ *  而一轮里的 dst、矩形、颜色全是按开轮那一刻的身份算的：继续发下去就是把画面
+ *  发错卡、或把别的格子的矩形塞给对端（对端会 NACK，但那一轮的失败计数已经记上，
+ *  几轮下来会把一张好卡剔掉）。所以身份一变就立刻给这一轮收尾。
+ *  只在有画布那半边用（轮次本身就在守卫内）。 */
+#if BOARD_SCREEN_CANVAS
+static uint8_t s_round_me;
+#endif
+
 /** @brief 起一轮枚举；已在枚举中则不动 */
 static void _enum_start(uint32_t now)
 {
@@ -745,6 +754,9 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
     const uint16_t       bmp_len = app_screen_card_bm_len(idx);
     if (!c || !bmp_len) return false;
 
+    /* 身份在本轮开始后换了：本项的 dst/矩形是按**旧的**本卡身份定位的，发出去就是错的 */
+    if (s_round_me != app_screen_self_addr()) return false;
+
     /* **位图直接抽进发送帧的载荷位置**：抽出来的格式（1bpp、行优先、MSB-first、
        末字节补位归零）与线上格式逐位一致，所以既不需要中间缓冲，也不用再 memcpy 一次。 */
     casc_image_t  *p   = (casc_image_t *)(s_tx + sizeof(casc_hdr_t));
@@ -780,7 +792,17 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
         s_ack.valid = false;
         (void)_send_tx(len, CASC_T_IMAGE);
 
-        if (!_wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS)) {
+        const bool got_ack = _wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS);
+
+        /* 等应答期间身份可能被改了（收到识别帧 / 按键认领）：**立刻收尾**，
+           不再重发、也不按旧身份结算。这里放在超时判断之前 —— 两条路都要拦。 */
+        if (s_round_me != app_screen_self_addr()) {
+            CASC_LOG("[casc·主] 轮次中途本卡身份变了（addr=%u），本轮作废\n",
+                     (unsigned)app_screen_self_addr());
+            return false;
+        }
+
+        if (!got_ack) {
             /* 超时 = 这张卡没应答，或者 ACK 丢了 —— 现场分不开，只能整帧重发 */
             CASC_LOG("[casc·主] seq=%u 卡%u ← 等应答超时（%ums）\n", (unsigned)seq,
                      (unsigned)c->addr, (unsigned)CASC_ACK_TIMEOUT_MS);
@@ -809,6 +831,9 @@ static bool _round_run(void)
     const screen_layout_t *L      = app_screen_layout();
     const uint8_t          me     = app_screen_self_addr();
     const uint16_t         seq    = ++s_round_seq;
+
+    /* 记下本轮的身份：中途别人改了它，这一轮就作废（见 s_round_me 的说明） */
+    s_round_me = me;
     /* **peek 而不是 take**：本轮的帧在落屏**之前**发出去，取走要等到最后的
        `app_screen_commit_self()`（它才是那个请求位的消费者）。 */
     const bool             persist = app_render_peek_persist_req();
@@ -820,6 +845,12 @@ static bool _round_run(void)
     app_screen_note_round(seq);
 
     for (uint8_t i = 0; i < L->count; i++) {
+        /* 身份在本轮中途换了：后面那些卡一项都不许发（它们的 dst 也是按旧身份定的） */
+        if (s_round_me != app_screen_self_addr()) {
+            all_ok = false;
+            break;
+        }
+
         const screen_card_t *c = app_screen_card(i);
         /* **按下标遍历，地址与矩形都从同一项里取** —— 两者顺序可以不同
            （主卡在下时 addr 与下标相反），拿地址当下标会把两块屏的内容对调。
@@ -844,6 +875,9 @@ static bool _round_run(void)
             s_fail_run[i] = 0;
         } else {
             all_ok = false; /* 上电对齐据此重试；剔除与否是另一件事 */
+            /* 身份变了的那次失败**不算这张卡的**：它不是没应答，是这一轮作废了。
+               记进去的话，几轮认领之后会把一张好卡剔掉，然后要等枚举才叫得回来。 */
+            if (s_round_me != app_screen_self_addr()) break;
             if (++s_fail_run[i] >= CASC_FAIL_RUN_MAX) {
                 CASC_LOG("[casc·主] 卡 %u 连续 %u 轮未完成 → 剔除（不再发数据，等枚举找回来）\n",
                          (unsigned)c->addr, (unsigned)s_fail_run[i]);
@@ -859,8 +893,11 @@ static bool _round_run(void)
        画布比本卡屏大，长度对不上，commit_bitmap 会拒绝。
 
        代价是主卡的换帧时机被总线节奏绑住（一轮 ~130ms/卡）。本项目是交通屏、
-       只显示静态文字与标识，指令式刷新，所以不为此另开"只更新主卡本地"的快路径。 */
-    (void)app_screen_commit_self();
+       只显示静态文字与标识，指令式刷新，所以不为此另开"只更新主卡本地"的快路径。
+
+       **身份在本轮中途变了就不提交**：那时门面已被重装（画布清空、本卡那一块的
+       矩形也换了），提交上去是把一张空画面推到屏上。 */
+    if (s_round_me == app_screen_self_addr()) (void)app_screen_commit_self();
 
     return all_ok; /* 只要有一张从卡没完成，上电对齐就还要再试 */
 }
@@ -1141,6 +1178,17 @@ void app_cascade_claim_master(void)
     s_claim_req = true;
 }
 
+/** @brief 取走按键请求并执行认领 —— `casc_task` 里那一格
+ *
+ *  **单独成函数**是为了能在 host 上测：`casc_task` 是死循环，用例没法进去看认领
+ *  到底做了什么（写记录、重装门面、逐卡通知）。 */
+static void _claim_poll(void)
+{
+    if (!s_claim_req) return;
+    s_claim_req = false;
+    _claim_run();
+}
+
 /* ================================================================
  *  任务
  * ================================================================ */
@@ -1205,8 +1253,7 @@ static void casc_task(void *argument)
          * 写身份记录、重装门面、逐卡通知。**不判主从** —— "谁被按谁主卡"里就包含
          * "本来是从卡、按一下变成主卡"这一半。 */
         if (s_claim_req) {
-            s_claim_req = false;
-            _claim_run();
+            _claim_poll();
             now = osKernelGetTickCount(); /* 认领最长约 1s，后面按新时刻算 */
         }
 
