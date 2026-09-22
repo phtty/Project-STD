@@ -44,6 +44,34 @@ static uint8_t        s_self;   /* 本卡在切分表里的下标 */
 
 static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表本卡那一项） */
 
+/* ---- 哪一格是主卡格：**运行期事实**（出厂默认来自 board.h）----
+ *
+ * 它 + 网格形状就是整张切分表：主卡格编 addr 0，其余格按网格顺序编 1..N。
+ * 允许运行期改的理由见 app_screen.h —— 编译期钉死会让"谁被按谁主卡"变成
+ * "被按的那张卡以为自己在另一块屏上"（两块屏的上下半幅对调）。 */
+static uint8_t s_master_cell = (uint8_t)BOARD_CASCADE_MASTER_CELL;
+
+uint8_t app_screen_master_cell(void)
+{
+    return s_master_cell;
+}
+
+/** @brief 格号 ↔ 地址：**整张切分表就这一条规则**（与 _layout_build_grid 同源）
+ *
+ *  纯函数，不依赖当前表 —— 认领时要同时算"旧表里你在哪"和"新表里你去哪"，
+ *  而此刻表只能有一份。 */
+uint8_t app_screen_addr_of_cell(uint8_t cell, uint8_t master_cell)
+{
+    if (cell == master_cell) return 0;
+    return (uint8_t)(cell < master_cell ? cell + 1U : cell);
+}
+
+uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t master_cell)
+{
+    if (addr == 0) return master_cell;
+    return (uint8_t)(addr <= master_cell ? addr - 1U : addr);
+}
+
 /* ---- 输出颜色的临时覆盖（只给工厂老化测试用）----
  *
  * 根因：画布是 **1bpp**（只记亮/灭），**颜色在协议里是逐卡给的**
@@ -274,7 +302,7 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
 static bool _layout_build(void)
 {
     return _layout_build_grid((uint8_t)BOARD_CASCADE_COLS, (uint8_t)BOARD_CASCADE_ROWS,
-                              (uint8_t)BOARD_CASCADE_MASTER_CELL);
+                              s_master_cell);
 }
 
 /** @brief 由切分表推出画布几何、定位本卡、清画布
@@ -308,10 +336,15 @@ static bool _apply_layout(void)
                (unsigned)s_bm_len, (unsigned)sizeof(s_canvas));
         return false;
     }
+    /* **每次重装都清**（换身份也一样）：换了身份之后画布上那份内容是不是
+       "一整幅完整的逻辑屏"就说不准了 —— 从卡的画布只有它自己那一块（上电从记录
+       恢复来的），把它当整幅推下去，别的卡当场被刷黑。而"按一下键屏上内容消失"
+       只在**角色真的变了**的时候发生（没变的那条路在 `apply_identity` 就返回了）。 */
     memset(s_canvas, 0, s_bm_len);
 #endif
     return true;
 }
+
 
 static volatile uint32_t s_gen;             /* 内容代数：每次写入自增 */
 static volatile uint32_t s_last_write_tick; /* 最后一次写入的时刻，静默期据此算 */
@@ -728,7 +761,7 @@ static bool _apply_identity(void)
 #endif
 
     /* 画布刚清空：**待落屏必须清掉**（置着的话主卡会立刻把一张全黑推给所有从卡），
-       "本周期被渲染过"这个闸也重新计。 */
+       "本周期被渲染过"这个闸也重新计 —— 新身份下这份内容要么没了、要么不完整。 */
     s_pending        = false;
     s_canvas_touched = false;
 
@@ -749,6 +782,17 @@ static bool _apply_identity(void)
     (void)c;
 #endif
     return true;
+}
+
+void app_screen_apply_identity(uint8_t addr, uint8_t master_cell)
+{
+    /* **一个都没变就别重装**：重装会按新身份重建表、清画布与"画布被写过"的闩 ——
+       上电那一次与"同址确认"都是这种情况，白清一次内容。 */
+    if (addr == s_addr && master_cell == s_master_cell) return;
+
+    s_addr        = addr;
+    s_master_cell = master_cell;
+    app_screen_reinit_identity();
 }
 
 void app_screen_reinit_identity(void)

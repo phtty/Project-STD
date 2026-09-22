@@ -63,6 +63,11 @@ void app_render_save(void) {}
 bool app_render_peek_persist_req(void) { return false; }
 bool app_render_busy(void) { return false; }                  /* 本套件不在渲染途中 */
 uint8_t app_screen_output_color(uint8_t c) { return c; }      /* 无颜色覆盖 */
+/* 身份的应用与格↔地址规则：本套件不测它们（由主卡套件覆盖），桩成恒等 */
+void    app_screen_apply_identity(uint8_t a, uint8_t mc) { (void)a; (void)mc; }
+uint8_t app_screen_master_cell(void) { return 0; }
+uint8_t app_screen_addr_of_cell(uint8_t cell, uint8_t mc) { return (uint8_t)(cell == mc ? 0 : cell); }
+uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t mc) { (void)mc; return addr; }
 
 
 

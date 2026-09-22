@@ -268,3 +268,24 @@ void app_screen_set_addr(uint8_t addr);
  *  上电（`_screen_init`）与运行期换身份（按键认领 / 收到识别帧）走**同一条路**，
  *  避免"上电装对了、运行期漏装一样"的漂移。必须在**任务上下文**调用。 */
 void app_screen_reinit_identity(void);
+
+/** @brief 应用身份（地址 + **主卡格**）：一个都没变就什么都不做
+ *
+ *  **主卡格是运行期事实**（出厂默认来自 `BOARD_CASCADE_MASTER_CELL`）：它 + 网格形状
+ *  决定整张切分表（主卡格编 addr 0，其余按格序编 1..N）。编译期钉死会怎样：
+ *  "谁被按谁主卡"改成的是**地址**，而"我在哪一格"没跟着走 —— 被按的那张卡于是
+ *  按老规矩渲染**另一块屏**那一格，两块屏的上下半幅当场对调。
+ *
+ *  两件事一次做完（而不是分开的 set_addr + reinit）：Caller 很容易只做一半，
+ *  而"地址变了、格没变"在屏上没有任何报错。 */
+void app_screen_apply_identity(uint8_t addr, uint8_t master_cell);
+
+/** @brief 当前认定的主卡格（哪一格编 addr 0） */
+uint8_t app_screen_master_cell(void);
+
+/** @brief 格号 ↔ 地址：整张切分表就这一条规则
+ *
+ *  纯函数、不依赖当前表 —— 认领时要同时算"旧表里你在哪"与"新表里你去哪"，
+ *  而表在那一刻只能有一份。 */
+uint8_t app_screen_addr_of_cell(uint8_t cell, uint8_t master_cell);
+uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t master_cell);

@@ -589,6 +589,54 @@ static void case_color_override(void)
               (unsigned)s_fb[0]);
 }
 
+/** 主卡格是**运行期事实**（F3）：同一地址在不同主卡格下对应**不同的格**
+ *
+ *  这就是"谁被按谁主卡"能不能成立的分水岭 —— 只改地址不改格的话，被按的那张卡
+ *  按老规矩去渲染**另一块屏**那一格，两块屏的上下半幅当场对调。
+ *
+ *  反向验证：把 `_layout_build()` 里的 `s_master_cell` 换回宏，第 ③ 段立刻红。 */
+static void case_master_cell_runtime(void)
+{
+    TEST_BEGIN("主卡格可运行期改：同一地址换算出不同的格");
+
+    /* ① 规则本身：格 ↔ 地址（主卡格编 0，其余按格序编 1..N） */
+    CHECK_MSG(app_screen_addr_of_cell(0, 0) == 0 && app_screen_addr_of_cell(1, 0) == 1,
+              "主卡格 0：格0→addr0、格1→addr1");
+    CHECK_MSG(app_screen_addr_of_cell(0, 1) == 1 && app_screen_addr_of_cell(1, 1) == 0,
+              "主卡格 1（主卡在下）：格0→addr1、格1→addr0");
+    CHECK_MSG(app_screen_cell_of_addr(0, 1) == 1 && app_screen_cell_of_addr(1, 1) == 0,
+              "反算：主卡格 1 下 addr0 在格1、addr1 在格0");
+    for (uint8_t mc = 0; mc < 2; mc++)
+        for (uint8_t a = 0; a < 2; a++)
+            CHECK_MSG(app_screen_addr_of_cell(app_screen_cell_of_addr(a, mc), mc) == a,
+                      "格↔地址来回一趟必须回到原点（mc=%u addr=%u）", (unsigned)mc, (unsigned)a);
+
+    /* ② 本卡那一格跟着主卡格走。本用例本卡 addr=1（见文件头） */
+    canvas_reset_mc(44, 12, 1, 2, 0); /* 主卡格 0（左上） */
+    app_screen_apply_identity(1, 0);
+    CHECK_MSG(app_screen_self_index() == 1, "主卡格 0 时本卡（addr1）在格 1，得到 %u",
+              (unsigned)app_screen_self_index());
+
+    app_screen_apply_identity(1, 1); /* 主卡格翻到下面那块 —— 与现场"按上面那块"等价 */
+    CHECK_MSG(s_master_cell == 1, "主卡格应更新到 1，得到 %u", (unsigned)s_master_cell);
+    CHECK_MSG(app_screen_self_index() == 0, "主卡格 1 时同一个 addr1 落在格 0，得到 %u",
+              (unsigned)app_screen_self_index());
+    CHECK_MSG(s_target_last == nullptr, "本卡是 addr1（从卡）→ 不该装渲染目标");
+    CHECK_MSG(!app_screen_canvas_touched(),
+              "换了格就要清画布与闩（换身份后那份内容不算完整的一幅）");
+
+    /* ③ **一个都没变时不许动任何东西**：按一下键不该把屏上内容清掉 */
+    app_screen_apply_identity(0, 1); /* 本卡成为主卡（格 1） */
+    _sink_fill(nullptr, 0, 0, 4, 4, COLOR_RED);
+    CHECK_MSG(app_screen_canvas_touched(), "画布被写过之后闩应置位");
+    app_screen_apply_identity(0, 1); /* 一模一样 */
+    CHECK_MSG(app_screen_canvas_touched() && app_screen_is_master(),
+              "身份一个都没变时不该重装门面（重装会清掉刚画好的内容）");
+
+    app_screen_set_addr((uint8_t)BOARD_CASCADE_ADDR);
+    app_screen_apply_identity((uint8_t)BOARD_CASCADE_ADDR, 0);
+}
+
 static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
@@ -780,6 +828,7 @@ int main(void)
     case_persist_after_commit();
     case_identity_reapply();
     case_color_override();
+    case_master_cell_runtime();
     case_commit_self_matches_canvas();
     case_master_below();
     case_addr_index_mapping();

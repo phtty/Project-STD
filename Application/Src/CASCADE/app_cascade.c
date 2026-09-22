@@ -942,12 +942,13 @@ static bool _round_run(void)
  *  **跑在 `sw_app(3)`（`_screen_init` 是 `sw_dev(2)` 之后）**：那时切分表已按默认身份
  *  建过一遍，这里解析出真身份后再 `reinit_identity()` 重装一次 —— 两条路走的是
  *  同一个 `_apply_identity()`，不会漂。 */
-#define CASC_ID_REC_VERSION (1U)
+#define CASC_ID_REC_VERSION (2U)
 
 typedef struct [[gnu::packed]] {
-    uint8_t addr;   /**< 0 = 主卡，1..0x1F = 从卡 */
-    uint8_t src;    /**< 谁定的：0=默认 1=记录 2=拨码 3=识别帧（只为排障打印） */
-    uint8_t rsv[2];
+    uint8_t addr;        /**< 0 = 主卡，1..0x1F = 从卡 */
+    uint8_t src;         /**< 谁定的：0=默认 1=记录 2=拨码 3=识别帧（只为排障打印） */
+    uint8_t master_cell; /**< 本机认定的**主卡格**（哪一格编 addr 0）—— 见 app_screen.h */
+    uint8_t rsv;
 } casc_id_rec_t;
 
 _Static_assert(sizeof(casc_id_rec_t) == 4, "身份记录载荷必须是 4 字节");
@@ -975,42 +976,46 @@ static uint8_t _id_dip(void)
 #endif
 }
 
-static void _id_save(uint8_t addr, uint8_t src)
+/** @brief 写身份记录（地址 + 主卡格）：**同址确认也要写**
+ *
+ *  以前只有"真改了地址"才写，于是从卡（被通知的地址与它自己一样）永远没有记录，
+ *  它的身份一直靠出厂默认值撑着 —— 默认值一改、或换一块板，它就跑到别的格上去了。 */
+static void _id_save(uint8_t addr, uint8_t master_cell, uint8_t src)
 {
     if (s_id_cfg == 0xFF) return;
-    const casc_id_rec_t r = {.addr = addr, .src = src};
+    const casc_id_rec_t r = {
+        .addr        = addr,
+        .src         = src,
+        .master_cell = master_cell,
+    };
     if (app_cfg_sched_save(s_id_cfg, (const uint8_t *)&r, sizeof(r)) != 0)
         printf("[casc·id] 身份记录写入失败（本次上电仍按 %u 跑）\n", (unsigned)addr);
 }
 
-/** @brief 记下身份并立刻生效（不重启）。拨码优先 → 冲突时拒绝并返回 false */
-static bool _id_set_local(uint8_t addr, uint8_t src, bool persist)
+/** @brief 记下身份（地址 + 主卡格）并立刻生效（不重启）。拨码优先 → 冲突时拒绝 */
+static bool _id_set_local(uint8_t addr, uint8_t master_cell, uint8_t src, bool persist)
 {
     if (_id_dip_present() && addr != _id_dip()) {
         printf("[casc·id] 本板有拨码（=%u），拒绝把地址改成 %u（拨码优先）\n",
                (unsigned)_id_dip(), (unsigned)addr);
         return false;
     }
-    if (persist) _id_save(addr, src);
+    /* 记录必须在 apply 之前写：apply 会把主卡格换成新的，而记录要记的是"新的那一份" */
+    if (persist) _id_save(addr, master_cell, src); /* 主卡格用**参数**：此刻 app_screen 里还是旧的 */
 
-    /* **身份没变就不重装门面**：重装会清画布、并把"画布被写过"的闩清零 ——
-       那等于"按一下键，屏上刚画好的内容当场消失，而且这一轮永远不开"。
-       工厂测试第一次按键要显示的那个编码就是这么丢的：认领在 ≤100ms
-       （`CASC_BRIGHT_POLL_MS`）内重装了一次门面，把刚渲染的编码连闩一起抹了。
 
-       表只由身份决定，身份没变就没有任何东西需要重算；记录该写还是要写
-       （认领的意义正是"把这台设备现在的身份记下来"）。 */
-    if (addr == app_screen_self_addr()) return true;
-
-    /* **先过 app_screen 再重装门面** —— 它会重算"本卡是哪一格"、清画布、按新主从
-       关系装卸渲染目标与持久化钩子。上电与运行期走同一条路。 */
-    app_screen_set_addr(addr);
-    app_screen_reinit_identity();
+    /* **一个都没变就什么都不做**（`app_screen_apply_identity` 内部的判断）：
+       重装门面会按新身份重建表、清画布与闩 —— 上电那一次与"同址确认"都是这种
+       情况，白清一次内容（工厂测试第一次按键要显示的编码就是这么丢的）。 */
+    app_screen_apply_identity(addr, master_cell);
     return true;
 }
 
-static uint8_t _id_resolve(uint8_t *src)
+/** @brief 解析身份：地址（`*mc` 带回记录里的主卡格） */
+static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
 {
+    *mc = (uint8_t)BOARD_CASCADE_MASTER_CELL; /* 默认：板级配置里那一格 */
+
     if (_id_dip_present()) {
         *src = 2;
         return _id_dip(); /* 每次现读：现场拨一下即生效 */
@@ -1025,21 +1030,22 @@ static uint8_t _id_resolve(uint8_t *src)
            （认领写的是 3=识别帧），拿它当"这次从哪读的"会打出一句
            `本机地址=0（来源 识别帧）` —— 看起来像开机时跑了一次识别，其实是读记录。 */
         *src = 1;
+        *mc  = r.master_cell;
         return r.addr;
     }
 
     *src = 0;
-    return (uint8_t)BOARD_CASCADE_ADDR; /* 板级默认（= 主卡） */
+    return (uint8_t)BOARD_CASCADE_ADDR; /* 板级默认（= 从卡） */
 }
 
 /** @brief 上电：解析身份 → 应用 → 打印 */
 static void _casc_id_boot(void)
 {
     uint8_t       src  = 0;
-    const uint8_t addr = _id_resolve(&src);
+    uint8_t       mc   = 0;
+    const uint8_t addr = _id_resolve(&src, &mc);
 
-    app_screen_set_addr(addr);
-    app_screen_reinit_identity();
+    app_screen_apply_identity(addr, mc);
 
     static const char *const k_src_name[] = {"板级默认", "记录", "拨码", "识别帧"};
     printf("[casc·id] 本机地址=%u（来源 %s）→ %s\n", (unsigned)addr,
@@ -1095,7 +1101,7 @@ static void _identity_poke(void)
     s_bus_quiet_until = 0; /* 认领期间可能刚发过帧，别让自己再等 300ms */
 }
 
-/** @brief 收到识别帧：按 `mine`/`yours`/`claim` 决定改不改自己的身份 */
+/** @brief 收到识别帧：按 `mine`/`yours`/`master_cell`/`claim` 决定改不改自己的身份 */
 static void _cmd_set_addr(frame_msg_t *msg)
 {
     if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_set_addr_t))) return;
@@ -1104,13 +1110,15 @@ static void _cmd_set_addr(frame_msg_t *msg)
     const casc_set_addr_t *p = (const casc_set_addr_t *)(msg->data + sizeof(casc_hdr_t));
     const uint16_t         seq = casc_get_u16(h->seq);
 
-    /* 自己的回声（半双工）：丢弃，且**不能回 ACK** —— 否则会把发起方的等待槽
-       当成"对方的答复"。 */
-    if (h->src == app_screen_self_addr()) return;
-
     const uint32_t claim = casc_get_u32(p->claim);
     const uint8_t  mine  = p->mine;
     const uint8_t  yours = p->yours;
+    const uint8_t  mc    = p->master_cell;
+
+    /* **自己的回声**（半双工）：丢弃，且不能回 ACK —— 否则会把发起方的等待槽当成
+       "对方的答复"。判据是"地址 + claim 都是我自己"：两张卡都自称主卡时两个地址
+       都是 0，光看 src 分不开，而 claim 是各按各的时刻。 */
+    if (h->src == app_screen_self_addr() && claim == s_my_claim) return;
 
     /* ① 对方不是主卡 → 不动作。**这一条守住"整个装置不会没有主卡"**：
        一张从卡（例如拨码≠0 的板子）按了键，不能把唯一的主卡降级。 */
@@ -1120,26 +1128,50 @@ static void _cmd_set_addr(frame_msg_t *msg)
         return;
     }
 
-    /* ② 只确认角色、不改地址（`yours` 0 或已经是本机地址） */
-    if (yours == CASC_ADDR_MASTER || yours == app_screen_self_addr()) {
-        (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
-        return;
+    const uint8_t old_mc   = app_screen_master_cell();
+    const uint8_t self     = app_screen_self_addr();
+    /* 我这一格（**按旧表算**：新主卡格一应用，地址与格的对应就变了） */
+    const uint8_t my_cell  = app_screen_cell_of_addr(self, old_mc);
+
+    uint8_t       new_addr;
+    if (yours == CASC_ADDR_SELF_CALC) {
+        if (my_cell == mc) {
+            /* **我也认为自己在主卡格，但发起方不是我** —— 两张卡都自称主卡的那种局面。
+               让不让由 claim 裁决：**更晚按下者作数**（两卡对同一对数做同一个比较，
+               结论一致，不会两张都让）。从没按过（0xFFFFFFFF）的一律让。 */
+            if ((int32_t)(claim - s_my_claim) < 0) {
+                CASC_LOG("[casc] ← 对方的 claim=%ums 早于本卡，回绝（本卡留主卡）\n",
+                         (unsigned)claim);
+                _nack(seq, CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
+                return;
+            }
+            /* 该让到哪一格：**第一个不是主卡格的格**。两卡设备上这就是另一块屏 ✓；
+               四卡时是个猜测（打印出来，别静默）。 */
+            const uint8_t spare_cell = (mc == 0U) ? 1U : 0U;
+            new_addr                 = app_screen_addr_of_cell(spare_cell, mc);
+            printf("[casc] ← 两张卡都自称主卡；本卡让位到 addr=%u（按第 %u 格算）\n",
+                   (unsigned)new_addr, (unsigned)spare_cell);
+        } else {
+            new_addr = app_screen_addr_of_cell(my_cell, mc); /* 格不动，只按新表重算地址 */
+        }
+    } else {
+        /* 明确的地址（逐卡单播）。`yours == 0` 只在"本卡就是主卡格"时才对得上，
+           那时下面 apply 的 addr==0 与 mc 一致，等于只更新主卡格。 */
+        if (yours != CASC_ADDR_MASTER && yours != self && app_screen_is_master() &&
+            (int32_t)(claim - s_my_claim) < 0) {
+            /* 我也自称主卡、而且**我按得更晚**（claim 更大 ⇒ 差为负）→ 我不让位，
+               只回绝。两卡对同一对数做同一个比较，结论一致，不会两张都让。 */
+            CASC_LOG("[casc] ← 对方的 claim=%ums 早于本卡，回绝（本卡留主卡）\n",
+                     (unsigned)claim);
+            _nack(seq, CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
+            return;
+        }
+        new_addr = yours;
     }
 
-    /* ③ 我也是主卡（两张都自称主卡）→ 比 claim，**更早者胜**。
-          用 (int32_t) 差值比较：回绕安全，且**两卡结论一致**。 */
-    if (app_screen_is_master() && (int32_t)(claim - s_my_claim) >= 0) {
-        CASC_LOG("[casc] ← 对方在自己的 %ums 就认领了主卡，本卡让位 → addr=%u\n",
-                 (unsigned)claim, (unsigned)yours);
-        (void)_id_set_local(yours, 3U, true);
-        _identity_poke();
-        (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
-        return;
-    }
-
-    /* ④ 改成 yours 并持久化。**哪怕原来就是主卡，收到也照改**（用户定的规则：
-       "谁被按谁主卡"）。有拨码的板子由 _id_set_local 拒绝（拨码优先）→ 回 NACK。 */
-    if (!_id_set_local(yours, 3U, true)) {
+    /* ② 改成算出来的地址 + 新的主卡格并持久化。**哪怕原来就是主卡，收到也照改**
+       （用户定的规则："谁被按谁主卡"）。有拨码的板子由 _id_set_local 拒绝 → NACK。 */
+    if (!_id_set_local(new_addr, mc, 3U, true)) {
         _nack(seq, CASC_NACK_ADDR, "本板有拨码，地址以拨码为准");
         return;
     }
@@ -1147,46 +1179,70 @@ static void _cmd_set_addr(frame_msg_t *msg)
     (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
 }
 
-/** @brief 认领之后：把"我是主卡、你是 X 号"告诉其余每一张卡；返回收到 ACK 的卡数
+/** @brief 认领之后：把"我是主卡、主卡格是 M"告诉其余每一张卡；返回收到 ACK 的卡数
  *
- *  **逐卡单播**（不用广播）：广播没法等 ACK（N 张卡回 N 条，`_wait_ack` 按
- *  (seq,src) 匹配无从匹配），而这里要的正是"确实通知到了"。
- *  dst 取切分表里那一项的地址，**包括可能存在的第二张主卡（addr 0）** ——
- *  那正是"哪怕对方是主卡，收到识别帧也要改身份"的落点。 */
-static uint8_t _claim_notify_peers(void)
+ *  **先广播再逐卡单播**，两件事各有不可替代的用处：
+ *   · **广播**（`yours = 0xFF`，让各卡按自己的格自算）：发起方**未必知道总线上有谁** ——
+ *     两张卡都自称主卡时，谁也枚举不到谁（主卡不应答 PING），逐卡单播无从下手；
+ *     而总线是共享的，一条广播一定到得了。这也是"整个装置不会卡在两张主卡"的关键。
+ *   · **逐卡单播**（具体地址）：表里认得的卡要一个个等 ACK —— 那才是"确实通知到了"
+ *     的证据，广播没法等（N 张卡回 N 条，`_wait_ack` 按 (seq,src) 匹配无从匹配）。
+ *     dst 用**旧表**里的地址（对端此刻还在旧地址上听着），`yours` 给**新表**里那个。 */
+static uint8_t _claim_notify_peers(const uint8_t *addr_old, uint8_t count)
 {
-    const screen_layout_t *L  = app_screen_layout();
-    const uint8_t          me = app_screen_self_addr();
-    uint8_t                ok = 0;
+    const uint8_t me = app_screen_self_addr();
+    const uint8_t mc = app_screen_master_cell();
+    uint8_t       ok = 0;
 
-    for (uint8_t i = 0; i < L->count; i++) {
-        const screen_card_t *c = app_screen_card(i);
-        if (!c || c->addr == me) continue; /* 自己那张跳过（也不该给自己发） */
+    /* ---- ① 广播：谁在听谁自算（含"另一张自称主卡"的那张） ---- */
+    {
+        casc_set_addr_t p = {.mine = CASC_ADDR_MASTER, .yours = CASC_ADDR_SELF_CALC,
+                             .master_cell = mc};
+        casc_put_u32(p.claim, s_my_claim);
+        if (_send_seq(CASC_T_SET_ADDR, CASC_ADDR_BCAST, ++s_round_seq, &p, sizeof(p)) >= 0)
+            ++ok; /* 广播只要发出去就算一份：它到得了谁，对端自己会 ACK/让位 */
+    }
 
-        casc_set_addr_t p = {.mine = me, .yours = c->addr};
+    /* ---- ② 逐卡单播：按旧地址点名叫，等它的 ACK ---- */
+    uint8_t unicast_ok = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        /* **按下标（格）跳过自己**，不是按地址比 —— 此刻自己的地址已经是新的 0，
+           而 `addr_old[]` 里存的是旧地址，两者不可比（比错的后果：该通知的旧主卡
+           被当成"自己"跳过，而不该通知的旧地址收到一条发给别人的帧）。 */
+        if (i == mc) continue; /* mc == 本卡那一格（认领之后就是主卡格） */
+
+        const uint8_t dst = addr_old[i];
+
+        casc_set_addr_t p = {.mine = CASC_ADDR_MASTER,
+                             .yours = app_screen_addr_of_cell(i, mc), /* 新表里它在几号 */
+                             .master_cell = mc};
         casc_put_u32(p.claim, s_my_claim);
 
         for (uint8_t attempt = 0; attempt <= CASC_RETRY_MAX; attempt++) {
             const uint16_t seq = ++s_round_seq; /* 借用同一个序号源：ACK 按 (seq,src) 匹配 */
             s_ack.valid        = false;
-            if (_send_seq(CASC_T_SET_ADDR, c->addr, seq, &p, sizeof(p)) < 0) break;
+            if (_send_seq(CASC_T_SET_ADDR, dst, seq, &p, sizeof(p)) < 0) break;
 
-            if (!_wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS)) continue;
+            /* 对端改完地址后用**新地址**回 ACK（它就是从这个 seq 上答的） */
+            if (!_wait_ack(p.yours == CASC_ADDR_MASTER ? dst : p.yours, seq,
+                           osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS))
+                continue;
 
             if (s_ack.sta == CASC_STA_NACK) {
-                printf("[casc·主] 卡 %u 拒绝识别帧（err=%u）—— 多半是它那块板有拨码、"
-                       "地址由拨码定\n",
-                       (unsigned)c->addr, (unsigned)s_ack.err);
+                printf("[casc·主] 卡 %u 拒绝识别帧（err=%u）—— 要么它那块的拨码与切分表"
+                       "对不上，要么它按得比本卡更晚\n",
+                       (unsigned)dst, (unsigned)s_ack.err);
             } else {
-                ok++;
+                unicast_ok++;
             }
             break;
         }
     }
 
-    printf("[casc·主] 认领完成：%u/%u 张卡确认（本卡 addr=%u）\n", (unsigned)ok,
-           (unsigned)(L->count > 0 ? L->count - 1U : 0U), (unsigned)me);
-    return ok;
+    printf("[casc·主] 认领完成：广播 1 条 + %u/%u 张卡单播确认（本卡 addr=%u 主卡格=%u）\n",
+           (unsigned)unicast_ok, (unsigned)(count > 0 ? count - 1U : 0U), (unsigned)me,
+           (unsigned)mc);
+    return (uint8_t)(ok + unicast_ok);
 }
 
 /** @brief 认领的实际动作：自己变主卡（写记录）→ 作废陈旧状态 → 通知其余卡 */
@@ -1194,15 +1250,34 @@ static void _claim_run(void)
 {
     s_my_claim = osKernelGetTickCount();
 
-    if (!_id_set_local(CASC_ADDR_MASTER, 3U, true)) {
-        /* 有拨码的板子按键不能选主卡（拨码优先的必然推论）：仍然把识别帧发出去，
-           让"另一张自称主卡"的卡降级 —— 但本机地址保持拨码给的值。 */
-        printf("[casc·id] 本板有拨码（=%u），按键不改变本机地址；只发识别帧\n",
-               (unsigned)_id_dip());
+    /* ---- 先把旧表抄下来：应用新身份之后，旧地址就查不到了 ---- */
+    uint8_t       addr_old[SCREEN_CARD_MAX] = {0};
+    const uint8_t count                     = app_screen_layout()->count;
+    for (uint8_t i = 0; i < count && i < SCREEN_CARD_MAX; i++)
+        addr_old[i] = app_screen_card(i)->addr;
+
+    /* ---- 我这一格 = 新主卡格（**"谁被按谁主卡"的落点**） ---- */
+    const uint8_t my_cell = app_screen_cell_of_addr(app_screen_self_addr(),
+                                                    app_screen_master_cell());
+    if (my_cell >= count) {
+        printf("[casc·id] 本卡地址 %u 不在切分表里，按键不改变身份\n",
+               (unsigned)app_screen_self_addr());
+        return;
     }
 
+    if (!_id_set_local(CASC_ADDR_MASTER, my_cell, 3U, true)) {
+        /* 有拨码的板子按键不能选主卡（拨码优先的必然推论）：身份保持拨码给的值，
+           这一下**到此为止** —— 继续往下发的话，帧里的 mine 是拨码值（≠0），
+           接收侧一律按"对方不是主卡"回绝，白占总线还打出一句方向错的日志。 */
+        printf("[casc·id] 本板有拨码（=%u），地址由拨码定，按键不改变身份；"
+               "要选主卡请把拨码拨到 0\n",
+               (unsigned)_id_dip());
+        return;
+    }
+    printf("[casc·id] 认领主卡：本卡成为 addr=0，主卡格=%u\n", (unsigned)my_cell);
+
     _identity_poke(); /* 先作废陈旧状态，再通知（通知要等 ACK，占着总线） */
-    (void)_claim_notify_peers();
+    (void)_claim_notify_peers(addr_old, count);
 }
 
 /** @brief 按键请求位（由 `app_cascade_claim_master` 置、`casc_task` 取） */
