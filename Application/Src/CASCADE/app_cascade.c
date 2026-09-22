@@ -989,7 +989,10 @@ static uint8_t _id_resolve(uint8_t *src)
     if (s_id_cfg != 0xFF &&
         app_cfg_sched_load(s_id_cfg, (uint8_t *)&r, sizeof(r), &n) == CFG_REC_OK &&
         n == sizeof(r) && r.addr <= 0x1FU) {
-        *src = r.src;
+        /* 标签只能报"**记录**"：`r.src` 是这条记录**当初被写下来时**的来源
+           （认领写的是 3=识别帧），拿它当"这次从哪读的"会打出一句
+           `本机地址=0（来源 识别帧）` —— 看起来像开机时跑了一次识别，其实是读记录。 */
+        *src = 1;
         return r.addr;
     }
 
