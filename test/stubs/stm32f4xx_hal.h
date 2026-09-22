@@ -27,7 +27,11 @@ typedef struct {
 
 typedef struct {
     uint32_t dummy;
+    /* pl_uart 的 ISR 靠 CR3 的 DMAR 位判断"接收 DMA 还在不在"（自愈用） */
+    uint32_t CR3;
 } USART_TypeDef;
+
+#define USART_CR3_DMAR (1U << 6)
 
 typedef struct {
     uint32_t dummy;

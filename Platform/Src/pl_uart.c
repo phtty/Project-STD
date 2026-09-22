@@ -278,11 +278,26 @@ void pl_uart_irq_handler(uint8_t id)
     UART_HandleTypeDef *h = (UART_HandleTypeDef *)g_pl_uart_board[id].huart;
     if (!h) return;
 
-    HAL_UART_IRQHandler(h); /* 无条件清标志：这一步绝不能依赖初始化期数据 */
-
-    /* 空闲中断的后续处理要用 ctx 里的 rx_buf/rx_cb，那些确实是运行期状态；
-       初始化完成前 ctx 还是空的，此时跳过即可（标志上面已经清过）。 */
+    /* ---- **空闲必须先于 HAL 处理** ----
+     *
+     * `HAL_UART_IRQHandler` 处理溢出等错误时走的是 `__HAL_UART_CLEAR_PEFLAG`，
+     * 而那个宏是"**读 SR、再读 DR**"——按 RM0090，**该序列同时会清掉 IDLE 位**。
+     * 于是顺序一反，`uart_idle_handle` 查不到 IDLE、静默返回，这一段的字节永不交付。
+     *
+     * 更糟的是 HAL 的 ORE 处理还会**中止接收 DMA**，且不会重新武装。两者叠加：
+     * 突发帧期间一溢出，接收就死掉，直到某次空闲恰好没有伴随错误才活过来 ——
+     * 实测表现为 247ms 到 21 秒不等、毫无规律的"处理慢"，而 P2 时期帧稀疏撞不上。
+     *
+     * 这一条不改"无条件清标志"的性质：HAL 照样无条件执行，只是挪到后面。
+     * 初始化期 ctx 还是空的，这里照旧跳过（HAL 那一步会清掉标志，不会成风暴）。 */
     if (g_uart_ctx[id].huart) uart_idle_handle(&g_uart_ctx[id]);
+
+    HAL_UART_IRQHandler(h);
+
+    /* HAL 可能刚把接收 DMA 中止掉（错误路径）。**DMA 的接收请求还在不在**是判断依据；
+     * 不在就武装回去 —— 否则接收就此停摆，而这一点不会有任何报错。 */
+    if (g_uart_ctx[id].huart && !(h->Instance->CR3 & USART_CR3_DMAR))
+        (void)_rx_rearm(&g_uart_ctx[id]);
 }
 
 void pl_uart_dma_irq_handler(uint8_t id)
