@@ -136,10 +136,20 @@ osThreadId_t app_rs485_start(void)
     self->rx_buf      = dev_rs485_get_buf();
     self->rx_buf_size = RS485_BUF_SIZE;
 
+    /* **优先级高于分发任务**（Normal → AboveNormal）。
+     *
+     * 这一级是整条接收链上唯一**没有缓冲余量**的：ISR 把"本段的长度"投进一个深 1
+     * 的队列，数据还在共享的 rx_buf 里 —— 队列加深会把"上一段的长度"配到"下一段的
+     * 数据"上，比丢更糟。而分片是 1ms 一帧连发的，本任务若等到下一个 tick 才被调度，
+     * 那一格就是满的，下一段**静默丢弃**：现场表现为"总缺中间某一片"或"某张卡整轮
+     * 不答"（COMMIT 被丢了），而两侧都不会报错。
+     *
+     * 提到分发任务之上后，ISR 投递完立刻抢占执行，这一格永远是空的。
+     * 本任务只做 rb_write + 通知，很短，不会饿着别人。 */
     osThreadAttr_t rs485_task_attr = {
         .name       = "rs485_task",
         .stack_size = 256 * 4,
-        .priority   = osPriorityNormal,
+        .priority   = osPriorityAboveNormal,
     };
     return pl_task_new(rs485_task, self, &rs485_task_attr);
 }

@@ -171,6 +171,8 @@ static void _enum_start(uint32_t now)
 #if BOARD_SCREEN_CANVAS
 static uint8_t  s_align_left;
 static uint32_t s_align_next;
+/** 上电对齐是否已经起过 —— 见 _enum_finish 里的说明 */
+static bool s_align_done;
 #endif
 
 /** @brief 枚举收尾：不再发 PING，等最后一帧 PRESENT 走完就开对齐轮 */
@@ -180,8 +182,16 @@ static void _enum_finish(uint32_t now)
     s_enum_deadline = now + CASC_BOOT_ALIGN_PING_GAP_MS;
     s_reenum_at     = now + CASC_REENUM_MS; /* 到点再问一次：卡回来了只有靠问才知道 */
 #if BOARD_SCREEN_CANVAS
-    s_align_left = CASC_BOOT_ALIGN_TRIES;
-    s_align_next = s_enum_deadline;
+    /* **只有上电那一次**才起对齐轮。
+       运行期的重新枚举若也起一轮，就变成"每 10 秒推一次整屏"—— 实测正是如此：
+       连续 13 轮里大半是重新枚举顺带起的，把总线占满了，反而让真正的内容更新
+       更难挤进去。上一轮我就是这么写错的。
+       运行期"卡回来了"由 PRESENT 处理里的 s_force_round 单独负责，不需要走对齐。 */
+    if (!s_align_done) {
+        s_align_done = true;
+        s_align_left = CASC_BOOT_ALIGN_TRIES;
+        s_align_next = s_enum_deadline;
+    }
 #endif
 }
 
@@ -887,6 +897,7 @@ static void casc_task(void *argument)
         if (app_screen_is_master() && s_ping_left && (int32_t)(now - s_ping_next) >= 0) {
             s_ping_left--;
             s_enum_seen = false; /* 只认**这一轮**发出去之后的应答 */
+            CASC_LOG("[casc·主] 枚举 PING（还剩 %u 次）\n", (unsigned)s_ping_left);
             (void)app_cascade_ping();
             /* 从卡马上会回 PRESENT —— 这段时间主卡不能再发别的（半双工） */
             s_bus_quiet_until = now + CASC_BOOT_ALIGN_PING_GAP_MS;
