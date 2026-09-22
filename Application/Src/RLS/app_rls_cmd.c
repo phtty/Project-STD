@@ -59,13 +59,16 @@ static void cmd_display_save(ccb_t *ccb, void *data)
         .color = COLOR_BLACK,
     });
     app_render(&(render_cfg_t){
-        .type   = RENDER_BITMAP,
-        .x      = 0,
-        .y      = 0,
-        .w      = app_screen_rows(),
-        .h      = app_screen_cols(),
-        .color  = display_ctx->color,
-        .bitmap = display_ctx->bitmap,
+        .type    = RENDER_BITMAP,
+        .x       = 0,
+        .y       = 0,
+        .w       = app_screen_rows(),
+        .h       = app_screen_cols(),
+        .color   = display_ctx->color,
+        .bitmap  = display_ctx->bitmap,
+        /* **内容定稿之后才存**（app_screen 在落屏时取走这个请求）。
+           原来是这里紧跟着调 app_render_save() —— 那时画布还没落屏，
+           存下去的是上一帧。 */
+        .persist = true,
     });
-    app_render_save();
 }

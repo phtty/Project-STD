@@ -137,6 +137,31 @@ static dev_storage_t *s_render_font;
 static const render_target_t *s_target;
 static const render_persist_hook_t *s_persist_hook;
 
+/* ---- "这一帧要落盘"的请求位 ----
+ *
+ * **只在有画布时才用**（多卡主卡）：渲染返回时内容还在画布上、没落屏，此刻读实屏
+ * 存下去的是**上一帧** —— 这正是 `app_rls_cmd.c` / `app_vms_ctrl.c` 那三个
+ * "render 完立刻 save" 调用点的旧缺陷。所以这里只记请求，由 `app_screen` 在
+ * **落屏之后**（`commit_bitmap` / `commit_self`）取走。
+ *
+ * 没有画布时（单卡、或从卡直写实屏）画的就是实屏，当场存即可 —— 见 app_render()。 */
+static volatile bool s_persist_req;
+
+/** @brief 取走"要落盘"的请求（清标志）；由落屏路径调用 */
+bool app_render_take_persist_req(void)
+{
+    const bool r = s_persist_req;
+    s_persist_req = false;
+    return r;
+}
+
+/** @brief **不取走**、只看：级联开轮时用它决定这一轮的 IMAGE 带不带 persist
+ *         （帧在落屏**之前**发出去，那时还不能取走标志） */
+bool app_render_peek_persist_req(void)
+{
+    return s_persist_req;
+}
+
 static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
 {
     dev_display_fill((dev_display_t *)ctx, x, y, w, h, c);
@@ -497,6 +522,17 @@ void app_render(const render_cfg_t *cfg)
     if (!cfg || !s_render_display) return;
     if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
         g_render_fn[cfg->type](cfg);
+
+    /* ---- 持久化请求（见 app_render.h 的 persist 说明）----
+     * **不能在这里直接存**：有画布时内容还在画布上、没落屏，此刻存下去是上一帧。 */
+    if (!cfg->persist) return;
+
+    if (s_target) {
+        s_persist_req = true; /* 交给 app_screen，落屏之后取走 */
+    } else {
+        /* 没画布：画的就是实屏（单卡、或从卡直写实屏），此刻已在屏上 → 当场存 */
+        app_render_save();
+    }
 }
 
 /* ================================================================

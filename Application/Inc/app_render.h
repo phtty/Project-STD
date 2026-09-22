@@ -126,6 +126,18 @@ typedef struct {
     const display_color_t color; /* 绘制颜色 */
     const render_type_t type;    /* 标签: 指定使用哪个 union 分支 */
 
+    /** @brief **这一帧的内容要落盘**（掉电再上电自动恢复）。默认 false。
+     *
+     *  语义是"**内容定稿之后**存"，不是"渲染完立刻存"：渲染返回时内容还在画布上、
+     *  没有落屏，此刻读实屏存下去的是**上一帧**。所以这里只记一个请求位，
+     *  由 `app_screen` 在**落屏之后**（commit_bitmap / commit_self）取走。
+     *  没有画布（单卡、或从卡直写实屏）时画的就是实屏，当场就存 —— 与加这个成员
+     *  之前的行为逐字一致。
+     *
+     *  **显式开关**：不给"每次都写"的默认 —— W25Qxx 每扇区约 10 万次擦写，
+     *  而内容可能是几秒一变的。 */
+    const bool persist;
+
     union {
         /* RENDER_TEXT — 文字专属 */
         struct {
@@ -217,6 +229,13 @@ typedef struct [[gnu::packed]] {
 
 /** @brief 显存持久化载荷上限 = 位图上限 + 头部(5B) */
 #define RENDER_PERSIST_PAYLOAD_MAX (sizeof(render_persist_t) + RENDER_PERSIST_BITMAP_MAX)
+
+/** @brief "这一帧要落盘"的请求位 —— 见 render_cfg_t.persist 的说明
+ *
+ *  取走（清标志）只在**落屏之后**做：`app_screen` 的 commit 路径是唯一的消费者。
+ *  `peek` 给级联开轮用（帧在落屏之前发出去，那时还不能取）。 */
+bool app_render_take_persist_req(void);
+bool app_render_peek_persist_req(void);
 
 /** @brief 将当前显存写入存储设备持久化扇区 */
 void app_render_save(void);

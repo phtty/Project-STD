@@ -20,7 +20,10 @@ static void vms_clear_screen(void)
         .h     = 0,
         .color = COLOR_BLACK,
     });
-    app_render_save();
+    /* **这里不再存**：清屏本身不该落盘（定时显示到点也是走这条），
+       而"永久显示"的那次清屏由紧随其后的文字帧带 `.persist` 一起覆盖 ——
+       落盘发生在**落屏之后**（app_screen 取走请求），一次写、内容还是最终那一帧。
+       原来这里是"清屏立刻 app_render_save()"，存下去的是清屏**之前**的上一帧。 */
 }
 
 void vms_timer_poll(void)
@@ -141,13 +144,15 @@ static void vms_display_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
         .font_size = font_size,
         .font_type = FONT_HT,
         .text_enc  = FONT_ENC_GBK,
+        /* 永久显示（keep_time==0）才落盘；定时显示是临时内容，不该占 flash。
+           落盘由 app_screen 在**落屏之后**做 —— 原来这里紧跟的 app_render_save()
+           在画布还没落屏时就存，存下去是上一帧。 */
+        .persist   = (ctx->keep_time == 0),
     });
 
     /* ---- 持久化策略 ---- */
     if (ctx->keep_time == 0) {
-        /* 永久显示：存入 Flash */
-        app_render_save();
-        s_vms_timer_active = false;
+        s_vms_timer_active = false; /* 落盘请求已随渲染提交，见上一段 */
     } else {
         /* 定时显示：keep_time 秒后自动清屏 */
         s_vms_clear_tick   = osKernelGetTickCount() + (uint32_t)ctx->keep_time * 1000U;
