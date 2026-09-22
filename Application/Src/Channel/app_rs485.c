@@ -67,8 +67,16 @@ ccb_t *app_rs485_ccb(void)
 }
 
 /* ---- rs485_rx_queue 静态分配 ---- */
-static StaticQueue_t s_rs485_rx_cb;
-static uint16_t s_rs485_rx_buf[1];
+/* **队列元素带到达时刻**：只有把"交给分发任务的时刻"也记下来，才能把
+ * "ISR → 任务"与"任务 → 协议任务"两跳分开 —— 实测从卡有一帧 247ms 后才被处理、
+ * 另一帧 21 秒后，而那两次 ISR 那一行要么晚了要么干脆没出现。查完连同 RS485_RX_LOG 收掉。 */
+typedef struct {
+    uint16_t len;
+    uint32_t tick; /* ISR 交付这一段数据的时刻 */
+} rs485_rx_msg_t;
+
+static StaticQueue_t  s_rs485_rx_cb;
+static rs485_rx_msg_t s_rs485_rx_buf[1];
 static const osMessageQueueAttr_t s_rs485_rx_attr = {
     .name    = "rs485_rx",
     .cb_mem  = &s_rs485_rx_cb,
@@ -89,7 +97,7 @@ static const osMessageQueueAttr_t s_rs485_rx_attr = {
    唯一能把上游（收发器/接线/接收 DMA）与下游（探针/匹配）分开的判据。
    查完置 0 —— 它每条块打一行，会把 1KB 的 RTT 缓冲占掉大半。 */
 #define RS485_RX_LOG 1
-#define RS485_RX_LOG_MAX 20U
+#define RS485_RX_LOG_MAX 60U
 
 static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 {
@@ -104,7 +112,8 @@ static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
         printf("[%8u] [rs485] 收到 %u 字节\n", (unsigned)osKernelGetTickCount(), (unsigned)len);
     }
 #endif
-    osMessageQueuePut(self->rx_queue, &len, 0, 0);
+    const rs485_rx_msg_t m = {.len = len, .tick = osKernelGetTickCount()};
+    osMessageQueuePut(self->rx_queue, &m, 0, 0);
 }
 
 /* ---- 任务循环 ---- */
@@ -112,7 +121,7 @@ static void rs485_task(void *argument)
 {
     rs485_ccb_t *self = (rs485_ccb_t *)argument;
 
-    self->rx_queue = osMessageQueueNew(1, sizeof(uint16_t), &s_rs485_rx_attr);
+    self->rx_queue = osMessageQueueNew(1, sizeof(rs485_rx_msg_t), &s_rs485_rx_attr);
     if (self->rx_queue == NULL) {
         osThreadExit();
         return;
@@ -123,9 +132,14 @@ static void rs485_task(void *argument)
     self->base.state = CCB_STATE_UP;
 
     for (;;) {
-        uint16_t rx_len = 0;
-        if (osMessageQueueGet(self->rx_queue, &rx_len, 0, osWaitForever) == osOK) {
-            app_ccb_dispatch(&self->base, nullptr, self->rx_buf, rx_len);
+        rs485_rx_msg_t m = {0};
+        if (osMessageQueueGet(self->rx_queue, &m, 0, osWaitForever) == osOK) {
+#if RS485_RX_LOG
+            const uint32_t now = osKernelGetTickCount();
+            printf("[%8u] [rs485] 交付 %u 字节（ISR 到任务 %u ms）\n", (unsigned)now,
+                   (unsigned)m.len, (unsigned)(now - m.tick));
+#endif
+            app_ccb_dispatch(&self->base, nullptr, self->rx_buf, m.len);
         }
     }
 }
