@@ -162,6 +162,17 @@ bool app_render_peek_persist_req(void)
     return s_persist_req;
 }
 
+/* ---- "正在渲染"的计数（见 app_render_busy 的说明）----
+ *
+ * 用计数而不是 bool：渲染内部还有可能回调（持久化钩子），将来若有人嵌套调用，
+ * 计数不会让闸提前打开。 */
+static volatile int s_render_busy;
+
+bool app_render_busy(void)
+{
+    return s_render_busy > 0;
+}
+
 static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
 {
     dev_display_fill((dev_display_t *)ctx, x, y, w, h, c);
@@ -520,8 +531,10 @@ static const render_fn_t g_render_fn[] = {
 void app_render(const render_cfg_t *cfg)
 {
     if (!cfg || !s_render_display) return;
+    s_render_busy++;
     if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
         g_render_fn[cfg->type](cfg);
+    s_render_busy--;
 
     /* ---- 持久化请求（见 app_render.h 的 persist 说明）----
      * **不能在这里直接存**：有画布时内容还在画布上、没落屏，此刻存下去是上一帧。 */

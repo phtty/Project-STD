@@ -163,8 +163,10 @@ static void factory_monitor_task(void *argument)
            `app_screen_set_brightness` 本地 + 置"待下发"，由级联广播给从卡。 */
         app_screen_set_brightness(7);
         for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
-            /* 同样走逻辑屏：多卡时这一下把**两块屏**一起点亮（单卡就是本卡那块）——
-               整设备老化要的正是这个，而不是只点亮主卡自己那半幅 */
+            /* 颜色要**覆盖**：画布是 1bpp（只记亮/灭），颜色在协议里是逐卡给的
+               （来自切分表）—— 不覆盖的话十种纯色会全显示成每块屏自己的那个颜色。
+               覆盖之后两块屏一起按这个颜色亮（单卡就是本卡那块）。 */
+            app_screen_set_color_override(s_dead_pixel_colors[i]);
             app_render(&(render_cfg_t){
                 .type  = RENDER_FILL,
                 .x     = 0,
@@ -173,6 +175,7 @@ static void factory_monitor_task(void *argument)
             });
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
+        app_screen_set_color_override(0xFF); /* 取消覆盖：后面的老化轮播用各卡自己的颜色 */
 
         /* ===== AGING ===== */
         osThreadResume(g_light_sensor_task_handle);

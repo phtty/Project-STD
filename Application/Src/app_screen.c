@@ -44,6 +44,25 @@ static uint8_t        s_self;   /* 本卡在切分表里的下标 */
 
 static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表本卡那一项） */
 
+/* ---- 输出颜色的临时覆盖（只给工厂老化测试用）----
+ *
+ * 根因：画布是 **1bpp**（只记亮/灭），**颜色在协议里是逐卡给的**
+ * （`casc_image_t.color`，来自切分表）。所以"整屏轮流点亮红/绿/蓝"这种
+ * 逐色老化，在级联下没有别的表达方式 —— 不覆盖的话所有纯色填充都会显示成
+ * **本卡那个颜色**（现场：十种颜色全是绿的）。 */
+#define SCREEN_COLOR_NO_OVERRIDE (0xFFU)
+static uint8_t s_color_override = SCREEN_COLOR_NO_OVERRIDE;
+
+void app_screen_set_color_override(uint8_t color)
+{
+    s_color_override = color;
+}
+
+uint8_t app_screen_output_color(uint8_t card_color)
+{
+    return (s_color_override <= (uint8_t)COLOR_WHITE) ? s_color_override : card_color;
+}
+
 /** 本上电周期内画布**有没有被写过**（任何渲染）—— 声明放守卫之外：
  *  `_screen_init` 与级联都要读它，而画布开关关闭时它们仍在编译。
  *
@@ -395,8 +414,9 @@ bool app_screen_commit_self(void)
     if (!len || len > sizeof(s_band)) return false;
     if (!app_screen_extract(s_self, s_band, sizeof(s_band))) return false;
 
-    /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致 */
-    app_screen_commit_bitmap(s_band, len, s_color);
+    /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致。
+       颜色过一道"输出颜色"：正常就是本卡那个颜色，工厂逐色老化时被临时覆盖。 */
+    app_screen_commit_bitmap(s_band, len, app_screen_output_color(s_color));
 
     /* ---- 持久化请求**只能在这里**消费 ----
      * 上面那一行刚把内容写进实屏，此刻存下去才是这一帧。渲染时（app_render）存的话

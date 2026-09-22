@@ -61,6 +61,9 @@ const screen_layout_t *app_screen_layout(void) { return nullptr; }
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
 void app_render_save(void) {}
 bool app_render_peek_persist_req(void) { return false; }
+bool app_render_busy(void) { return false; }                  /* 本套件不在渲染途中 */
+uint8_t app_screen_output_color(uint8_t c) { return c; }      /* 无颜色覆盖 */
+
 
 
 

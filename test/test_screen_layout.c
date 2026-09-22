@@ -555,6 +555,40 @@ static void case_identity_reapply(void)
     canvas_reset(44, 12, 1, 2);
 }
 
+/** 输出颜色覆盖：工厂逐色老化要的（画布是 1bpp，颜色只能逐卡给一次）
+ *
+ *  现场症状：十种纯色填充全显示成绿色 —— 因为画布只记亮/灭，颜色来自切分表里
+ *  本卡那一项。逐色老化只能靠"这一轮所有卡统一按某个颜色输出"来表达。
+ *
+ *  反向验证：把 `commit_self` 里的 `app_screen_output_color(s_color)` 换回 `s_color`，
+ *  本用例第二条立刻红。 */
+static void case_color_override(void)
+{
+    TEST_BEGIN("输出颜色覆盖：覆盖生效 / 取消后回到本卡颜色");
+
+    canvas_reset_mc(44, 12, 1, 2, 1); /* 1×2、主卡在下：本卡（addr=1）是格 0，在画布原点 */
+    _sink_fill(nullptr, 0, 0, 4, 4, COLOR_WHITE);
+
+    /* ① 没有覆盖：用切分表给本卡的颜色 */
+    app_screen_set_color_override(0xFF);
+    CHECK_MSG(app_screen_commit_self(), "落屏应成功");
+    CHECK_MSG(s_fb[0] == (uint8_t)BOARD_SCREEN_COLOR,
+              "无覆盖时应是本卡颜色 %u，得到 %u", (unsigned)BOARD_SCREEN_COLOR,
+              (unsigned)s_fb[0]);
+
+    /* ② 覆盖成红：同样的内容，实屏变红（整设备同色 —— 逐色老化的表达方式） */
+    app_screen_set_color_override(COLOR_RED);
+    CHECK_MSG(app_screen_commit_self(), "落屏应成功");
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_RED, "有覆盖时实屏应取覆盖色，得到 %u",
+              (unsigned)s_fb[0]);
+
+    /* ③ 取消覆盖：回到本卡颜色（老化轮播不该被测试用的颜色带着走） */
+    app_screen_set_color_override(0xFF);
+    CHECK_MSG(app_screen_commit_self(), "落屏应成功");
+    CHECK_MSG(s_fb[0] == (uint8_t)BOARD_SCREEN_COLOR, "取消覆盖后应回到本卡颜色，得到 %u",
+              (unsigned)s_fb[0]);
+}
+
 static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
@@ -745,6 +779,7 @@ int main(void)
     case_extract_bounds();
     case_persist_after_commit();
     case_identity_reapply();
+    case_color_override();
     case_commit_self_matches_canvas();
     case_master_below();
     case_addr_index_mapping();

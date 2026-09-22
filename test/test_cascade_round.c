@@ -130,6 +130,9 @@ void       app_render_save(void)
     order_push('S');
 }
 bool app_render_peek_persist_req(void) { return false; }
+bool app_render_busy(void) { return false; }                  /* 本套件不在渲染途中 */
+uint8_t app_screen_output_color(uint8_t c) { return c; }      /* 无颜色覆盖 */
+
 
 
 /* 本卡实屏：几何必须与 IMAGE 里的矩形一致，否则从卡回 NACK —— 这正是被测行为之一 */

@@ -237,6 +237,13 @@ typedef struct [[gnu::packed]] {
 bool app_render_take_persist_req(void);
 bool app_render_peek_persist_req(void);
 
+/** @brief 正在渲染中（`app_render` 的**整段**：文字是"测量趟 + 渲染趟"两趟）
+ *
+ *  级联用它闸开轮：渲染途中画布上只有一半内容（甚至刚被清空），这一眼推下去，
+ *  屏上就是"闪一下"（清屏那一帧先到，文字那一帧 3ms 后才到）。
+ *  渲染一趟的开销含逐字读字库（SPI），几十毫秒量级 —— 完全够一次误开轮钻进去。 */
+bool app_render_busy(void);
+
 /** @brief 将当前显存写入存储设备持久化扇区 */
 void app_render_save(void);
 

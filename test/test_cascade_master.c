@@ -196,7 +196,19 @@ dev_key_t *dev_key_get(dev_key_id_t id)
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
 void app_render_save(void) {}
 bool app_render_peek_persist_req(void) { return false; }
-bool app_screen_canvas_touched(void) { return false; }
+uint8_t app_screen_output_color(uint8_t c) { return c; } /* 无颜色覆盖 */
+
+/* ---- 开轮三闸的输入：用例逐个摆（`_round_ready` 就是靠这三个判的） ---- */
+static bool s_canvas_touched, s_settled, s_render_busy;
+
+bool app_screen_canvas_touched(void) { return s_canvas_touched; }
+bool app_render_busy(void) { return s_render_busy; }
+bool app_screen_take_pending_settled(void)
+{
+    if (!s_settled) return false;
+    s_settled = false; /* 与生产同语义：取了就清 */
+    return true;
+}
 
 
 /** 每张卡一块可辨认的图案 —— 张冠李戴（把 A 卡的矩形发给 B 卡）当场露馅 */
@@ -235,8 +247,6 @@ bool    app_screen_brightness_take_pending(uint8_t *l)
     (void)l;
     return false;
 }
-bool app_screen_take_pending_settled(void) { return false; }
-
 /* ---- 显示与总线 ---- */
 #define DEV_W (48U)
 #define DEV_H (16U)
@@ -498,6 +508,9 @@ static void fixture_reset(void)
     s_dip_bit[1]           = false;
     s_change_addr_after_rx = -1;
     s_my_claim             = 0xFFFFFFFFU;
+    s_canvas_touched       = false;
+    s_settled              = false;
+    s_render_busy          = false;
     s_claim_req            = false;
     memset(&s_tx_last, 0, sizeof(s_tx_last));
 
@@ -922,6 +935,11 @@ static void case_claim_master_flow(void)
     CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == CASC_ADDR_MASTER,
               "认领要先把自己写成主卡（addr=0）并落盘，得到 save=%d addr=%u", s_save_calls,
               (unsigned)s_last_saved_addr);
+    /* **身份没变就不重装门面**：重装会清画布 + 清"画布被写过"的闩 ——
+       那等于"按一下键，刚渲染的内容当场消失"（工厂测试第一次按键显示编码就是这么丢的） */
+    CHECK_MSG(s_reinit_calls == 0,
+              "本卡已经是 addr 0 时认领不该重装门面（重装会清掉刚画好的内容），得到 %d 次",
+              s_reinit_calls);
     CHECK_MSG(s_self_addr == CASC_ADDR_MASTER, "认领后本机就是主卡");
     CHECK_MSG(s_my_claim != 0xFFFFFFFFU, "认领时刻要记下来（两张都自称主卡时靠它裁决）");
 
@@ -988,6 +1006,60 @@ static void case_identity_poke(void)
               "应把下一次枚举提前到**现在**，而不是等 10s 周期");
 }
 
+/** 开轮三闸：画布没写过不开 / **渲染途中不开** / 静默期没到不开
+ *
+ *  第三条是现场"切换下一个字之前闪一下"的根因：渲染是"测量趟 + 渲染趟"，
+ *  清屏与文字之间画布是空的 —— 这一眼推下去，两块屏先黑一帧再出新字。
+ *  闸住之后，一轮只在"内容定稿"之后才开。
+ *
+ *  **反向验证**：去掉 `_round_ready` 里 `if (app_render_busy()) return false;`
+ *  那一行，本用例的"渲染途中"两条立刻红。 */
+static void case_round_ready_gates(void)
+{
+    TEST_BEGIN("开轮三闸：画布没写过 / 渲染途中 / 静默期（force 也要过前两闸）");
+
+    fixture_reset();
+
+    /* ① 画布没被写过：一轮都不许开 */
+    s_canvas_touched = false;
+    s_settled        = true;
+    s_render_busy    = false;
+    CHECK_MSG(!_round_ready(), "画布没被写过时不许开轮（上电恢复的内容会被刷黑）");
+
+    /* ② 画布写过 + 静默期到 → 开 */
+    s_canvas_touched = true;
+    s_settled        = true;
+    CHECK_MSG(_round_ready(), "画布写过且静默期已过应开轮");
+
+    /* ③ **渲染途中**：静默期到了也不许（这一眼画布上只有半张，甚至刚清空） */
+    s_canvas_touched = true;
+    s_settled        = true;
+    s_render_busy    = true;
+    CHECK_MSG(!_round_ready(), "渲染途中不许开轮 —— 推下去的就是那一帧「闪一下」的中间态");
+    s_render_busy = false;
+
+    /* ④ 静默期没到：内容还在变，攒着 */
+    s_canvas_touched = true;
+    s_settled        = false;
+    CHECK_MSG(!_round_ready(), "静默期没到不许开轮");
+
+    /* ⑤ `force_round`（有卡刚上线）**也要过前两闸**，而且请求不许被白白吃掉 */
+    s_settled        = false;
+    s_canvas_touched = false;
+    s_force_round    = true;
+    CHECK_MSG(!_round_ready() && s_force_round,
+              "新上线的卡也要等画布被写过 —— 且这一眼的请求必须留着");
+    s_canvas_touched = true;
+    s_render_busy    = true;
+    CHECK_MSG(!_round_ready() && s_force_round, "渲染途中 force_round 同样不许开");
+    s_render_busy = false;
+    CHECK_MSG(_round_ready() && !s_force_round, "闸都过了才开，并把 force 请求清掉");
+
+    /* ⑥ 请求被清掉之后，下一下不再开（依赖画布内容，而不是依赖这个标志） */
+    s_settled = false;
+    CHECK_MSG(!_round_ready(), "force 用掉之后要靠静默期那条路");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -1008,6 +1080,7 @@ int main(void)
     case_set_addr_branches();
     case_claim_master_flow();
     case_round_aborts_on_identity_change();
+    case_round_ready_gates();
     case_identity_poke();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

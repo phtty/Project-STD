@@ -770,7 +770,7 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
     casc_put_u16(p->h, c->h);
     casc_put_u16(p->bmp_len, bmp_len);
     p->bright  = bright;
-    p->color   = c->color;
+    p->color   = app_screen_output_color(c->color); /* 工厂逐色老化时会临时统一 */
     /* 上位机"这次内容要长期保留"的意图原样传到从卡：各卡各存自己那一块 */
     p->persist = persist ? 1U : 0U;
 
@@ -826,6 +826,29 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
 }
 
 /** @brief 开一轮：逐张从卡下发它那一块，全部结算完后主卡自己也换帧 */
+/** @brief 现在该开一轮吗？（`casc_task` 周期活里的那一格，单独成函数便于 host 测）
+ *
+ *  三个闸，各自对应一种"这一眼的内容不对"：
+ *   · **画布没被写过就不开**（`canvas_touched`）：上电时画布上只有本卡那一块是从
+ *     记录恢复来的，推下去会把从卡刚恢复的内容刷黑。
+ *   · **正在渲染就不开**（`app_render_busy`）：渲染是"测量趟 + 渲染趟"，文字还要
+ *     逐字读字库（SPI，几十毫秒）。中途看一眼，画布上只有一半 —— 或者刚好是
+ *     "已经清屏、文字还没画"的那一瞬间，推下去就是现场看到的"闪一下"。
+ *   · **静默期**：内容连改几次（老化轮播就是）时，攒到不再变再推一轮。
+ *
+ *  `s_force_round`（有卡刚上线）**不跳过前两个闸**：它要的正是"一张完整的画布"。 */
+static bool _round_ready(void)
+{
+    if (!app_screen_canvas_touched()) return false;
+    if (app_render_busy()) return false;
+
+    if (s_force_round) {
+        s_force_round = false; /* 有卡刚上线：立刻给它当前内容 */
+        return true;
+    }
+    return app_screen_take_pending_settled();
+}
+
 static bool _round_run(void)
 {
     const screen_layout_t *L      = app_screen_layout();
@@ -969,6 +992,15 @@ static bool _id_set_local(uint8_t addr, uint8_t src, bool persist)
         return false;
     }
     if (persist) _id_save(addr, src);
+
+    /* **身份没变就不重装门面**：重装会清画布、并把"画布被写过"的闩清零 ——
+       那等于"按一下键，屏上刚画好的内容当场消失，而且这一轮永远不开"。
+       工厂测试第一次按键要显示的那个编码就是这么丢的：认领在 ≤100ms
+       （`CASC_BRIGHT_POLL_MS`）内重装了一次门面，把刚渲染的编码连闩一起抹了。
+
+       表只由身份决定，身份没变就没有任何东西需要重算；记录该写还是要写
+       （认领的意义正是"把这台设备现在的身份记下来"）。 */
+    if (addr == app_screen_self_addr()) return true;
 
     /* **先过 app_screen 再重装门面** —— 它会重算"本卡是哪一格"、清画布、按新主从
        关系装卸渲染目标与持久化钩子。上电与运行期走同一条路。 */
@@ -1274,18 +1306,7 @@ static void casc_task(void *argument)
            某张卡掉线回来时画布早被写过，`s_force_round` 照常补内容。 */
         if (app_screen_is_master() && app_screen_layout()->count > 1 &&
             (int32_t)(now - s_bus_quiet_until) >= 0) {
-            bool go = false;
-
-            if (app_screen_canvas_touched()) {
-                if (s_force_round) {
-                    s_force_round = false;
-                    go            = true; /* 有卡刚上线，立刻给它当前内容 */
-                } else if (app_screen_take_pending_settled()) {
-                    go = true; /* 画布有新内容且已过静默期 */
-                }
-            }
-
-            if (go) (void)_round_run();
+            if (_round_ready()) (void)_round_run();
         }
 #endif
     }

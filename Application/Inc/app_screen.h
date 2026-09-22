@@ -217,6 +217,17 @@ bool app_screen_canvas_touched(void);
  *  这个手法在 `app_factory_test.c` 已有先例。 */
 void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color);
 
+/** @brief 把**所有卡**的输出颜色临时统一成这一个（`0xFF` = 取消覆盖）
+ *
+ *  只给工厂逐色老化用。为什么需要它：画布是 **1bpp**（只记亮/灭），而颜色在协议里
+ *  是**逐卡**给的（`casc_image_t.color`，来自切分表）—— 不覆盖的话，整屏轮流点亮
+ *  红/绿/蓝这种测试在级联下只能显示成"每块屏各自的颜色"（现场：十色全绿）。
+ *  正常运行时不要调用它。 */
+void app_screen_set_color_override(uint8_t color);
+
+/** @brief 本卡最终输出用的颜色：有覆盖用覆盖，否则用切分表给的这一个 */
+uint8_t app_screen_output_color(uint8_t card_color);
+
 /** @brief 设置屏亮度等级（0~7）
  *
  *  级联下由主卡统一分发 —— 从卡若有自己的光传感器，两张卡会各调各的，屏上出现
