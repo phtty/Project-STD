@@ -295,8 +295,10 @@ static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb
      * 一个字节都不多拷；只有确认是真帧、且整帧到齐，才拷进来算 CRC。
      *
      * 顺带：`avail` 用 rb_avail 问，不靠窥视的返回值（那次窥视只拷了 11 字节）。 */
-    if (rb_peek_capped(self->rb, 0, scratch, (uint16_t)sizeof(casc_hdr_t), nullptr) <
-        sizeof(casc_hdr_t))
+    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(casc_hdr_t))
+                                  ? scratch_size
+                                  : (uint16_t)sizeof(casc_hdr_t);
+    if (rb_peek_capped(self->rb, 0, scratch, head_cap, nullptr) < sizeof(casc_hdr_t))
         return PCB_PROBE_WAIT;
 
     casc_hdr_t *h = (casc_hdr_t *)scratch;

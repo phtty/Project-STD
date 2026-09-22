@@ -338,8 +338,16 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
         return PCB_PROBE_WAIT;
 
     /* 先窥视帧头（含 4 字节长度域），据此判断整帧是否已到齐。
-       rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。 */
-    if (rb_peek_capped(buff, 0, scratch, scratch_size, nullptr) < sizeof(ldi_frame_t))
+       rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。
+       **注意这里拷的只有帧头那几个字节**（原先传的是 scratch_size，等于每探一次就把
+       整帧拷一遍）：框架对伪帧的做法是"跳 1 字节再探"，每次拷一整帧就退化成 O(n²) 的
+       memcpy —— 实测一条 1427 字节的杂物 ~2MB、两个协议 ~4MB，把帧分发任务拖住
+       几十毫秒，而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议缓冲里
+       挤掉（"装不下就丢旧留新"）。判"是不是本协议的帧"只要这 8 个字节。 */
+    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(ldi_frame_t))
+                                  ? scratch_size
+                                  : (uint16_t)sizeof(ldi_frame_t);
+    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(ldi_frame_t))
         return PCB_PROBE_SKIP;
     ldi_frame_t *frame = (ldi_frame_t *)scratch;
 
@@ -367,10 +375,11 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
         return PCB_PROBE_SKIP;
     }
 
-    /* 取整帧到暂存区（上面已保证 full_len ≤ scratch_size）。
+    /* 取整帧到暂存区（上面已保证 full_len ≤ scratch_size，且 avail ≥ full_len）。
+       **拷的正好是 full_len**，不必按 scratch_size 多拷一截无关数据。
        身份校验最多读到 data_crc[21]，而顶部已保证 avail ≥ 8+20+2 = 30，
        故这些字节必在本次拷入的范围内。 */
-    rb_peek_capped(buff, 0, scratch, scratch_size, nullptr);
+    rb_peek_capped(buff, 0, scratch, (uint16_t)full_len, nullptr);
 
     uint16_t frame_crc =
         (uint16_t)((frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1]);

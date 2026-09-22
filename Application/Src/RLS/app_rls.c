@@ -83,8 +83,16 @@ pcb_probe_sta_t rls_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
 
     /* 窥视一律经 rb_peek_capped —— 按暂存区容量夹紧。此前 rb_peek(buff, 0, mem_pool,
        avail, nullptr) 配 525 字节的 mem_pool，而 rb 有 2048 字节，avail 超过 525
-       即写穿栈数组。 */
-    if (rb_peek_capped(buff, 0, scratch, scratch_size, nullptr) < sizeof(rls_frame_t))
+       即写穿栈数组。
+       **而且这里只拷帧头那几个字节**：伪帧时框架会"跳 1 字节再探"，若每次都按
+       `scratch_size` 拷一整帧，逐字节重跳就是 O(n²) 的 memcpy —— 级联那边实测：
+       一条 1427 字节的杂物要拷 ~2MB，三个协议绑在同一条 485 上 ~6MB，把帧分发任务
+       拖住 40ms+；而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议
+       缓冲里挤掉（"装不下就丢旧留新"）。判"是不是本协议的帧"只要这 6 个字节。 */
+    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(rls_frame_t))
+                                  ? scratch_size
+                                  : (uint16_t)sizeof(rls_frame_t);
+    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(rls_frame_t))
         return PCB_PROBE_SKIP;
     rls_frame_t *frame = (rls_frame_t *)scratch;
 
@@ -108,7 +116,10 @@ pcb_probe_sta_t rls_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
         return PCB_PROBE_SKIP;
     }
 
-    rb_peek_capped(buff, 0, scratch, scratch_size, nullptr);
+    /* 到这里才需要整帧（尾标在帧尾）。拷的**正好是 data_len** —— 上面两条已经保证
+       `data_len ≤ avail`（⑦）且 `data_len ≤ scratch_size`（⑧），所以既不越界、
+       也不必像原先那样按 scratch_size 多拷一截无关数据。 */
+    rb_peek_capped(buff, 0, scratch, data_len, nullptr);
 
     if (memcmp(rls_tail, (uint8_t *)frame + data_len - 2, sizeof(rls_tail)))
         return PCB_PROBE_FAKE;

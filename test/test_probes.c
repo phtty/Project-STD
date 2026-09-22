@@ -420,6 +420,68 @@ static void test_scratch_contract(void)
 }
 
 /* ================================================================
+ *  伪帧不得拷整帧（O(n²) 的守门）
+ *
+ *  框架对伪帧的做法是"跳 1 字节再探"，所以探针每次多拷一字节，整条路就退化成
+ *  O(n²) 的 memcpy。级联那边实测：一条 1427 字节的杂物要拷 ~2MB，三个协议绑在
+ *  同一条 485 上 ~6MB —— 在 168MHz 上是**四十多毫秒**，把帧分发任务按在那里，
+ *  而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议缓冲里挤掉
+ *  （`app_ccb_dispatch` 装不下就"丢旧留新"），现场表现是"跨回绕拆成两段的帧总丢"。
+ *
+ *  做法：给一大段"一个真帧头都没有"的杂物，暂存区铺哨兵，跑完检查**帧头那几个字节
+ *  以外**原封不动。判"是不是本协议的帧"最多只需要读到自己的长度域，所以取一个宽松
+ *  上界 32 字节 —— 比 1440 小两个数量级，足以抓住"拷了整帧"这一类回归。
+ *
+ *  **反向验证**：把任一探针改回 `rb_peek_capped(..., scratch_size, ...)`，本用例红。
+ * ================================================================ */
+
+static void test_fake_does_not_copy_whole(void)
+{
+    TEST_BEGIN("伪帧时不得拷整帧（否则逐字节重跳是 O(n²)，实测拖住 40ms+）");
+
+    enum { HDR_MAX = 32 }; /* 判帧头+长度域所需的上界，远小于整帧 */
+    static uint8_t junk[1400];
+
+    static const struct {
+        const char     *name;
+        pcb_probe_fn_t  probe;
+    } t[] = {
+        {"iap", iap_probe_frame},
+        {"ldi", ldi_probe_frame},
+        {"rls", rls_probe_frame},
+    };
+
+    memset(junk, 0x43, sizeof(junk)); /* 一个 A5 5A / FF FE / 0x7E 都不给 */
+
+    for (unsigned i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        s_rb.read_index  = 0;
+        s_rb.write_index = 0;
+        feed(junk, (uint16_t)sizeof(junk));
+
+        memset(s_scratch, 0xEE, sizeof(s_scratch));
+        uint32_t        len = 0;
+        uint8_t         aux = 0;
+        pcb_probe_sta_t st  = t[i].probe(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch),
+                                         &len, &aux);
+
+        CHECK_MSG(st != PCB_PROBE_READY, "%s：这段杂物不该判 READY（得到 %u）", t[i].name,
+                  (unsigned)st);
+
+        bool untouched = true;
+        for (uint16_t k = HDR_MAX; k < sizeof(s_scratch); k++) {
+            if (s_scratch[k] != 0xEE) {
+                untouched = false;
+                break;
+            }
+        }
+        CHECK_MSG(untouched,
+                  "%s: FAKE 却把整帧拷进了暂存区 —— 逐字节重跳会退化成 O(n²) 的 memcpy，"
+                  "把帧分发任务拖住几十毫秒，下游协议缓冲在那期间被写满会冲掉完整帧",
+                  t[i].name);
+    }
+}
+
+/* ================================================================
  *  通用探针契约 —— 不变量测试
  *
  *  上面三个 test_xxx 覆盖的是"我知道会错的地方"；这一节覆盖"我没想到的地方"：
@@ -550,6 +612,7 @@ int main(void)
     test_ldi();
     test_rls();
     test_scratch_contract();
+    test_fake_does_not_copy_whole();
     test_conformance();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
