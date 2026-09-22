@@ -579,6 +579,52 @@ static void case_identity_reapply(void)
  *
  *  反向验证：把 `commit_self` 里的 `app_screen_output_color(s_color)` 换回 `s_color`，
  *  本用例第二条立刻红。 */
+/** 渲染传下来的**颜色**要落到屏上（画布只记亮/灭，颜色另行记着）
+ *
+ *  现场症状：LDI 发红字显示成绿、RLS 的位图颜色同样被吃掉 —— 因为开画布之后
+ *  "颜色由像素属于哪张卡决定"，渲染传下来的颜色整段丢了。
+ *  RLS / VMS / AH_MQTT 走的是同一条路（都是 app_render），所以**一起修**。
+ *
+ *  反向验证：把 `app_screen_output_color` 里的内容色那一条去掉（退回只看卡片色），
+ *  本用例第一条立刻红。 */
+static void case_content_color(void)
+{
+    TEST_BEGIN("内容颜色：单色内容用它的颜色，混色才退回本卡颜色");
+
+    canvas_reset_mc(44, 12, 1, 2, 1); /* 本卡（addr=1）是格 0，矩形在画布原点 */
+    static const uint8_t bm8[8] = {0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF};
+
+    /* ① 清屏（黑）+ 红色内容 → 屏上应是**红**，不是切分表给本卡的绿 */
+    _sink_fill(nullptr, 0, 0, 44, 24, COLOR_BLACK); /* 整屏清屏（= 新一帧开始） */
+    _sink_bitmap(&s_target, 0, 0, 8, 8, bm8, COLOR_RED);
+    CHECK_MSG(app_screen_commit_self(), "落屏应成功");
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_RED, "内容是红的，屏上就该是红的（得到 %u，本卡色 %u）",
+              (unsigned)s_fb[0], (unsigned)BOARD_SCREEN_COLOR);
+
+    /* ② 换成蓝色文字 → 跟着变蓝（颜色随内容走，不是锁死一个） */
+    _sink_fill(nullptr, 0, 0, 44, 24, COLOR_BLACK);
+    _sink_bitmap(&s_target, 0, 0, 8, 8, bm8, COLOR_BLUE);
+    app_screen_commit_self();
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_BLUE, "换成蓝的之后就该是蓝的，得到 %u",
+              (unsigned)s_fb[0]);
+
+    /* ③ 一帧里混用两种非黑颜色 → **退回本卡颜色**（1bpp 表达不了多色，
+       与其静默挑一个，不如退回这张卡的部署色 —— 现场看得见且可解释） */
+    _sink_fill(nullptr, 0, 0, 44, 24, COLOR_BLACK);
+    _sink_fill(nullptr, 0, 0, 4, 4, COLOR_RED);
+    _sink_fill(nullptr, 8, 0, 4, 4, COLOR_BLUE);
+    app_screen_commit_self();
+    CHECK_MSG(s_fb[0] == (uint8_t)BOARD_SCREEN_COLOR, "混色内容应退回本卡颜色 %u，得到 %u",
+              (unsigned)BOARD_SCREEN_COLOR, (unsigned)s_fb[0]);
+
+    /* ④ 清屏之后重新计数：上一帧的混色不该影响这一帧 */
+    _sink_fill(nullptr, 0, 0, 44, 24, COLOR_BLACK);
+    _sink_fill(nullptr, 0, 0, 4, 4, COLOR_YELLOW);
+    app_screen_commit_self();
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_YELLOW, "新一帧只有一种颜色，应是黄的，得到 %u",
+              (unsigned)s_fb[0]);
+}
+
 static void case_color_override(void)
 {
     TEST_BEGIN("输出颜色覆盖：覆盖生效 / 取消后回到本卡颜色");
@@ -586,12 +632,12 @@ static void case_color_override(void)
     canvas_reset_mc(44, 12, 1, 2, 1); /* 1×2、主卡在下：本卡（addr=1）是格 0，在画布原点 */
     _sink_fill(nullptr, 0, 0, 4, 4, COLOR_WHITE);
 
-    /* ① 没有覆盖：用切分表给本卡的颜色 */
+    /* ① 没有覆盖：用**这一帧内容的颜色**（本用例画的是白色）。
+       内容色 → 卡片色的优先关系见 case_content_color */
     app_screen_set_color_override(0xFF);
     CHECK_MSG(app_screen_commit_self(), "落屏应成功");
-    CHECK_MSG(s_fb[0] == (uint8_t)BOARD_SCREEN_COLOR,
-              "无覆盖时应是本卡颜色 %u，得到 %u", (unsigned)BOARD_SCREEN_COLOR,
-              (unsigned)s_fb[0]);
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_WHITE,
+              "无覆盖时应是这一帧内容的颜色（白），得到 %u", (unsigned)s_fb[0]);
 
     /* ② 覆盖成红：同样的内容，实屏变红（整设备同色 —— 逐色老化的表达方式） */
     app_screen_set_color_override(COLOR_RED);
@@ -599,10 +645,10 @@ static void case_color_override(void)
     CHECK_MSG(s_fb[0] == (uint8_t)COLOR_RED, "有覆盖时实屏应取覆盖色，得到 %u",
               (unsigned)s_fb[0]);
 
-    /* ③ 取消覆盖：回到本卡颜色（老化轮播不该被测试用的颜色带着走） */
+    /* ③ 取消覆盖：回到这一帧内容的颜色（老化轮播不该被测试用的颜色带着走） */
     app_screen_set_color_override(0xFF);
     CHECK_MSG(app_screen_commit_self(), "落屏应成功");
-    CHECK_MSG(s_fb[0] == (uint8_t)BOARD_SCREEN_COLOR, "取消覆盖后应回到本卡颜色，得到 %u",
+    CHECK_MSG(s_fb[0] == (uint8_t)COLOR_WHITE, "取消覆盖后应回到内容色（白），得到 %u",
               (unsigned)s_fb[0]);
 }
 
@@ -845,6 +891,7 @@ int main(void)
     case_persist_after_commit();
     case_identity_reapply();
     case_color_override();
+    case_content_color();
     case_master_cell_runtime();
     case_commit_self_matches_canvas();
     case_master_below();

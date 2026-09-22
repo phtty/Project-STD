@@ -86,9 +86,58 @@ void app_screen_set_color_override(uint8_t color)
     s_color_override = color;
 }
 
+/* ---- 这一帧内容用的颜色（画布只记亮/灭，颜色另行记着）----
+ *
+ * 画布是 **1bpp**，原来的规矩是"颜色由像素属于哪张卡决定" —— 于是 `app_render`
+ * 传下来的颜色**被整个丢掉**：LDI 发红字显示成绿、RLS 的位图颜色同样中招、
+ * 工厂老化逐色全绿。开画布之前（渲染直写实屏）颜色是逐像素的真彩，所以这是
+ * 开画布之后新出现的回归。
+ *
+ * 现在的规矩：记下这一帧用了哪个**非黑**颜色，落屏时用它。
+ *   · 只有一种非黑颜色（文字、位图、填充 —— 绝大多数用法）→ 就是它 ✓
+ *   · 混用多种 → 退回"本卡颜色"，并置混色标志（1bpp 画布本来就表达不了多色，
+ *     与其静默挑一个，不如退回那张卡的部署色）
+ *   · 一次非黑都没写过（比如整屏全黑）→ 同样退回落卡片色 ✓ */
+static uint8_t s_content_color = SCREEN_COLOR_NO_OVERRIDE; /* 0xFF = 本帧还没定 */
+static bool    s_content_mixed;
+
+#if BOARD_SCREEN_CANVAS /* 下面三个只在"有画布"时才有人调（sink 里）*/
+
+/** @brief 这一次填充是不是"整屏清屏"（= 新一帧的开始）
+ *
+ *  各个渲染调用点的清屏都是"整屏黑填充"（`RENDER_FILL` 的 w=h=0）——
+ *  它是唯一可靠的"上一帧结束"信号（画布本身被 memset 清只发生在重装门面时）。 */
+static bool _is_full_clear(uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
+{
+    return c == COLOR_BLACK && x == 0 && y == 0 && w >= s_rows && h >= s_cols;
+}
+
+/** @brief 记下"这一帧用了哪个颜色"；只在写**亮**像素时调 */
+static void _note_content_color(display_color_t c)
+{
+    if (c == COLOR_BLACK) return; /* 黑 = 灭，不算颜色 */
+    if (s_content_color == SCREEN_COLOR_NO_OVERRIDE) {
+        s_content_color = (uint8_t)c;
+        return;
+    }
+    if (s_content_color != (uint8_t)c) s_content_mixed = true;
+}
+
+/** @brief 新一帧开始（画布被清）—— 上一帧的颜色主张作废 */
+static void _reset_content_color(void)
+{
+    s_content_color = SCREEN_COLOR_NO_OVERRIDE;
+    s_content_mixed = false;
+}
+
+#endif /* BOARD_SCREEN_CANVAS */
+
 uint8_t app_screen_output_color(uint8_t card_color)
 {
-    return (s_color_override <= (uint8_t)COLOR_WHITE) ? s_color_override : card_color;
+    /* 优先级：工厂测试的强制覆盖 > 这一帧内容的颜色 > 切分表给这张卡的颜色 */
+    if (s_color_override <= (uint8_t)COLOR_WHITE) return s_color_override;
+    if (!s_content_mixed && s_content_color <= (uint8_t)COLOR_WHITE) return s_content_color;
+    return card_color;
 }
 
 /** 本上电周期内画布**有没有被写过**（任何渲染）—— 声明放守卫之外：
@@ -341,6 +390,7 @@ static bool _apply_layout(void)
        恢复来的），把它当整幅推下去，别的卡当场被刷黑。而"按一下键屏上内容消失"
        只在**角色真的变了**的时候发生（没变的那条路在 `apply_identity` 就返回了）。 */
     memset(s_canvas, 0, s_bm_len);
+    _reset_content_color(); /* 上一帧的颜色主张作废 */
 #endif
     return true;
 }
@@ -502,8 +552,12 @@ static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h
     (void)ctx;
     if (!_clip(&x, &y, &w, &h)) return;
 
-    /* 画布只记亮/灭，**忽略具体是哪个非黑颜色** —— 最终颜色由像素属于哪张卡决定 */
+    /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
+       落屏时用它（见 app_screen_output_color） */
     bool on = (c != COLOR_BLACK);
+    /* 整屏清屏 → 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
+    if (_is_full_clear(x, y, w, h, c)) _reset_content_color();
+    else _note_content_color(c);
 
     for (uint16_t r = 0; r < h; r++) {
         uint8_t *row = &s_canvas[(uint32_t)(y + r) * s_stride];
@@ -529,6 +583,7 @@ static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t
        位序同为 MSB-first、(宽+7)/8 行字节。 */
     bool         on        = (c != COLOR_BLACK);
     uint16_t     src_stride = (uint16_t)((w + 7U) / 8U);
+    _note_content_color(c);
 
     for (uint16_t r = 0; r < h; r++) {
         for (uint16_t k = 0; k < w; k++) {
@@ -608,6 +663,9 @@ static bool _persist_restore(void)
         const uint16_t       dh = s_display->screen_cols;
 
         memset(s_canvas, 0, s_bm_len);
+        /* 恢复的内容**直写画布**、不经过 sink，所以这条路上颜色无从得知 ——
+           落屏时退回切分表给本卡的颜色（记录里那个颜色字段本版本还没接进来）。 */
+        _reset_content_color();
         for (uint16_t y = 0; y < dh && y < c->h; y++)
             for (uint16_t x = 0; x < dw && x < c->w; x++)
                 if (s_display->pixel_map[(uint32_t)y * dw + x] != COLOR_BLACK) {
