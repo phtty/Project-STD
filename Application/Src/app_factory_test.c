@@ -5,12 +5,16 @@
 
 #include "app_factory_test.h"
 
+#include "board.h" /* BOARD_CASCADE_ENABLED —— 必须先于下面的条件包含 */
+
 #include <string.h>
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
 #include "dev_key.h"
-#include "app_cascade.h" /* 首次按键时认领主卡 */
+#if BOARD_CASCADE_ENABLED
+#include "app_cascade.h" /* 首次按键时认领主卡（单卡板不引：那一档没有级联） */
+#endif
 #include "app_render.h"
 #include "app_screen.h" /* app_screen_rows/cols：渲染要用**逻辑屏**几何，不是实屏 */
 #include "app_dispatch.h"
@@ -137,7 +141,9 @@ static void factory_monitor_task(void *argument)
          * **只投递请求**：写身份记录要几十毫秒、发识别帧要占 s_tx 并等 ACK（最长约
          * 1s）——那些必须由**级联任务**做（s_tx 与轮次都是它的）。本任务是
          * factory_monitor_task，而 TEST 键只有它一个消费者，在这里投递不会冲突。 */
+#if BOARD_CASCADE_ENABLED
         app_cascade_claim_master();
+#endif
 
         /* ===== SHOW_CODE ===== */
         /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）

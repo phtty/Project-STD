@@ -74,6 +74,18 @@
 #define BOARD_CASCADE_MASTER_CELL (0)
 #endif
 
+/* ---- 本板跑不跑级联：**由网格形状推导**（单卡 = COLS×ROWS == 1 = 不跑）----
+ *
+ * 单卡板上整个 `app_cascade.c` 编译成空（不占 Flash、不占那 5KB CCMRAM、不发每 10 秒
+ * 一次的 PING、也不读身份记录与拨码 —— 与"没有级联之前的那套功能"逐字一致）；
+ * 连带 `app_factory_test.c` 也不再 include 级联头，于是单卡板的构建**不需要**
+ * `Application/Inc/CASCADE` 出现在包含路径上。
+ *
+ * 测试套件要跑级联：在包含任何头之前 `#define BOARD_CASCADE_ENABLED 1`。 */
+#ifndef BOARD_CASCADE_ENABLED
+#define BOARD_CASCADE_ENABLED (((BOARD_CASCADE_COLS) * (BOARD_CASCADE_ROWS)) > 1)
+#endif
+
 /* ---- 单卡矩形位图的上限（字节）----
  * 1bpp、ceil(屏宽/8)×屏高：本板单卡 128×32 → 16×32 = **512**。
  * app_screen 的抽带缓冲与 app_cascade 的从卡暂存都按它静态分配。 */
