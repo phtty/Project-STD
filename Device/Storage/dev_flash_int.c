@@ -24,7 +24,9 @@ static int32_t _init(dev_storage_t *dev)
 static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
     dev_flash_int_t *self = container_of(dev, dev_flash_int_t, base);
-    memcpy(buf, (void *)(self->base_addr + addr), len);
+    /* base_addr 是"地址整数"：经 uintptr_t 转指针，既表达意图，也让 64 位宿主机测试
+     * 不再报 -Wint-to-pointer-cast（目标机 32 位下与原先完全等价，无 codegen 变化） */
+    memcpy(buf, (void *)(uintptr_t)(self->base_addr + addr), len);
     return 0; /* 约定: 0 = 成功（不返回字节数） */
 }
 
