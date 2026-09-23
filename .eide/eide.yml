@@ -13,10 +13,7 @@ virtualFolder:
         - path: Application/Src/app_boot.c
         - path: Application/Src/app_key.c
         - path: Application/Src/app_light_sensor.c
-        - path: Application/Src/BIST/app_test.c
-        - path: Application/Src/BIST/app_factory_test.c
         - path: Application/Src/app_cfg_sched.c
-        - path: Application/Src/BIST/app_diag.c
       folders:
         - name: channel
           files:
@@ -64,6 +61,15 @@ virtualFolder:
             - path: Application/Src/Render/app_screen_canvas.c
             - path: Application/Src/Render/app_screen_status.c
             - path: Application/Src/Render/app_screen.c
+          folders:
+            - name: self_test
+              files: []
+              folders: []
+        - name: self_test
+          files:
+            - path: Application/Src/BIST/app_diag.c
+            - path: Application/Src/BIST/app_factory_test.c
+            - path: Application/Src/BIST/app_test.c
           folders: []
     - name: Drivers
       files: []
