@@ -163,7 +163,33 @@ GENERATE_XML     = YES
 
 ---
 
-## 5. 已裁决（2026-09-23）
+## 6. B1 完成记录（15 个契约头）
+
+**范围**：`app_dispatch.h`、`app_screen.h`、`dev_storage.h`、`dev_cfg_record.h`、`dev_display.h`、`ring_buffer.h`、`initcall.h`、`pl_eth.h`、`app_casc.h`、`app_iap_cmd.h`、`app_ldi.h`、`app_ldi_cmd.h`、`app_rls.h`、`app_ahmq.h`、`board.h`（两块板）。
+
+**产出**：`@brief` +157、`@return` +57、参数条目（含方向）+43、成员 `/**<` +359。
+
+**收尾中修掉的 3 类由本批引入的缺陷**（`doxygen` 报出）：
+
+| # | 症状 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `too many @param` / `multiple @param documentation sections` | 同一函数在**头文件声明处与 `.c` 定义处各有一段带 `@param` 的文档块**，合并后重复（`app_ldi_build_rsp_head`、`app_ldi_build_ctrl_rsp_head`、`pl_eth_netif_init`） | 头文件（公开接口）保留完整 `@param`；`.c` 定义处去掉 `@param`、只留散文 |
+| 2 | `expecting command </strong>` | 注释块里 markdown 加粗标记未配平（`app_screen.h:20`） | 去掉该处 `**…**`，文字原意保留 |
+| 3 | `The following parameters … are not documented` | §12 表述含糊——"纯输入不标方向"被读成"不写 `@param`" | **§12 已澄清**：每个参数都要有 `@param`，纯输入用**裸 `@param`** |
+
+**已知 Doxygen 怪癖（非代码缺陷）**：`static uint8_t x[] __attribute__((aligned(4)));` 这类**尾置**属性会让 Doxygen 把后续声明吞进前一条，误报 `documented symbol … was not declared or defined`。规避办法是**把属性前置**（`__attribute__((aligned(4))) static uint8_t x[];`，GCC 同样接受）。Doxyfile 的 `PREDEFINED = __attribute__(x)=` 对本例**无效**，已撤除。
+
+**指标**：
+
+| 指标 | 首次生成 | A 类后 | B0 后 | **B1 后** |
+|---|---|---|---|---|
+| 告警总数 | 1197 | 1185 | 1489 | **1091** |
+| 非 `is not documented` 类 | 26 | 14 | 14 | **0** |
+| 成员/复合类型缺口 | 1171 | 1171 | 1475 | **1091** |
+| 缺 `@file` 的自研文件 | 30 | 30 | **0** | 0 |
+
+**剩余工作（B2/B3）**：1091 条成员/复合类型文档缺口，集中在 `dev_dp83848.h`（PHY 寄存器映射，~159）、`app_ldi.h/.c`、各板级驱动、`app_screen.h` 等；另有 `@retval`→`@return` 用法归一（B3）。
+
 
 | # | 事项 | 结论 |
 |---|---|---|
