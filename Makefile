@@ -548,16 +548,17 @@ TEST_FONT_LIB_SRCS = \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c
 
 # 套件九：整屏画布（经画布渲染必须与直写实屏逐像素相等）
-# 用例直接 include app_screen.c（sink 是 static），并自己提供 dev_display 原语作为
-# 独立参考实现 —— 所以不列 app_screen.c，也不列 Device/Display/dev_display.c。
+# 用例直接 TU-include app_screen.c 与 app_screen_canvas.c（sink 是 static），并自己
+# 提供 dev_display 原语作为独立参考实现 —— 两个生产 .c 都不列进 SRCS，
+# Device/Display/dev_display.c 同样不列（否则符号重复）。
 TEST_SCREEN_CANVAS_SRCS = \
 	test/test_screen_canvas.c \
 	test/stubs/os_stub.c
 
 # 套件十二：切分表与抽带（画布上的矩形 → 1bpp 位图，必须与独立参考逐位相等）
-# 同套件九：用例 include app_screen.c（sink 与抽带都是 static），并自带一套
-# 1B/px 帧缓冲作为独立参考 —— 所以不列 app_screen.c，也不列 dev_display.c。
-# 本套件的本卡地址被钉成 1（非原点矩形），故与套件九不是重复覆盖。
+# 同套件九：用例 TU-include app_screen.c 与 app_screen_canvas.c（sink 与抽带都是
+# static），并自带一套 1B/px 帧缓冲作为独立参考 —— 两个生产 .c 都不列进 SRCS，
+# dev_display.c 同样不列。本套件的本卡地址被钉成 1（非原点矩形），故与套件九不重复。
 TEST_SCREEN_LAYOUT_SRCS = \
 	test/test_screen_layout.c \
 	test/stubs/os_stub.c
@@ -701,7 +702,7 @@ $(TEST_BUILD)/test_casc_frame: $(TEST_CASC_FRAME_SRCS)
 # （同 test_cfg_sched / test_iap_cfg / test_ldi_0ah / test_screen_canvas 的那几条。）
 $(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 
-# 同上：用例 TU-include 了 app_screen.c 与板级 board.h，都不在 SRCS 里。
+# 同上：用例 TU-include 了 app_screen.c、app_screen_canvas.c 与板级 board.h，都不在 SRCS 里。
 $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) \
 	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c
 	@mkdir -p $(dir $@)

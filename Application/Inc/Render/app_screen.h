@@ -13,6 +13,10 @@
  *   · 落屏   —— `app_screen_commit_bitmap()`，**主卡本地与从卡走同一个函数**
  *   · 显存持久化 —— 通过 `app_render_persist_hook_fn_t` 接管（画布比实屏大，直存实屏会错位）
  *
+ * 实现分两个 TU：门面职责（切分表/几何、卡状态、落屏、亮度、身份）在 app_screen.c；
+ * 画布那一簇（1bpp 缓冲/渲染目标/抽带/静默期提交/持久化）在 app_screen_canvas.c ——
+ * 两者只经本头文件的按钮面（含 `app_screen_canvas_*` 内部接缝）耦合。
+ *
  * 画布是 **1bpp 位掩码**（`row_bytes = (宽+7)/8`、行优先、MSB-first、bit=1 上色），
  * 与 `dev_display_draw_bitmap` 和 `app_render_persist_t` 的位序约定**逐位一致** ——
  * 三处同一约定，所以"画布抽取出的位图"从卡可以直接吃，零转码。

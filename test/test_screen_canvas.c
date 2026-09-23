@@ -11,8 +11,8 @@
  * 参考实现是刻意另写的，不是把被测代码的算法抄一遍：它走的是 `dev_display_*` 直写
  * `pixel_map`，然后按 `(宽+7)/8`、MSB-first 打包 —— 与级联要用的线格式同源但路径无关。
  *
- * 被测代码是生产源码本体：直接 include `app_screen.c`（它的 sink 是 static，
- * 从外部够不着；这也顺带让 `#if BOARD_SCREEN_CANVAS` 里的代码真正进到构建里）。
+ * 被测代码是生产源码本体：直接 include `app_screen.c` 与其拆出的 `app_screen_canvas.c`
+ * （sink 是 static，从外部够不着；这也顺带让 `#if BOARD_SCREEN_CANVAS` 里的代码真正进到构建里）。
  */
 
 /* 必须在 include app_screen.c 之前定义：board.h 里是 #ifndef 保护的，
