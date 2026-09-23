@@ -114,7 +114,7 @@ void dev_display_frame_end(dev_display_t *dev)
 
 
 /* ---- 被测：生产源码本体 ---- */
-#include "../Application/Src/app_screen.c"
+#include "../Application/Src/Render/app_screen.c"
 
 /* ================================================================
  *  测试夹具
@@ -261,8 +261,12 @@ static void case_clipping(void)
     _sink_fill(nullptr, 0, H + 10, 4, 4, DEV_DISPLAY_COLOR_RED);   /* y 越界 */
     _sink_fill(nullptr, W - 2, H - 2, 100, 100, DEV_DISPLAY_COLOR_RED); /* 右下溢出 */
     _sink_bitmap(nullptr, W - 4, 0, 8, 1, s_fb, DEV_DISPLAY_COLOR_RED); /* 源可能越界，画布要裁 */
-    _sink_set_pixel(nullptr, W + 1, 0, DEV_DISPLAY_COLOR_RED);
-    _sink_set_pixel(nullptr, 0, H + 1, DEV_DISPLAY_COLOR_RED);
+    /* 单像素越界：原来的 _sink_set_pixel 已删，改用 1×1 的 fill / bitmap 走同一条 _clip
+       拒绝路径。bitmap 源取全 1，若裁剪失效就会写进几何之外的池尾（下方 tail_clean 抓得住）。 */
+    const uint8_t ones = 0xFFU;
+    _sink_fill(nullptr, W + 1, 0, 1, 1, DEV_DISPLAY_COLOR_RED);
+    _sink_fill(nullptr, 0, H + 1, 1, 1, DEV_DISPLAY_COLOR_RED);
+    _sink_bitmap(nullptr, 0, H + 1, 1, 1, &ones, DEV_DISPLAY_COLOR_RED);
 
     uint16_t stride = (W + 7) / 8;
 

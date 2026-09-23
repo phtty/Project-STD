@@ -182,26 +182,21 @@ static void _direct_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16
 {
     dev_display_draw_bitmap((dev_display_t *)ctx, x, y, w, h, bm, c);
 }
-static void _direct_set_pixel(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c)
-{
-    dev_display_set_pixel((dev_display_t *)ctx, x, y, c);
-}
 
 /** @brief 取当前渲染目标；未显式设置时按实屏现搭一个。
  *
  *  每次现搭而不是缓存：几何来自 dev_display_t，而它在 hw initcall 里才注册，
- *  缓存在模块静态里会锁住一个可能为 NULL 的早期值。现搭是 6 次赋值，可以忽略。 */
+ *  缓存在模块静态里会锁住一个可能为 NULL 的早期值。现搭是 5 次赋值，可以忽略。 */
 static const app_render_target_t *_rt(void)
 {
     static app_render_target_t direct;
     if (s_target) return s_target;
 
-    direct.fill      = _direct_fill;
-    direct.bitmap    = _direct_bitmap;
-    direct.set_pixel = _direct_set_pixel;
-    direct.ctx       = s_render_display;
-    direct.rows      = s_render_display ? s_render_display->screen_rows : 0;
-    direct.cols      = s_render_display ? s_render_display->screen_cols : 0;
+    direct.fill   = _direct_fill;
+    direct.bitmap = _direct_bitmap;
+    direct.ctx    = s_render_display;
+    direct.rows   = s_render_display ? s_render_display->screen_rows : 0;
+    direct.cols   = s_render_display ? s_render_display->screen_cols : 0;
     return &direct;
 }
 

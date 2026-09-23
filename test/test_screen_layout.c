@@ -143,7 +143,7 @@ void dev_display_frame_end(dev_display_t *dev)
 
 
 /* ---- 被测：生产源码本体 ---- */
-#include "../Application/Src/app_screen.c"
+#include "../Application/Src/Render/app_screen.c"
 
 /* ================================================================
  *  夹具

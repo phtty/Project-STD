@@ -595,26 +595,17 @@ static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t
     _mark_dirty();
 }
 
-static void _sink_set_pixel(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c)
-{
-    (void)ctx;
-    if (x >= s_rows || y >= s_cols) return;
-    _set_bit(x, y, c != DEV_DISPLAY_COLOR_BLACK);
-    _mark_dirty();
-}
-
 /* ---- 渲染目标与持久化钩子（只在 BOARD_SCREEN_CANVAS 打开时注册）---- */
 
 /* **不能加 const**：几何在 _screen_init 里填，而 const 对象住 .rodata ——
    在 STM32 上那就是 Flash，写进去会被静默丢弃（不报错！），于是 rows/cols 恒为 0，
    画布裁剪把所有内容裁光、屏上什么都不显示。host 单测用 ASan 抓到的就是这个写。 */
 static app_render_target_t s_target = {
-    .fill      = _sink_fill,
-    .bitmap    = _sink_bitmap,
-    .set_pixel = _sink_set_pixel,
-    .ctx       = nullptr,
-    .rows      = 0, /* _screen_init 里填 */
-    .cols      = 0,
+    .fill   = _sink_fill,
+    .bitmap = _sink_bitmap,
+    .ctx    = nullptr,
+    .rows   = 0, /* _screen_init 里填 */
+    .cols   = 0,
 };
 
 static void _persist_save(void);

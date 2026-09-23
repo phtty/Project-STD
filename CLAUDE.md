@@ -549,7 +549,7 @@ OCP 虚表实现，提供 `flash_int_ops`（`init/read/write/erase`），由各�
 
 **LDI 配置** (`dev_flash_ldi.c`)：已迁移至 W25Qxx 最后一个 4KB 扇区。`dev_flash_ldi_record_t`（116B）= magic(4) + cfg(106) + padding(2) + CRC32(4)。通过 `dev_w25qxx_get()` 获取存储句柄，使用 `dev_storage_read/write` 接口。
 
-## Render 引擎 (`Application/Src/app_render.c`)
+## Render 引擎 (`Application/Src/Render/app_render.c`)
 
 数据驱动字库引擎，字库存储在 W25Qxx Flash 中，模块 `sw_app_initcall` 自注册。
 

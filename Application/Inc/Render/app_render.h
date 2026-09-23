@@ -187,13 +187,12 @@ typedef struct {
  * 一遍，只为把输出目标从实屏换成虚拟屏。那是本设计明确要避免的形态 —— 两份排版
  * 逻辑必然漂移，而漂移的表现是"某个字号/对齐方式下两卡排版不一致"，极难查。
  *
- * 走这条缝的只有 3 个原语 + 2 处几何读取（见 app_render.c），排版逻辑一行不动。 */
-/** @brief 可插拔渲染目标：3 个绘制原语 + 目标几何 */
+ * 走这条缝的只有 2 个原语 + 2 处几何读取（见 app_render.c），排版逻辑一行不动。 */
+/** @brief 可插拔渲染目标：2 个绘制原语 + 目标几何 */
 typedef struct {
     void (*fill)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c); /**< 矩形填充原语 */
     void (*bitmap)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bm,
                    dev_display_color_t c); /**< 位图绘制原语 */
-    void (*set_pixel)(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c); /**< 单像素原语 */
     void    *ctx; /**< 目标上下文，随原语回传 */
     uint16_t rows; /**< 目标宽（_render_fill 的全屏语义、_render_text 的边界判断要用） */
     uint16_t cols; /**< 目标高 */
