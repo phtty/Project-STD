@@ -719,8 +719,10 @@ $(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_
 $(TEST_BUILD)/test_casc_round: Application/Src/CASC/app_casc.c \
 	Application/Inc/CASC/app_casc.h $(BOARD_DIR)/board.h
 
-$(TEST_BUILD)/test_casc_master: $(TEST_CASC_MASTER_SRCS) \
-	Application/Src/Render/app_screen.c Application/Src/CASC/app_casc.c
+# test_casc_master 把 app_screen 整套换成用例内的桩（stub 定义在 test_casc_master.c，
+# 地址/亮度/extract/commit_self 都是假的），**不**TU-include app_screen.c 或
+# app_screen_canvas.c —— 所以依赖里只挂真正被 include 的 app_casc.c。
+$(TEST_BUILD)/test_casc_master: $(TEST_CASC_MASTER_SRCS) Application/Src/CASC/app_casc.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASC_MASTER_SRCS) $(TEST_LDFLAGS)
 
