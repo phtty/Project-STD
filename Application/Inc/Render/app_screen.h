@@ -13,9 +13,10 @@
  *   · 落屏   —— `app_screen_commit_bitmap()`，**主卡本地与从卡走同一个函数**
  *   · 显存持久化 —— 通过 `app_render_persist_hook_fn_t` 接管（画布比实屏大，直存实屏会错位）
  *
- * 实现分两个 TU：门面职责（切分表/几何、卡状态、落屏、亮度、身份）在 app_screen.c；
- * 画布那一簇（1bpp 缓冲/渲染目标/抽带/静默期提交/持久化）在 app_screen_canvas.c ——
- * 两者只经本头文件的按钮面（含 `app_screen_canvas_*` 内部接缝）耦合。
+ * 实现分三个 TU：门面职责（切分表/几何、落屏、亮度、身份）在 app_screen.c；
+ * 画布那一簇（1bpp 缓冲/渲染目标/抽带/静默期提交/持久化）在 app_screen_canvas.c；
+ * 卡片状态与整屏状态快照在 app_screen_status.c —— 三者只经本头文件的按钮面
+ * （含 `app_screen_canvas_*` 与 `app_screen_card_state_store` 内部接缝）耦合。
  *
  * 画布是 **1bpp 位掩码**（`row_bytes = (宽+7)/8`、行优先、MSB-first、bit=1 上色），
  * 与 `dev_display_draw_bitmap` 和 `app_render_persist_t` 的位序约定**逐位一致** ——
@@ -123,6 +124,22 @@ uint16_t app_screen_cols(void);
  *  返回的项同时带 `.addr` 与矩形，所以"发给谁"和"发哪块"从同一个来源取，不会错配。
  *  @return 第 card_idx 项；越界返回 nullptr */
 const app_screen_card_t *app_screen_card(uint8_t card_idx);
+
+/* ---- 内部接缝 ----
+ *
+ * 只给 app_screen.c（卡表持有者）与 app_screen_status.c（状态实现）之间用，
+ * **不是对外 API**：卡表是 app_screen.c 的文件私有数据（§4.1），状态那一簇拆出去
+ * 后仍要写它的 `.state` 字段，故由卡表持有者提供**唯一**写入点。这样两边的 static
+ * 各归各自文件，不必用 extern 共享卡表。 */
+
+/** @brief 改写一张卡的运行期状态（卡表在 app_screen.c，故写操作收在那里）
+ *
+ *  状态没变、或下标越界时什么都不做。
+ *  @param card_idx 切分表下标（不是总线地址）
+ *  @param st       新状态
+ *  @param[out] addr_out 状态确实改变时写入该卡总线地址；未变时不写
+ *  @return true = 状态确实变了；false = 越界或状态未变 */
+bool app_screen_card_state_store(uint8_t card_idx, app_screen_card_state_t st, uint8_t *addr_out);
 
 /** @brief 总线地址 → 切分表下标；表中没有该地址返回 0xFF
  *  @return 切分表下标；未找到返回 0xFF */

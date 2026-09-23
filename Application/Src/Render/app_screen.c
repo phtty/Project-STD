@@ -1,10 +1,11 @@
 /**
  * @file    app_screen.c
- * @brief   整屏门面实现 —— 切分表/几何、卡状态、落屏、亮度、身份
+ * @brief   整屏门面实现 —— 切分表/几何、落屏、亮度、身份
  *
  * 见 app_screen.h 的设计说明。逻辑几何来自切分表（单卡时即本屏几何）。
  * 画布那一簇（1bpp 缓冲、渲染目标 sink、抽带、静默期提交、显存持久化）已拆到
- * app_screen_canvas.c —— 本文件只保留"与画布无关"的门面职责。
+ * app_screen_canvas.c；卡片状态与整屏状态快照已拆到 app_screen_status.c ——
+ * 本文件只保留"与画布无关、与状态无关"的门面职责。
  *
  * 由 board.h 的 BOARD_SCREEN_CANVAS 开关：多卡级联的板子打开（5006048 即如此），
  * 单独一块卡上，画布是纯开销 —— 它多占一块 1bpp 缓冲、多一次拷贝，还要把卡内多色
@@ -97,76 +98,23 @@ const app_screen_card_t *app_screen_card(uint8_t card_idx)
     return (card_idx < s_screen_layout.count) ? &s_screen_layout.cards[card_idx] : nullptr;
 }
 
-/* ================================================================
- *  卡片状态与整屏状态快照
- * ================================================================ */
+/* ---- 内部接缝 ----
+ *
+ * 卡表（s_card_table）是本文件私有的（§4.1）：卡片状态那一簇拆到
+ * app_screen_status.c 后，仍要写卡项的 .state 字段，故写操作收在这里 —— 拆出的
+ * TU 只经本接缝落状态，不必 extern 共享卡表，两边的 static 各归各的文件。 */
 
-/* 最近一轮序号：**只存低 8 位**，只为日志对照，不参与任何判断 */
-static uint8_t s_status_seq_lo;
-
-static app_screen_alarm_fn_t s_alarm_fn;
-static uint16_t              s_retrans_cnt;
-static uint8_t               s_evict_cnt;
-static uint8_t               s_last_alarm;
-
-app_screen_card_state_t app_screen_card_state(uint8_t card_idx)
-{
-    const app_screen_card_t *c = app_screen_card(card_idx);
-    return c ? (app_screen_card_state_t)c->state : APP_SCREEN_CARD_STATE_MISSING;
-}
-
-void app_screen_card_set_state(uint8_t card_idx, app_screen_card_state_t st)
+bool app_screen_card_state_store(uint8_t card_idx, app_screen_card_state_t st, uint8_t *addr_out)
 {
     /* **必须走 s_card_table[] 而不是 s_screen_layout.cards** —— 后者是 const 指针（表对外只读），
        从这里改会被编译器拦下（或悄悄写进只读段）。 */
     app_screen_card_t *c = (card_idx < s_screen_layout.count) ? &s_card_table[card_idx] : nullptr;
-    if (!c || c->state == (uint8_t)st) return; /* 没变就不算一次跳变 */
+    if (!c || c->state == (uint8_t)st) return false; /* 没变就不算一次跳变 */
 
-    const uint8_t addr = c->addr;
-    c->state           = (uint8_t)st;
-
-    if (st == APP_SCREEN_CARD_STATE_OFFLINE) s_evict_cnt++;
-    s_last_alarm = addr;
-
-    /* **不注册就什么都不发生** —— 协议只暴露状态，不决定去向，也不认识任何上层协议。
-       要报的产品自己注册；不报的产品一个字节都不产生。 */
-    if (s_alarm_fn) s_alarm_fn(addr, (uint8_t)st);
+    if (addr_out) *addr_out = c->addr;
+    c->state = (uint8_t)st;
+    return true;
 }
-
-void app_screen_register_alarm(app_screen_alarm_fn_t fn)
-{
-    s_alarm_fn = fn;
-}
-
-void app_screen_note_retrans(void)
-{
-    s_retrans_cnt++;
-}
-
-void app_screen_note_round(uint16_t seq)
-{
-    s_status_seq_lo = (uint8_t)seq;
-}
-
-void app_screen_status(app_screen_status_t *out)
-{
-    if (!out) return;
-
-    out->seq_lo      = s_status_seq_lo;
-    out->online_mask = 0;
-    out->retrans_cnt = s_retrans_cnt;
-    out->evict_cnt   = s_evict_cnt;
-    out->last_alarm  = s_last_alarm;
-
-    /* 位 i ↔ 地址 i+1：地址 0 是本卡，不进掩码。从卡地址上限 0x1F，8 位够放
-       （本工程 APP_SCREEN_CARD_MAX=4，实际只用到低 3 位）。 */
-    for (uint8_t i = 0; i < s_screen_layout.count; i++) {
-        const app_screen_card_t *c = &s_screen_layout.cards[i];
-        if (c->addr >= 1U && c->addr <= 8U && c->state == (uint8_t)APP_SCREEN_CARD_STATE_ONLINE)
-            out->online_mask |= (uint8_t)(1U << (c->addr - 1U));
-    }
-}
-
 
 uint8_t app_screen_index_of_addr(uint8_t addr)
 {

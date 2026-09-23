@@ -319,6 +319,7 @@ SRC_APPLICATION = \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/Render/app_screen.c \
 	Application/Src/Render/app_screen_canvas.c \
+	Application/Src/Render/app_screen_status.c \
 	Application/Src/CASC/app_casc.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
@@ -702,14 +703,17 @@ $(TEST_BUILD)/test_casc_frame: $(TEST_CASC_FRAME_SRCS)
 # （同 test_cfg_sched / test_iap_cfg / test_ldi_0ah / test_screen_canvas 的那几条。）
 $(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 
-# 同上：用例 TU-include 了 app_screen.c、app_screen_canvas.c 与板级 board.h，都不在 SRCS 里。
+# 同上：用例 TU-include 了 app_screen.c、app_screen_canvas.c、app_screen_status.c
+# 与板级 board.h，都不在 SRCS 里。
 $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) \
-	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c
+	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c \
+	Application/Src/Render/app_screen_status.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_LAYOUT_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_screen_layout: Application/Src/Render/app_screen.c \
-	Application/Src/Render/app_screen_canvas.c $(BOARD_DIR)/board.h
+	Application/Src/Render/app_screen_canvas.c Application/Src/Render/app_screen_status.c \
+	$(BOARD_DIR)/board.h
 
 # 同上：用例 TU-include 了 app_casc.c。
 $(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_casc.c
