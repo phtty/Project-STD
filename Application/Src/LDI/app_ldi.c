@@ -110,10 +110,11 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self)
 
     } else {
         /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
-        if (app_flash_iap_is_config_valid(g_iap_sys_info)) {
-            memcpy(self->cfg.device_ip, g_iap_sys_info->net_cfg.ip, 4);
-            memcpy(self->cfg.netmask, g_iap_sys_info->net_cfg.mask, 4);
-            memcpy(self->cfg.gateway, g_iap_sys_info->net_cfg.gw, 4);
+        app_flash_iap_net_cfg_t iap_net = {0};
+        if (app_iap_get_net_cfg(&iap_net)) {
+            memcpy(self->cfg.device_ip, iap_net.ip, 4);
+            memcpy(self->cfg.netmask, iap_net.mask, 4);
+            memcpy(self->cfg.gateway, iap_net.gw, 4);
         } else {
             /* IAP 也无有效配置，使用上电默认 IP */
             uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};

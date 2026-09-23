@@ -134,6 +134,16 @@ bool app_flash_iap_is_config_valid(volatile const app_flash_iap_sys_info_t *info
     return info->config_crc == _iap_cfg_crc((const app_flash_iap_sys_info_t *)info);
 }
 
+/** @brief 取记录里的网段配置；唯一的合法性判据沿用 app_flash_iap_is_config_valid()，
+ *         记录无效时不触碰 out */
+bool app_iap_get_net_cfg(app_flash_iap_net_cfg_t *out)
+{
+    if (!app_flash_iap_is_config_valid(g_iap_sys_info)) return false;
+
+    *out = g_iap_sys_info->net_cfg;
+    return true;
+}
+
 /* ================================================================
  *  写入操作（先擦除整扇区，再逐 word 编程）
  * ================================================================ */

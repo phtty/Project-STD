@@ -101,4 +101,12 @@ void app_flash_iap_sync_from_runtime(void);
  *  @return 存储设备句柄 */
 dev_storage_t *app_flash_iap_get_storage(void);
 
-extern app_flash_iap_sys_info_t *g_iap_sys_info; /**< 记录区内存映射指针 (0x08004000) */
+/** @brief 取 IAP 记录的网段配置（IP / 掩码 / 网关 / 端口）
+ *  @param[out] out 接收网络配置
+ *  @return true = 记录有效并已填充 out；false = 记录无效（out 不写） */
+bool app_iap_get_net_cfg(app_flash_iap_net_cfg_t *out);
+
+/** @brief IAP 记录区内存映射指针 (0x08004000)
+ *
+ *  仅本模块与白盒测试使用；跨模块请走 app_iap_get_net_cfg()（§4.7）。 */
+extern app_flash_iap_sys_info_t *g_iap_sys_info;

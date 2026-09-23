@@ -448,6 +448,38 @@ static void case_storage_returns_zero_on_success(void)
               "NOR 上把 0 位写回 1 应该失败，写接口却报了成功");
 }
 
+/* ================================================================
+ *  ⑩ 跨模块访问器 app_iap_get_net_cfg()（§4.7）
+ *
+ *  §4.7 要求 LDI 不再直接解引用 IAP 的 g_iap_sys_info，改走此访问器。
+ *  这里钉住两端契约：无效记录返回 false 且**不写 out**（否则调用方会把残留值
+ *  当成配置用）；有效记录返回 true 且 ip/mask/gw/port 与写入记录逐字节一致。
+ * ================================================================ */
+
+static void case_net_cfg_accessor_contract(void)
+{
+    flash_setup();
+
+    /* ① 空记录（0xFF）→ 无效：返回 false，out 必须原封不动 */
+    app_flash_iap_net_cfg_t out;
+    memset(&out, 0xA5, sizeof out); /* 哨兵：被写就能看出来 */
+    app_flash_iap_net_cfg_t sentinel = out;
+
+    CHECK_MSG(!app_iap_get_net_cfg(&out), "空记录却返回了 true");
+    CHECK_MSG(memcmp(&out, &sentinel, sizeof out) == 0, "记录无效时访问器改写了 out");
+
+    /* ② 有效记录 → 返回 true，四字段与写入记录一致 */
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+    CHECK(app_flash_iap_is_config_valid(REC));
+
+    memset(&out, 0xA5, sizeof out);
+    CHECK_MSG(app_iap_get_net_cfg(&out), "有效记录却返回了 false");
+    CHECK(memcmp(out.ip, IP_A, 4) == 0);
+    CHECK(memcmp(out.mask, MASK, 4) == 0);
+    CHECK(memcmp(out.gw, GW, 4) == 0);
+    CHECK_MSG(out.port == PORT, "port 不一致：%u != %u", (unsigned)out.port, (unsigned)PORT);
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -465,6 +497,7 @@ int main(void)
         {"异格式 magic（CRC 自洽）被拒", case_foreign_magic_is_rejected},
         {"写失败必须上报", case_write_failure_is_reported},
         {"存储接口 0 = 成功的约定", case_storage_returns_zero_on_success},
+        {"跨模块访问器 app_iap_get_net_cfg()", case_net_cfg_accessor_contract},
     };
 
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
