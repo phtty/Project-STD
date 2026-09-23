@@ -558,9 +558,10 @@ TEST_SCREEN_CANVAS_SRCS = \
 	test/stubs/os_stub.c
 
 # 套件十二：切分表与抽带（画布上的矩形 → 1bpp 位图，必须与独立参考逐位相等）
-# 同套件九：用例 TU-include app_screen.c 与 app_screen_canvas.c（sink 与抽带都是
-# static），并自带一套 1B/px 帧缓冲作为独立参考 —— 两个生产 .c 都不列进 SRCS，
-# dev_display.c 同样不列。本套件的本卡地址被钉成 1（非原点矩形），故与套件九不重复。
+# 同套件九：用例 TU-include app_screen.c、app_screen_canvas.c 与 app_screen_status.c
+# （sink 与抽带都是 static，状态快照也在这里覆盖），并自带一套 1B/px 帧缓冲作为
+# 独立参考 —— 三个生产 .c 都不列进 SRCS，dev_display.c 同样不列。本套件的本卡
+# 地址被钉成 1（非原点矩形），故与套件九不重复。
 TEST_SCREEN_LAYOUT_SRCS = \
 	test/test_screen_layout.c \
 	test/stubs/os_stub.c

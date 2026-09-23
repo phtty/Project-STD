@@ -2,7 +2,7 @@
  * @file    app_screen_canvas.c
  * @brief   整屏逻辑画布实现 —— 1bpp 画布、渲染目标、抽带、落屏与持久化
  *
- * 由 app_screen.c 拆出：整屏门面（几何/身份/亮度/卡状态）留在 app_screen.c，
+ * 由 app_screen.c 拆出：整屏门面（几何/身份）留在 app_screen.c，
  * 画布这一簇 —— 1bpp 缓冲、渲染目标 sink、抽带、静默期提交、显存持久化 —— 收在这里。
  *
  * 由 board.h 的 BOARD_SCREEN_CANVAS 开关：多卡级联的板子打开（5006048 即如此），

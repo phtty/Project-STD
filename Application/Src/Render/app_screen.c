@@ -22,7 +22,7 @@
 #include "initcall.h"
 #include "pl_task.h"
 
-/* 几何（整屏逻辑宽高）与身份/亮度/卡状态都归门面；画布自己的缓冲与 stride 在
+/* 几何（整屏逻辑宽高）与身份归门面；画布自己的缓冲与 stride 在
    app_screen_canvas.c。s_rows/s_cols 为 0 表示门面停用，此时回落到本卡实屏几何。 */
 static dev_display_t *s_display_dev;
 static uint16_t       s_rows;     /* **整屏**逻辑宽（单卡时 == 本屏宽） */
