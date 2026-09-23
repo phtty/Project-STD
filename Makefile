@@ -56,6 +56,7 @@ INC_DIRS = \
 	-I Application/Inc/Channel \
 	-I Application/Inc/CASC \
 	-I Application/Inc/Render \
+	-I Application/Inc/BIST \
 	-I Device/Inc \
 	-I Device/Inc/Display \
 	-I Device/Inc/IO \
@@ -311,8 +312,8 @@ SRC_DEVICE = \
 
 # Application (Project_STD 新模块，resend app_* 等 Phase 7 集成后加入)
 SRC_APPLICATION = \
-	Application/Src/app_test.c \
-	Application/Src/app_factory_test.c \
+	Application/Src/BIST/app_test.c \
+	Application/Src/BIST/app_factory_test.c \
 	Application/Src/app_boot.c \
 	Application/Src/app_dispatch.c \
 	Application/Src/Render/app_render.c \
@@ -322,7 +323,7 @@ SRC_APPLICATION = \
 	Application/Src/Render/app_screen_status.c \
 	Application/Src/Render/app_screen_brightness.c \
 	Application/Src/CASC/app_casc.c \
-	Application/Src/app_diag.c \
+	Application/Src/BIST/app_diag.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
 	Application/Src/IAP/app_iap.c \
@@ -442,6 +443,7 @@ TEST_INC     = \
 	-I Application/Inc/CASC \
 	-I Application/Inc/Channel \
 	-I Application/Inc/Render \
+	-I Application/Inc/BIST \
 	-I Kernel/Inc \
 	-I Platform/Inc \
 	-I Device/Inc \

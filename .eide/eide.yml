@@ -11,17 +11,12 @@ virtualFolder:
     - name: Application
       files:
         - path: Application/Src/app_boot.c
-        - path: Application/Src/Render/app_render.c
         - path: Application/Src/app_key.c
         - path: Application/Src/app_light_sensor.c
-        - path: Application/Src/app_test.c
-        - path: Application/Src/app_factory_test.c
+        - path: Application/Src/BIST/app_test.c
+        - path: Application/Src/BIST/app_factory_test.c
         - path: Application/Src/app_cfg_sched.c
-        - path: Application/Src/app_diag.c
-        - path: Application/Src/Render/app_screen.c
-        - path: Application/Src/Render/app_screen_canvas.c
-        - path: Application/Src/Render/app_screen_status.c
-        - path: Application/Src/Render/app_screen_brightness.c
+        - path: Application/Src/BIST/app_diag.c
       folders:
         - name: channel
           files:
@@ -62,6 +57,14 @@ virtualFolder:
               files:
                 - path: Application/Src/CASC/app_casc.c
               folders: []
+        - name: render
+          files:
+            - path: Application/Src/Render/app_render.c
+            - path: Application/Src/Render/app_screen_brightness.c
+            - path: Application/Src/Render/app_screen_canvas.c
+            - path: Application/Src/Render/app_screen_status.c
+            - path: Application/Src/Render/app_screen.c
+          folders: []
     - name: Drivers
       files: []
       folders:
@@ -416,6 +419,7 @@ targets:
         - boards/3833024/Platform/Inc
         - Application/Inc/CASC
         - Application/Inc/Render
+        - Application/Inc/BIST
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -575,6 +579,7 @@ targets:
         - boards/5006048
         - Application/Inc/CASC
         - Application/Inc/Render
+        - Application/Inc/BIST
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c

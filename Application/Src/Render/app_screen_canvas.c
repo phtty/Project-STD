@@ -18,7 +18,7 @@
 /* ================================================================
  *  画布关闭（BOARD_SCREEN_CANVAS=0）：整 TU 不进构建，只留两个桩符号
  *
- *  原因：Application/Src/app_factory_test.c **无条件**调
+ *  原因：Application/Src/BIST/app_factory_test.c **无条件**调
  *  `app_screen_set_color_override()`，而该文件不分板编译 —— 没有下面这两个桩，
  *  关闭画布的那块板会链接报"被引用却未定义"。`app_screen_output_color` 同理：
  *  它虽只在有画布时被 commit_self 调，但保持符号对称、语义退化为"原样输出"。
