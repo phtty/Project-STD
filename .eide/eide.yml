@@ -382,7 +382,6 @@ targets:
         - USE_HAL_DRIVER
         - STM32F407xx
       incList:
-        - Core/Inc
         - Drivers/CMSIS/Include
         - Drivers/CMSIS/Device/ST/STM32F4xx/Include
         - Drivers/STM32F4xx_HAL_Driver/Inc
@@ -543,7 +542,6 @@ targets:
         - USE_HAL_DRIVER
         - STM32F407xx
       incList:
-        - Core/Inc
         - Drivers/CMSIS/Include
         - Drivers/CMSIS/Device/ST/STM32F4xx/Include
         - Drivers/STM32F4xx_HAL_Driver/Inc
@@ -567,7 +565,6 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AHMQ
         - Application/Inc/RLS
-        - Application/Inc/CQ_P10
         - boards/5006048/Core/Inc
         - boards/5006048/Device/Inc
         - boards/5006048/Platform/Inc
