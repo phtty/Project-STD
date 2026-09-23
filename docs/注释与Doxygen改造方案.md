@@ -190,6 +190,48 @@ GENERATE_XML     = YES
 
 **剩余工作（B2/B3）**：1091 条成员/复合类型文档缺口，集中在 `dev_dp83848.h`（PHY 寄存器映射，~159）、`app_ldi.h/.c`、各板级驱动、`app_screen.h` 等；另有 `@retval`→`@return` 用法归一（B3）。
 
+---
+
+## 7. B2 范围与计分口径（已裁决）
+
+**输入范围**：头文件与源文件**都进**（方案 B）——生成文档最全，`.c` 的文件头与实现说明都在。
+
+**豁免登记**（见 `docs/命名约定.md` §14 E5–E7）：
+
+| 豁免 | 实现方式 | 豁免条数 |
+|---|---|---|
+| `.c` 内部实现细节（局部宏、内部结构体及其成员、内部类型、static 符号） | 不要求文档；计入"豁免常量" | **429** |
+| PHY 寄存器位定义 `DP83848_*` | Doxyfile `EXCLUDE_SYMBOLS` | 155 |
+| `test/`（host 测试） | Doxyfile `EXCLUDE` | 211 |
+
+**两套口径**：
+
+| 口径 | 命令 | 当前基线 | 目标 |
+|---|---|---|---|
+| 正式文档（`.h` + `.c`） | `doxygen Doxyfile` | 725 | = 429（即豁免常量） |
+| **导出侧**（B2 的计分器） | `{ cat Doxyfile; echo "FILE_PATTERNS = *.h"; echo "OUTPUT_DIRECTORY = build/doxygen-h"; } \| doxygen -` | **296** | **0** |
+
+**验收一律用"导出侧"口径**（正式口径只作参考，它的 429 是登记的豁免，不是缺口）。
+
+**B2 的范围**：导出侧口径下仍报缺口的**头文件导出符号**——按当前分布，约 40 个头文件、296 条，集中在：
+`pl_hub75.h`(25)、`dev_dp83848.h`(19)、`app_iap_cfg.h`(16)、`text_cvt.h`(11)、`app_iap.h`(11)、`app_udp.h`/`app_mqtt.h`(各 8)、`app_tcp_server.h`(7)、`pl_tim.h`/`pl_rtc.h`/`app_tcp_client.h`/`app_ahmq_cmd.h`(各 6)，其余为 1–5 的长尾。
+
+---
+
+## 8. Doxygen 行为实测（本轮踩出来的，供后续参考）
+
+1. **`@param` 不是计分器要求，是契约要求**。本环境下 Doxygen **不会**因"整个函数一个 `@param` 都没有"告警；只在**部分参数有 `@param`**、或**声明与定义两处都有**时才告警。所以：
+   - 导出侧的 296 条缺口本质是**缺 `@brief`**（成员/类型/宏未被文档化）；
+   - `@param` 要按 §12 补，但它不改变计分数字。
+2. **`@param` 必须只出现在一处**（见 `docs/命名约定.md` §12 的新增条目）：头文件声明处保留，`.c` 定义处去标签。本轮 `dev_dp83848.h` ↔ `.c` 因两处都写而产生 34 组重复告警。
+3. **`__attribute__` 会让 Doxygen 解析错位**，两种表现：
+   - **尾置**属性（`uint8_t x[] __attribute__((aligned(4)));`）会让 Doxygen 把**后续声明吞进前一条**，误报 `documented symbol … was not declared`。规避：**属性前置**（`__attribute__((aligned(4))) uint8_t x[];`，GCC 同样接受）。
+   - **`__attribute__((aligned(4))) typedef struct {…} X;`** 会被误判成 "variable"，导致前导文档块挂不上；规避：在 `X;` 行尾补 `/**< … */`。
+   - Doxyfile 的 `PREDEFINED = __attribute__(x)=` 对这两例**均无效**，未采用。
+4. **`HIDE_UNDOC_MEMBERS = YES` 不可用**：它会把**导出侧**的缺口一起隐藏（725 → 30），计分器失效。
+
+
+
 
 | # | 事项 | 结论 |
 |---|---|---|

@@ -24,9 +24,13 @@ FILE_PATTERNS          = *.h *.c
 EXCLUDE                = Drivers \
                          Middlewares \
                          build \
-                         test/stubs \
+                         test \
                          Platform/Inc/lwipopts.h
 EXCLUDE_PATTERNS       = */Core/*
+
+# 豁免（§12 例外登记）：PHY 寄存器位定义是硬件事实，权威来源是 PHY 数据手册，
+# 逐位写 @brief 属于低价值机械注释。排除后 dev_dp83848.h 的 API 仍然出文档。
+EXCLUDE_SYMBOLS        = DP83848_*
 
 # 只文档化导出的（非 static）符号 —— 与 §12 的"导出符号"口径一致
 EXTRACT_ALL            = NO
