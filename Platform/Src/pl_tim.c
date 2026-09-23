@@ -3,7 +3,7 @@
  * @brief       定时器平台层抽象
  *
  * 本文件只有机制，不含任何"哪几个定时器存在"的事实——那些来自板级的
- * g_pl_tim_board[]（见 boards/<板>/Src/pl_tim_board.c），因此本文件跨板共享。
+ * g_pl_tim_board[]（见 boards/&lt;板&gt;/Platform/Src/pl_tim_board.c），因此本文件跨板共享。
  */
 
 #include "pl_tim.h"

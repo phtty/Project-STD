@@ -30,11 +30,11 @@
 _Static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
 
 /* 记录扇区**必须落在固件映像之外**。固件起点 = FLASH_BASE + BOARD_VECT_TAB_OFFSET，
-   与 boards/<板>/board.ld 的 FLASH_ORIGIN 同源（两处由这条断言间接钉住）。
+   与 boards/&lt;板&gt;/STM32F407XX_FLASH.ld 的 FLASH_ORIGIN 同源（两处由这条断言间接钉住）。
 
    这两件事是耦合的，只改一个就会回到"擦掉自己"的 HardFault：
      · 给本板加 IAP bootloader → 必须同时
-         board.ld 的 FLASH_ORIGIN 改成 0x08040000（前 4 个扇区留给 bootloader）
+         board.ld 的 FLASH_ORIGIN 改成 0x08040000（前 256KB 留给 bootloader）
          board.h  的 BOARD_VECT_TAB_OFFSET 改成 0x40000
          BOARD_HAS_IAP_RECORD 置 1
      · 只把 BOARD_HAS_IAP_RECORD 置 1 而不动布局 → 这条断言当场编译失败 ✓
@@ -143,8 +143,8 @@ bool app_flash_iap_is_config_valid(volatile const app_flash_iap_sys_info_t *info
  * ================================================================ */
 
 /* ---- 记录区是否属于本板（BOARD_HAS_IAP_RECORD）----
- * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：bootloader 占
- * Sector 0~3、应用从 0x08040000 起，Sector 1 留作记录。
+ * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：应用从
+ * 0x08040000 起，其前的 256KB（Sector 0~5）留给 bootloader，Sector 1 留作记录。
  *
  * **直烧的板子固件从 0x08000000 起铺满整片，而 ADDR_CONFIG_SECTOR 是写死的
  * 0x08004000 —— 那就在固件映像内部。** 对它做任何擦写都是在抹正在执行的代码。

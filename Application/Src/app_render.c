@@ -5,7 +5,7 @@
  * 字库布局: (字号, 编码, 字型) 三元组在 Flash 中顺序拼接。
  * 具体有哪些三元组、各自多大、怎么索引，**都是板级事实**（两板字库不是同一版：
  * 3833024 是 GBK/14-16-20-24-32，5006048 是 GB2312/16-24-32-48），由
- * boards/<板>/Src/app_font_lib_board.c 的 g_board_font_lib 提供，本模块只消费。
+ * boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 的 g_board_font_lib 提供，本模块只消费。
  */
 
 #include "app_render.h"

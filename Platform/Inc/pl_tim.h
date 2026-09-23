@@ -36,7 +36,7 @@ typedef void *pl_tim_handle_t;
 #define PL_TIM_DISPLAY_SCAN PL_TIM3
 #define PL_TIM_DISPLAY_PWM  PL_TIM4
 
-/** @brief 板级定时器表项（由 boards/<板>/Src/pl_tim_board.c 提供）
+/** @brief 板级定时器表项（由 boards/&lt;板&gt;/Platform/Src/pl_tim_board.c 提供）
  *
  *  共享的 pl_tim.c 只认这张表，不认具体是哪几个定时器——哪些定时器存在、
  *  各自怎么初始化、句柄是谁、IRQ 号是多少，全是板级事实。 */

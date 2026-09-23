@@ -36,7 +36,7 @@
  * **两板的字库不是同一版**：本板 GB2312、4 字号（16/24/32/48）；3833024 是
  * GBK、5 字号（14/16/20/24/32），总量 30713088。所以这是板级量，不能放共享头。
  *
- * 必须与 Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
+ * 必须与 Application/Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
  * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
  * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
 #define BOARD_FONT_LIB_TOTAL_BYTES 18518144U
@@ -60,7 +60,7 @@
 #define BOARD_SCREEN_CANVAS (1)
 #endif
 /* 本卡颜色（dev_display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
-#define BOARD_SCREEN_COLOR (2) /* COLOR_GREEN */
+#define BOARD_SCREEN_COLOR (2) /* DEV_DISPLAY_COLOR_GREEN */
 
 /* ---- 级联切分（整屏 = 若干张等尺寸卡按网格拼）----
  *

@@ -12,15 +12,16 @@
  * 后者由 pl_task_new 累加（见 pl_task.h 里为什么只记录不阻断）。
  *
  * 输出经 printf → RTT（见 SEGGER_RTT_Syscalls_GCC.c 的 _write 重定向）。
- * RTT 上行缓冲当前 1KB（SEGGER_RTT_Conf.h），一次全量打印约 30×40 = 1.2KB 略超 ——
- * 主机侧持续读取时会被及时抽走，丢几行也无妨；要完整抓一次就把 BUFFER_SIZE_UP
- * 临时调回 4KB。
+ * RTT 上行缓冲 1KB（SEGGER_RTT_Conf.h）；一次全量打印上限 = APP_DIAG_TASK_MAX(24) 行
+ * × 33 字节/行 + 表头 ≈ 0.9KB，当前任务数下约 700 字节（见 _diag_dump 的格式串）。
+ * 输出模式是 NO_BLOCK_SKIP，主机侧不持续读取时会被截尾；要完整抓一次就把
+ * BUFFER_SIZE_UP 临时调回 4KB。
  *
  * 关闭：把下面 APP_DIAG_ENABLE 置 0。
  */
 
-#define APP_DIAG_ENABLE 0 /* 级联调试期关掉：一次全量打印约 1.2KB，会把 1KB 的 RTT 上行缓冲冲掉，
-                          * 把级联那几行挤没了。查完再打开。 */
+#define APP_DIAG_ENABLE 0 /* 默认关闭：一次全量打印约 0.9KB，会挤占 1KB 的 RTT 上行缓冲，
+                          * 把别的日志挤没了。排障时置 1 打开，打完再置回 0。 */
 
 #if APP_DIAG_ENABLE
 

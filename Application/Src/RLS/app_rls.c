@@ -86,7 +86,7 @@ app_pcb_probe_state_t app_rls_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
        即写穿栈数组。
        **而且这里只拷帧头那几个字节**：伪帧时框架会"跳 1 字节再探"，若每次都按
        `scratch_size` 拷一整帧，逐字节重跳就是 O(n²) 的 memcpy —— 级联那边实测：
-       一条 1427 字节的杂物要拷 ~2MB，三个协议绑在同一条 485 上 ~6MB，把帧分发任务
+       一条 1428 字节的杂物要拷 ~2MB，三个协议绑在同一条 485 上 ~6MB，把帧分发任务
        拖住 40ms+；而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议
        缓冲里挤掉（"装不下就丢旧留新"）。判"是不是本协议的帧"只要这 6 个字节。 */
     const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_rls_frame_t))

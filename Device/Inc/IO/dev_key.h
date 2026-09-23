@@ -50,7 +50,7 @@ struct dev_key {
     uint32_t        last_edge_ms; /* 上次被采纳的边沿时刻，EXTI 回调据此软件去抖 */
 };
 
-/** @brief 板级按键描述（由 boards/<板>/Src/dev_key_board.c 提供）
+/** @brief 板级按键描述（由 boards/&lt;板&gt;/Device/Src/dev_key_board.c 提供）
  *
  *  "本板有哪些按键、各在哪根引脚、有没有 EXTI"是板级事实；而按键实例的存储、
  *  虚表选择、去抖、信号量生命周期都是机制，留在 dev_key.c。

@@ -7,7 +7,7 @@
  * - dip:  无 EXTI，wait_press=NULL，get_state 直接读 GPIO（DIP1~DIP2）
  *
  * 本文件只有机制；"本板有哪些按键、各在哪根引脚"来自板级的 g_dev_key_board[]
- * （见 boards/<板>/Src/dev_key_board.c）。板上没有的按键 id 不在表里，
+ * （见 boards/&lt;板&gt;/Device/Src/dev_key_board.c）。板上没有的按键 id 不在表里，
  * dev_key_get() 返回 NULL，因此下面所有遍历都要容忍空槽。
  */
 

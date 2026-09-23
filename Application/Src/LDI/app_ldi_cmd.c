@@ -734,7 +734,7 @@ static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data)
                            ((uint32_t)head->unix_timestamp[1] << 16) |
                            ((uint32_t)head->unix_timestamp[2] << 8) |
                            (uint32_t)head->unix_timestamp[3];
-    pl_rtc_set_timestamp(pl_rtc_get_handle(), ts); // 调试：排除 RTC 并发写
+    pl_rtc_set_timestamp(pl_rtc_get_handle(), ts); /* 用 E0H 响应里的 unix 时间戳校准 RTC */
 
     uint8_t error_code = *((uint8_t *)data + sizeof(app_ldi_req_head_t));
     if (error_code == 0x00)

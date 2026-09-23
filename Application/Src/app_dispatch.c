@@ -20,7 +20,7 @@
 #include "initcall.h"
 #include "pl_mem.h"
 
-#include <stdio.h> /* 诊断输出（限次，查完连着开关一起删） */
+#include <stdio.h> /* 诊断输出（限次；DISPATCH_DIAG 默认关，排障时开） */
 #include <string.h>
 #include "pl_task.h"
 

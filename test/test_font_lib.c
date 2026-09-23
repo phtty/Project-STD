@@ -36,7 +36,7 @@ typedef struct {
     uint32_t   off;
 } font_expect_t;
 
-/* 用 BOARD 的编译期量做板间判别 —— 测试按板级头分层的包含路径分板编译（-I $(BOARD_DIR)/<层>/Inc），
+/* 用 BOARD 的编译期量做板间判别 —— 测试按板级头分层的包含路径分板编译（-I $(BOARD_DIR)/&lt;层&gt;/Inc），
    新板加进来时这里会直接 #error 提示补表，而不是悄悄跳过核对。 */
 #if BOARD_FONT_LIB_TOTAL_BYTES == 18518144U
 /* ---- 5006048：GB2312，16/24/32/48，每组 FS,HT,KT,ST ---- */

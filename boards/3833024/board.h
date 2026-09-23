@@ -12,8 +12,9 @@
 #pragma once
 
 /* ---- IAP 配置记录是否存在 ----
- * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：bootloader 占
- * Sector 0~3、应用从 0x08040000 起，Sector 1 留作记录（见 board.ld 的 FLASH 起始）。
+ * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：应用从
+ * 0x08040000 起，其前的 256KB（Sector 0~5）留给 bootloader，Sector 1 留作记录
+ * （见 board.ld 的 FLASH 起始）。
  * 直烧的板子固件从 0x08000000 起铺满整片，**0x08004000 就在固件映像内部** ——
  * 那里没有记录，对它做任何擦写都是在抹自己的代码。详见 app_iap_cfg.c 的说明。 */
 #define BOARD_HAS_IAP_RECORD 1
@@ -31,7 +32,7 @@
  * **两板的字库不是同一版**：本板 GBK、5 字号（14/16/20/24/32）；5006048 是
  * GB2312、4 字号（16/24/32/48），总量 18518144。所以这是板级量，不能放共享头。
  *
- * 必须与 Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
+ * 必须与 Application/Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
  * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
  * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
 #define BOARD_FONT_LIB_TOTAL_BYTES 30713088U
@@ -54,7 +55,7 @@
 #define BOARD_SCREEN_CANVAS     (0)
 #endif
 /* 本卡颜色（dev_display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
-#define BOARD_SCREEN_COLOR      (2) /* COLOR_GREEN */
+#define BOARD_SCREEN_COLOR      (2) /* DEV_DISPLAY_COLOR_GREEN */
 
 /* ---- 级联切分（整屏 = 若干张等尺寸卡按网格拼）----
  * 与 5006048 同名同义，说明见那边的 board.h。本板单卡屏 128×32，
@@ -92,9 +93,11 @@
 #define BOARD_CASC_BAND_MAX  (512U)
 
 /* ---- 级联总线地址（app_screen_self_addr）----
- * 0 = 主卡，1..0x1F = 从卡。**本期是编译期常量**，即主卡与从卡烧不同固件；
- * 后续期由 W25Qxx 的切分表记录覆盖 —— 同型号板子可以是 2/3/4 卡部署，
- * 那是部署期事实，不可能永久写死在固件里。
+ * 0 = 主卡，1..0x1F = 从卡。
+ *
+ * **运行期事实，不写死在固件里**：两块卡烧**同一份固件**，谁是谁由三重来源决定，
+ * 优先级 **拨码（本板有）> W25Qxx 记录（`casc_id`）> 本宏（出厂默认）**。
+ * 没有拨码的板子（5006048）按 TEST 键认领 —— 被按的那张卡成为主卡并写记录。
  *
  * 注意 3833024 有 DIP1/DIP2 可以直接读出地址（2 bit = 4 码，恰好 1 主 + 3 从），
  * 而 5006048 只有 KEY_TST、没有拨码 —— 所以本参数不能做成"必须靠硬件读"，

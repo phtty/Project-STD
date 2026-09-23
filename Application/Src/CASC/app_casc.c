@@ -85,7 +85,7 @@ _Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(app_casc_nack_t), "NACK �
    队列一满框架就**静默丢帧**（Put 超时为 0），现场表现为"总缺中间那几片"。
 
    一帧一轮之后连发没了：主卡发一条、从卡回一条，**任何时刻队列里最多一条**，
-   2 就是留一格的余量。而深度现在也不是能随便加的 —— 队列元素 = 8 + 1427 = 1435 字节
+   2 就是留一格的余量。而深度现在也不是能随便加的 —— 队列元素 = 8 + 1428 = 1436 字节
    （位图整块进队列），深 8 要 11.5KB CCMRAM，而 CCMRAM 总共只剩 2.2KB 空闲。 */
 #define CASC_QUEUE_DEPTH (2U)
 
@@ -93,7 +93,7 @@ _Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(app_casc_nack_t), "NACK �
  *
  * 必须在 **.bss（SRAM）**：RS485 通道按"指针是否落 CCMRAM"在 DMA 与轮询之间二选一
  * （app_rs485.c 的 _rs485_send），挪进 CCMRAM 不会报错，只会**静默退化成轮询发送** ——
- * 一帧 1427 字节 @115200 就是 124ms 的 CPU 被烧在这条任务里。`_casc_init` 里有
+ * 一帧 1428 字节 @115200 就是 124ms 的 CPU 被烧在这条任务里。`_casc_init` 里有
  * 一次性校验，真被挪了会打出来。
  *
  * 一块够所有卡轮着用：`app_ccb_send` 是**阻塞**语义（DMA 等 TC、轮询等发完），返回即发完。
@@ -121,7 +121,7 @@ static const osMessageQueueAttr_t s_casc_queue_attr = {
  * **丢旧留新**（整段 flush 再写），而它分不清"旧数据是半截帧"与"旧数据是一条完整
  * 但还没轮到解析的帧"。实测就撞上了：帧分发任务被同一条总线上别的协议的探针拖住
  * 几十毫秒（见 _casc_probe_frame 里那段 O(n²) 的说明），这期间**下一条帧的第一段**
- * 就到了 —— 2112 装不下 1427 + 1211，于是那条完整帧被 flush 掉，主卡只能重发。
+ * 就到了 —— 2112 装不下 1428 + 1211，于是那条完整帧被 flush 掉，主卡只能重发。
  * 留够"两帧"的余量，这种抢占就不会发生（仍留有 flush 兜底，只是不再误伤整帧）。 */
 RB_DEFINE_ATTR(s_casc_rb, 4096, PL_CCMRAM);
 
@@ -152,7 +152,7 @@ static osMessageQueueId_t s_casc_queue;
 /* **整帧重传**次数上限（一封帧最多发 1 + 本值 次）。
  *
  * 一帧就是一幅完整画面，所以"重传"没有"只补缺的那几片"这种粒度可言 —— 整帧重发。
- * 一条 1427 字节的重发（124ms）换掉整套缺片追踪，值。
+ * 一条 1428 字节的重发（124ms）换掉整套缺片追踪，值。
  * 但不能无限试：卡真的掉线时，每轮都卡在这儿会拖长整轮时间（其余卡与主卡本来不用等它），
  * 所以上限 2 次 ≈ 3×(124ms 发送 + 200ms 等应答)，之后交 `CASC_FAIL_RUN_MAX` 去剔除。 */
 #define CASC_RETRY_MAX (2U)
@@ -162,7 +162,7 @@ static osMessageQueueId_t s_casc_queue;
  * **不能只发一次就下结论**：从卡可能比主卡晚就绪，或者那一帧正好赶上总线冲突。
  * 只发一次的话"链路其实没问题"会被报成"整个不通"—— 实测就撞上过：枚举说没人应答，
  * 紧接着的对齐轮次却全部成功，把人往接线/上电的方向引了半天。
- * （这也正是 P4 要做的"运行期重新枚举"的雏形。） */
+ * 运行期也按 `CASC_REENUM_MS` 周期重跑这一套，故这条判据同样适用。 */
 #define CASC_PING_TRIES     (5U)
 #define CASC_PING_RETRY_MS  (250U)
 
@@ -307,7 +307,7 @@ static app_pcb_probe_state_t _casc_probe_frame(app_pcb_t *self, const app_ccb_t 
     /* ---- **先只窥视帧头，别一上来就拷整帧** ----
      *
      * 伪帧时框架会"跳 1 字节再探"，于是"每次探都把整帧拷进暂存区"就成了 O(n²)：
-     * 实测一条 1427 字节的杂物要拷 ~2MB（1427 次 × 每次 ~1428 字节），×3 个协议 = ~6MB，
+     * 实测一条 1428 字节的杂物要拷 ~2MB（1428 次 × 每次 ~1428 字节），×3 个协议 = ~6MB，
      * 把帧分发任务拖住**四十多毫秒** —— 而这段时间里同一条总线上后到的帧会把前一条
      * **完整但还没轮到解析的**帧从协议缓冲里挤掉（丢旧留新），现场表现就是
      * "跨回绕拆成两段的帧总是丢、一次发完的就成"。所以头没对上就直接 FAKE，
@@ -453,7 +453,8 @@ int32_t app_casc_broadcast_bright(uint8_t level)
 /* ================================================================
  *  命令处理
  *
- *  P2 只三条：PING / PRESENT / SET_BRIGHT。分派按 `msg->aux` 查表 ——
+ *  当前 7 条命令（IMAGE / SET_ADDR / PING / PRESENT / SET_BRIGHT / ACK / NACK）
+ *  都在这张表里。分派按 `msg->aux` 查表 ——
  *  与 app_iap.c 同一做法，**且必须先做范围检查再索引**（那里写着不检查就等于
  *  给出一条可控的越界函数调用）。
  * ================================================================ */
@@ -485,7 +486,7 @@ static void _cmd_ping(app_dispatch_msg_t *msg)
 
 static void _cmd_present(app_dispatch_msg_t *msg)
 {
-    /* 主卡收：枚举结果先打出来。P4 建卡表时这里改成填表 + 校验几何。 */
+    /* 主卡收：枚举结果先打出来，并把这张卡置为 ONLINE、清失败计数（建表）。 */
     if (!app_screen_is_master()) return;
     if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_present_t))) return;
 
@@ -687,7 +688,8 @@ static void _cmd_set_addr(app_dispatch_msg_t *msg);
 
 typedef void (*app_casc_cmd_fn_t)(app_dispatch_msg_t *msg);
 
-/* 按帧类型索引。0 项留空 = 未实现或不支持（SET_COLOR/SET_LAYOUT/BLANK 归后续期）。 */
+/* 按帧类型索引。0 项留空 = 本协议未用的类型位（SET_COLOR/SET_BLANK 已裁掉，
+   颜色随 IMAGE 携带；不存在 SET_LAYOUT 类型）。 */
 static const app_casc_cmd_fn_t s_casc_cmd_table[CASC_TYPE_MASK + 1U] = {
     [APP_CASC_TYPE_IMAGE]      = _cmd_image,
     [APP_CASC_TYPE_SET_ADDR]   = _cmd_set_addr,
@@ -759,7 +761,7 @@ static bool _wait_ack(uint8_t from, uint16_t seq, uint32_t deadline)
  *
  *  一轮 = 把**整屏**的新内容分发给每张从卡（各发它那一块，一帧装下），全部结算完后
  *  主卡自己也换帧。刷新需求是指令式的（几秒~几分钟一次），所以一轮 ~135ms/卡
- *  （1427 字节 @115200 的 124ms + 应答往返）完全够用 —— 这也是不做差分模式的前提。
+ *  （1428 字节 @115200 的 124ms + 应答往返）完全够用 —— 这也是不做差分模式的前提。
  * ================================================================ */
 
 /** @brief 单张从卡的一轮：发一条 IMAGE（含整块位图）→ 等应答 → 失败则整帧重发
@@ -1350,7 +1352,7 @@ static void _casc_task(void *argument)
 
         /* 上电枚举：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒起发，
            没等到应答就再发 —— 见 CASC_PING_TRIES 的说明。
-           运行期的重新枚举（拔插、掉线恢复）留到 P4。 */
+           运行期也按 CASC_REENUM_MS 周期重新枚举（拔插、掉线恢复），见该宏的说明。 */
         if (app_screen_is_master() && !s_ping_left_cnt && s_enum_deadline_tick == 0 &&
             (int32_t)(now - s_reenum_at_tick) >= 0) {
             _enum_start(now);
@@ -1372,7 +1374,8 @@ static void _casc_task(void *argument)
 
         /* 亮度待下发：光传感器每秒钟都可能改，这里把"变了"攒成一次广播。
            广播本身**不要求应答** —— 亮度差一帧不可见，且它天然是渐变量。
-           "从卡永久停在旧亮度"的防线是 P3 起每一轮 SYNC_BEGIN 都带 bright 重新断言。 */
+           "从卡永久停在旧亮度"的防线是每一轮 IMAGE 都带 bright 重新断言
+           （见 app_casc.h 的 app_casc_image_t.bright）。 */
         uint8_t lv;
         if (app_screen_is_master() && app_screen_brightness_take_pending(&lv)) {
             (void)app_casc_broadcast_bright(lv);

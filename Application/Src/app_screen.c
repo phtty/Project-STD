@@ -2,13 +2,12 @@
  * @file    app_screen.c
  * @brief   整屏门面实现 —— 1bpp 逻辑画布 + 渲染目标 + 落屏 + 亮度
  *
- * 见 app_screen.h 的设计说明。本文件在 P1（画布与渲染目标）阶段的形态：
- * **不开级联**，逻辑几何 = 本屏几何，画布画完直接落到本地屏。
- * 级联接入后几何来自切分表、提交改为"抽取本卡矩形 + 逐卡下发"。
+ * 见 app_screen.h 的设计说明。逻辑几何来自切分表（单卡时即本屏几何），画布画完后
+ * 抽取本卡矩形再落屏（多卡时逐卡下发）—— 见 app_screen_extract / app_screen_commit_self。
  *
- * 默认关闭（board.h 的 BOARD_SCREEN_CANVAS）：单独一块卡上，画布是纯开销 ——
- * 它多占一块 1bpp 缓冲、多一次拷贝，还要把卡内多色塌缩成单色，却没有换来任何功能。
- * 等级联落地时再打开。中间靠 `app_render_set_target(NULL)` 即可完全回退。
+ * 由 board.h 的 BOARD_SCREEN_CANVAS 开关：多卡级联的板子打开（5006048 即如此），
+ * 单独一块卡上，画布是纯开销 —— 它多占一块 1bpp 缓冲、多一次拷贝，还要把卡内多色
+ * 塌缩成单色，却没有换来任何功能。中间靠 `app_render_set_target(NULL)` 即可完全回退。
  */
 
 #include "app_screen.h"
@@ -435,8 +434,8 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
 
 /** @brief 把画布落到本地屏。
  *
- *  P1：逻辑几何 == 本屏几何，画布可以整块交出去。
- *  级联接入后这里要改成"按切分表抽出本卡那个矩形"，因为画布会大于本屏。 */
+ *  几何来自切分表，画布可能大于本屏 —— 落屏前按切分表抽出本卡那个矩形
+ *  （`app_screen_extract`）。 */
 /* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
 #if BOARD_SCREEN_CANVAS
 
@@ -627,7 +626,7 @@ static const app_render_persist_hook_fn_t s_persist_hook = {.save = _persist_sav
  *  格式沿用 app_render_persist_t（1bpp、MSB-first），但多带一个颜色字段已经够用
  *  （本卡颜色由切分表给，不随内容变）。
  *
- *  P1 阶段画布 == 本屏，所以存画布与存实屏等价；改动的意义在于接上钩子这条缝。
+ *  画布已大于本屏，存画布与存实屏不再等价；改动的意义在于接上钩子这条缝。
  * ================================================================ */
 
 static void _persist_save(void)

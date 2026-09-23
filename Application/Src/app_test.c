@@ -105,5 +105,5 @@ void app_test_run(void)
     // app_test_led_mapping(); /* 新模组灯序确认时启用 */
     app_test_pixel_scan();
     // app_test_render_text();
-    // board_test_io_output(); /* 板级测试，见 boards/<板>/Src/app_test_board.c */
+    // board_test_io_output(); /* 板级测试，见 boards/&lt;板&gt;/Application/Src/app_test_board.c */
 }

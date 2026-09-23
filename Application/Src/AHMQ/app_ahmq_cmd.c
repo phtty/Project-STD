@@ -121,7 +121,7 @@ static void _cmd_checktime(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 }
 
 /**
- * @brief 拼接回复主题（<设备标识>/<后缀>）并记入协议对象，供随后的 app_ccb_send_to 使用
+ * @brief 拼接回复主题（设备标识 + 后缀）并记入协议对象，供随后的 app_ccb_send_to 使用
  *
  * @param self   协议对象（提供设备标识与回复缓冲）
  * @param suffix 命令对应的回复后缀

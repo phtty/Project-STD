@@ -341,7 +341,7 @@ app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
        rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。
        **注意这里拷的只有帧头那几个字节**（原先传的是 scratch_size，等于每探一次就把
        整帧拷一遍）：框架对伪帧的做法是"跳 1 字节再探"，每次拷一整帧就退化成 O(n²) 的
-       memcpy —— 实测一条 1427 字节的杂物 ~2MB、两个协议 ~4MB，把帧分发任务拖住
+       memcpy —— 实测一条 1428 字节的杂物 ~2MB、两个协议 ~4MB，把帧分发任务拖住
        几十毫秒，而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议缓冲里
        挤掉（"装不下就丢旧留新"）。判"是不是本协议的帧"只要这 8 个字节。 */
     const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_ldi_frame_t))

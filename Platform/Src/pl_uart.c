@@ -5,7 +5,7 @@
  * 提供不透明句柄、阻塞发送和 DMA 空闲中断接收。
  *
  * 本文件只有机制，不含"本板有哪几路 UART"——那来自板级的 g_pl_uart_board[]
- * （见 boards/<板>/Src/pl_uart_board.c）。ISR 向量也在板级文件里，因为
+ * （见 boards/&lt;板&gt;/Platform/Src/pl_uart_board.c）。ISR 向量也在板级文件里，因为
  * "有哪些中断向量、哪个 DMA 流配哪一路"同样是板级事实。
  */
 
@@ -317,7 +317,7 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
 }
 
 /* ================================================================
- *  中断入口（由 boards/<板>/Src/pl_uart_board.c 里的向量调用）
+ *  中断入口（由 boards/&lt;板&gt;/Platform/Src/pl_uart_board.c 里的向量调用）
  * ================================================================ */
 
 void pl_uart_irq_handler(uint8_t id)

@@ -69,9 +69,6 @@ const osThreadAttr_t g_tcp_server_task_attr = {
     .priority   = osPriorityNormal,
 };
 
-/* ---- 调试变量 ---- */
-static volatile int s_tcp_server_connected;
-
 /* ================================================================
  *  manage 任务: bind → listen → accept → 派生 conn → 等待断开 → 循环
  * ================================================================ */
@@ -138,7 +135,6 @@ void app_tcp_server_conn_task(void *argument)
     app_tcp_ccb_t *tcp         = &s_tcp_server_ccb;
     tcp->conn              = conn;
     tcp->base.state        = APP_CCB_STATE_UP;
-    s_tcp_server_connected = 1;
 
     struct netbuf *buf;
     void *data;
@@ -154,7 +150,6 @@ void app_tcp_server_conn_task(void *argument)
     }
 
     /* 先置 DOWN 再清 conn：send 路径据此拒绝访问即将释放的 netconn */
-    s_tcp_server_connected = 0;
     tcp->base.state        = APP_CCB_STATE_DOWN;
     tcp->conn              = nullptr;
     netconn_close(conn);

@@ -6,7 +6,7 @@
  * 不持有应用级 RTOS 对象。
  *
  * 中断向量不在这里：哪些 EXTI 向量存在、各自服务哪几根引脚是板级事实，
- * 写在 boards/<板>/Src/pl_exti_board.c，函数体复用 HAL_GPIO_EXTI_IRQHandler +
+ * 写在 boards/&lt;板&gt;/Platform/Src/pl_exti_board.c，函数体复用 HAL_GPIO_EXTI_IRQHandler +
  * 本文件的 HAL_GPIO_EXTI_Callback。
  */
 

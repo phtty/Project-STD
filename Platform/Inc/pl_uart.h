@@ -27,7 +27,7 @@ enum {
 /** @brief UART 不透明句柄 */
 typedef void *pl_uart_handle_t;
 
-/** @brief 板级 UART 表项（由 boards/<板>/Src/pl_uart_board.c 提供）
+/** @brief 板级 UART 表项（由 boards/&lt;板&gt;/Platform/Src/pl_uart_board.c 提供）
  *
  *  PL_UART_MAX 是 A/B 两块板枚举的并集；某块板没有的那几路 .init/.huart 留 NULL，
  *  pl_uart_init 会跳过，pl_uart_get_handle 返回的 ctx 里 huart 为 NULL，
@@ -48,7 +48,7 @@ extern const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX];
  *
  *  ISR 向量名（USART1_IRQHandler / DMA2_Stream2_IRQHandler …）必须写在某个 .c 里，
  *  而"本板有哪些中断、哪个 DMA 流属于哪一路"是板级事实，所以向量放在
- *  boards/<板>/Src/pl_uart_board.c，函数体复用这两个共享入口。 */
+ *  boards/&lt;板&gt;/Platform/Src/pl_uart_board.c，函数体复用这两个共享入口。 */
 void pl_uart_irq_handler(uint8_t id);
 void pl_uart_dma_irq_handler(uint8_t id);
 /** @brief TX DMA 流的中断入口（与 RX 分开：两条流各有各的向量，

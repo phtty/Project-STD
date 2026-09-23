@@ -4,7 +4,7 @@
  *
  * 字库存储为 (字号, 编码, 字型) 三元组的顺序拼接。
  * **具体有哪些三元组、各自多大、怎么索引，是板级事实** —— 由
- * boards/<板>/Src/app_font_lib_board.c 的 g_board_font_lib 描述，本文件只声明接口。
+ * boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 的 g_board_font_lib 描述，本文件只声明接口。
  * 新增渲染类型只需在 app_render_type_t 和 union 中追加。
  */
 
@@ -80,7 +80,7 @@ typedef struct {
  * 只会让每种字型都取到别人的字形（旧 feat/old_font_lib 分支就踩在这上面：
  * 它按 ST,FS,KT,HT 排，而 5006048 的映像地理顺序是 FS,HT,KT,ST，24/32 项错位）。
  *
- * 唯一实例 g_board_font_lib 由 boards/<板>/Src/app_font_lib_board.c 提供。 */
+ * 唯一实例 g_board_font_lib 由 boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 提供。 */
 typedef struct {
     const app_font_unit_t *lib;
     uint16_t           lib_count;
