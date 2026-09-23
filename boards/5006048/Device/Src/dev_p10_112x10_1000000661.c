@@ -1,5 +1,5 @@
 /**
- * @file    dev_display_p10.c
+ * @file    dev_p10_112x10_1000000661.c
  * @brief   P10 模组派生类型 — 1/2 扫描、50 数据通道（自 B 工程 display.c 移植）
  *
  * 实现 dev_display_ops:

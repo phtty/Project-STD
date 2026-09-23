@@ -67,8 +67,8 @@
 #include "app_dispatch.h" /* FRAME_DATA_MAX_LEN —— 上限断言；app_pcb_t —— 协议控制块 */
 
 /* ---- 帧定界与固定开销 ---- */
-#define CASC_SOF0 (0xA5U)
-#define CASC_SOF1 (0x5AU)
+#define CASC_SOF0 (0xA5U) /**< 帧起始第 1 字节 */
+#define CASC_SOF1 (0x5AU) /**< 帧起始第 2 字节 */
 
 /** @brief 帧头 + 尾 CRC 的固定开销：头 11 字节（2 sof + 1 ver_type + 1 dst + 1 src
  *         + 2 seq + 1 idx + 1 frag_n + 2 len）+ CRC32 4 字节 */
@@ -83,8 +83,8 @@
 #define CASC_PROTO_VER (3U)
 
 /* ---- 地址 ---- */
-#define CASC_ADDR_MASTER (0x00U)
-#define CASC_ADDR_BCAST  (0xFFU)
+#define CASC_ADDR_MASTER (0x00U) /**< 主卡总线地址 */
+#define CASC_ADDR_BCAST  (0xFFU) /**< 广播地址 */
 
 /* ---- 帧类型（ver_type 的低 6 位）----
  *
@@ -92,6 +92,8 @@
  * 颜色本来就随每轮 IMAGE 一起下发（见 `app_casc_image_t.color`），"清屏"就是"发一块全黑的
  * 位图"（主卡每轮都发整块位图）—— 两条都是冗余的命令，留着只会让人以为有别的语义。
  */
+
+/** @brief 级联帧类型（ver_type 低 6 位），方向靠 0x20 位区分 */
 typedef enum {
     /* 主 → 从 */
     APP_CASC_TYPE_IMAGE      = 0x01, /**< 一轮就是这一条：本卡那一块整块位图 + 本轮参数 */
@@ -109,19 +111,21 @@ typedef enum {
     APP_CASC_TYPE_NACK    = 0x23, /**< 本轮拒收（配置错，重发没用） */
 } app_casc_type_t;
 
-#define CASC_TYPE_MASK (0x3FU)
-#define CASC_TYPE_OF(vt) ((uint8_t)((vt) & CASC_TYPE_MASK))
+#define CASC_TYPE_MASK (0x3FU)                      /**< 帧类型字段掩码（ver_type 低 6 位） */
+#define CASC_TYPE_OF(vt) ((uint8_t)((vt) & CASC_TYPE_MASK)) /**< 取 ver_type 的帧类型低 6 位 */
 
 /* ---- 帧头 ---- */
+
+/** @brief 级联帧头（11 字节） */
 typedef struct [[gnu::packed]] {
-    uint8_t sof[2];
-    uint8_t ver_type;
-    uint8_t dst;
-    uint8_t src;
-    uint8_t seq[2];
-    uint8_t idx;
-    uint8_t frag_n;
-    uint8_t len[2];
+    uint8_t sof[2];    /**< 帧定界，固定 0xA5 0x5A */
+    uint8_t ver_type;  /**< b7..b6 = 协议版本，b5..b0 = 帧类型 */
+    uint8_t dst;       /**< 目的地址：00 = 主卡，01..1F = 从卡，FF = 广播 */
+    uint8_t src;       /**< 源地址：主卡恒 00，从卡填自身地址 */
+    uint8_t seq[2];    /**< 轮次序号，大端 */
+    uint8_t idx;       /**< 保留（分片已废弃，恒 0） */
+    uint8_t frag_n;    /**< 保留（分片已废弃，同上） */
+    uint8_t len[2];    /**< 整帧字节数（含头含 CRC），大端 */
 } app_casc_hdr_t;
 
 _Static_assert(sizeof(app_casc_hdr_t) == 11, "级联帧头必须是 11 字节");
@@ -253,8 +257,8 @@ _Static_assert(sizeof(app_casc_image_t) == 13, "IMAGE 载荷头必须是 13 字�
  * **由板级带缓冲推出，不写裸字面量**：一帧必须装得下**一整块本卡位图**，
  * 也就是 `BOARD_CASC_BAND_MAX`。换模组只改 board.h 一处，这里自动跟上；
  * 装不下时下面这条断言会在编译期就把话说清楚（而不是运行期静默跳过那张卡）。 */
-#define CASC_FRAME_MAX (CASC_OVERHEAD + sizeof(app_casc_image_t) + BOARD_CASC_BAND_MAX)
-#define CASC_FRAME_MIN (CASC_OVERHEAD)
+#define CASC_FRAME_MAX (CASC_OVERHEAD + sizeof(app_casc_image_t) + BOARD_CASC_BAND_MAX) /**< 单帧最大字节数（含整块本卡位图） */
+#define CASC_FRAME_MIN (CASC_OVERHEAD) /**< 单帧最小字节数（仅固定开销） */
 
 _Static_assert(CASC_FRAME_MAX <= FRAME_DATA_MAX_LEN,
                "本卡位图一帧装不下 —— 抬 FRAME_DATA_MAX_LEN（app_dispatch.h）");
@@ -281,8 +285,9 @@ typedef enum {
     APP_CASC_NACK_ADDR = 3, /**< 识别帧与本板定址冲突（本板有拨码、以拨码为准） */
 } app_casc_nack_err_t;
 
+/** @brief NACK 载荷：拒收原因 */
 typedef struct [[gnu::packed]] {
-    uint8_t err; /**< app_casc_nack_err_t */
+    uint8_t err; /**< 拒收原因，取值见 app_casc_nack_err_t */
 } app_casc_nack_t;
 
 /* ---- 本机身份见 app_screen.h ----
@@ -292,13 +297,17 @@ typedef struct [[gnu::packed]] {
 /* ---- 协议控制块（供板级 initcall 追加绑定用）---- */
 #if BOARD_CASC_ENABLED
 
+/** @brief 取级联协议控制块（供板级 initcall 追加绑定用）
+ *  @return 级联协议控制块指针，恒非 NULL */
 app_pcb_t *app_casc_pcb(void);
 
-/** @brief 枚举：主卡广播一次 PING。上电初始化后与运行期都可以调。 */
+/** @brief 枚举：主卡广播一次 PING。上电初始化后与运行期都可以调。
+ *  @return 发出的整帧字节数（>0）；-1 = 组帧失败未发出 */
 int32_t app_casc_ping(void);
 
-/** @brief 整屏调光：主卡广播一次亮度等级。从卡收到后写自己的 light_level。 */
-
+/** @brief 整屏调光：主卡广播一次亮度等级。从卡收到后写自己的 light_level。
+ *  @param level 亮度等级（0..7，超出按 7 夹紧）
+ *  @return 发出的整帧字节数（>0）；-1 = 组帧失败未发出 */
 int32_t app_casc_broadcast_bright(uint8_t level);
 
 #endif /* BOARD_CASC_ENABLED */

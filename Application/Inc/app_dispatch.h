@@ -44,12 +44,14 @@
 #define FRAME_DATA_MAX_LEN (1440U)
 
 /* ---- 通道连接状态 ---- */
+/** @brief 通道连接状态 */
 typedef enum {
-    APP_CCB_STATE_DOWN = 0,
-    APP_CCB_STATE_UP   = 1,
+    APP_CCB_STATE_DOWN = 0, /**< 通道断开 */
+    APP_CCB_STATE_UP   = 1, /**< 通道可用 */
 } app_ccb_state_t;
 
 /* ---- 帧探测结果 ---- */
+/** @brief 帧探测结果 —— 探针给框架的处置决定 */
 typedef enum {
     APP_PCB_PROBE_STATE_READY, /**< 完整帧就绪 */
     APP_PCB_PROBE_STATE_WAIT,  /**< 数据不足，等待更多字节 */
@@ -58,7 +60,9 @@ typedef enum {
 } app_pcb_probe_state_t;
 
 /* ---- 基类前置声明 ---- */
+/** @brief 通道控制块（基类）*/
 typedef struct app_ccb app_ccb_t;
+/** @brief 协议控制块（基类）*/
 typedef struct app_pcb app_pcb_t;
 
 /**
@@ -83,7 +87,7 @@ typedef struct {
     const char *topic; /**< 来源字符串地址，如 MQTT 主题（其余通道为 nullptr）*/
 } app_ccb_src_t;
 
-/** 来源主题的最大长度（含结尾 NUL）。需要更长的通道请一并调大此值。 */
+/** @brief 来源主题的最大长度（含结尾 NUL）；需要更长的通道请一并调大此值 */
 #define APP_CCB_SRC_TOPIC_MAX (48U)
 
 
@@ -96,10 +100,10 @@ typedef struct {
  * @param self          协议控制块；派生实现用 container_of 取回自身属性
  * @param ccb            数据来源通道
  * @param src           本帧来源描述（可为 nullptr）；只在本次调用内有效
- * @param scratch       框架提供的暂存区（即入队缓冲），容量 scratch_size
+ * @param[out] scratch  框架提供的暂存区（即入队缓冲），容量 scratch_size
  * @param scratch_size  暂存区容量；帧长超过它时必须返回 SKIP，不得越界写
- * @param total_len     输出：完整帧长度（READY / SKIP 时有效）
- * @param aux           输出：协议层分类（命令码等）。READY 时由框架存进
+ * @param[out] total_len 完整帧长度（READY / SKIP 时有效）
+ * @param[out] aux      协议层分类（命令码等）。READY 时由框架存进
  *                      app_dispatch_msg_t.aux 一并投递给协议任务 —— 探针在投递当下
  *                      能看到的 per-message 信息（如来源地址的分类结果）由此
  *                      传给协议任务，不必事后从通道对象上再捞一次。
@@ -112,13 +116,13 @@ typedef app_pcb_probe_state_t (*app_pcb_probe_fn_t)(app_pcb_t *self, const app_c
 
 /** @brief 协议虚表 —— 追加新方法时不影响已有协议 */
 typedef struct app_pcb_ops {
-    app_pcb_probe_fn_t probe;
+    app_pcb_probe_fn_t probe; /**< 探测并分类一帧 */
 } app_pcb_ops_t;
 
 /** @brief 协议控制块（基类）— 协议模块静态持有 */
 struct app_pcb {
     const char        *name;        /**< 首成员：排障时用于识别对象 */
-    const app_pcb_ops_t *ops;
+    const app_pcb_ops_t *ops;       /**< 协议虚表 */
     ring_buffer_t     *rb;          /**< 协议自有缓冲区（须先 rb_init）*/
     osMessageQueueId_t queue;       /**< 协议自有帧队列，在 sw initcall 中创建 */
     uint16_t           payload_max; /**< 本协议最长帧，须 ≤ FRAME_DATA_MAX_LEN */
@@ -148,53 +152,61 @@ typedef struct {
     const char *topic;     /**< 目的字符串地址，如 MQTT 主题（MQTT 支持；其余忽略）*/
 } app_ccb_dst_t;
 
+/** @brief 通道虚表 —— 追加新方法时不影响已有通道 */
 typedef struct app_ccb_ops {
-    /** 发送；dst 为 nullptr 表示回复到本帧来源 */
-    int32_t (*send)(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len);
+    int32_t (*send)(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len); /**< 发送；dst 为 nullptr 表示回复到本帧来源 */
 } app_ccb_ops_t;
 
 /** @brief 通道控制块（基类）— 通道模块静态持有 */
 struct app_ccb {
     const char     *name;                /**< 首成员：排障时用于识别对象 */
-    const app_ccb_ops_t *ops;
+    const app_ccb_ops_t *ops;            /**< 通道虚表 */
     uint8_t         state;               /**< app_ccb_state_t */
     app_pcb_t          *protos[APP_CCB_PROTO_MAX];/**< 本通道承载的协议（绑定顺序）*/
-    uint8_t         proto_cnt;
+    uint8_t         proto_cnt;           /**< 已绑定协议数（≤ APP_CCB_PROTO_MAX）*/
 };
 
 /* ---- 帧消息（协议队列元素）---- */
 
+/** @brief 协议队列元素 —— 一帧及其来源信息 */
 typedef struct {
-    app_ccb_t *ccb;
-    uint16_t   data_len;
+    app_ccb_t *ccb;      /**< 帧来源通道 */
+    uint16_t   data_len; /**< 帧字节数 */
     uint8_t    aux; /**< 探针给出的协议层分类（命令码等），框架原样带给协议任务 */
     /* 4 字节对齐：探针会把该暂存区直接 cast 成含 uint32 字段的帧结构体
      * （如 app_iap_frame_t）访问，未对齐的字访问在 Cortex-M4 上要么变慢要么触发异常。
      * 加该属性后 offsetof(data) == 8 == sizeof(app_dispatch_msg_t)；
      * aux 落在 data_len 之后的填充字节里，不增加 sizeof。 */
-    uint8_t data[] __attribute__((aligned(4)));
+    uint8_t data[] __attribute__((aligned(4))); /**< 帧数据（4 字节对齐）*/
 } app_dispatch_msg_t;
 
 /* ---- 接收事件监听：框架以注册方式通知，不直接依赖任何业务模块 ---- */
 
+/** @brief 接收事件监听回调 —— 收到一条有效帧时触发一次 */
 typedef void (*app_dispatch_rx_listener_fn_t)(void);
 
 /* ---- 调度上下文 ---- */
 
+/** @brief 调度上下文 */
 typedef struct {
     osMessageQueueId_t ccb_queue; /**< 通道通知队列（元素为 app_ccb_t *）*/
 } app_dispatch_ctx_t;
 
-extern app_dispatch_ctx_t g_dispatch_ctx;
-extern osThreadId_t g_dispatch_task_handle;
+extern app_dispatch_ctx_t g_dispatch_ctx;   /**< 调度上下文 */
+extern osThreadId_t g_dispatch_task_handle; /**< 分发任务句柄 */
 
 /* ---- 调度 API ---- */
 
-/** @brief 声明协议承载的通道 —— 即完成注册（须在任何通道任务启动前调用）*/
+/** @brief 声明协议承载的通道 —— 即完成注册（须在任何通道任务启动前调用）
+ *  @param pcb 待绑定的协议控制块；本函数只读它，把它存入 ccb->protos[]
+ *  @param[in,out] ccb 目标通道；写入 protos[] 与 proto_cnt */
 void app_dispatch_bind(app_pcb_t *pcb, app_ccb_t *ccb);
 
 /** @brief 通道接收入口：写入本通道各协议的缓冲区并唤醒分发任务
- *  @param src 本帧来源描述，无来源概念的通道传 nullptr */
+ *  @param ccb 本帧来源通道；本函数读取其 protos[]，写入的是各协议的缓冲区
+ *  @param src 本帧来源描述，无来源概念的通道传 nullptr
+ *  @param data 本批接收到的字节
+ *  @param len  本批字节数 */
 void app_ccb_dispatch(const app_ccb_t *ccb, const app_ccb_src_t *src, const uint8_t *data,
                           uint16_t len);
 
@@ -216,5 +228,7 @@ int32_t app_ccb_send(app_ccb_t *ccb, const uint8_t *data, uint16_t len);
  *  只有到那里才知道这一帧属于哪个协议、是不是完整的帧。 */
 void app_dispatch_register_rx_listener(app_dispatch_rx_listener_fn_t fn);
 
+/** @brief 帧分发任务入口 —— 等待通道通知并依次排空各协议缓冲 */
 void app_dispatch_task(void *argument);
+/** @brief 调度初始化（sw_app_initcall）：建通道通知队列与分发任务 */
 void app_dispatch_init(void);

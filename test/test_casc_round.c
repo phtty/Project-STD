@@ -303,9 +303,9 @@ static uint16_t image_payload(uint8_t *out, uint16_t x, uint16_t y, uint16_t w, 
 
 /** @brief 组一条 IMAGE 并喂进去（带 persist 的那一版）
  *
- *  @param len_delta 把"整帧实际带的载荷"加减几个字节，用来构造"帧长与 bmp_len
- *                   自相矛盾"的帧（跨版本固件的第一道防线就是拦它）
- *  @param persist   主卡带下来的"这次内容要长期保留" */
+ *  几何与颜色参数与 image_payload() 一一对应，这里不逐个复述。
+ *  len_delta 把"整帧实际带的载荷"加减几个字节，用来构造"帧长与 bmp_len 自相矛盾"
+ *  的帧（跨版本固件的第一道防线就是拦它）；persist 是主卡带下来的"这次内容要长期保留"。 */
 static void feed_image_p(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                          uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp,
                          int len_delta, uint8_t persist)

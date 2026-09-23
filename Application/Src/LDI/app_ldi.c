@@ -233,8 +233,7 @@ static bool ldi_cmd_allowed(app_ldi_state_t state, uint8_t cmd)
  * Unix 时间戳取自内部 RTC，lane_code / cert_info 取自 g_ldi_ctx.cfg，
  * reserve 填零。不再从请求帧拷贝头部。
  *
- * @param head     待填充的响应头指针
- * @param cmd_type 响应命令码（如 APP_LDI_CMD_TYPE_SET_IP_RSP = 0xA0）
+ * 参数契约见 app_ldi.h 的声明（公开接口处）。
  */
 void app_ldi_build_rsp_head(app_ldi_req_head_t *head, uint8_t cmd_type)
 {
@@ -255,8 +254,7 @@ void app_ldi_build_rsp_head(app_ldi_req_head_t *head, uint8_t cmd_type)
  * 与 app_ldi_build_rsp_head 同理，但时间戳为 8 字节毫秒格式（秒×1000）。
  * 仅 B1H 控制查询应答使用。
  *
- * @param head     待填充的控制查询响应头指针
- * @param cmd_type 响应命令码（APP_LDI_CMD_TYPE_CTRL_RSP = 0xB1）
+ * 参数契约见 app_ldi.h 的声明（公开接口处）。
  */
 void app_ldi_build_ctrl_rsp_head(app_ldi_ctrl_head_t *head, uint8_t cmd_type)
 {

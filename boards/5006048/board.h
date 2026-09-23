@@ -6,7 +6,7 @@
  * 写死某个具体的 TIMx/USARTx——那是板级事实，换板就变。
  *
  * 本文件由 -I $(BOARD_DIR) 选中（Makefile 里排在板级头的第一位），
- * 因此共享代码统一写 #include "board.h" 即可，无需条件编译。
+ * 因此共享代码统一写 \#include "board.h" 即可，无需条件编译。
  */
 
 #pragma once
@@ -21,13 +21,13 @@
  *     本文件      BOARD_VECT_TAB_OFFSET  0 → 0x40000
  *     本文件      BOARD_HAS_IAP_RECORD    0 → 1
  * 只翻 flag 不动布局会被那条断言当场拦下。 */
-#define BOARD_HAS_IAP_RECORD 0
+#define BOARD_HAS_IAP_RECORD 0 /**< 0 = 本板直烧、无 IAP 记录（临时状态） */
 
 /* ---- 向量表偏移 ----
  * 必须与 boards/5006048/board.ld 的 FLASH_ORIGIN 保持一致：5006048 直烧 0x08000000，
  * 偏移 0；带 IAP bootloader 的板子则是 0x40000。两处不一致的表现是任何中断都
  * 跳到错误的地方（bootloader 的向量表或空白区），且不会有编译期报错。 */
-#define BOARD_VECT_TAB_OFFSET 0x00000000UL /* 做 IAP 时改 0x40000，与 board.ld 同步 */
+#define BOARD_VECT_TAB_OFFSET 0x00000000UL /**< 向量表偏移；做 IAP 时改 0x40000，须与 board.ld 同步 */
 
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
@@ -39,7 +39,7 @@
  * 必须与 Application/Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
  * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
  * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
-#define BOARD_FONT_LIB_TOTAL_BYTES 18518144U
+#define BOARD_FONT_LIB_TOTAL_BYTES 18518144U /**< 本板 W25Qxx 字库总字节数，须与 g_board_font_lib.total_bytes 一致 */
 
 /* ---- 整屏逻辑画布（app_screen）----
  *
@@ -54,13 +54,13 @@
  * 单卡形态下它是纯开销（多一块 1bpp 缓冲 + 一次拷贝 + 把卡内多色塌缩成单色），
  * 那种场合才关掉。 */
 #ifndef BOARD_SCREEN_CANVAS_MAX
-#define BOARD_SCREEN_CANVAS_MAX (5600U)
+#define BOARD_SCREEN_CANVAS_MAX (5600U) /**< 整屏逻辑画布上限（字节），按本板最大级联规模留 */
 #endif
 #ifndef BOARD_SCREEN_CANVAS
-#define BOARD_SCREEN_CANVAS (1)
+#define BOARD_SCREEN_CANVAS (1) /**< 1 = 启用整屏逻辑画布；本板双卡级联出货固定为 1 */
 #endif
 /* 本卡颜色（dev_display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
-#define BOARD_SCREEN_COLOR (2) /* DEV_DISPLAY_COLOR_GREEN */
+#define BOARD_SCREEN_COLOR (2) /**< 本卡默认颜色：DEV_DISPLAY_COLOR_GREEN */
 
 /* ---- 级联切分（整屏 = 若干张等尺寸卡按网格拼）----
  *
@@ -73,10 +73,10 @@
  * 网格只能表达**等尺寸卡**的规则拼法。异形拼法（一张卡占左半、另两张在右侧
  * 上下堆叠）目前表达不了。 */
 #ifndef BOARD_CASC_COLS
-#define BOARD_CASC_COLS (1)
+#define BOARD_CASC_COLS (1) /**< 级联网格列数（横排卡数） */
 #endif
 #ifndef BOARD_CASC_ROWS
-#define BOARD_CASC_ROWS (2)
+#define BOARD_CASC_ROWS (2) /**< 级联网格行数（竖排卡数） */
 #endif
 
 /* 主卡所在的**网格下标**（行优先：0 = 左上，1 = 右上，……）—— **出厂默认值**。
@@ -90,7 +90,7 @@
  * 能成立的前提（只改地址不改格的话，被按的卡会去渲染另一块屏那一格，上下半幅对调）。
  * 改过的值随 `casc_id` 记录持久化，掉电不忘；这个宏只是"还没有记录时"的默认。 */
 #ifndef BOARD_CASC_MASTER_CELL
-#define BOARD_CASC_MASTER_CELL (1)
+#define BOARD_CASC_MASTER_CELL (1) /**< 主卡所在网格下标（行优先，1 = 右上；出厂默认） */
 #endif
 
 /* ---- 本板跑不跑级联：**由网格形状推导**（单卡 = COLS×ROWS == 1 = 不跑）----
@@ -102,7 +102,7 @@
  *
  * 测试套件要跑级联：在包含任何头之前 `#define BOARD_CASC_ENABLED 1`。 */
 #ifndef BOARD_CASC_ENABLED
-#define BOARD_CASC_ENABLED (((BOARD_CASC_COLS) * (BOARD_CASC_ROWS)) > 1)
+#define BOARD_CASC_ENABLED (((BOARD_CASC_COLS) * (BOARD_CASC_ROWS)) > 1) /**< 1 = 本板跑级联（单卡时为 0） */
 #endif
 
 /* ---- 单卡矩形位图的上限（字节）----
@@ -110,7 +110,7 @@
  * 1bpp、ceil(屏宽/8)×屏高：本板单卡 224×50 → 28×50 = **1400**。
  * app_screen 的抽带缓冲与 app_casc 的从卡暂存都按它静态分配。
  * 必须 ≥ 实屏几何算出来的值 —— _screen_init 有运行期校验，不符会明确打出来。 */
-#define BOARD_CASC_BAND_MAX (1400U)
+#define BOARD_CASC_BAND_MAX (1400U) /**< 单卡矩形位图上限（1bpp，字节） */
 
 /* ---- 级联总线地址（app_screen_self_addr）----
  * 0 = 主卡，1..0x1F = 从卡。
@@ -123,7 +123,7 @@
  * 认领 + W25Qxx 记录。级联的身份解析据此选"从哪读"（见 app_casc.c）。
  * **拨码优先于记录**：现场拨一下即生效，不用工具。 */
 #ifndef BOARD_HAS_ADDR_DIP
-#define BOARD_HAS_ADDR_DIP (0)
+#define BOARD_HAS_ADDR_DIP (0) /**< 0 = 本板无拨码，地址靠 TEST 键认领 + W25Qxx 记录 */
 #endif
 
 /* ---- 出厂默认身份：**主卡**（0 = 主卡）----
@@ -135,7 +135,7 @@
  * 反过来（默认从卡）在"两张都自称主卡"还解不开的年代更安全 —— 那个死局已经修好
  * （认领主卡时会广播让位，见 app_casc.c），所以这里回到主卡。 */
 #ifndef BOARD_CASC_ADDR
-#define BOARD_CASC_ADDR (0) /* 0 = 主卡 */
+#define BOARD_CASC_ADDR (0) /**< 出厂默认总线地址（0 = 主卡） */
 #endif
 
 /* ---- 板级组合校验（放在最后：上面几个宏都要已定义）---- */

@@ -411,10 +411,10 @@ static err_t _eth_low_level_output_arp_off(struct netif *netif, struct pbuf *q, 
 
 /**
  * @brief   LwIP 网络接口注册入口（传递给 netif_add 的回调）
- * @param   netif  LwIP 网络接口
  * @return  ERR_OK 初始化成功；ERR_MEM 内存不足
  *
  * 设置 name、output/linkoutput 函数指针，调用 _eth_low_level_init 初始化硬件。
+ * 参数契约见 pl_eth.h 的声明（公开接口处）。
  */
 err_t pl_eth_netif_init(struct netif *netif)
 {

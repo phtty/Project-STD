@@ -17,7 +17,7 @@
  * 与 `dev_display_draw_bitmap` 和 `app_render_persist_t` 的位序约定**逐位一致** ——
  * 三处同一约定，所以"画布抽取出的位图"从卡可以直接吃，零转码。
  *
- * **颜色**：画布只记亮/灭，颜色另行记着 —— `app_screen` 记下"这一帧用了哪个**非黑**
+ * 颜色：画布只记亮/灭，颜色另行记着 —— `app_screen` 记下"这一帧用了哪个**非黑**
  * 颜色"（`_note_content_color`），落屏时用它，于是 LDI/RLS/VMS 传下来的颜色能生效。
  * 只有两种情况退回**切分表给这张卡的颜色**：一帧里混用了多种非黑颜色（1bpp 画布
  * 本来就表达不了多色），或这一帧一次非黑都没写过。工厂测试的强制覆盖最优先。
@@ -49,8 +49,8 @@
  *  合成一个值的话，现场分不清该去查接线还是查配置 —— 而这两件事的代价差很远。 */
 typedef enum {
     APP_SCREEN_CARD_STATE_MISSING = 0, /**< 建表初值；也可能是从卡根本没起来 */
-    APP_SCREEN_CARD_STATE_ONLINE  = 1,
-    APP_SCREEN_CARD_STATE_OFFLINE = 2,
+    APP_SCREEN_CARD_STATE_ONLINE  = 1, /**< 应答正常 */
+    APP_SCREEN_CARD_STATE_OFFLINE = 2, /**< 曾在线，后连续失败被剔除 */
 } app_screen_card_state_t;
 
 /** @brief 一张卡在整屏里占的矩形 */
@@ -74,13 +74,14 @@ typedef struct {
  *  大屏的 HUB75 口"（矩形小于本卡屏），需要给落屏加一个偏移，那是另一期的事；
  *  现在不符会被 app_screen_commit_bitmap 的长度校验明确拒绝，不会静默错位。 */
 typedef struct {
-    const app_screen_card_t *cards;
+    const app_screen_card_t *cards; /**< 卡表（按切分表下标排列）*/
     uint8_t              count; /**< 卡数 */
     uint16_t             rows;  /**< **整屏**宽（= 各卡矩形并集宽） */
     uint16_t             cols;  /**< **整屏**高 */
 } app_screen_layout_t;
 
-/** @brief 本卡看到的切分表。**永远非空**（没有级联时是"单卡占满整屏"）。 */
+/** @brief 本卡看到的切分表。**永远非空**（没有级联时是"单卡占满整屏"）。
+ *  @return 切分表指针，永不为 nullptr */
 const app_screen_layout_t *app_screen_layout(void);
 
 /** @brief **逻辑屏**尺寸（= 整屏；单卡时等于本卡屏）
@@ -91,8 +92,11 @@ const app_screen_layout_t *app_screen_layout(void);
  *  其实只是矩形算小了。
  *
  *  门面停用（显示未就绪/地址不在表里）时回落到 `dev_display_get()`，与加级联之前
- *  的行为一致。 */
+ *  的行为一致。
+ *  @return 逻辑屏行数 */
 uint16_t app_screen_rows(void);
+/** @brief 逻辑屏列数（含义见 app_screen_rows() 的说明）
+ *  @return 逻辑屏列数 */
 uint16_t app_screen_cols(void);
 
 /* ---- 下标 与 地址 是两回事，别混 ----
@@ -110,10 +114,12 @@ uint16_t app_screen_cols(void);
 
 /** @brief 第 card_idx 张卡（**切分表下标，不是总线地址**）；越界返回 nullptr。
  *
- *  返回的项同时带 `.addr` 与矩形，所以"发给谁"和"发哪块"从同一个来源取，不会错配。 */
+ *  返回的项同时带 `.addr` 与矩形，所以"发给谁"和"发哪块"从同一个来源取，不会错配。
+ *  @return 第 card_idx 项；越界返回 nullptr */
 const app_screen_card_t *app_screen_card(uint8_t card_idx);
 
-/** @brief 总线地址 → 切分表下标；表中没有该地址返回 0xFF */
+/** @brief 总线地址 → 切分表下标；表中没有该地址返回 0xFF
+ *  @return 切分表下标；未找到返回 0xFF */
 uint8_t app_screen_index_of_addr(uint8_t addr);
 
 /* ================================================================
@@ -123,7 +129,8 @@ uint8_t app_screen_index_of_addr(uint8_t addr);
  *  哪个协议探活无关。协议只**驱动**它（收到应答 / 轮次成败），不拥有它。
  * ================================================================ */
 
-/** @brief 某张卡的当前状态；下标越界返回 MISSING */
+/** @brief 某张卡的当前状态；下标越界返回 MISSING
+ *  @return 该卡状态；越界返回 APP_SCREEN_CARD_STATE_MISSING */
 app_screen_card_state_t app_screen_card_state(uint8_t card_idx);
 
 /** @brief 改写某张卡的状态；**状态真的变了才会触发告警回调**
@@ -143,6 +150,8 @@ typedef struct {
     uint8_t  last_alarm;  /**< 最近一次状态跳变的卡地址；0 = 尚未有过 */
 } app_screen_status_t;
 
+/** @brief 取一份整屏状态快照
+ *  @param[out] out 接收快照 */
 void app_screen_status(app_screen_status_t *out);
 
 /** @brief 状态跳变时的告警回调；**不注册 = 完全静默，一个字节都不产生**
@@ -152,6 +161,7 @@ void app_screen_status(app_screen_status_t *out);
  *  出问题静默即可。所以这里只暴露状态，不决定去向，也不依赖任何上层协议。 */
 typedef void (*app_screen_alarm_fn_t)(uint8_t card_addr, uint8_t new_st);
 
+/** @brief 注册状态跳变告警回调（传 nullptr 取消注册）*/
 void app_screen_register_alarm(app_screen_alarm_fn_t fn);
 
 /** @brief 记一次定向重传（计数器，供状态快照用） */
@@ -160,10 +170,12 @@ void app_screen_note_retrans(void);
 /** @brief 记一轮的序号（供状态快照用） */
 void app_screen_note_round(uint16_t seq);
 
-/** @brief 本卡在切分表里的下标；本卡地址不在表中返回 0xFF（配置错误） */
+/** @brief 本卡在切分表里的下标；本卡地址不在表中返回 0xFF（配置错误）
+ *  @return 本卡下标；不在表中返回 0xFF */
 uint8_t app_screen_self_index(void);
 
-/** @brief 第 card_idx 张卡（**切分表下标**）矩形的 1bpp 位图长度（字节）；越界返回 0 */
+/** @brief 第 card_idx 张卡（**切分表下标**）矩形的 1bpp 位图长度（字节）；越界返回 0
+ *  @return 位图字节数；越界返回 0 */
 uint16_t app_screen_card_bm_len(uint8_t card_idx);
 
 #if BOARD_SCREEN_CANVAS
@@ -177,6 +189,7 @@ uint16_t app_screen_card_bm_len(uint8_t card_idx);
  *  **末字节的补位一律归零**（w 不是 8 的倍数时），这样"抽出来的位图"是唯一确定的
  *  一串字节，可以直接比对、可以直接当协议载荷。
  *
+ *  @param[out] buf 接收 1bpp 位图（长度 = 该卡矩形的 bm_len）
  *  @return false = card_idx 越界 / buf 装不下 / 矩形超出画布（都不写 buf） */
 bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap);
 
@@ -190,7 +203,8 @@ bool app_screen_commit_self(void);
 /** @brief 画布有未落屏的内容、且已过静默期 → 返回 true 并清掉"待落屏"标志
  *
  *  单卡时由 app_screen 自己的任务消费；级联主卡由开轮的那个任务消费 ——
- *  **两者只能有一个**，谁消费谁负责把内容落下去。 */
+ *  **两者只能有一个**，谁消费谁负责把内容落下去。
+ *  @return true = 有未落屏内容且已过静默期（并已清标志）*/
 bool app_screen_take_pending_settled(void);
 
 #endif /* BOARD_SCREEN_CANVAS */
@@ -201,13 +215,15 @@ bool app_screen_take_pending_settled(void);
  *  只在"必须立即生效"的场合用（如某条协议要求看到即时反馈）。 */
 void app_screen_flush(void);
 
-/** @brief 画布内容代数（每次写入自增）。级联用它做"本轮内容是否已过期"的复检。 */
+/** @brief 画布内容代数（每次写入自增）。级联用它做"本轮内容是否已过期"的复检。
+ *  @return 当前代数 */
 uint32_t app_screen_generation(void);
 
 /** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
  *
  *  级联用它闸开轮：上电时画布上只有本卡那一块是从记录恢复来的，这时候开轮会把
- *  一张**不全的画布**推下去、把从卡刚恢复的内容刷黑。 */
+ *  一张**不全的画布**推下去、把从卡刚恢复的内容刷黑。
+ *  @return true = 本上电周期内画布被渲染过 */
 bool app_screen_canvas_touched(void);
 
 /** @brief 把一张整屏 1bpp 位图落到本地实屏（主卡本地提交与从卡落屏共用的唯一路径）
@@ -227,7 +243,8 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color);
  *  正常运行时不要调用它。 */
 void app_screen_set_color_override(uint8_t color);
 
-/** @brief 本卡最终输出用的颜色：有覆盖用覆盖，否则用切分表给的这一个 */
+/** @brief 本卡最终输出用的颜色：有覆盖用覆盖，否则用切分表给的这一个
+ *  @return 本卡输出颜色（dev_display_color_t）*/
 uint8_t app_screen_output_color(uint8_t card_color);
 
 /** @brief 设置屏亮度等级（0~7）
@@ -236,14 +253,17 @@ uint8_t app_screen_output_color(uint8_t card_color);
  *  亮度接缝。故本函数是**唯一**的亮度入口，光传感器也走它。 */
 void app_screen_set_brightness(uint8_t level);
 
-/** @brief 当前亮度等级 */
+/** @brief 当前亮度等级
+ *  @return 亮度等级 (0~7) */
 uint8_t app_screen_get_brightness(void);
 
 /** @brief 取走"亮度已变、待下发"的标志 —— 级联协议用它把每秒可能变多次的亮度
  *         攒成一次广播。返回 true 时 *level 给出新等级。
  *
  *  为什么要有这个：光传感器每秒都可能改，而广播要走总线。攒成一次比每次改都发
- *  省得多，且亮度是渐变量、晚几十毫秒下发不可见。 */
+ *  省得多，且亮度是渐变量、晚几十毫秒下发不可见。
+ *  @param[out] level 取走标志时写入新亮度等级
+ *  @return true = 有新的待下发亮度 */
 bool app_screen_brightness_take_pending(uint8_t *level);
 
 /** @brief 本卡总线地址。0 = 主卡。
@@ -253,10 +273,12 @@ bool app_screen_brightness_take_pending(uint8_t *level);
  *
  *  运行期事实：由拨码（3833024）或 `casc_id` 记录决定（按键认领会写记录、掉电不忘），
  *  board.h 的编译期常量只是**出厂默认** —— 同型号板子可以是 2/3/4 卡部署，
- *  那是**部署期事实**，不可能写死。 */
+ *  那是**部署期事实**，不可能写死。
+ *  @return 本卡总线地址；0 = 主卡 */
 uint8_t app_screen_self_addr(void);
 
-/** @brief 本卡是否主卡（地址 0） */
+/** @brief 本卡是否主卡（地址 0）
+ *  @return true = 本卡是主卡 */
 bool app_screen_is_master(void);
 
 /** @brief 改写本机地址：**只改值，不落盘、不重应用**
@@ -283,12 +305,17 @@ void app_screen_reinit_identity(void);
  *  而"地址变了、格没变"在屏上没有任何报错。 */
 void app_screen_apply_identity(uint8_t addr, uint8_t master_cell);
 
-/** @brief 当前认定的主卡格（哪一格编 addr 0） */
+/** @brief 当前认定的主卡格（哪一格编 addr 0）
+ *  @return 主卡格号 */
 uint8_t app_screen_master_cell(void);
 
 /** @brief 格号 ↔ 地址：整张切分表就这一条规则
  *
  *  纯函数、不依赖当前表 —— 认领时要同时算"旧表里你在哪"与"新表里你去哪"，
- *  而表在那一刻只能有一份。 */
+ *  而表在那一刻只能有一份。
+ *  @return 该格对应的总线地址 */
 uint8_t app_screen_addr_of_cell(uint8_t cell, uint8_t master_cell);
+
+/** @brief 地址 → 格号（app_screen_addr_of_cell 的反向）
+ *  @return 该地址所在的格号 */
 uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t master_cell);

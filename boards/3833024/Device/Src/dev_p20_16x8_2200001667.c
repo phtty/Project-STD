@@ -1,5 +1,5 @@
 /**
- * @file    dev_display_p20.c
+ * @file    dev_p20_16x8_2200001667.c
  * @brief   P20 模组派生类型 — 静态扫描、2 通道、R/G/B 分离
  *
  * 实现 dev_display_ops: prepare (pixel_map→hub75_buff) + scan (BSRR 查表输出)

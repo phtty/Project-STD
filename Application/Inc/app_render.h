@@ -23,36 +23,43 @@
  *
  * 调用方请求了本板没有的字号时**回落到最接近的一个**（见 app_render.c 的
  * _resolve_size），不会静默按别的字库单元渲染。 */
+/** @brief 字号（像素高度；ASCII 半宽 = size/2） */
 typedef enum {
-    APP_FONT_SIZE_SELF_ADAPT = 0,
-    APP_FONT_SIZE_14         = 14,
-    APP_FONT_SIZE_16         = 16,
-    APP_FONT_SIZE_20         = 20,
-    APP_FONT_SIZE_24         = 24,
-    APP_FONT_SIZE_32         = 32,
-    APP_FONT_SIZE_48         = 48,
+    APP_FONT_SIZE_SELF_ADAPT = 0,  /**< 自适应（由渲染器按目标尺寸选择） */
+    APP_FONT_SIZE_14         = 14, /**< 14 像素高 */
+    APP_FONT_SIZE_16         = 16, /**< 16 像素高 */
+    APP_FONT_SIZE_20         = 20, /**< 20 像素高 */
+    APP_FONT_SIZE_24         = 24, /**< 24 像素高 */
+    APP_FONT_SIZE_32         = 32, /**< 32 像素高 */
+    APP_FONT_SIZE_48         = 48, /**< 48 像素高 */
 } app_font_size_t;
 
 /* ---- 字型 ---- */
+
+/** @brief 字型（宋体/仿宋/楷体/黑体） */
 typedef enum {
-    APP_FONT_TYPE_ST = 0, /* 宋体 */
-    APP_FONT_TYPE_FS = 1, /* 仿宋 */
-    APP_FONT_TYPE_KT = 2, /* 楷体 */
-    APP_FONT_TYPE_HT = 3, /* 黑体 */
+    APP_FONT_TYPE_ST = 0, /**< 宋体 */
+    APP_FONT_TYPE_FS = 1, /**< 仿宋 */
+    APP_FONT_TYPE_KT = 2, /**< 楷体 */
+    APP_FONT_TYPE_HT = 3, /**< 黑体 */
 } app_font_type_t;
 
 /* ---- 编码类型 ---- */
+
+/** @brief 字库/输入文本编码 */
 typedef enum {
-    APP_FONT_ENC_ASCII = 0, /* 字库编码 — ASCII 单字节 */
-    APP_FONT_ENC_GBK   = 1, /* 字库编码 — GBK  双字节 */
-    APP_FONT_ENC_UTF8  = 2, /* 输入文本编码 — 内部自动转 GBK */
+    APP_FONT_ENC_ASCII = 0, /**< 字库编码 — ASCII 单字节 */
+    APP_FONT_ENC_GBK   = 1, /**< 字库编码 — GBK  双字节 */
+    APP_FONT_ENC_UTF8  = 2, /**< 输入文本编码 — 内部自动转 GBK */
 } app_font_enc_t;
 
 /* ---- 字库三元组：内部检索 key，调用方无需接触 ---- */
+
+/** @brief 字库检索键（字号 + 字库编码 + 字型） */
 typedef struct {
-    app_font_size_t size;   /* 字号 */
-    app_font_enc_t charset; /* 字库编码 (ASCII/GBK) — 渲染器内部按字符自动填充 */
-    app_font_type_t type;   /* 字型 */
+    app_font_size_t size; /**< 字号 */
+    app_font_enc_t charset; /**< 字库编码 (ASCII/GBK) — 渲染器内部按字符自动填充 */
+    app_font_type_t type; /**< 字型 */
 } app_font_key_t;
 
 /* ---- 汉字在字库单元内的索引方式 ----
@@ -60,15 +67,18 @@ typedef struct {
  *   GBK    : (hi-0x81)*190 + (lo - (lo>=0x80 ? 0x41 : 0x40))   23940 字
  *   GB2312 : 94*(hi-0xA1) + (lo-0xA1)                           8836 字 = 94×94 区位全集
  * 由板级表逐块指定 —— 同一个型号的屏换一批字库母片就可能换一种。 */
+/** @brief 汉字在字库单元内的索引方式（两版字库区位基准不同） */
 typedef enum {
-    APP_FONT_IDX_KIND_GBK = 0,
-    APP_FONT_IDX_KIND_GB2312,
+    APP_FONT_IDX_KIND_GBK = 0,   /**< GBK 区位索引（23940 字） */
+    APP_FONT_IDX_KIND_GB2312,    /**< GB2312 区位索引（8836 字） */
 } app_font_idx_kind_t;
 
 /* ---- 字库单元（板级表的一项）---- */
+
+/** @brief 字库单元：一个 (字号, 编码, 字型) 三元组及其 Flash 占用量 */
 typedef struct {
-    app_font_key_t key;
-    uint32_t   unit_size; /* 该三元组在 Flash 中占用的总字节数 */
+    app_font_key_t key;        /**< 检索键 */
+    uint32_t   unit_size; /**< 该三元组在 Flash 中占用的总字节数 */
 } app_font_unit_t;
 
 /* ---- 板级字库描述 ----
@@ -81,50 +91,59 @@ typedef struct {
  * 它按 ST,FS,KT,HT 排，而 5006048 的映像地理顺序是 FS,HT,KT,ST，24/32 项错位）。
  *
  * 唯一实例 g_board_font_lib 由 boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 提供。 */
+/** @brief 板级字库描述（单元表、可用字号与容量契约） */
 typedef struct {
-    const app_font_unit_t *lib;
-    uint16_t           lib_count;
-    const app_font_size_t *sizes;     /* 本板可用字号，**必须升序**（最近邻回落依赖它） */
-    uint8_t            size_count;
-    uint8_t            asc_index_base; /* ASCII 索引起点：0x20（96 槽）或 0x00（128 槽） */
-    app_font_idx_kind_t    gb_index;       /* 汉字索引式 */
-    uint32_t           total_bytes;    /* 必须等于 lib[] 各项之和 */
+    const app_font_unit_t *lib;    /**< 单元表，顺序必须与实物映像一致 */
+    uint16_t           lib_count;  /**< 单元表项数 */
+    const app_font_size_t *sizes; /**< 本板可用字号，**必须升序**（最近邻回落依赖它） */
+    uint8_t            size_count; /**< sizes[] 项数 */
+    uint8_t            asc_index_base; /**< ASCII 索引起点：0x20（96 槽）或 0x00（128 槽） */
+    app_font_idx_kind_t    gb_index; /**< 汉字索引式 */
+    uint32_t           total_bytes; /**< 必须等于 lib[] 各项之和 */
 } app_font_lib_desc_t;
 
-extern const app_font_lib_desc_t g_board_font_lib;
+extern const app_font_lib_desc_t g_board_font_lib; /**< 唯一板级字库描述实例 */
 
 /* 容量契约用编译期量 BOARD_FONT_LIB_TOTAL_BYTES（在 board.h，因为 app_cfg_sched.h
  * 的 _Static_assert 要用它）。g_board_font_lib.total_bytes 是它的运行期副本，两者由
  * _render_init 的交叉校验钉住 —— 单靠编译期常量挡不住"表里写错一项"。 */
 
 /* ---- 水平/垂直对齐 ---- */
+
+/** @brief 水平/垂直对齐方式 */
 typedef enum {
-    APP_RENDER_ALIGN_LEFT_UP    = 0, /* 左对齐 / 上对齐 */
-    APP_RENDER_ALIGN_CENTER     = 1, /* 居中 */
-    APP_RENDER_ALIGN_RIGHT_DOWN = 2, /* 右对齐 / 下对齐 */
+    APP_RENDER_ALIGN_LEFT_UP    = 0, /**< 左对齐 / 上对齐 */
+    APP_RENDER_ALIGN_CENTER     = 1, /**< 居中 */
+    APP_RENDER_ALIGN_RIGHT_DOWN = 2, /**< 右对齐 / 下对齐 */
 } app_render_align_t;
 
 /* ---- 渲染风格（文字专属）---- */
+
+/** @brief 文字渲染风格（对齐与换行） */
 typedef struct {
-    app_render_align_t h_align; /* 水平对齐 */
-    app_render_align_t v_align; /* 垂直对齐 */
-    bool word_wrap;  /* 超宽时自动换行 */
+    app_render_align_t h_align; /**< 水平对齐 */
+    app_render_align_t v_align; /**< 垂直对齐 */
+    bool word_wrap; /**< 超宽时自动换行 */
 } app_render_style_t;
 
 /* ---- 渲染类型：告诉 app_render 如何解析 union ---- */
+
+/** @brief 渲染类型标签，决定 union 中哪个分支生效 */
 typedef enum {
-    APP_RENDER_TYPE_TEXT   = 0, /* 文字渲染 — 使用 text/len/font_key/style/text_enc */
-    APP_RENDER_TYPE_BITMAP = 1, /* 位图渲染 — 使用 bitmap/w/h           */
-    APP_RENDER_TYPE_FILL   = 2, /* 矩形填充 — 使用公共字段 x/y/w/h/color (w/h=0 全屏) */
+    APP_RENDER_TYPE_TEXT   = 0, /**< 文字渲染 — 使用 text/len/font_key/style/text_enc */
+    APP_RENDER_TYPE_BITMAP = 1, /**< 位图渲染 — 使用 bitmap/w/h */
+    APP_RENDER_TYPE_FILL   = 2, /**< 矩形填充 — 使用公共字段 x/y/w/h/color (w/h=0 全屏) */
 } app_render_type_t;
 
 /* ---- 统一渲染参数 — tagged union — type 决定哪个 union 分支生效 ---- */
+
+/** @brief 统一渲染参数（tagged union；type 决定哪个分支生效） */
 typedef struct {
     /* 公共 — 调用方设置后渲染器只读 */
-    const uint16_t x, y;         /* 目标起点 */
-    const uint16_t w, h;         /* 目标宽高 (fill 时 w/h=0 表示全屏) */
-    const dev_display_color_t color; /* 绘制颜色 */
-    const app_render_type_t type;    /* 标签: 指定使用哪个 union 分支 */
+    const uint16_t x, y; /**< 目标起点 */
+    const uint16_t w, h; /**< 目标宽高 (fill 时 w/h=0 表示全屏) */
+    const dev_display_color_t color; /**< 绘制颜色 */
+    const app_render_type_t type; /**< 标签: 指定使用哪个 union 分支 */
 
     /** @brief **这一帧的内容要落盘**（掉电再上电自动恢复）。默认 false。
      *
@@ -141,16 +160,16 @@ typedef struct {
     union {
         /* APP_RENDER_TYPE_TEXT — 文字专属 */
         struct {
-            const char *text;            /* 字符串 */
-            const uint16_t len;          /* 字符串长度（字节数） */
-            const app_font_size_t font_size; /* 字号 */
-            const app_font_type_t font_type; /* 字型 */
-            const app_render_style_t *style; /* 对齐/换行 (NULL=默认) */
-            const app_font_enc_t text_enc;   /* 输入文本编码 (UTF8需转换/GBK直通) */
+            const char *text; /**< 字符串 */
+            const uint16_t len; /**< 字符串长度（字节数） */
+            const app_font_size_t font_size; /**< 字号 */
+            const app_font_type_t font_type; /**< 字型 */
+            const app_render_style_t *style; /**< 对齐/换行 (NULL=默认) */
+            const app_font_enc_t text_enc; /**< 输入文本编码 (UTF8需转换/GBK直通) */
         };
 
         /* APP_RENDER_TYPE_BITMAP — 位图专属 */
-        const uint8_t *const bitmap; /* 位图数据, 每行 (w+7)/8 字节, MSB first */
+        const uint8_t *const bitmap; /**< 位图数据, 每行 (w+7)/8 字节, MSB first */
 
         /* APP_RENDER_TYPE_FILL — 无专属字段, 只用公共的 x/y/w/h/color */
     };
@@ -167,19 +186,21 @@ typedef struct {
  * 逻辑必然漂移，而漂移的表现是"某个字号/对齐方式下两卡排版不一致"，极难查。
  *
  * 走这条缝的只有 3 个原语 + 2 处几何读取（见 app_render.c），排版逻辑一行不动。 */
+/** @brief 可插拔渲染目标：3 个绘制原语 + 目标几何 */
 typedef struct {
-    void (*fill)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c);
+    void (*fill)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c); /**< 矩形填充原语 */
     void (*bitmap)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bm,
-                   dev_display_color_t c);
-    void (*set_pixel)(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c);
-    void    *ctx;
+                   dev_display_color_t c); /**< 位图绘制原语 */
+    void (*set_pixel)(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c); /**< 单像素原语 */
+    void    *ctx; /**< 目标上下文，随原语回传 */
     uint16_t rows; /**< 目标宽（_render_fill 的全屏语义、_render_text 的边界判断要用） */
     uint16_t cols; /**< 目标高 */
 } app_render_target_t;
 
 /** @brief 换渲染目标；传 NULL 回落 `dev_display_get()`（默认）。
  *
- *  可逆：传 NULL 即恢复直写实屏，级联整套关掉时靠它。 */
+ *  可逆：传 NULL 即恢复直写实屏，级联整套关掉时靠它。
+ *  @param t 新渲染目标；NULL = 直写实屏 */
 void app_render_set_target(const app_render_target_t *t);
 
 /** @brief 显存持久化的接管钩子
@@ -187,16 +208,20 @@ void app_render_set_target(const app_render_target_t *t);
  *  `app_render_save/restore` 原先直接对 `dev_display_t` 读写。装了逻辑画布之后
  *  那样会错位：主卡自己的带恢复了旧内容、画布却是黑的。注册了钩子就整体委托 ——
  *  由画布所有者决定"存什么、从哪恢复"。不注册则保持原行为。 */
+/** @brief 显存持久化接管钩子（save/restore 成对提供） */
 typedef struct {
-    void (*save)(void);
-    bool (*restore)(void);
+    void (*save)(void);    /**< 保存当前显存 */
+    bool (*restore)(void); /**< 恢复显存；成功返回 true */
 } app_render_persist_hook_fn_t;
 
+/** @brief 注册显存持久化接管钩子；传 NULL 恢复直接读写实屏
+ *  @param h 钩子；NULL = 不接管 */
 void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h);
 
 /* ---- API（模块自注册 sw_app_initcall，调用方无需传 display/font 句柄）---- */
 
-/** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现 */
+/** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现
+ *  @param cfg 渲染参数；type 决定生效的 union 分支 */
 void app_render(const app_render_cfg_t *cfg);
 
 /* ---- 持久化显示 ----
@@ -204,14 +229,15 @@ void app_render(const app_render_cfg_t *cfg);
  * 归属（注册名 "render_persist"）、格式版本、长度、CRC32 由配置记录头统一管理
  * （见 Device/Inc/Storage/dev_cfg_record.h），本结构只承载"渲染状态"本身。 */
 
+/** @brief 持久化的渲染状态（屏幕几何 + 颜色 + 1bpp 位图） */
 typedef struct [[gnu::packed]] {
-    uint16_t screen_rows;
-    uint16_t screen_cols;
-    uint8_t  color;    /* 非黑像素颜色 (dev_display_color_t) */
-    uint8_t  bitmap[]; /* (cols × ((rows+7)/8)) 字节, MSB first per row */
+    uint16_t screen_rows; /**< 屏宽（一行像素数） */
+    uint16_t screen_cols; /**< 屏高（行数） */
+    uint8_t  color; /**< 非黑像素颜色 (dev_display_color_t) */
+    uint8_t  bitmap[]; /**< (cols × ((rows+7)/8)) 字节, MSB first per row */
 } app_render_persist_t;
 
-/** 记录格式版本。布局变更时 +1 —— 版本不符会被判为记录失效、回落默认，
+/** @brief 记录格式版本。布局变更时 +1 —— 版本不符会被判为记录失效、回落默认，
  *  而不是让记录搬家（见 app_cfg_sched.c 的扫描认领）。 */
 #define RENDER_PERSIST_VERSION (1U)
 
@@ -233,15 +259,20 @@ typedef struct [[gnu::packed]] {
 /** @brief "这一帧要落盘"的请求位 —— 见 app_render_cfg_t.persist 的说明
  *
  *  取走（清标志）只在**落屏之后**做：`app_screen` 的 commit 路径是唯一的消费者。
- *  `peek` 给级联开轮用（帧在落屏之前发出去，那时还不能取）。 */
+ *  `peek` 给级联开轮用（帧在落屏之前发出去，那时还不能取）。
+ *  @return true = 存在待落盘请求（take 会同时清标志） */
 bool app_render_take_persist_req(void);
+
+/** @brief 只看"要落盘"请求位，不清标志（级联开轮用）
+ *  @return true = 存在待落盘请求 */
 bool app_render_peek_persist_req(void);
 
 /** @brief 正在渲染中（`app_render` 的**整段**：文字是"测量趟 + 渲染趟"两趟）
  *
  *  级联用它闸开轮：渲染途中画布上只有一半内容（甚至刚被清空），这一眼推下去，
  *  屏上就是"闪一下"（清屏那一帧先到，文字那一帧 3ms 后才到）。
- *  渲染一趟的开销含逐字读字库（SPI），几十毫秒量级 —— 完全够一次误开轮钻进去。 */
+ *  渲染一趟的开销含逐字读字库（SPI），几十毫秒量级 —— 完全够一次误开轮钻进去。
+ *  @return true = 正在渲染（app_render 整段） */
 bool app_render_busy(void);
 
 /** @brief 将当前显存写入存储设备持久化扇区 */

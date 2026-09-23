@@ -73,9 +73,9 @@ static ring_buffer_t s_rb = {.data = s_rb_buf, .size = RB_SIZE, .mutex = NULL};
 static app_pcb_t s_pcb = {.name = "probe_ut", .rb = &s_rb};
 static app_ccb_t s_ccb = {.name = "chan", .ops = NULL};
 
-static uint8_t s_scratch_buf[FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
+__attribute__((aligned(4))) static uint8_t s_scratch_buf[FRAME_DATA_MAX_LEN];
 
-static uint8_t s_frame[1200] __attribute__((aligned(4)));
+__attribute__((aligned(4))) static uint8_t s_frame[1200];
 
 /** @brief 清空缓冲区并放入一段字节 */
 static void feed(const void *data, size_t len)
@@ -97,6 +97,7 @@ static app_pcb_probe_state_t iap_probe(void)
 
 /**
  * @brief 构造 IAP 帧
+ * @param cmd       命令码
  * @param len_words DATA 域字数（0 ~ 256）
  * @return 整帧字节数
  */

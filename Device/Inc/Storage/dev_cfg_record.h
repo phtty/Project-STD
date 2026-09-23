@@ -18,17 +18,17 @@
 #include <stddef.h>
 #include "dev_storage.h"
 
-#define DEV_CFG_RECORD_NAME_MAX (16U)
+#define DEV_CFG_RECORD_NAME_MAX (16U) /**< 所有者标识最大长度（含结尾 NUL）*/
 
 /** @brief 记录头 (24 字节, 紧打包) */
 typedef struct [[gnu::packed]] {
-    char name[DEV_CFG_RECORD_NAME_MAX]; /* 所有者标识 (NUL 填充; 首字节 0xFF = 从未写入) */
-    uint16_t version;
-    uint16_t len;    /* payload 字节数 */
-    uint32_t crc32;
+    char name[DEV_CFG_RECORD_NAME_MAX]; /**< 所有者标识 (NUL 填充; 首字节 0xFF = 从未写入) */
+    uint16_t version;                   /**< 记录格式版本 */
+    uint16_t len;                       /**< payload 字节数 */
+    uint32_t crc32;                     /**< payload 全部字节的 CRC32 */
 } dev_cfg_record_hdr_t;
 
-#define DEV_CFG_RECORD_HDR_SIZE ((uint32_t)sizeof(dev_cfg_record_hdr_t)) /* 24 */
+#define DEV_CFG_RECORD_HDR_SIZE ((uint32_t)sizeof(dev_cfg_record_hdr_t)) /**< 记录头字节数 (24) */
 
 _Static_assert(sizeof(dev_cfg_record_hdr_t) == 24, "dev_cfg_record_hdr_t must be 24 bytes");
 
@@ -52,10 +52,10 @@ typedef uint32_t (*dev_cfg_record_crc_fn_t)(const uint8_t *data, size_t len);
 
 /** @brief 读取结果状态 */
 typedef enum {
-    DEV_CFG_RECORD_STATE_OK      = 0, /* 读取成功, payload 有效 */
-    DEV_CFG_RECORD_STATE_EMPTY,       /* 区域全 0xFF, 从未写入 → 调用方应用默认值 */
-    DEV_CFG_RECORD_STATE_INVALID,     /* name/version/len/CRC 任一不符 → 调用方应用默认值 */
-    DEV_CFG_RECORD_STATE_IO_ERR,      /* 底层读写失败 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_OK      = 0, /**< 读取成功, payload 有效 */
+    DEV_CFG_RECORD_STATE_EMPTY,       /**< 区域全 0xFF, 从未写入 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_INVALID,     /**< name/version/len/CRC 任一不符 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_IO_ERR,      /**< 底层读写失败 → 调用方应用默认值 */
 } dev_cfg_record_state_t;
 
 /**
@@ -66,9 +66,9 @@ typedef enum {
  * @param  name        期望所有者标识 (<= 15 字符)
  * @param  version     期望版本 (不符视为 INVALID)
  * @param  crc         校验函数, NULL 则用 crc32_calc
- * @param  payload     载荷输出缓冲
+ * @param[out] payload 载荷输出缓冲
  * @param  payload_cap 载荷缓冲容量 (记录 len 超过则 INVALID)
- * @param  payload_len 输出实际载荷长度 (可为 NULL)
+ * @param[out] payload_len 实际载荷长度输出 (可为 NULL)
  * @return dev_cfg_record_state_t 状态; 仅 OK 时 payload 有效
  */
 dev_cfg_record_state_t dev_cfg_record_load(dev_storage_t *stor, uint32_t addr,
@@ -88,7 +88,7 @@ dev_cfg_record_state_t dev_cfg_record_load(dev_storage_t *stor, uint32_t addr,
  * @param  crc         校验函数, NULL 则用 crc32_calc
  * @param  payload     载荷数据
  * @param  payload_len 载荷长度
- * @param  scratch     组包缓冲 (容量 >= 24 + payload_len)
+ * @param[out] scratch 组包缓冲 (容量 >= 24 + payload_len)
  * @param  scratch_cap scratch 容量
  * @return 0 成功 (含去重跳过); 负值失败
  *
