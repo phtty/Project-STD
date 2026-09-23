@@ -1,0 +1,52 @@
+# Doxyfile —— Project_STD 文档生成配置
+#
+# 用法：doxygen Doxyfile
+# 输出：build/doxygen/（已被 .gitignore 排除，不会污染工作区）
+#
+# 契约见 docs/命名约定.md §12：最小必需集是 @file/@brief、导出符号 @brief、
+# 非 void 的 @return（枚举取值时才用 @retval）、会被写入的参数标 @param[out]/[in,out]、
+# 成员/宏/枚举常量用行尾 /**< */。@defgroup 本轮不要求。
+#
+# WARN_IF_UNDOCUMENTED=YES：把"缺文档"当缺口计分器用 —— 每批改造后重跑一次，
+# 对比告警数量即可验收。
+
+PROJECT_NAME           = "Project_STD"
+PROJECT_BRIEF          = "STM32F407 车道诱导屏 / VMS 情报板控制器"
+
+OUTPUT_DIRECTORY       = build/doxygen
+OUTPUT_LANGUAGE        = Chinese
+INPUT                  = .
+INPUT_ENCODING         = UTF-8
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.c
+
+# 只记录自研层：第三方驱动/中间件、CubeMX 生成、测试打桩、构建产物全部排除
+EXCLUDE                = Drivers \
+                         Middlewares \
+                         build \
+                         test/stubs \
+                         Platform/Inc/lwipopts.h
+EXCLUDE_PATTERNS       = */Core/*
+
+# 只文档化导出的（非 static）符号 —— 与 §12 的"导出符号"口径一致
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = NO
+EXTRACT_PRIVATE        = NO
+
+OPTIMIZE_OUTPUT_FOR_C  = YES          # C 工程：按文件/函数组织，不生成类图那套
+HAVE_DOT               = NO           # 不依赖 graphviz
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES          # 缺口计分器
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = NO
+QUIET                  = NO
+
+GENERATE_HTML          = YES
+GENERATE_XML           = YES
+GENERATE_LATEX         = NO
+
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
