@@ -209,6 +209,19 @@ bool app_screen_commit_self(void);
  *  @return true = 有未落屏内容且已过静默期（并已清标志）*/
 bool app_screen_take_pending_settled(void);
 
+/** @brief 显式提交：立刻把画布内容落到本地屏（不必等静默期）
+ *
+ *  默认不需要调 —— 静默期会自动提交，现有渲染调用点一行都不用改。
+ *  只在"必须立即生效"的场合用（如某条协议要求看到即时反馈）。 */
+void app_screen_flush(void);
+
+/** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
+ *
+ *  级联用它闸开轮：上电时画布上只有本卡那一块是从记录恢复来的，这时候开轮会把
+ *  一张**不全的画布**推下去、把从卡刚恢复的内容刷黑。
+ *  @return true = 本上电周期内画布被渲染过 */
+bool app_screen_canvas_touched(void);
+
 /* ---- 内部接缝 ----
  *
  * 只给 app_screen.c（门面）与 app_screen_canvas.c（画布实现）之间用，
@@ -238,23 +251,6 @@ void app_screen_canvas_enable(uint16_t rows, uint16_t cols);
 void app_screen_canvas_disable(void);
 
 #endif /* BOARD_SCREEN_CANVAS */
-
-/** @brief 显式提交：立刻把画布内容落到本地屏（不必等静默期）
- *
- *  默认不需要调 —— 静默期会自动提交，现有渲染调用点一行都不用改。
- *  只在"必须立即生效"的场合用（如某条协议要求看到即时反馈）。 */
-void app_screen_flush(void);
-
-/** @brief 画布内容代数（每次写入自增）。级联用它做"本轮内容是否已过期"的复检。
- *  @return 当前代数 */
-uint32_t app_screen_generation(void);
-
-/** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
- *
- *  级联用它闸开轮：上电时画布上只有本卡那一块是从记录恢复来的，这时候开轮会把
- *  一张**不全的画布**推下去、把从卡刚恢复的内容刷黑。
- *  @return true = 本上电周期内画布被渲染过 */
-bool app_screen_canvas_touched(void);
 
 /** @brief 把一张整屏 1bpp 位图落到本地实屏（主卡本地提交与从卡落屏共用的唯一路径）
  *

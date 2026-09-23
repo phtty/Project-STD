@@ -1,9 +1,10 @@
 /**
  * @file    app_screen.c
- * @brief   整屏门面实现 —— 1bpp 逻辑画布 + 渲染目标 + 落屏 + 亮度
+ * @brief   整屏门面实现 —— 切分表/几何、卡状态、落屏、亮度、身份
  *
- * 见 app_screen.h 的设计说明。逻辑几何来自切分表（单卡时即本屏几何），画布画完后
- * 抽取本卡矩形再落屏（多卡时逐卡下发）—— 见 app_screen_extract / app_screen_commit_self。
+ * 见 app_screen.h 的设计说明。逻辑几何来自切分表（单卡时即本屏几何）。
+ * 画布那一簇（1bpp 缓冲、渲染目标 sink、抽带、静默期提交、显存持久化）已拆到
+ * app_screen_canvas.c —— 本文件只保留"与画布无关"的门面职责。
  *
  * 由 board.h 的 BOARD_SCREEN_CANVAS 开关：多卡级联的板子打开（5006048 即如此），
  * 单独一块卡上，画布是纯开销 —— 它多占一块 1bpp 缓冲、多一次拷贝，还要把卡内多色
@@ -13,35 +14,19 @@
 #include "app_screen.h"
 
 #include <stdio.h>
-#include <string.h>
-#include "board.h" /* BOARD_SCREEN_CANVAS / _CANVAS_MAX / _COLOR */
+#include "board.h" /* BOARD_SCREEN_CANVAS / _COLOR / BOARD_CASC_* */
 #include "app_render.h"
 #include "dev_display.h"
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_task.h"
 
-/* ---- 画布 ----
- * 1bpp 字节池。静态定长、按"本板参与的最大级联规模"留，运行期几何从中切 ——
- * dev_display_t 没有编译期几何宏，尺寸只能运行期读（与本工程既有做法一致）。
- *
- * 放 SRAM 不放 CCMRAM：画布只在渲染与抽取时被碰（每轮几 KB），是冷路径，
- * 不值得跟协议 RB/队列（工程惯例放 CCMRAM）与显示缓冲抢那 64KB。
- * 且 CCMRAM 在 5006048 上只剩约 12KB，1B/px 的整屏画布根本放不下 ——
- * "整屏 1bpp"这个决策的真实价值就在这里。 */
-/* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
-#if BOARD_SCREEN_CANVAS
-static uint8_t s_canvas_buf[BOARD_SCREEN_CANVAS_MAX];
-#endif /* BOARD_SCREEN_CANVAS */
-
+/* 几何（整屏逻辑宽高）与身份/亮度/卡状态都归门面；画布自己的缓冲与 stride 在
+   app_screen_canvas.c。s_rows/s_cols 为 0 表示门面停用，此时回落到本卡实屏几何。 */
 static dev_display_t *s_display_dev;
-static uint16_t       s_rows;   /* **整屏**逻辑宽（单卡时 == 本屏宽） */
-static uint16_t       s_cols;   /* 整屏逻辑高 */
-static uint16_t       s_stride; /* = (s_rows + 7) / 8 */
-static uint16_t       s_bm_len; /* = s_stride * s_cols */
-static uint8_t        s_self_idx;   /* 本卡在切分表里的下标 */
-
-static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表本卡那一项） */
+static uint16_t       s_rows;     /* **整屏**逻辑宽（单卡时 == 本屏宽） */
+static uint16_t       s_cols;     /* 整屏逻辑高 */
+static uint8_t        s_self_idx; /* 本卡在切分表里的下标 */
 
 /* ---- 哪一格是主卡格：**运行期事实**（出厂默认来自 board.h）----
  *
@@ -71,88 +56,6 @@ uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t master_cell)
     return (uint8_t)(addr <= master_cell ? addr - 1U : addr);
 }
 
-/* ---- 输出颜色的临时覆盖（只给工厂老化测试用）----
- *
- * 根因：画布是 **1bpp**（只记亮/灭），**颜色在协议里是逐卡给的**
- * （`app_casc_image_t.color`，来自切分表）。所以"整屏轮流点亮红/绿/蓝"这种
- * 逐色老化，在级联下没有别的表达方式 —— 不覆盖的话所有纯色填充都会显示成
- * **本卡那个颜色**（现场：十种颜色全是绿的）。 */
-#define SCREEN_COLOR_NO_OVERRIDE (0xFFU)
-static uint8_t s_color_override = SCREEN_COLOR_NO_OVERRIDE;
-
-void app_screen_set_color_override(uint8_t color)
-{
-    s_color_override = color;
-}
-
-/* ---- 这一帧内容用的颜色（画布只记亮/灭，颜色另行记着）----
- *
- * 画布是 **1bpp**，原来的规矩是"颜色由像素属于哪张卡决定" —— 于是 `app_render`
- * 传下来的颜色**被整个丢掉**：LDI 发红字显示成绿、RLS 的位图颜色同样中招、
- * 工厂老化逐色全绿。开画布之前（渲染直写实屏）颜色是逐像素的真彩，所以这是
- * 开画布之后新出现的回归。
- *
- * 现在的规矩：记下这一帧用了哪个**非黑**颜色，落屏时用它。
- *   · 只有一种非黑颜色（文字、位图、填充 —— 绝大多数用法）→ 就是它 ✓
- *   · 混用多种 → 退回"本卡颜色"，并置混色标志（1bpp 画布本来就表达不了多色，
- *     与其静默挑一个，不如退回那张卡的部署色）
- *   · 一次非黑都没写过（比如整屏全黑）→ 同样退回落卡片色 ✓ */
-static uint8_t s_content_color = SCREEN_COLOR_NO_OVERRIDE; /* 0xFF = 本帧还没定 */
-static bool    s_content_mixed;
-
-#if BOARD_SCREEN_CANVAS /* 下面三个只在"有画布"时才有人调（sink 里）*/
-
-/** @brief 这一次填充是不是"整屏清屏"（= 新一帧的开始）
- *
- *  各个渲染调用点的清屏都是"整屏黑填充"（`APP_RENDER_TYPE_FILL` 的 w=h=0）——
- *  它是唯一可靠的"上一帧结束"信号（画布本身被 memset 清只发生在重装门面时）。 */
-static bool _is_full_clear(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
-{
-    return c == DEV_DISPLAY_COLOR_BLACK && x == 0 && y == 0 && w >= s_rows && h >= s_cols;
-}
-
-/** @brief 记下"这一帧用了哪个颜色"；只在写**亮**像素时调 */
-static void _note_content_color(dev_display_color_t c)
-{
-    if (c == DEV_DISPLAY_COLOR_BLACK) return; /* 黑 = 灭，不算颜色 */
-    if (s_content_color == SCREEN_COLOR_NO_OVERRIDE) {
-        s_content_color = (uint8_t)c;
-        return;
-    }
-    if (s_content_color != (uint8_t)c) s_content_mixed = true;
-}
-
-/** @brief 新一帧开始（画布被清）—— 上一帧的颜色主张作废 */
-static void _reset_content_color(void)
-{
-    s_content_color = SCREEN_COLOR_NO_OVERRIDE;
-    s_content_mixed = false;
-}
-
-#endif /* BOARD_SCREEN_CANVAS */
-
-uint8_t app_screen_output_color(uint8_t card_color)
-{
-    /* 优先级：工厂测试的强制覆盖 > 这一帧内容的颜色 > 切分表给这张卡的颜色 */
-    if (s_color_override <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_color_override;
-    if (!s_content_mixed && s_content_color <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_content_color;
-    return card_color;
-}
-
-/** 本上电周期内画布**有没有被写过**（任何渲染）—— 声明放守卫之外：
- *  `_screen_init` 与级联都要读它，而画布开关关闭时它们仍在编译。
- *
- *  **`_persist_restore()` 直写画布、不经过 sink → 不置位** —— 这正是
- *  "上电恢复不算新内容"的干净表达。 */
-static bool s_canvas_touched_flag;
-
-/* 抽带缓冲：本卡矩形抽出来放这儿，再交给 commit_bitmap 落屏。
-   主卡本地提交与"单卡即整屏"共用它 —— 长度由 BOARD_CASC_BAND_MAX 兜底，
-   _screen_init 按**运行期几何**校验一次（超了会明确打出来并停用门面）。 */
-#if BOARD_SCREEN_CANVAS
-static uint8_t s_band_buf[BOARD_CASC_BAND_MAX];
-#endif
-
 /* ================================================================
  *  切分表 —— 本期由 board.h 的网格参数合成
  *
@@ -171,17 +74,6 @@ static app_screen_layout_t s_screen_layout = {.cards = s_card_table, .count = 0,
 const app_screen_layout_t *app_screen_layout(void)
 {
     return &s_screen_layout;
-}
-
-/** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
- *
- *  级联用它闸开轮：上电时画布上只有本卡那一块是从记录恢复来的、其余区域是空的 ——
- *  这时候开轮就是把一张**不全的画布**推下去，把从卡刚恢复的内容刷黑。
- *  闸住之后：整机掉电重启 → 一轮都不开、各卡显示各自记录的内容；上位机一下发内容
- *  → 画布被重画 → 恢复正常同步整屏。 */
-bool app_screen_canvas_touched(void)
-{
-    return s_canvas_touched_flag;
 }
 
 /* 门面停用（显示未就绪 / 地址不在表里）时 s_rows/s_cols 还是 0，回落到本卡屏几何 ——
@@ -307,7 +199,7 @@ uint16_t app_screen_card_bm_len(uint8_t card_idx)
  *  **主卡不必在网格原点** —— 现场的拼法就有"上面一块、下面一块，下面那块是主卡"
  *  的（此时主卡在最后一行）。所以地址不能拿网格下标当：主卡那格编 0，
  *  其余按行优先依次编 1、2、3…。全工程没有任何地方假设主卡在原点
- *  （持久化恢复也按本卡矩形映射，见 _persist_restore）。 */
+ *  （持久化恢复也按本卡矩形映射，见 app_screen_canvas.c 的 _persist_restore）。 */
 static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
 {
     const uint16_t cw = s_display_dev ? s_display_dev->screen_rows : 0; /* 单卡屏宽 */
@@ -355,17 +247,15 @@ static bool _layout_build(void)
                               s_master_cell);
 }
 
-/** @brief 由切分表推出画布几何、定位本卡、清画布
+/** @brief 由切分表推出逻辑几何、定位本卡；画布几何与清零交给画布 TU
  *
  *  `_screen_init` 与 host 用例都走这一条 —— 用例换一组几何/网格时不必自己拼
  *  "设几何 + 清画布"那几步，也就不会与生产初始化漂移。
  *  @return false = 本卡地址不在表里，或画布池装不下整屏 */
 static bool _apply_layout(void)
 {
-    s_rows   = s_screen_layout.rows;
-    s_cols   = s_screen_layout.cols;
-    s_stride = (uint16_t)((s_rows + 7U) / 8U);
-    s_bm_len = (uint16_t)(s_stride * s_cols);
+    s_rows = s_screen_layout.rows;
+    s_cols = s_screen_layout.cols;
 
     s_self_idx = app_screen_self_index();
     if (s_self_idx >= s_screen_layout.count) {
@@ -376,38 +266,13 @@ static bool _apply_layout(void)
                (unsigned)app_screen_self_addr(), (unsigned)s_screen_layout.count);
         return false;
     }
-    s_color = s_screen_layout.cards[s_self_idx].color;
 
 #if BOARD_SCREEN_CANVAS
-    /* 尺寸校验必须在 memset 之前 —— 池子小了先清就是直接写穿 */
-    if (s_bm_len > sizeof(s_canvas_buf)) {
-        /* 拦下而不是截断：画布小了的表现是"右边/下边一块永远不更新"，很难查 */
-        printf("[screen] 画布需要 %u 字节 > BOARD_SCREEN_CANVAS_MAX %u，整屏门面停用\n",
-               (unsigned)s_bm_len, (unsigned)sizeof(s_canvas_buf));
-        return false;
-    }
-    /* **每次重装都清**（换身份也一样）：换了身份之后画布上那份内容是不是
-       "一整幅完整的逻辑屏"就说不准了 —— 从卡的画布只有它自己那一块（上电从记录
-       恢复来的），把它当整幅推下去，别的卡当场被刷黑。而"按一下键屏上内容消失"
-       只在**角色真的变了**的时候发生（没变的那条路在 `apply_identity` 就返回了）。 */
-    memset(s_canvas_buf, 0, s_bm_len);
-    _reset_content_color(); /* 上一帧的颜色主张作废 */
+    /* 画布几何由此固定。内部做：池容校验 → memset → 作废颜色主张；
+       **校验失败必须先于 memset 返回**（池子小了先清就是直接写穿）。 */
     if (!app_screen_canvas_attach(s_rows, s_cols)) return false;
 #endif
     return true;
-}
-
-
-static volatile uint32_t s_gen_cnt;             /* 内容代数：每次写入自增 */
-static volatile uint32_t s_last_write_tick; /* 最后一次写入的时刻，静默期据此算 */
-static volatile bool     s_pending_flag;         /* 有内容尚未落屏 */
-
-#define SCREEN_POLL_MS   (10U) /**< 检查静默期的周期 */
-#define SCREEN_SETTLE_MS (50U) /**< 静默多久算"这一屏画完了" */
-
-uint32_t app_screen_generation(void)
-{
-    return s_gen_cnt;
 }
 
 /* ================================================================
@@ -434,248 +299,6 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
     dev_display_draw_bitmap(d, 0, 0, d->screen_rows, d->screen_cols, bm, (dev_display_color_t)color);
     dev_display_frame_end(d);
 }
-
-/** @brief 把画布落到本地屏。
- *
- *  几何来自切分表，画布可能大于本屏 —— 落屏前按切分表抽出本卡那个矩形
- *  （`app_screen_extract`）。 */
-/* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
-#if BOARD_SCREEN_CANVAS
-
-/* ================================================================
- *  抽带：画布上的一个矩形 → 一张 1bpp 位图
- *
- *  这是**主卡本地提交**与**发给从卡**共用的唯一提取路径 —— 两条路各写一份提取
- *  逻辑，迟早会在某个边界（w 不是 8 的倍数、x 不对齐）上漂移，而漂移的表现是
- *  "主卡屏上对、从卡屏上差一列"，现场几乎无法归因。
- * ================================================================ */
-
-bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap)
-{
-    const app_screen_card_t *c = app_screen_card(card_idx); /* **下标**，不是地址 */
-    if (!c || !buf) return false;
-
-    const uint16_t stride = (uint16_t)((c->w + 7U) / 8U);
-    const uint16_t need   = (uint16_t)(stride * c->h);
-
-    /* 矩形必须整个落在画布里。网格切分下恒真；切分表可由记录覆盖后就未必了，
-       所以这里挡住而不是让它读到画布外面去。 */
-    if (cap < need || (uint32_t)c->x + c->w > s_rows || (uint32_t)c->y + c->h > s_cols)
-        return false;
-
-    memset(buf, 0, need);
-
-    for (uint16_t y = 0; y < c->h; y++) {
-        uint8_t       *dst = &buf[(uint32_t)y * stride];
-        const uint8_t *row = &s_canvas_buf[(uint32_t)(c->y + y) * s_stride];
-
-        if ((c->x & 7U) == 0U) {
-            /* 矩形按字节对齐 —— 两板的卡宽都是 8 的倍数，这是常见情形（整行 memcpy） */
-            memcpy(dst, &row[c->x >> 3], stride);
-        } else {
-            for (uint16_t x = 0; x < c->w; x++) {
-                const uint16_t sx = (uint16_t)(c->x + x);
-                if (row[sx >> 3] & (uint8_t)(0x80U >> (sx & 7U)))
-                    dst[x >> 3] |= (uint8_t)(0x80U >> (x & 7U));
-            }
-        }
-
-        /* 末字节补位归零：w 不是 8 的倍数时，memcpy 会把矩形右边**属于邻卡**的
-           位也搬过来。不清掉的话同一幅画面会有两种字节表示（取决于画布右边是什么），
-           比对与差分都失去意义。 */
-        if (c->w & 7U) dst[stride - 1U] &= (uint8_t)(0xFFU << (8U - (c->w & 7U)));
-    }
-    return true;
-}
-
-/* 前置声明：定义在文件后部（持久化那一节），而提交路径要用它 */
-#if BOARD_SCREEN_CANVAS
-static void _persist_save(void);
-#endif
-
-bool app_screen_commit_self(void)
-{
-    if (s_self_idx >= s_screen_layout.count) return false;
-    const uint16_t len = app_screen_card_bm_len(s_self_idx);
-    if (!len || len > sizeof(s_band_buf)) return false;
-    if (!app_screen_extract(s_self_idx, s_band_buf, sizeof(s_band_buf))) return false;
-
-    /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致。
-       颜色过一道"输出颜色"：正常就是本卡那个颜色，工厂逐色老化时被临时覆盖。 */
-    app_screen_commit_bitmap(s_band_buf, len, app_screen_output_color(s_color));
-
-    /* ---- 持久化请求**只能在这里**消费 ----
-     * 上面那一行刚把内容写进实屏，此刻存下去才是这一帧。渲染时（app_render）存的话
-     * 读到的还是上一帧 —— 那是加这条缝之前三个调用点的缺陷。
-     * 单卡走 _screen_task → 本函数；多卡主卡走 _round_run → 本函数 —— 两条都覆盖。 */
-    if (app_render_take_persist_req()) _persist_save();
-    return true;
-}
-
-/* ================================================================
- *  渲染目标实现
- *
- *  **边界裁剪必须自己做**：不顺开 dev_display 那两个坑 ——
- *  `dev_display_fill` 在 x > screen_rows 时 w 会 uint16 下溢、冲出缓冲；
- *  `dev_display_draw_bitmap` 越界则整体放弃且不报错。
- *  在画布层裁干净，两个坑就都用不上。
- * ================================================================ */
-
-static void _mark_dirty(void)
-{
-    s_gen_cnt++;
-    s_last_write_tick = osKernelGetTickCount();
-    s_pending_flag         = true;
-    s_canvas_touched_flag  = true;
-}
-
-/** @brief 把矩形裁到画布内；全裁掉返回 false */
-static bool _clip(uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
-{
-    if (*x >= s_rows || *y >= s_cols) return false;
-    if ((uint32_t)*x + *w > s_rows) *w = (uint16_t)(s_rows - *x);
-    if ((uint32_t)*y + *h > s_cols) *h = (uint16_t)(s_cols - *y);
-    return *w && *h;
-}
-
-/** @brief 置/清一个像素位 */
-static inline void _set_bit(uint16_t x, uint16_t y, bool on)
-{
-    uint8_t *p   = &s_canvas_buf[(uint32_t)y * s_stride + (x >> 3)];
-    uint8_t  msk = (uint8_t)(0x80U >> (x & 7U));
-    if (on)
-        *p |= msk;
-    else
-        *p &= (uint8_t)~msk;
-}
-
-static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
-{
-    (void)ctx;
-    if (!_clip(&x, &y, &w, &h)) return;
-
-    /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
-       落屏时用它（见 app_screen_output_color） */
-    bool on = (c != DEV_DISPLAY_COLOR_BLACK);
-    /* 整屏清屏 → 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
-    if (_is_full_clear(x, y, w, h, c)) _reset_content_color();
-    else _note_content_color(c);
-
-    for (uint16_t r = 0; r < h; r++) {
-        uint8_t *row = &s_canvas_buf[(uint32_t)(y + r) * s_stride];
-        for (uint16_t k = 0; k < w; k++) {
-            uint16_t xx = (uint16_t)(x + k);
-            uint8_t  m  = (uint8_t)(0x80U >> (xx & 7U));
-            if (on)
-                row[xx >> 3] |= m;
-            else
-                row[xx >> 3] &= (uint8_t)~m;
-        }
-    }
-    _mark_dirty();
-}
-
-static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                         const uint8_t *bm, dev_display_color_t c)
-{
-    (void)ctx;
-    if (!bm || !_clip(&x, &y, &w, &h)) return;
-
-    /* 与 dev_display_draw_bitmap 同语义：bit=1 才写（写 on 或 off），bit=0 不动。
-       位序同为 MSB-first、(宽+7)/8 行字节。 */
-    bool         on        = (c != DEV_DISPLAY_COLOR_BLACK);
-    uint16_t     src_stride = (uint16_t)((w + 7U) / 8U);
-    _note_content_color(c);
-
-    for (uint16_t r = 0; r < h; r++) {
-        for (uint16_t k = 0; k < w; k++) {
-            if (bm[(uint32_t)r * src_stride + (k >> 3)] & (uint8_t)(0x80U >> (k & 7U)))
-                _set_bit((uint16_t)(x + k), (uint16_t)(y + r), on);
-        }
-    }
-    _mark_dirty();
-}
-
-/* ---- 渲染目标与持久化钩子（只在 BOARD_SCREEN_CANVAS 打开时注册）---- */
-
-/* **不能加 const**：几何在 _screen_init 里填，而 const 对象住 .rodata ——
-   在 STM32 上那就是 Flash，写进去会被静默丢弃（不报错！），于是 rows/cols 恒为 0，
-   画布裁剪把所有内容裁光、屏上什么都不显示。host 单测用 ASan 抓到的就是这个写。 */
-static app_render_target_t s_target = {
-    .fill   = _sink_fill,
-    .bitmap = _sink_bitmap,
-    .ctx    = nullptr,
-    .rows   = 0, /* _screen_init 里填 */
-    .cols   = 0,
-};
-
-static void _persist_save(void);
-static bool _persist_restore(void);
-static const app_render_persist_hook_fn_t s_persist_hook = {.save = _persist_save, .restore = _persist_restore};
-
-/* ================================================================
- *  显存持久化：画布版本的存/取
- *
- *  接管之后存的**不再是实屏**，而是画布 —— 级联下这才是"整屏的内容"。
- *  格式沿用 app_render_persist_t（1bpp、MSB-first），但多带一个颜色字段已经够用
- *  （本卡颜色由切分表给，不随内容变）。
- *
- *  画布已大于本屏，存画布与存实屏不再等价；改动的意义在于接上钩子这条缝。
- * ================================================================ */
-
-static void _persist_save(void)
-{
-    /* 复用 app_render 原有的落盘路径：它读的是 dev_display 的 pixel_map，而**本卡
-       那一块**画布刚刚经 app_screen_commit_self 提交给它，两者逐位一致。
-       所以存实屏 == 存本卡矩形，是多卡下也对的一件事（画布其余部分属于别的卡）。
-
-       刻意**不**改成存整张画布：记录格式（app_render_persist_t）的尺寸域与位图上限
-       （RENDER_PERSIST_BITMAP_MAX=2560）都是按**单块屏**定的，整屏画布 4 卡能到
-       5600 字节，存不下。要存整屏得先改记录格式 —— 那是另一件事。 */
-    app_render_set_persist_hook(nullptr);
-    app_render_save();
-    app_render_set_persist_hook(&s_persist_hook);
-}
-
-static bool _persist_restore(void)
-{
-    bool ok;
-    app_render_set_persist_hook(nullptr);
-    ok = app_render_restore();
-    app_render_set_persist_hook(&s_persist_hook);
-
-    /* 恢复了实屏，画布要跟着同步 —— 否则下一轮静默提交会拿一张空画布把屏刷黑。
-     *
-     * 记录里存的是**本卡那块实屏**（app_render_persist_t 的尺寸域与位图上限都按单块屏
-     * 算的），不是整屏画布。所以这里要把实屏按"本卡在画布上的矩形"摆回去 ——
-     * 多卡时画布比实屏大，直接按画布尺寸索引 pixel_map 会读到屏外。
-     * 索引一律用**实屏几何** dw/dh，与画布几何 s_rows/s_cols 是两回事。 */
-    if (ok && s_display_dev && s_self_idx < s_screen_layout.count) {
-        const app_screen_card_t *c  = &s_screen_layout.cards[s_self_idx];
-        const uint16_t       dw = s_display_dev->screen_rows;
-        const uint16_t       dh = s_display_dev->screen_cols;
-
-        memset(s_canvas_buf, 0, s_bm_len);
-        /* 恢复的内容**直写画布**、不经过 sink —— 内容色在这里补记：
-           实屏上那份是 `app_render_restore` 用**记录里的颜色**画出来的
-           （存的时候也是取"第一个非黑像素的颜色"，见 app_render_save），
-           所以照着像素记一遍即可，落屏时才不会退回卡片色。 */
-        _reset_content_color();
-        for (uint16_t y = 0; y < dh && y < c->h; y++)
-            for (uint16_t x = 0; x < dw && x < c->w; x++) {
-                const uint8_t px = s_display_dev->pixel_map[(uint32_t)y * dw + x];
-                if (px == DEV_DISPLAY_COLOR_BLACK) continue;
-
-                _note_content_color((dev_display_color_t)px);
-                const uint16_t cx = (uint16_t)(c->x + x);
-                const uint16_t cy = (uint16_t)(c->y + y);
-                s_canvas_buf[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
-            }
-        s_pending_flag = false; /* 刚恢复的内容已经落过屏，不必再提交一遍 */
-    }
-    return ok;
-}
-#endif /* BOARD_SCREEN_CANVAS */
 
 /* ================================================================
  *  亮度
@@ -732,48 +355,6 @@ bool app_screen_is_master(void)
     return app_screen_self_addr() == 0U; /* 地址 0 = 主卡 */
 }
 
-void app_screen_flush(void)
-{
-    /* 把"最后一次写入"往前推过静默窗，下一次轮询就提交 */
-    s_last_write_tick = osKernelGetTickCount() - SCREEN_SETTLE_MS;
-    s_pending_flag         = true;
-}
-
-/* ================================================================
- *  静默期自动提交
- *
- *  为什么不"每次 app_render 返回就提交"：
- *   · `_vms_display_ctrl` 是"先 fill 再 bitmap"两次调用，逐次提交会推两遍整屏
- *   · 文字是**逐字** fill+draw_bitmap，中间态会被推出去（屏上会闪）
- *   · 调用点有六处，靠人记得 flush 迟早会漏
- *  静默 50ms 之后才提交，上述三类问题一次解决，且现有调用点一行都不用改。
- * ================================================================ */
-
-/* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
-#if BOARD_SCREEN_CANVAS
-
-bool app_screen_take_pending_settled(void)
-{
-    if (!s_pending_flag) return false;
-    if ((osKernelGetTickCount() - s_last_write_tick) < SCREEN_SETTLE_MS) return false;
-    s_pending_flag = false;
-    return true;
-}
-
-static void _screen_task(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        osDelay(SCREEN_POLL_MS);
-        if (app_screen_take_pending_settled()) (void)app_screen_commit_self();
-    }
-}
-#endif /* BOARD_SCREEN_CANVAS */
-
-/* ================================================================
- *  初始化
- * ================================================================ */
-
 /** @brief 按**当前** `app_screen_self_addr()` 装好整屏门面 —— 上电与运行期换身份共用
  *
  *  把原来 `_screen_init` 里"与身份有关的那半段"整段搬到这里：重算几何、定位本卡、
@@ -806,31 +387,21 @@ static bool _apply_identity(void)
        与下发的内容打架。
        **两个方向都要做**：从主变从要撤、从从变主要装 —— 这是本函数存在的理由。 */
     if (app_screen_is_master()) {
-        /* 渲染目标几何必须跟着**整屏**走 —— 排版/换行/居中判的是它 */
-        s_target.rows = s_rows;
-        s_target.cols = s_cols;
-        app_render_set_persist_hook(&s_persist_hook);
-        app_render_set_target(&s_target);
         app_screen_canvas_enable(s_rows, s_cols);
     } else {
-        app_render_set_persist_hook(nullptr);
-        app_render_set_target(nullptr);
         app_screen_canvas_disable();
     }
 #endif
 
-    /* 画布刚清空：**待落屏必须清掉**（置着的话主卡会立刻把一张全黑推给所有从卡），
-       "本周期被渲染过"这个闸也重新计 —— 新身份下这份内容要么没了、要么不完整。 */
-    s_pending_flag        = false;
-    s_canvas_touched_flag = false;
-
     const app_screen_card_t *c = app_screen_card(s_self_idx);
 #if BOARD_SCREEN_CANVAS
+    /* 画布字节数在这里按几何现算（s_bm_len 是画布 TU 的内部量，不跨 TU 取） */
+    const uint16_t canvas_bytes = (uint16_t)(((s_rows + 7U) / 8U) * s_cols);
     printf("[screen] 整屏画布 %ux%u（%u 字节，1bpp）共 %u 卡；本卡 #%u addr=%u "
            "矩形 %ux%u@(%u,%u) 颜色 %u%s\n",
-           (unsigned)s_rows, (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_screen_layout.count,
+           (unsigned)s_rows, (unsigned)s_cols, (unsigned)canvas_bytes, (unsigned)s_screen_layout.count,
            (unsigned)s_self_idx, (unsigned)app_screen_self_addr(), (unsigned)c->w, (unsigned)c->h,
-           (unsigned)c->x, (unsigned)c->y, (unsigned)s_color,
+           (unsigned)c->x, (unsigned)c->y, (unsigned)c->color,
            app_screen_is_master()
                ? (s_screen_layout.count > 1 ? "（主卡，落屏由级联轮次统一做）" : "（单卡）")
                : "（从卡，内容由主卡下发）");
@@ -862,13 +433,42 @@ void app_screen_reinit_identity(void)
 
     /* 本卡地址不在切分表里 → **停用门面**（不是静默降级成"单卡占满"）：
        主卡身份残留会让这张卡继续往画布上画、而屏上什么都没有。 */
-    app_render_set_target(nullptr);
-    app_render_set_persist_hook(nullptr);
-    s_pending_flag = false;
 #if BOARD_SCREEN_CANVAS
     app_screen_canvas_disable();
+#else
+    app_render_set_target(nullptr);
+    app_render_set_persist_hook(nullptr);
 #endif
 }
+
+/* ================================================================
+ *  静默期自动提交的消费者：单卡
+ *
+ *  落屏的消费者**只能有一个**：
+ *   · 单卡       → 本模块自己的静默期任务（就是加级联之前的行为）
+ *   · 多卡主卡   → 级联的"轮"。它还要把同一份内容分发给从卡，必须由它统一决定
+ *                 何时落屏 —— 两个消费者并存的话主卡屏与从卡屏会差一轮
+ *   · 从卡       → 两个都不是，它的内容来自总线（app_screen_commit_bitmap）
+ *
+ *  本任务只在**画布打开**时存在（没有画布就没有"待落屏"，渲染是直写实屏的）。
+ *  任务体只用画布 TU 的公开 API（take_pending_settled + commit_self），
+ *  周期宏与任务体一起留在这里（画布 TU 不再需要它）。 */
+#if BOARD_SCREEN_CANVAS
+#define SCREEN_POLL_MS (10U) /**< 检查静默期的周期 */
+
+static void _screen_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        osDelay(SCREEN_POLL_MS);
+        if (app_screen_take_pending_settled()) (void)app_screen_commit_self();
+    }
+}
+#endif /* BOARD_SCREEN_CANVAS */
+
+/* ================================================================
+ *  初始化
+ * ================================================================ */
 
 static void _screen_init(void)
 {
@@ -884,13 +484,6 @@ static void _screen_init(void)
         return;
     }
 
-    /* 落屏的消费者**只能有一个**：
-     *  · 单卡       → 本模块自己的静默期任务（就是加级联之前的行为）
-     *  · 多卡主卡   → 级联的"轮"。它还要把同一份内容分发给从卡，必须由它统一决定
-     *                 何时落屏 —— 两个消费者并存的话主卡屏与从卡屏会差一轮
-     *  · 从卡       → 两个都不是，它的内容来自总线（app_screen_commit_bitmap）
-     *
-     * 本任务只在**画布打开**时存在（没有画布就没有"待落屏"，渲染是直写实屏的）。 */
 #if BOARD_SCREEN_CANVAS
     if (s_screen_layout.count <= 1) {
         const osThreadAttr_t attr = {
