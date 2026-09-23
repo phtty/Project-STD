@@ -318,6 +318,7 @@ SRC_APPLICATION = \
 	Application/Src/Render/app_render.c \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/Render/app_screen.c \
+	Application/Src/Render/app_screen_canvas.c \
 	Application/Src/CASC/app_casc.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
@@ -682,7 +683,8 @@ $(TEST_BUILD)/test_font_lib: $(TEST_FONT_LIB_SRCS)
 # 换板换字库时必须重编本套件（期望表是按板 #if 选的）
 $(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
 
-$(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) Application/Src/Render/app_screen.c
+$(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) \
+	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
 
@@ -700,11 +702,13 @@ $(TEST_BUILD)/test_casc_frame: $(TEST_CASC_FRAME_SRCS)
 $(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 
 # 同上：用例 TU-include 了 app_screen.c 与板级 board.h，都不在 SRCS 里。
-$(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) Application/Src/Render/app_screen.c
+$(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) \
+	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_LAYOUT_SRCS) $(TEST_LDFLAGS)
 
-$(TEST_BUILD)/test_screen_layout: Application/Src/Render/app_screen.c $(BOARD_DIR)/board.h
+$(TEST_BUILD)/test_screen_layout: Application/Src/Render/app_screen.c \
+	Application/Src/Render/app_screen_canvas.c $(BOARD_DIR)/board.h
 
 # 同上：用例 TU-include 了 app_casc.c。
 $(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_casc.c

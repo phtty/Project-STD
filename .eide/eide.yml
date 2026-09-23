@@ -19,6 +19,7 @@ virtualFolder:
         - path: Application/Src/app_cfg_sched.c
         - path: Application/Src/app_diag.c
         - path: Application/Src/Render/app_screen.c
+        - path: Application/Src/Render/app_screen_canvas.c
       folders:
         - name: channel
           files:
