@@ -1,11 +1,11 @@
 /**
  * @file    app_screen.c
- * @brief   整屏门面实现 —— 切分表/几何、落屏、亮度、身份
+ * @brief   整屏门面实现 —— 切分表/几何、落屏、身份
  *
  * 见 app_screen.h 的设计说明。逻辑几何来自切分表（单卡时即本屏几何）。
  * 画布那一簇（1bpp 缓冲、渲染目标 sink、抽带、静默期提交、显存持久化）已拆到
- * app_screen_canvas.c；卡片状态与整屏状态快照已拆到 app_screen_status.c ——
- * 本文件只保留"与画布无关、与状态无关"的门面职责。
+ * app_screen_canvas.c；卡片状态与整屏状态快照拆到 app_screen_status.c；亮度拆到
+ * app_screen_brightness.c —— 本文件只保留切分表/几何、落屏与身份。
  *
  * 由 board.h 的 BOARD_SCREEN_CANVAS 开关：多卡级联的板子打开（5006048 即如此），
  * 单独一块卡上，画布是纯开销 —— 它多占一块 1bpp 缓冲、多一次拷贝，还要把卡内多色
@@ -246,35 +246,6 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
     dev_display_fill(d, 0, 0, d->screen_rows, d->screen_cols, DEV_DISPLAY_COLOR_BLACK);
     dev_display_draw_bitmap(d, 0, 0, d->screen_rows, d->screen_cols, bm, (dev_display_color_t)color);
     dev_display_frame_end(d);
-}
-
-/* ================================================================
- *  亮度
- * ================================================================ */
-
-static volatile bool    s_bright_pending_flag;
-static volatile uint8_t s_bright_level;
-
-void app_screen_set_brightness(uint8_t level)
-{
-    if (level > 7) level = 7;
-    if (s_display_dev) dev_display_set_brightness(s_display_dev, level);
-
-    s_bright_level   = level;
-    s_bright_pending_flag = true; /* 由级联协议取走并广播给从卡 */
-}
-
-uint8_t app_screen_get_brightness(void)
-{
-    return s_display_dev ? s_display_dev->light_level : 0;
-}
-
-bool app_screen_brightness_take_pending(uint8_t *level)
-{
-    if (!s_bright_pending_flag) return false;
-    s_bright_pending_flag = false;
-    if (level) *level = s_bright_level;
-    return true;
 }
 
 /* ---- 本卡身份（总线地址）----

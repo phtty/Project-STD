@@ -320,6 +320,7 @@ SRC_APPLICATION = \
 	Application/Src/Render/app_screen.c \
 	Application/Src/Render/app_screen_canvas.c \
 	Application/Src/Render/app_screen_status.c \
+	Application/Src/Render/app_screen_brightness.c \
 	Application/Src/CASC/app_casc.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \

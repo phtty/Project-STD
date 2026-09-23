@@ -21,6 +21,7 @@ virtualFolder:
         - path: Application/Src/Render/app_screen.c
         - path: Application/Src/Render/app_screen_canvas.c
         - path: Application/Src/Render/app_screen_status.c
+        - path: Application/Src/Render/app_screen_brightness.c
       folders:
         - name: channel
           files:
