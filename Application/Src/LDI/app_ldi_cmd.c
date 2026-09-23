@@ -1,3 +1,8 @@
+/**
+ * @file    app_ldi_cmd.c
+ * @brief   LDI 命令处理实现：逐命令解析请求帧并拼装应答
+ */
+
 #include "app_ldi_cmd.h"
 
 #include <time.h>

@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_vms_ctrl.h
+ * @brief   VMS 情报板控制：文本显示与定时清屏接口
+ */
+
 #include "app_ldi.h"
 #include "app_ldi_cmd.h"
 

@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_ahmq_cmd.h
+ * @brief   AHMQ 命令定义：各命令载荷结构与命令处理表
+ */
+
 #include <stdint.h>
 
 #include "app_ahmq.h"

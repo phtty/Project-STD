@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    dev_dp83848.h
+ * @brief   DP83848 以太网 PHY：寄存器定义与驱动接口
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif

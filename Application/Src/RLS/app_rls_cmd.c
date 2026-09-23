@@ -1,3 +1,8 @@
+/**
+ * @file    app_rls_cmd.c
+ * @brief   RLS 命令处理实现：测试帧与图文显示
+ */
+
 #include "app_rls_cmd.h"
 #include "app_screen.h"
 

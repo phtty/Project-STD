@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_iap.h
+ * @brief   IAP 升级协议：帧格式、协议控制块与任务接口
+ */
+
 #include <stdint.h>
 #include "cmsis_os2.h"
 

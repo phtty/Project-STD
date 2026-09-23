@@ -1,3 +1,8 @@
+/**
+ * @file    app_ahmq_cmd.c
+ * @brief   AHMQ 命令处理实现：按命令表分派到显示/填充/重启/对时
+ */
+
 #include "app_ahmq_cmd.h"
 
 #include "app_ahmq.h"

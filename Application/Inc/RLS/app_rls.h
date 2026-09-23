@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_rls.h
+ * @brief   RLS 协议：帧格式、命令类型与任务接口
+ */
+
 #include "string.h"
 
 #include "cmsis_os2.h"

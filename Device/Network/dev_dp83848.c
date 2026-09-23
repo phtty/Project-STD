@@ -1,3 +1,8 @@
+/**
+ * @file    dev_dp83848.c
+ * @brief   DP83848 以太网 PHY 驱动实现：寄存器访问、自协商与链路状态
+ */
+
 #include "dev_dp83848.h"
 
 #define DP83848_MAX_DEV_ADDR ((uint32_t)31U)

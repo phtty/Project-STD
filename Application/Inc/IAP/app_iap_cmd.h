@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_iap_cmd.h
+ * @brief   IAP 命令定义：返回命令码与命令处理表
+ */
+
 #include <stdint.h>
 
 #include "app_iap.h"

@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    pl_eth.h
+ * @brief   以太网 Platform 抽象：MAC 初始化、netif 接口与 PHY 链路回调
+ */
+
 #include "lwip/err.h"
 #include "lwip/netif.h"
 #include "cmsis_os.h"

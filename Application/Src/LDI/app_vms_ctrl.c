@@ -1,3 +1,8 @@
+/**
+ * @file    app_vms_ctrl.c
+ * @brief   VMS 情报板控制实现：文本显示与定时清屏
+ */
+
 #include "app_vms_ctrl.h"
 #include "app_screen.h"
 

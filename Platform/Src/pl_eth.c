@@ -1,3 +1,8 @@
+/**
+ * @file    pl_eth.c
+ * @brief   以太网 Platform 实现：MAC 初始化、netif 收发与 PHY 链路管理
+ */
+
 #include "main.h"
 #include "pl_net_adapt.h"
 #include "pl_eth.h"

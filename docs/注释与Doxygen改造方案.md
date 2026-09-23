@@ -79,7 +79,24 @@
 
 ### 2.1 缺口（启发式计数，执行时逐条核对）
 
-**Doxygen 告警基线（2026-09-23 首次生成）：1197 条** ← 每批改造后的验收计分器（只增不减即为回归）。
+**Doxygen 告警口径（B0 后修正）**：`WARN_IF_UNDOCUMENTED=YES` + `EXTRACT_ALL=NO` 下，Doxygen **只对"文件本身已文档化"的文件**逐个成员报缺口。由此：
+
+- 补 `@file`/`@brief` 文件头会让告警数**上升** —— 原本不可见的成员缺口开始被计入。这是**口径效应，不是回归**。
+- 正确计分方式是两段式：
+  - **文件头缺口** = 缺 `@file` 的自研文件数 → **B0 后为 0**（本项达标）
+  - **成员缺口** = `Member … is not documented` 计数 → **B0 后 1489**，此后每批应单调下降
+- 历史数字：首次生成 1197 → A 类收尾后 1185 → **B0 后 1489**（这才是真实完整的成员缺口底数）
+
+**B0 顺带发现的 Doxygen 契约违规（并入 B1/B2 一并修）**：
+
+| 位置 | 问题 | 处理 |
+|---|---|---|
+| `boards/3833024/Device/Src/dev_p20_16x8_2200001667.c:2` | `@file dev_display_p20.c` —— 该文件名**不存在**（旧名） | 改为实际文件名 |
+| `boards/5006048/Device/Src/dev_p10_112x10_1000000661.c:2` | `@file dev_display_p10.c` —— 同上 | 同上 |
+| `Application/Inc/LDI/app_ldi_cmd.h:17` | `@param meta` 与 `app_ldi_cmd_handler_fn_t(app_ccb_t *, void *)` 的**无名形参**对不上 | 给 typedef 形参命名，或改为散文说明 |
+| `boards/*/board.h:9`、`Kernel/Inc/initcall.h:12` | `explicit link request to 'include' / 'lvl' could not be resolved` —— 注释里的 `#include`、裸词被当成成员引用 | 用 `@c` 包裹或转义（`\#include`） |
+
+另有 2 条 `Compound p20_bsrr_t / dev_display_p20_t is not documented` —— 属 B2 的类型文档缺口。
 
 另有 12 处 `<>` 被 Doxygen 当作 HTML 标签解析（注释里写 `boards/<板>/` 这类），需转义为 `boards/&lt;板&gt;/` 或包进 `@c`；归入 B0。
 

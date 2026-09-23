@@ -1,3 +1,8 @@
+/**
+ * @file    dev_p20_16x16_1000001055.c
+ * @brief   3833024 板 P20 16x16 模组显示驱动：HUB75 映射与刷新
+ */
+
 #include "dev_display.h"
 
 #include <string.h>

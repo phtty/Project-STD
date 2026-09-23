@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_rls_cmd.h
+ * @brief   RLS 命令定义：显示载荷结构与命令处理表
+ */
+
 #include "string.h"
 
 #include "app_rls.h"

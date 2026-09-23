@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    text_cvt.h
+ * @brief   文本编码转换：十六进制与 GBK/UTF-8/Unicode 互转
+ */
+
 #include <stdint.h>
 
 /*  是否启用UTF8、GBK、UNICODE编码之间的转换

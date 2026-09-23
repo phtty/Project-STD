@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_ldi_cfg.h
+ * @brief   LDI 配置持久化：W25Qxx 配置区记录格式与读写接口
+ */
+
 #include <stdint.h>
 
 /* LDI 配置持久化 — 存在 W25Qxx 尾部的配置区内，由配置调度器统一管理

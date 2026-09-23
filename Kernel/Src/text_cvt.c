@@ -1,3 +1,8 @@
+/**
+ * @file    text_cvt.c
+ * @brief   文本编码转换实现：十六进制互转与 GBK/UTF-8/Unicode 码表
+ */
+
 #include "text_cvt.h"
 
 /**

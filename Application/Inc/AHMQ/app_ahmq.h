@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_ahmq.h
+ * @brief   AHMQ 应用层协议：MQTT 帧、主题/通知结构与协议控制块
+ */
+
 #include <stdint.h>
 
 #include "cmsis_os2.h"

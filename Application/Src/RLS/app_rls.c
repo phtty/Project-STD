@@ -1,3 +1,8 @@
+/**
+ * @file    app_rls.c
+ * @brief   RLS 协议主实现：帧探测、消息任务与命令分发
+ */
+
 #include "app_rls.h"
 #include "FreeRTOS.h"
 #include "initcall.h"

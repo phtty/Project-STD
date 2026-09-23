@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_ldi.h
+ * @brief   LDI 车道设备协议：设备类型、命令码、帧格式与协议上下文
+ */
+
 #include "cmsis_os2.h"
 #include "app_dispatch.h"
 #include "app_ldi_cfg.h"

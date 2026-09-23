@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_ldi_cmd.h
+ * @brief   LDI 命令定义：复合指令载荷结构与命令处理表
+ */
+
 #include "main.h"
 
 #include "app_ldi.h"

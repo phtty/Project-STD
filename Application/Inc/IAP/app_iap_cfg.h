@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    app_iap_cfg.h
+ * @brief   IAP 配置持久化：Flash 地址常量、系统信息记录与读写接口
+ */
+
 #include <stdint.h>
 #include <string.h>
 #include "dev_storage.h"

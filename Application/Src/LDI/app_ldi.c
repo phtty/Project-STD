@@ -1,3 +1,8 @@
+/**
+ * @file    app_ldi.c
+ * @brief   LDI 协议主实现：帧探测、消息任务、状态机与应答头构建
+ */
+
 #include "app_ldi.h"
 #include "pl_net_diag.h"
 #include "FreeRTOS.h"
