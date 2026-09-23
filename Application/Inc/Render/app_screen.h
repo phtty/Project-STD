@@ -209,6 +209,34 @@ bool app_screen_commit_self(void);
  *  @return true = 有未落屏内容且已过静默期（并已清标志）*/
 bool app_screen_take_pending_settled(void);
 
+/* ---- 内部接缝 ----
+ *
+ * 只给 app_screen.c（门面）与 app_screen_canvas.c（画布实现）之间用，
+ * **不是对外 API**：不导出画布状态，也不让别处直接摸缓冲。这样拆 TU 之后
+ * 两边的 static 仍归各自文件（§4.1），不必用 extern 共享变量。 */
+
+/** @brief 装画布几何并清空画布（池容不够返回 false）
+ *
+ *  **先做池容校验、再 memset**：池子小了先清就是直接写穿调用方以外的内存。
+ *  校验通过才按 rows/cols 算 stride 并清零，同时作废上一帧的颜色主张。
+ *  @param rows 整屏逻辑宽（像素）
+ *  @param cols 整屏逻辑高（像素）
+ *  @return false = 整屏放不进 BOARD_SCREEN_CANVAS_MAX（此时不动画布） */
+bool app_screen_canvas_attach(uint16_t rows, uint16_t cols);
+
+/** @brief 把画布注册为渲染目标并挂上持久化钩子（主卡）
+ *
+ *  渲染目标几何取整屏 rows×cols（排版/换行/居中判的是它，不是本卡实屏），
+ *  并按"新身份的画布是新的"清掉待落屏与"被渲染过"的闩。
+ *  @param rows 整屏逻辑宽，作为渲染目标几何
+ *  @param cols 整屏逻辑高，作为渲染目标几何 */
+void app_screen_canvas_enable(uint16_t rows, uint16_t cols);
+
+/** @brief 撤销渲染目标与持久化钩子，并清掉待落屏与"被渲染过"的闩（从卡/停用）
+ *
+ *  从卡的屏是整屏的一块窗口，内容由主卡下发；本地画布渲染没有意义，故不注册。 */
+void app_screen_canvas_disable(void);
+
 #endif /* BOARD_SCREEN_CANVAS */
 
 /** @brief 显式提交：立刻把画布内容落到本地屏（不必等静默期）

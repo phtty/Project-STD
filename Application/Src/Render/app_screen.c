@@ -392,6 +392,7 @@ static bool _apply_layout(void)
        只在**角色真的变了**的时候发生（没变的那条路在 `apply_identity` 就返回了）。 */
     memset(s_canvas_buf, 0, s_bm_len);
     _reset_content_color(); /* 上一帧的颜色主张作废 */
+    if (!app_screen_canvas_attach(s_rows, s_cols)) return false;
 #endif
     return true;
 }
@@ -810,9 +811,11 @@ static bool _apply_identity(void)
         s_target.cols = s_cols;
         app_render_set_persist_hook(&s_persist_hook);
         app_render_set_target(&s_target);
+        app_screen_canvas_enable(s_rows, s_cols);
     } else {
         app_render_set_persist_hook(nullptr);
         app_render_set_target(nullptr);
+        app_screen_canvas_disable();
     }
 #endif
 
@@ -862,6 +865,9 @@ void app_screen_reinit_identity(void)
     app_render_set_target(nullptr);
     app_render_set_persist_hook(nullptr);
     s_pending_flag = false;
+#if BOARD_SCREEN_CANVAS
+    app_screen_canvas_disable();
+#endif
 }
 
 static void _screen_init(void)

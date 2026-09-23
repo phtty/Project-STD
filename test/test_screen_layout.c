@@ -142,8 +142,11 @@ void dev_display_frame_end(dev_display_t *dev)
 }
 
 
-/* ---- 被测：生产源码本体 ---- */
+/* ---- 被测：生产源码本体 ----
+   画布实现已拆到独立 TU（app_screen_canvas.c），用例同样 TU-include ——
+   否则 static sink / 画布缓冲与接缝符号都缺失，链接报未定义。 */
 #include "../Application/Src/Render/app_screen.c"
+#include "../Application/Src/Render/app_screen_canvas.c"
 
 /* ================================================================
  *  夹具
