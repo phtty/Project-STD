@@ -209,41 +209,148 @@ extern "C" {
 #define DP83848_AUTONEGO_PAGE_RECEIVED_IT   DP83848_INT_1
 
 /* ---- 类型定义 ---- */
+
+/** @brief PHY 初始化回调（配置 GPIO/时钟等底层资源） */
 typedef int32_t (*dev_dp83848_init_fn_t)(void);
+
+/** @brief PHY 反初始化回调（释放底层资源） */
 typedef int32_t (*dev_dp83848_deinit_fn_t)(void);
+
+/** @brief PHY 寄存器读取回调；读到的值写入 *reg_val */
 typedef int32_t (*dev_dp83848_read_reg_fn_t)(uint32_t dev_addr, uint32_t reg_addr, uint32_t *reg_val);
+
+/** @brief PHY 寄存器写入回调 */
 typedef int32_t (*dev_dp83848_write_reg_fn_t)(uint32_t dev_addr, uint32_t reg_addr, uint32_t reg_val);
+
+/** @brief 毫秒节拍获取回调（供驱动内部超时使用） */
 typedef int32_t (*dev_dp83848_get_tick_fn_t)(void);
 
+/** @brief DP83848 的 IO 操作函数集（按所用总线由调用方实现并注册） */
 typedef struct {
-    dev_dp83848_init_fn_t      init;
-    dev_dp83848_deinit_fn_t    deinit;
-    dev_dp83848_write_reg_fn_t write_reg;
-    dev_dp83848_read_reg_fn_t  read_reg;
-    dev_dp83848_get_tick_fn_t  get_tick;
+    dev_dp83848_init_fn_t      init;       /**< 初始化回调；可为 NULL */
+    dev_dp83848_deinit_fn_t    deinit;     /**< 反初始化回调；可为 NULL */
+    dev_dp83848_write_reg_fn_t write_reg;  /**< 写寄存器回调；必填 */
+    dev_dp83848_read_reg_fn_t  read_reg;   /**< 读寄存器回调；必填 */
+    dev_dp83848_get_tick_fn_t  get_tick;   /**< 取节拍回调；必填 */
 } dev_dp83848_io_ctx_t;
 
+/** @brief DP83848 设备对象（由调用方分配，驱动只持有指针） */
 typedef struct {
-    uint32_t        dev_addr;
-    uint32_t        is_initialized;
-    dev_dp83848_io_ctx_t io;
-    void           *p_data;
+    uint32_t             dev_addr;       /**< 探测到的 PHY 地址 */
+    uint32_t             is_initialized; /**< 初始化完成标志，非 0 表示已初始化 */
+    dev_dp83848_io_ctx_t io;             /**< IO 操作函数集 */
+    void                *p_data;         /**< 调用方私有数据指针，驱动不解释 */
 } dev_dp83848_obj_t;
 
 /* ---- API ---- */
+
+/**
+ * @brief 向 PHY 设备对象注册 IO 操作函数
+ * @param[out] obj    待填充的设备对象；本函数写入其 io 成员
+ * @param io_ctx      IO 操作函数集（读/写寄存器、取节拍等）
+ * @return DP83848_STATUS_OK 注册成功；DP83848_STATUS_ERROR 缺失必要回调
+ */
 int32_t dev_dp83848_register_bus_io(dev_dp83848_obj_t *obj, dev_dp83848_io_ctx_t *io_ctx);
+
+/**
+ * @brief 初始化 DP83848 PHY 并扫描设备地址
+ * @param[in,out] obj  设备对象；读出 io 回调，写入 dev_addr 与 is_initialized
+ * @return 成功返回 DP83848_STATUS_OK；地址未找到或寄存器读取失败返回负错误码
+ */
 int32_t dev_dp83848_init(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 反初始化 DP83848，释放硬件资源
+ * @param[in,out] obj  设备对象；读/写其 is_initialized 标志
+ * @return DP83848_STATUS_OK 成功；DP83848_STATUS_ERROR 反初始化失败
+ */
 int32_t dev_dp83848_deinit(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 退出 PHY 省电模式
+ * @param obj  设备对象
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_power_down_disable(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 进入 PHY 省电模式
+ * @param obj  设备对象
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_power_down_enable(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 启动自动协商
+ * @param obj  设备对象
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_autonego_start(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 获取 DP83848 当前链路状态（速率、双工模式）
+ * @param obj  设备对象
+ * @return 100M/10M × 全/半双工之一；链路断开、自协商未完成或读失败返回
+ *         对应错误码
+ */
 int32_t dev_dp83848_link_state_get(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 手动设置 DP83848 链路速率和双工模式（关闭自动协商）
+ * @param obj        设备对象
+ * @param link_state 目标链路状态：DP83848_STATUS_100MBITS_FULLDUPLEX、
+ *                   DP83848_STATUS_100MBITS_HALFDUPLEX、
+ *                   DP83848_STATUS_10MBITS_FULLDUPLEX、
+ *                   DP83848_STATUS_10MBITS_HALFDUPLEX 之一
+ * @return DP83848_STATUS_OK 成功；DP83848_STATUS_ERROR 链路状态参数无效；
+ *         负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_link_state_set(dev_dp83848_obj_t *obj, uint32_t link_state);
+
+/**
+ * @brief 使能 PHY 环回模式（调试用）
+ * @param obj  设备对象
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_loopback_enable(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 关闭 PHY 环回模式
+ * @param obj  设备对象
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_loopback_disable(dev_dp83848_obj_t *obj);
+
+/**
+ * @brief 使能 PHY 中断源
+ * @param obj        设备对象
+ * @param interrupt  中断源掩码，可为多个 DP83848_*_IT 的组合
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_it_enable(dev_dp83848_obj_t *obj, uint32_t interrupt);
+
+/**
+ * @brief 关闭 PHY 中断源
+ * @param obj        设备对象
+ * @param interrupt  中断源掩码，可为多个 DP83848_*_IT 的组合
+ * @return DP83848_STATUS_OK 成功；负错误码表示读/写寄存器失败
+ */
 int32_t dev_dp83848_it_disable(dev_dp83848_obj_t *obj, uint32_t interrupt);
+
+/**
+ * @brief 清除 PHY 中断标志（读 ISFR 即清除）
+ * @param obj        设备对象
+ * @param interrupt  中断标志掩码（未使用，读 ISFR 即清除标志）
+ * @return DP83848_STATUS_OK 成功；DP83848_STATUS_READ_ERROR 寄存器读取失败
+ */
 int32_t dev_dp83848_it_clear(dev_dp83848_obj_t *obj, uint32_t interrupt);
+
+/**
+ * @brief 获取 PHY 中断标志状态
+ * @param obj        设备对象
+ * @param interrupt  待检查的中断标志掩码，可为多个 DP83848_*_IT 的组合
+ * @return 1 中断标志置位；0 未置位；DP83848_STATUS_READ_ERROR 寄存器读取失败
+ */
 int32_t dev_dp83848_it_status_get(dev_dp83848_obj_t *obj, uint32_t interrupt);
 
 #ifdef __cplusplus

@@ -22,7 +22,7 @@
  * 2026-09-18 那轮"上电首次连接失败"就是靠它定位的 —— 结论是设备侧清白
  * （20/20 ping 同毫秒回复），丢包在虚拟化层。详见提交信息。 */
 #ifndef PL_NET_DIAG_ENABLE
-#define PL_NET_DIAG_ENABLE 0
+#define PL_NET_DIAG_ENABLE 0    /**< 诊断日志总开关：1 打开，0 关闭 */
 #endif
 
 #if PL_NET_DIAG_ENABLE
@@ -35,5 +35,8 @@
 #define PL_NET_DIAG(fmt, ...)                                                                         \
     printf("[net] %6lums " fmt "\n", (unsigned long)osKernelGetTickCount() __VA_OPT__(, ) __VA_ARGS__)
 #else
+/** @brief 网络诊断日志宏（总开关关闭时展开为空语句）
+ *  @param fmt  printf 风格格式串
+ *  @param ...  格式串的参数 */
 #define PL_NET_DIAG(fmt, ...) ((void)0)
 #endif

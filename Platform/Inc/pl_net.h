@@ -11,11 +11,15 @@
 
 #include <stdint.h>
 
-#define PL_NET_IP_LISTENER_MAX   4
+#define PL_NET_IP_LISTENER_MAX   4    /**< IP 变更监听器注册槽位数 */
 
 /** @brief IP 变更监听器：pl_net_set_ip 成功后以新值同步回调（调用方任务上下文） */
 typedef void (*pl_net_ip_listener_fn_t)(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4]);
 
+/** @brief 启动 TCP/IP 协议栈并以静态地址建立默认网络接口
+ *  @param ip      本机 IPv4 地址（4 字节，网络序）
+ *  @param mask    子网掩码（4 字节，网络序）
+ *  @param gateway 默认网关（4 字节，网络序） */
 void pl_net_init(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gateway[4]);
 
 /** @brief 注册 IP 变更监听器（如 IAP 记录镜像同步）

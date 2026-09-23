@@ -26,19 +26,20 @@
 #include <stdbool.h>
 
 /* ---- 控制信号 (bit-band, B 工程引脚) ---- */
-#define HUB75_OE  BITBAND_PERIPH(&(LED_OE_GPIO_Port->ODR), 9)  /* PE9  */
-#define HUB75_CLK BITBAND_PERIPH(&(LED_CLK_GPIO_Port->ODR), 8)  /* PE8  */
-#define HUB75_LAT BITBAND_PERIPH(&(LED_LE_GPIO_Port->ODR), 7)   /* PE7  */
+#define HUB75_OE  BITBAND_PERIPH(&(LED_OE_GPIO_Port->ODR), 9)  /**< 输出使能位带（PE9，低有效） */
+#define HUB75_CLK BITBAND_PERIPH(&(LED_CLK_GPIO_Port->ODR), 8) /**< 移位时钟位带（PE8） */
+#define HUB75_LAT BITBAND_PERIPH(&(LED_LE_GPIO_Port->ODR), 7)  /**< 锁存脉冲位带（PE7） */
 
 /* ---- 行地址选择 (bit-band, 标签交叉: A→LED_C, B→LED_D, C→LED_A, D→LED_B) ---- */
-#define HUB75_A BITBAND_PERIPH(&(LED_C_GPIO_Port->ODR), 15)     /* PF15 */
-#define HUB75_B BITBAND_PERIPH(&(LED_D_GPIO_Port->ODR), 14)     /* PF14 */
-#define HUB75_C BITBAND_PERIPH(&(LED_A_GPIO_Port->ODR), 1)      /* PG1  */
-#define HUB75_D BITBAND_PERIPH(&(LED_B_GPIO_Port->ODR), 0)      /* PG0  */
+#define HUB75_A BITBAND_PERIPH(&(LED_C_GPIO_Port->ODR), 15)    /**< 行地址 bit0 位带（PF15） */
+#define HUB75_B BITBAND_PERIPH(&(LED_D_GPIO_Port->ODR), 14)    /**< 行地址 bit1 位带（PF14） */
+#define HUB75_C BITBAND_PERIPH(&(LED_A_GPIO_Port->ODR), 1)     /**< 行地址 bit2 位带（PG1） */
+#define HUB75_D BITBAND_PERIPH(&(LED_B_GPIO_Port->ODR), 0)     /**< 行地址 bit3 位带（PG0） */
 
 /* ---- 高性能内联：控制信号 ---- */
 
 /* B 工程时序: 高低电平各 4 NOP */
+/** @brief 发一个移位时钟脉冲（高低电平各 4 个 NOP） */
 __STATIC_INLINE void pl_hub75_clock_pulse(void)
 {
     HUB75_CLK = 1;
@@ -53,6 +54,7 @@ __STATIC_INLINE void pl_hub75_clock_pulse(void)
     __NOP();
 }
 
+/** @brief 发一个锁存脉冲（高低电平各 4 个 NOP） */
 __STATIC_INLINE void pl_hub75_latch_pulse(void)
 {
     HUB75_LAT = 1;
@@ -95,4 +97,5 @@ __STATIC_INLINE void pl_hub75_set_row(uint8_t row)
 GPIO_TypeDef *pl_hub75_port_by_idx(uint8_t idx);
 
 /* ---- 初始化 ---- */
+/** @brief 初始化 HUB75 控制引脚（模式/速度按 B 工程引脚） */
 void pl_hub75_init(void);

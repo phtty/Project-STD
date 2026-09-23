@@ -21,6 +21,7 @@ enum {
     PL_TIM_MAX,
 };
 
+/** @brief 定时器不透明句柄 */
 typedef void *pl_tim_handle_t;
 
 /** @brief 显示子系统占用的两个定时器角色
@@ -34,7 +35,7 @@ typedef void *pl_tim_handle_t;
  *  两块板的 Core/Src/tim.c 都只配这三个（注意周期是**板级**的——模组不同，
  *  扫描率与 PWM 率各异，那部分留在各板自己的 tim.c 里）。 */
 #define PL_TIM_DISPLAY_SCAN PL_TIM3
-#define PL_TIM_DISPLAY_PWM  PL_TIM4
+#define PL_TIM_DISPLAY_PWM  PL_TIM4    /**< 显示调光 PWM 占用的定时器角色 */
 
 /** @brief 板级定时器表项（由 boards/&lt;板&gt;/Platform/Src/pl_tim_board.c 提供）
  *
@@ -46,9 +47,14 @@ typedef struct {
     uint8_t irq;           /**< TIMx_IRQn，0 表示无 */
 } pl_tim_board_entry_t;
 
-extern const pl_tim_board_entry_t g_pl_tim_board[PL_TIM_MAX];
+extern const pl_tim_board_entry_t g_pl_tim_board[PL_TIM_MAX];    /**< 板级定时器表，按 PL_TIMx 枚举索引 */
 
+/** @brief 调用板级表里存在的各定时器初始化函数（hw_pl_initcall 阶段） */
 void pl_tim_init(void);
+
+/** @brief 按定时器 ID 取句柄
+ *  @param id 定时器 ID（PL_TIMx）
+ *  @return 该定时器句柄；ID 越界或本板无此定时器时为 NULL */
 pl_tim_handle_t pl_tim_get_handle(uint8_t id);
 
 /** @brief 启动定时器中断 */
@@ -56,6 +62,9 @@ void pl_tim_start_it(pl_tim_handle_t h);
 
 /** @brief NVIC 中断开关（用于 OE 原子操作等） */
 void pl_tim_irq_disable(uint8_t irq);
+
+/** @brief 使能定时器 NVIC 中断
+ *  @param irq NVIC 中断号 */
 void pl_tim_irq_enable(uint8_t irq);
 
 /** @brief 按定时器 ID 取 NVIC 中断号；本板无此定时器时返回 0 */

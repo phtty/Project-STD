@@ -42,7 +42,7 @@ typedef struct {
     uint8_t dma_tx_irq; /**< DMAn_Streamm_IRQn（TX），0 表示无 */
 } pl_uart_board_entry_t;
 
-extern const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX];
+extern const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX];    /**< 板级 UART 表，按 PL_UARTx 枚举索引 */
 
 /** @brief 供板级 ISR 调用的中断入口
  *
@@ -50,6 +50,9 @@ extern const pl_uart_board_entry_t g_pl_uart_board[PL_UART_MAX];
  *  而"本板有哪些中断、哪个 DMA 流属于哪一路"是板级事实，所以向量放在
  *  boards/&lt;板&gt;/Platform/Src/pl_uart_board.c，函数体复用这两个共享入口。 */
 void pl_uart_irq_handler(uint8_t id);
+
+/** @brief RX DMA 流的中断入口（与 TX 分开：两条流各有各的向量）
+ *  @param id UART 实例 ID（PL_UARTx） */
 void pl_uart_dma_irq_handler(uint8_t id);
 /** @brief TX DMA 流的中断入口（与 RX 分开：两条流各有各的向量，
  *         对没在中断的那条调 HAL_DMA_IRQHandler 是没意义的） */
@@ -61,7 +64,12 @@ typedef void (*pl_uart_rx_fn_t)(uint8_t *data, uint16_t len, void *ctx);
 /** @brief 收发方向控制回调（Device 层注入，用于 RS485 RE 引脚控制） */
 typedef void (*pl_uart_dir_fn_t)(bool tx);
 
+/** @brief 调用板级表里存在的各路 UART 初始化函数（hw_pl_initcall 阶段） */
 void pl_uart_init(void);
+
+/** @brief 按实例 ID 取 UART 句柄
+ *  @param id UART 实例 ID（PL_UARTx）
+ *  @return 该路句柄；ID 越界或本板无此路时为 NULL */
 pl_uart_handle_t pl_uart_get_handle(uint8_t id);
 
 /** @brief 发送模式 */

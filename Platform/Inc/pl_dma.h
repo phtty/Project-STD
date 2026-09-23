@@ -5,4 +5,5 @@
 
 #pragma once
 
+/** @brief 按板级配置初始化各 DMA 控制器与流 */
 void pl_dma_init(void);

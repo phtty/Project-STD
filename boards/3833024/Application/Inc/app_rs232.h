@@ -18,7 +18,12 @@
 #include "cmsis_os2.h"
 #include "app_dispatch.h"
 
+/** @brief 启动 RS232-0（USART3）通道任务
+ *  @return 任务句柄，创建失败返回 NULL */
 osThreadId_t app_rs232_start(void);
+
+/** @brief 启动 RS232-1（USART6）通道任务
+ *  @return 任务句柄，创建失败返回 NULL */
 osThreadId_t app_rs232_1_start(void);
 
 /** @brief 暴露 RS232-0（USART3）控制块（协议绑定时使用）*/

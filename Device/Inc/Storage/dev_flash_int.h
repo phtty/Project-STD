@@ -14,9 +14,9 @@
 
 /** @brief 内部 Flash 派生类型（dev_storage_t 子类） */
 typedef struct {
-    dev_storage_t base;
-    uint32_t base_addr;
-    uint32_t sector;
+    dev_storage_t base; /**< 基类子对象，必须放在第一个成员位置 */
+    uint32_t base_addr; /**< 本设备映射的内部 Flash 起始地址 */
+    uint32_t sector;    /**< 擦除所用的内部 Flash 扇区号（PL_FLASH_SECTOR_*） */
 } dev_flash_int_t;
 
 /** @brief 共享的 g_flash_int_ops 虚表（定义在 dev_flash_int.c） */

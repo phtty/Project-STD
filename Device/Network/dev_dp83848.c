@@ -9,8 +9,6 @@
 
 /**
  * @brief  向 PHY 设备对象注册 IO 操作函数
- * @param  obj    DP83848 设备对象
- * @param  io_ctx IO 操作函数集（读/写寄存器、获取时间戳等）
  * @retval DP83848_STATUS_OK    注册成功
  * @retval DP83848_STATUS_ERROR 缺失必要的 IO 函数
  */
@@ -31,7 +29,6 @@ int32_t dev_dp83848_register_bus_io(dev_dp83848_obj_t *obj, dev_dp83848_io_ctx_t
 
 /**
  * @brief  初始化 DP83848 PHY 并扫描设备地址
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK            初始化成功
  * @retval DP83848_STATUS_ADDRESS_ERROR 未找到 PHY 设备地址
  * @retval DP83848_STATUS_READ_ERROR    寄存器读取失败
@@ -80,7 +77,6 @@ int32_t dev_dp83848_init(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  反初始化 DP83848，释放硬件资源
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK    成功
  * @retval DP83848_STATUS_ERROR 反初始化失败
  */
@@ -101,7 +97,6 @@ int32_t dev_dp83848_deinit(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  退出 PHY 省电模式
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -127,7 +122,6 @@ int32_t dev_dp83848_power_down_disable(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  进入 PHY 省电模式
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -153,7 +147,6 @@ int32_t dev_dp83848_power_down_enable(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  启动自动协商
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -179,7 +172,6 @@ int32_t dev_dp83848_autonego_start(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  获取 DP83848 当前链路状态（速率、双工模式）
- * @param  obj   DP83848 设备对象
  * @retval DP83848_STATUS_LINK_DOWN            链路断开
  * @retval DP83848_STATUS_AUTONEGO_NOTDONE     自动协商未完成
  * @retval DP83848_STATUS_100MBITS_FULLDUPLEX  100M 全双工
@@ -247,12 +239,6 @@ int32_t dev_dp83848_link_state_get(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  手动设置 DP83848 链路速率和双工模式（关闭自动协商）
- * @param  obj        DP83848 设备对象
- * @param  link_state 目标链路状态：
- *                    DP83848_STATUS_100MBITS_FULLDUPLEX
- *                    DP83848_STATUS_100MBITS_HALFDUPLEX
- *                    DP83848_STATUS_10MBITS_FULLDUPLEX
- *                    DP83848_STATUS_10MBITS_HALFDUPLEX
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_ERROR        无效的链路状态参数
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
@@ -293,7 +279,6 @@ int32_t dev_dp83848_link_state_set(dev_dp83848_obj_t *obj, uint32_t link_state)
 
 /**
  * @brief  使能 PHY 环回模式（调试用）
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -319,7 +304,6 @@ int32_t dev_dp83848_loopback_enable(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  关闭 PHY 环回模式
- * @param  obj  DP83848 设备对象
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -345,16 +329,6 @@ int32_t dev_dp83848_loopback_disable(dev_dp83848_obj_t *obj)
 
 /**
  * @brief  使能 PHY 中断源
- * @param  obj        DP83848 设备对象
- * @param  interrupt  中断源掩码，可以是以下值的组合：
- *                    DP83848_WOL_IT
- *                    DP83848_ENERGYON_IT
- *                    DP83848_AUTONEGO_COMPLETE_IT
- *                    DP83848_REMOTE_FAULT_IT
- *                    DP83848_LINK_DOWN_IT
- *                    DP83848_AUTONEGO_LP_ACK_IT
- *                    DP83848_PARALLEL_DETECTION_FAULT_IT
- *                    DP83848_AUTONEGO_PAGE_RECEIVED_IT
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -380,16 +354,6 @@ int32_t dev_dp83848_it_enable(dev_dp83848_obj_t *obj, uint32_t interrupt)
 
 /**
  * @brief  关闭 PHY 中断源
- * @param  obj        DP83848 设备对象
- * @param  interrupt  中断源掩码，可以是以下值的组合：
- *                    DP83848_WOL_IT
- *                    DP83848_ENERGYON_IT
- *                    DP83848_AUTONEGO_COMPLETE_IT
- *                    DP83848_REMOTE_FAULT_IT
- *                    DP83848_LINK_DOWN_IT
- *                    DP83848_AUTONEGO_LP_ACK_IT
- *                    DP83848_PARALLEL_DETECTION_FAULT_IT
- *                    DP83848_AUTONEGO_PAGE_RECEIVED_IT
  * @retval DP83848_STATUS_OK           成功
  * @retval DP83848_STATUS_READ_ERROR   寄存器读取失败
  * @retval DP83848_STATUS_WRITE_ERROR  寄存器写入失败
@@ -415,8 +379,6 @@ int32_t dev_dp83848_it_disable(dev_dp83848_obj_t *obj, uint32_t interrupt)
 
 /**
  * @brief  清除 PHY 中断标志（读 ISFR 即清除）
- * @param  obj        DP83848 设备对象
- * @param  interrupt  中断标志掩码（未使用，寄存器的读操作即清除标志）
  * @retval DP83848_STATUS_OK         成功
  * @retval DP83848_STATUS_READ_ERROR 寄存器读取失败
  */
@@ -435,16 +397,6 @@ int32_t dev_dp83848_it_clear(dev_dp83848_obj_t *obj, uint32_t interrupt)
 
 /**
  * @brief  获取 PHY 中断标志状态
- * @param  obj        DP83848 设备对象
- * @param  interrupt  待检查的中断标志，可以是以下值的组合：
- *                    DP83848_WOL_IT
- *                    DP83848_ENERGYON_IT
- *                    DP83848_AUTONEGO_COMPLETE_IT
- *                    DP83848_REMOTE_FAULT_IT
- *                    DP83848_LINK_DOWN_IT
- *                    DP83848_AUTONEGO_LP_ACK_IT
- *                    DP83848_PARALLEL_DETECTION_FAULT_IT
- *                    DP83848_AUTONEGO_PAGE_RECEIVED_IT
  * @retval 1  中断标志置位
  * @retval 0  中断标志未置位
  * @retval DP83848_STATUS_READ_ERROR  寄存器读取失败

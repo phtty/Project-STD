@@ -52,11 +52,13 @@ typedef struct {
        突发消息覆盖；改由探针按结尾 NUL 自行定界。 */
 } app_mqtt_ccb_t;
 
-extern const app_ccb_ops_t g_mqtt_ccb_ops;
-extern app_mqtt_ccb_t g_mqtt_ccb;
-extern osThreadId_t g_mqtt_task_handle;
-extern const osThreadAttr_t g_mqtt_task_attr;
+extern const app_ccb_ops_t g_mqtt_ccb_ops;   /**< MQTT 通道 ops 虚表 */
+extern app_mqtt_ccb_t g_mqtt_ccb;            /**< MQTT 通道控制块（静态单例，协议侧据其 state 判断时机） */
+extern osThreadId_t g_mqtt_task_handle;      /**< MQTT 任务句柄 */
+extern const osThreadAttr_t g_mqtt_task_attr; /**< MQTT 任务属性 */
 
+/** @brief MQTT 任务：建客户端 → connect → 订阅登记表 → 断线重连
+ *  @param argument 未使用（单例通道，上下文取自静态控制块） */
 void app_mqtt_task(void *argument);
 
 static inline osThreadId_t app_mqtt_start(void)
@@ -64,7 +66,13 @@ static inline osThreadId_t app_mqtt_start(void)
     return osThreadNew(app_mqtt_task, NULL, &g_mqtt_task_attr);
 }
 
+/** @brief 发起一次 MQTT 连接（非阻塞：仅提交连接请求，结果经连接回调转状态机） */
 void app_mqtt_connect(void);
+
+/** @brief 发布一条 MQTT 消息（仅在 READY 状态实际发送）
+ *  @param topic 发布主题（只读）
+ *  @param data  消息载荷（只读）
+ *  @param len   载荷字节长度 */
 void app_mqtt_send(const char *topic, const void *data, uint16_t len);
 
 /**
@@ -88,6 +96,11 @@ int32_t app_mqtt_subscribe(const char *const *topics, uint8_t count);
  * @note    需在调用 app_mqtt_connect() 之前调用
  */
 void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port);
+/** @brief 设置 MQTT 认证信息
+ *  @param client_id Client ID（只读，内部有界拷贝）
+ *  @param user      用户名（只读，内部有界拷贝）
+ *  @param pass      密码（只读，内部有界拷贝）
+ *  @note 需在调用 app_mqtt_connect() 之前设置 */
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/

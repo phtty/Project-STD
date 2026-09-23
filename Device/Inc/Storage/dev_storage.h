@@ -32,8 +32,8 @@ typedef struct dev_storage_ops {
 
 /** @brief 存储设备基类（派生类必须将其放在第一个成员位置） */
 typedef struct dev_storage {
-    const dev_storage_ops_t *ops;
-    uint32_t capacity;
+    const dev_storage_ops_t *ops; /**< 操作虚表；由派生类型在 init 中绑定 */
+    uint32_t capacity;            /**< 容量（字节）；由派生类型实例初始化时填写 */
 } dev_storage_t;
 
 /* ---- 便捷内联（调用方无需写 dev->ops->read(dev, ...)） ---- */

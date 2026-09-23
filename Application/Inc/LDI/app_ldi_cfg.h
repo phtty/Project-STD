@@ -17,7 +17,7 @@
  *  而不是让记录搬家（见 app_cfg_sched.c 的扫描认领）。 */
 #define APP_FLASH_LDI_VERSION (1U)
 
-#define APP_FLASH_LDI_MAX_MODULES (6U) // 可存储的功能模块数量上限
+#define APP_FLASH_LDI_MAX_MODULES (6U) /**< 可存储的功能模块数量上限 */
 
 /**
  * 单功能模块配置信息（从 0BH 命令下发，共 12 字节）
@@ -26,9 +26,9 @@
  * 存储在 Flash 中供 1EH 参数采集命令回读。
  */
 typedef struct {
-    uint8_t device_type;   // app_ldi_device_t 枚举值 (E1H~EBH)
-    uint8_t device_index;  // 功能模块序号，从 01H 开始
-    uint8_t vendor[10];    // 厂商自定义参数段 (0BH 命令下发的 Vendor[] 段)
+    uint8_t device_type;  /**< app_ldi_device_t 枚举值 (E1H~EBH) */
+    uint8_t device_index; /**< 功能模块序号，从 01H 开始 */
+    uint8_t vendor[10];   /**< 厂商自定义参数段 (0BH 命令下发的 Vendor[] 段) */
 } app_flash_ldi_module_cfg_t;
 
 static_assert(sizeof(app_flash_ldi_module_cfg_t) == 12);
@@ -40,16 +40,16 @@ static_assert(sizeof(app_flash_ldi_module_cfg_t) == 12);
  * 设备上电后从中加载配置。
  */
 typedef struct {
-    uint8_t device_ip[4];  // 设备自身 IP 地址
-    uint16_t device_port;  // 设备端口号
-    uint8_t host_ip[4];    // 上位机 IP 地址 (外设控制服务)
-    uint16_t host_port;    // 上位机端口号
-    uint8_t netmask[4];    // 子网掩码
-    uint8_t gateway[4];    // 网关地址
-    uint8_t lane_hex[5];   // 车道 HEX 编号 (来自 req_head.lane_code)
-    uint8_t cert[8];       // 设备验证信息 (来自 req_head.cert_info)
-    uint8_t module_count;  // 功能模块数量 N
-    app_flash_ldi_module_cfg_t modules[APP_FLASH_LDI_MAX_MODULES]; // N <= MAX_MODULES
+    uint8_t device_ip[4];  /**< 设备自身 IP 地址 */
+    uint16_t device_port;  /**< 设备端口号 */
+    uint8_t host_ip[4];    /**< 上位机 IP 地址 (外设控制服务) */
+    uint16_t host_port;    /**< 上位机端口号 */
+    uint8_t netmask[4];    /**< 子网掩码 */
+    uint8_t gateway[4];    /**< 网关地址 */
+    uint8_t lane_hex[5];   /**< 车道 HEX 编号 (来自 req_head.lane_code) */
+    uint8_t cert[8];       /**< 设备验证信息 (来自 req_head.cert_info) */
+    uint8_t module_count;  /**< 功能模块数量 N */
+    app_flash_ldi_module_cfg_t modules[APP_FLASH_LDI_MAX_MODULES]; /**< 功能模块配置数组，N <= MAX_MODULES */
 } app_flash_ldi_cfg_info_t;
 
 /* 载荷长度是持久化契约：记录头里的 len 与实际结构体不符时，读回会静默错位。

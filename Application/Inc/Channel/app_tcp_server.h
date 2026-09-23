@@ -22,12 +22,17 @@ typedef struct {
     void *conn; /**< 不透明句柄（netconn），断开时为 nullptr */
 } app_tcp_ccb_t;
 
-extern const app_ccb_ops_t g_tcp_ccb_ops;
+extern const app_ccb_ops_t g_tcp_ccb_ops; /**< netconn 类通道 ops 虚表（server/client 共用） */
 
-extern osThreadId_t g_tcp_server_task_handle;
-extern const osThreadAttr_t g_tcp_server_task_attr;
+extern osThreadId_t g_tcp_server_task_handle;       /**< TCP 服务端管理任务句柄 */
+extern const osThreadAttr_t g_tcp_server_task_attr; /**< TCP 服务端管理任务属性 */
 
+/** @brief TCP 服务端管理任务：bind → listen → accept → 派生 conn 任务 → 等待断开 → 循环
+ *  @param argument 未使用（单例任务） */
 void app_tcp_server_task(void *argument);
+
+/** @brief TCP 服务端连接任务：netconn_recv → app_ccb_dispatch，断开时释放信号量
+ *  @param argument accept 得到的 netconn 句柄 */
 void app_tcp_server_conn_task(void *argument);
 
 static inline osThreadId_t app_tcp_server_start(void)
@@ -35,7 +40,12 @@ static inline osThreadId_t app_tcp_server_start(void)
     return osThreadNew(app_tcp_server_task, NULL, &g_tcp_server_task_attr);
 }
 
+/** @brief 设置监听端口（须在管理任务启动前调用）
+ *  @param port 监听端口号 */
 void app_tcp_server_set_port(uint16_t port);
+
+/** @brief 读取当前监听端口
+ *  @return 监听端口号 */
 uint16_t app_tcp_server_get_port(void);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/

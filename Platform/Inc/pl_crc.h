@@ -14,7 +14,11 @@
 /** @brief CRC 不透明句柄 */
 typedef void *pl_crc_handle_t;
 
+/** @brief 使能硬件 CRC 单元时钟并复位计算单元 */
 void            pl_crc_init(void);
+
+/** @brief 取硬件 CRC 外设句柄
+ *  @return CRC 外设句柄（恒非 NULL） */
 pl_crc_handle_t pl_crc_get_handle(void);
 
 /** @brief 硬件 CRC32 计算 */

@@ -140,8 +140,10 @@ typedef enum {
 /** @brief 统一渲染参数（tagged union；type 决定哪个分支生效） */
 typedef struct {
     /* 公共 — 调用方设置后渲染器只读 */
-    const uint16_t x, y; /**< 目标起点 */
-    const uint16_t w, h; /**< 目标宽高 (fill 时 w/h=0 表示全屏) */
+    const uint16_t x; /**< 目标起点 X 坐标 */
+    const uint16_t y; /**< 目标起点 Y 坐标 */
+    const uint16_t w; /**< 目标宽 (fill 时 w=0 表示全屏) */
+    const uint16_t h; /**< 目标高 (fill 时 h=0 表示全屏) */
     const dev_display_color_t color; /**< 绘制颜色 */
     const app_render_type_t type; /**< 标签: 指定使用哪个 union 分支 */
 

@@ -31,10 +31,10 @@
 #include "dev_cfg_record.h" /* dev_cfg_record_state_t */
 
 /* ---- 编译期契约 ---- */
-#define CFG_REGION_SECTOR     (4096U)
-#define CFG_CAP_CONTRACT      (32U * 1024U * 1024U) /* W25Q256 */
-#define CFG_REGION_MAX_BLOCKS (8U)                  /* 尾部预留区: 8 × 4KB */
-#define CFG_REGION_BYTES      (CFG_REGION_MAX_BLOCKS * CFG_REGION_SECTOR)
+#define CFG_REGION_SECTOR     (4096U)                                   /**< 单个配置块（扇区）字节数 */
+#define CFG_CAP_CONTRACT      (32U * 1024U * 1024U)                     /**< 器件容量契约：W25Q256 = 32MB */
+#define CFG_REGION_MAX_BLOCKS (8U)                                      /**< 尾部预留区块数：8 × 4KB */
+#define CFG_REGION_BYTES      (CFG_REGION_MAX_BLOCKS * CFG_REGION_SECTOR) /**< 配置区总字节数 */
 
 /* 字库与配置区在器件上都必须放得下。器件实配容量由运行期门槛把关
    （见 app_cfg_sched.c 的 s_storage_ready）—— 这里锁的是"设计假定的容量"。
@@ -49,26 +49,39 @@ _Static_assert(RENDER_PERSIST_PAYLOAD_MAX + DEV_CFG_RECORD_HDR_SIZE <= DEV_CFG_R
                "DEV_CFG_RECORD_MAX_IMAGE 装不下最大的记录：调大它，或核对 RENDER_PERSIST_BITMAP_MAX");
 
 /* ---- 注册描述 ---- */
+/** @brief 配置所有者注册描述：注册名 + 记录格式版本 + 启动加载回调 */
 typedef struct {
-    const char *name;     /* 唯一标识 (<= 15 字符, 写入记录头作归属校验), 也作调试名 */
-    uint16_t version;     /* 本所有者记录格式版本 (不符视为无效, 供格式演进) */
-    void (*load)(void);   /* 启动加载回调: 读+校验+应用或回落默认 (调用方实现; 可为 NULL) */
+    const char *name;   /**< 唯一标识 (<= 15 字符, 写入记录头作归属校验), 也作调试名 */
+    uint16_t version;   /**< 本所有者记录格式版本 (不符视为无效, 供格式演进) */
+    void (*load)(void); /**< 启动加载回调: 读+校验+应用或回落默认 (调用方实现; 可为 NULL) */
 } app_cfg_sched_desc_t;
 
 /**
  * @brief  注册配置所有者 (各模块 sw_dev initcall 中调用)
+ * @param desc 注册描述（只读；名称须唯一且长度合法）
  * @return 句柄 id (0..CFG_REGION_MAX_BLOCKS-1), 供 load/save 使用;
  *         名字重复/满员/名字过短 返回 0xFF (注册被忽略)
  */
 uint8_t app_cfg_sched_register(const app_cfg_sched_desc_t *desc);
 
-/** @brief 加载本所有者记录 (内部用注册名 + version + dev_cfg_record 全量校验) */
-dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *payload, uint16_t payload_cap, uint16_t *payload_len);
+/** @brief 加载本所有者记录 (内部用注册名 + version + dev_cfg_record 全量校验)
+ *  @param id          注册返回的句柄
+ *  @param[out] payload 接收载荷的缓冲
+ *  @param payload_cap  payload 缓冲容量（字节）
+ *  @param[out] payload_len 实际读出的载荷字节数
+ *  @return 记录状态（OK / EMPTY / INVALID / IO_ERR） */
+dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *payload, uint16_t payload_cap,
+                                          uint16_t *payload_len);
 
-/** @brief 保存本所有者记录 (调度器内部组包缓冲 + 写前对比去重; W25Qxx RMW 自行擦除) */
+/** @brief 保存本所有者记录 (调度器内部组包缓冲 + 写前对比去重; W25Qxx RMW 自行擦除)
+ *  @param id          注册返回的句柄
+ *  @param payload     待保存载荷（只读）
+ *  @param payload_len 载荷字节长度
+ *  @return 0 成功（含内容未变而去重跳过），负值失败 */
 int32_t app_cfg_sched_save(uint8_t id, const uint8_t *payload, uint16_t payload_len);
 
-/** @brief 存储是否可用 (JEDEC 容量 >= 配置区 32KB 即可; 不足则全部配置回落默认) */
+/** @brief 存储是否可用 (JEDEC 容量 >= 配置区 32KB 即可; 不足则全部配置回落默认)
+ *  @return true 表示存储可用 */
 bool app_cfg_sched_ready(void);
 
 /** @brief 启动加载遍: 按注册顺序调用各 load 回调 (sw_app 首字母序最先) */

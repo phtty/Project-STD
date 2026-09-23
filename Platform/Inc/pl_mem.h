@@ -28,7 +28,7 @@
 
 /** CCMRAM 段边界，由链接脚本定义（见 .ccmram 段） */
 extern uint8_t _sccmram[];
-extern uint8_t _eccmram[];
+extern uint8_t _eccmram[];    /**< CCMRAM 段结束地址（链接脚本定义） */
 
 /**
  * @brief 判断一段内存是否可以作为 DMA 的源/目标

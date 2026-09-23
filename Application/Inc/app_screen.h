@@ -60,8 +60,10 @@ typedef struct {
                      *   就有"下面那块是主卡"），地址由 board.h 的
                      *   BOARD_CASC_MASTER_CELL 决定谁编 0。 */
     uint8_t  color; /**< 该卡的显示颜色（dev_display_color_t）—— 卡间可不同，见 design */
-    uint16_t x, y;  /**< 矩形左上角（整屏逻辑坐标，像素） */
-    uint16_t w, h;  /**< 矩形尺寸。**本工程要求它 == 该卡自己的屏几何**（见下） */
+    uint16_t x;          /**< 矩形左上角 X（整屏逻辑坐标，像素） */
+    uint16_t y;          /**< 矩形左上角 Y（整屏逻辑坐标，像素） */
+    uint16_t w;          /**< 矩形宽。**本工程要求它 == 该卡自己的屏宽**（见下） */
+    uint16_t h;          /**< 矩形高。**本工程要求它 == 该卡自己的屏高**（见下） */
 
     /* ---- 以下由运行期填（建表时是"表里的静态事实"，之后被枚举与轮次改写）---- */
     uint8_t state; /**< app_screen_card_state_t。建表初值 MISSING */

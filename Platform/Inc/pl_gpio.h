@@ -21,8 +21,19 @@ typedef enum {
     PL_PORT_MAX,
 } pl_gpio_port_t;
 
+/** @brief 初始化各端口的引脚复用/方向配置 */
 void pl_gpio_init(void);
+
+/** @brief 写单个引脚电平
+ *  @param port 端口
+ *  @param pin  引脚号（0~15）
+ *  @param high true 输出高，false 输出低 */
 void pl_gpio_write(pl_gpio_port_t port, uint8_t pin, bool high);
+
+/** @brief 读单个引脚电平
+ *  @param port 端口
+ *  @param pin  引脚号（0~15）
+ *  @return 引脚为高返回 true；非法端口或为低返回 false */
 bool pl_gpio_read(pl_gpio_port_t port, uint8_t pin);
 
 /** @brief 使能某端口的外设时钟

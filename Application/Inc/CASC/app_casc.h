@@ -235,8 +235,10 @@ _Static_assert(sizeof(app_casc_set_addr_t) == 7, "SET_ADDR 载荷必须是 7 字
  *
  *  整帧 = 11 帧头 + 13 本头 + bmp_len + 4 CRC；本板满幅即 **1428** 字节。 */
 typedef struct [[gnu::packed]] {
-    uint8_t x[2], y[2];  /**< 本卡矩形左上角（整屏坐标），大端 */
-    uint8_t w[2], h[2];  /**< 本卡矩形尺寸，大端 */
+    uint8_t x[2];  /**< 本卡矩形左上角 X（整屏坐标），大端 */
+    uint8_t y[2];  /**< 本卡矩形左上角 Y（整屏坐标），大端 */
+    uint8_t w[2];  /**< 本卡矩形宽（整屏坐标），大端 */
+    uint8_t h[2];  /**< 本卡矩形高（整屏坐标），大端 */
     uint8_t bmp_len[2];  /**< 位图字节数 = ceil(w/8)*h，大端 */
     uint8_t bright;      /**< 本轮亮度断言 0..7 */
     uint8_t color;       /**< 本卡颜色（dev_display_color_t）*/

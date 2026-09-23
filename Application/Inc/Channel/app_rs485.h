@@ -11,6 +11,8 @@
 #include "cmsis_os2.h"
 #include "app_dispatch.h"
 
+/** @brief 启动 RS485 通道任务
+ *  @return 任务句柄，创建失败返回 NULL */
 osThreadId_t app_rs485_start(void);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/
