@@ -6,7 +6,7 @@
 #
 # 显示模组只列一个：每个驱动自带一份 CCMRAM 帧缓冲（pixel_map + hub75_buff），
 # 多编一份直接把 CCMRAM 顶爆（实测多两份超 588B）。同目录下的
-# dev_P10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
+# dev_p10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
 # 换屏时换掉这一行，而不是追加。
 SRC_BOARD = \
 	$(BOARD_DIR)/Platform/Src/pl_tim_board.c \
@@ -21,4 +21,4 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_p20_16x8_2200001667.c \
 	$(BOARD_DIR)/Application/Src/app_rs232.c \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
-	$(BOARD_DIR)/Application/Src/font_lib_board.c
+	$(BOARD_DIR)/Application/Src/app_font_lib_board.c

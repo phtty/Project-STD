@@ -10,7 +10,7 @@
  * 选择逻辑塞进 ops->send 内部，等于把通道枚举换个地方藏起来。
  *
  * 容器约定：两个控制块由本模块静态持有，base 是第一个成员（偏移 0，container_of
- * 零开销还原）；协议侧只保存 app_rs232_0_ccb()/app_rs232_1_ccb() 返回的 ccb_t*，
+ * 零开销还原）；协议侧只保存 app_rs232_0_ccb()/app_rs232_1_ccb() 返回的 app_ccb_t*，
  * 断线只改 base.state，控制块本身不销毁，故该指针永不悬空。
  */
 #pragma once
@@ -22,7 +22,7 @@ osThreadId_t app_rs232_start(void);
 osThreadId_t app_rs232_1_start(void);
 
 /** @brief 暴露 RS232-0（USART3）控制块（协议绑定时使用）*/
-ccb_t *app_rs232_0_ccb(void);
+app_ccb_t *app_rs232_0_ccb(void);
 
 /** @brief 暴露 RS232-1（USART6）控制块（协议绑定时使用）*/
-ccb_t *app_rs232_1_ccb(void);
+app_ccb_t *app_rs232_1_ccb(void);

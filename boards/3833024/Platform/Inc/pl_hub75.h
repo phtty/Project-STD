@@ -43,51 +43,12 @@
 typedef struct {
     GPIO_TypeDef *port;
     uint16_t pin;
-} hub75_pin_t;
-
-/** @brief HUB75 颜色枚举 (bit0=R, bit1=G, bit2=B) */
-typedef enum {
-    HUB75_COLOR_BLACK  = 0,
-    HUB75_COLOR_RED    = 1,
-    HUB75_COLOR_GREEN  = 2,
-    HUB75_COLOR_YELLOW = 3,
-    HUB75_COLOR_BLUE   = 4,
-    HUB75_COLOR_PURPLE = 5,
-    HUB75_COLOR_CYAN   = 6,
-    HUB75_COLOR_WHITE  = 7,
-} hub75_color_t;
+} pl_hub75_pin_t;
 
 /** @brief HUB75 引脚表（由 boards/3833024/Platform/Src/pl_hub75_board.c 定义） */
-extern const hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX];
-extern const hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX];
-extern const hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX];
-
-/* ---- 高性能内联：单通道 RGB 输出 ---- */
-__STATIC_INLINE void pl_hub75_set_rgb(uint8_t ch, hub75_color_t color)
-{
-    GPIO_TypeDef *rp = g_hub75_pin_r[ch].port;
-    GPIO_TypeDef *gp = g_hub75_pin_g[ch].port;
-    GPIO_TypeDef *bp = g_hub75_pin_b[ch].port;
-    uint16_t rm      = g_hub75_pin_r[ch].pin;
-    uint16_t gm      = g_hub75_pin_g[ch].pin;
-    uint16_t bm      = g_hub75_pin_b[ch].pin;
-
-    if (color & 1) {
-        rp->BSRR = rm;
-    } else {
-        rp->BSRR = rm << 0x10;
-    }
-    if (color & 2) {
-        gp->BSRR = gm;
-    } else {
-        gp->BSRR = gm << 0x10;
-    }
-    if (color & 4) {
-        bp->BSRR = bm;
-    } else {
-        bp->BSRR = bm << 0x10;
-    }
-}
+extern const pl_hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX];
+extern const pl_hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX];
+extern const pl_hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX];
 
 __STATIC_INLINE void pl_hub75_clock_pulse(void)
 {

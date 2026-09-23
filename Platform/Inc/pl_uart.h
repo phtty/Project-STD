@@ -56,7 +56,7 @@ void pl_uart_dma_irq_handler(uint8_t id);
 void pl_uart_dma_tx_irq_handler(uint8_t id);
 
 /** @brief DMA 空闲中断接收回调（ISR 上下文，应尽快返回） */
-typedef void (*pl_uart_rx_cb_t)(uint8_t *data, uint16_t len, void *ctx);
+typedef void (*pl_uart_rx_fn_t)(uint8_t *data, uint16_t len, void *ctx);
 
 /** @brief 收发方向控制回调（Device 层注入，用于 RS485 RE 引脚控制） */
 typedef void (*pl_uart_dir_fn_t)(bool tx);
@@ -97,7 +97,7 @@ int32_t pl_uart_send(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_
 int32_t pl_uart_send_dma(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_t timeout_ms);
 
 /** @brief 注册 DMA 空闲中断接收回调 */
-void pl_uart_set_rx_cb(pl_uart_handle_t h, pl_uart_rx_cb_t cb, void *ctx);
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx);
 
 /** @brief 注册收发方向控制回调（仅 RS485 需要，RS232 传 NULL） */
 void pl_uart_set_dir_cb(pl_uart_handle_t h, pl_uart_dir_fn_t cb);

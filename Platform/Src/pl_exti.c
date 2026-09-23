@@ -18,26 +18,26 @@
 
 typedef struct {
     uint16_t pin;
-    pl_exti_cb_t cb;
+    pl_exti_fn_t cb;
     void *ctx;
 } exti_entry_t;
 
-static exti_entry_t s_cb[PL_EXTI_CB_MAX];
+static exti_entry_t s_exti_cb_table[PL_EXTI_CB_MAX];
 
 void pl_exti_init(void)
 {
     for (int i = 0; i < PL_EXTI_CB_MAX; i++)
-        s_cb[i].pin = 0, s_cb[i].cb = NULL;
+        s_exti_cb_table[i].pin = 0, s_exti_cb_table[i].cb = NULL;
 }
 hw_pl_initcall(pl_exti_init);
 
-void pl_exti_register_cb(uint16_t pin, pl_exti_cb_t cb, void *ctx)
+void pl_exti_register_cb(uint16_t pin, pl_exti_fn_t cb, void *ctx)
 {
     for (int i = 0; i < PL_EXTI_CB_MAX; i++) {
-        if (s_cb[i].cb == NULL) {
-            s_cb[i].pin  = pin;
-            s_cb[i].cb   = cb;
-            s_cb[i].ctx  = ctx;
+        if (s_exti_cb_table[i].cb == NULL) {
+            s_exti_cb_table[i].pin  = pin;
+            s_exti_cb_table[i].cb   = cb;
+            s_exti_cb_table[i].ctx  = ctx;
             return;
         }
     }
@@ -46,6 +46,6 @@ void pl_exti_register_cb(uint16_t pin, pl_exti_cb_t cb, void *ctx)
 void HAL_GPIO_EXTI_Callback(uint16_t pin)
 {
     for (int i = 0; i < PL_EXTI_CB_MAX; i++)
-        if (s_cb[i].cb && s_cb[i].pin == pin)
-            s_cb[i].cb(pin, s_cb[i].ctx);
+        if (s_exti_cb_table[i].cb && s_exti_cb_table[i].pin == pin)
+            s_exti_cb_table[i].cb(pin, s_exti_cb_table[i].ctx);
 }

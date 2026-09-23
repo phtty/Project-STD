@@ -2,7 +2,7 @@
  * @file    test_dispatch.c
  * @brief   协议/通道分发引擎 —— host 单测
  *
- * 用假通道 + 可脚本化探针驱动**真实的** frame_dispatch_task（跑在 pthread 上）：
+ * 用假通道 + 可脚本化探针驱动**真实的** app_dispatch_task（跑在 pthread 上）：
  * cmsis_os2 由 test/stubs/os_stub.c 用 pthread 实现，app_dispatch.c / ring_buffer.c
  * 一行都不用为测试改动，因此测的是生产代码本身而不是它的复制品。
  *
@@ -65,26 +65,26 @@ static int g_fail;
 #define FAKE_RB_SIZE (2048U)
 #define FAKE_PAYLOAD_MAX (128U)
 #define FAKE_QUEUE_DEPTH (8U)
-#define FAKE_MSG_SIZE (sizeof(frame_msg_t) + FAKE_PAYLOAD_MAX)
+#define FAKE_MSG_SIZE (sizeof(app_dispatch_msg_t) + FAKE_PAYLOAD_MAX)
 #define SCRIPT_MAX (64)
 
 typedef struct {
-    pcb_probe_sta_t state;
+    app_pcb_probe_state_t state;
     uint32_t          len;
     uint8_t           aux; /**< 探针输出的协议层分类，用于验证逐帧传递 */
 } script_step_t;
 
 typedef struct {
-    pcb_t            base; /**< 第一个成员：container_of 还原 */
+    app_pcb_t            base; /**< 第一个成员：container_of 还原 */
     script_step_t    script[SCRIPT_MAX];
     int              script_len;
     int              script_pos;
     int              probe_calls;
-    pcb_t           *seen_self;
-    const ccb_t *seen_ccb;
+    app_pcb_t           *seen_self;
+    const app_ccb_t *seen_ccb;
     /* src 只在本次调用内有效 —— 假探针按契约当场消费（拷走主题），不留指针 */
     bool             seen_src_valid;
-    char             seen_src_topic[CCB_SRC_TOPIC_MAX];
+    char             seen_src_topic[APP_CCB_SRC_TOPIC_MAX];
     uint16_t         seen_scratch_size;
     ring_buffer_t      rb;
     uint8_t            rb_buf[FAKE_RB_SIZE];
@@ -96,7 +96,7 @@ typedef struct {
 static fake_proto_t s_pa;
 static fake_proto_t s_pb;
 
-static pcb_probe_sta_t fake_probe(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+static app_pcb_probe_state_t fake_probe(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                     uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
                                     uint8_t *aux)
 {
@@ -115,7 +115,7 @@ static pcb_probe_sta_t fake_probe(pcb_t *self, const ccb_t *ccb, const ccb_src_t
     }
     p->seen_scratch_size = scratch_size;
 
-    script_step_t st = {.state = PCB_PROBE_WAIT, .len = 0, .aux = 0};
+    script_step_t st = {.state = APP_PCB_PROBE_STATE_WAIT, .len = 0, .aux = 0};
     if (p->script_pos < p->script_len) {
         st = p->script[p->script_pos++];
     } else if (p->script_len > 0) {
@@ -127,7 +127,7 @@ static pcb_probe_sta_t fake_probe(pcb_t *self, const ccb_t *ccb, const ccb_src_t
     return st.state;
 }
 
-static const pcb_ops_t s_fake_ops = {.probe = fake_probe};
+static const app_pcb_ops_t s_fake_ops = {.probe = fake_probe};
 
 /* ================================================================
  *  假通道
@@ -135,9 +135,9 @@ static const pcb_ops_t s_fake_ops = {.probe = fake_probe};
 
 static int             s_send_calls;
 static uint16_t        s_send_len;
-static const ccb_dst_t *s_send_dst;
+static const app_ccb_dst_t *s_send_dst;
 
-static int32_t fake_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+static int32_t fake_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
     (void)ccb;
     (void)data;
@@ -147,10 +147,10 @@ static int32_t fake_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, 
     return (int32_t)len;
 }
 
-static const ccb_ops_t s_chan_ops = {.send = fake_send};
+static const app_ccb_ops_t s_chan_ops = {.send = fake_send};
 
-static ccb_t s_chan_a = {.name = "chan_a", .ops = &s_chan_ops};
-static ccb_t s_chan_b = {.name = "chan_b", .ops = &s_chan_ops};
+static app_ccb_t s_chan_a = {.name = "chan_a", .ops = &s_chan_ops};
+static app_ccb_t s_chan_b = {.name = "chan_b", .ops = &s_chan_ops};
 
 /* ================================================================
  *  装置
@@ -162,13 +162,13 @@ static void script_begin(fake_proto_t *p)
     p->script_pos = 0;
 }
 
-static void script_with_aux(fake_proto_t *p, pcb_probe_sta_t state, uint32_t len, uint8_t aux)
+static void script_with_aux(fake_proto_t *p, app_pcb_probe_state_t state, uint32_t len, uint8_t aux)
 {
     if (p->script_len < SCRIPT_MAX)
         p->script[p->script_len++] = (script_step_t){.state = state, .len = len, .aux = aux};
 }
 
-static void script(fake_proto_t *p, pcb_probe_sta_t state, uint32_t len)
+static void script(fake_proto_t *p, app_pcb_probe_state_t state, uint32_t len)
 {
     script_with_aux(p, state, len, 0x5A); /* 既有用例统一用这个分类值 */
 }
@@ -205,7 +205,7 @@ static void proto_create(fake_proto_t *p, const char *name)
     p->rb.size = FAKE_RB_SIZE;
     rb_init(&p->rb, name);
 
-    p->base = (pcb_t){
+    p->base = (app_pcb_t){
         .name        = name,
         .ops         = &s_fake_ops,
         .rb          = &p->rb,
@@ -214,11 +214,11 @@ static void proto_create(fake_proto_t *p, const char *name)
     proto_reset(p, name);
 }
 
-static void chan_reset(ccb_t *ccb, const char *name)
+static void chan_reset(app_ccb_t *ccb, const char *name)
 {
     ccb->name      = name;
     ccb->ops       = &s_chan_ops;
-    ccb->state     = CCB_STATE_UP;
+    ccb->state     = APP_CCB_STATE_UP;
     ccb->proto_cnt = 0;
 }
 
@@ -233,7 +233,7 @@ static void scenario_begin(void)
 /* ---- 收帧 ---- */
 
 static uint8_t s_rx[FAKE_MSG_SIZE] __attribute__((aligned(4)));
-#define RX ((frame_msg_t *)s_rx)
+#define RX ((app_dispatch_msg_t *)s_rx)
 
 static bool wait_frame(fake_proto_t *p, uint32_t timeout_ms)
 {
@@ -241,7 +241,7 @@ static bool wait_frame(fake_proto_t *p, uint32_t timeout_ms)
     return osMessageQueueGet(p->queue, s_rx, NULL, timeout_ms) == osOK;
 }
 
-static void feed(const ccb_t *ccb, const void *data, size_t len)
+static void feed(const app_ccb_t *ccb, const void *data, size_t len)
 {
     app_ccb_dispatch(ccb, NULL, (const uint8_t *)data, (uint16_t)len);
 }
@@ -259,9 +259,9 @@ static void test_single_frame(void)
 {
     TEST_BEGIN("单帧 READY：帧内容、来源通道与探针契约");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_READY, 5);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 5);
     feed(&s_chan_a, "HELLO", 5);
 
     CHECK(wait_frame(&s_pa, 500));
@@ -280,9 +280,9 @@ static void test_multi_frame_drain(void)
 {
     TEST_BEGIN("一次唤醒抽出多帧：while (avail > 0) 连续解析");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_READY, 4); /* 脚本用完后重复 → 连抽 */
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 4); /* 脚本用完后重复 → 连抽 */
     feed(&s_chan_a, "AAAABBBBCCCC", 12);
 
     const char *expect[3] = {"AAAA", "BBBB", "CCCC"};
@@ -299,11 +299,11 @@ static void test_fake_skips_one_byte(void)
 {
     TEST_BEGIN("FAKE：只跳 1 字节后重新同步");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_FAKE, 0);
-    script(&s_pa, PCB_PROBE_FAKE, 0);
-    script(&s_pa, PCB_PROBE_READY, 3);
+    script(&s_pa, APP_PCB_PROBE_STATE_FAKE, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_FAKE, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 3);
     feed(&s_chan_a, "xxABC", 5);
 
     CHECK(wait_frame(&s_pa, 500));
@@ -316,10 +316,10 @@ static void test_skip_skips_whole_frame(void)
 {
     TEST_BEGIN("SKIP：整帧跳过（不是 1 字节）");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_SKIP, 3);
-    script(&s_pa, PCB_PROBE_READY, 2);
+    script(&s_pa, APP_PCB_PROBE_STATE_SKIP, 3);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 2);
     feed(&s_chan_a, "XYZPQ", 5);
 
     CHECK(wait_frame(&s_pa, 500));
@@ -331,15 +331,15 @@ static void test_wait_consumes_nothing(void)
 {
     TEST_BEGIN("WAIT：不消费数据，跨通知累积成帧");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_WAIT, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_WAIT, 0);
     feed(&s_chan_a, "AB", 2);
     CHECK(!wait_frame(&s_pa, 100));
     CHECK_MSG(rb_used(&s_pa) == 2, "WAIT 后缓冲区应仍留有 2 字节，实际 %u", rb_used(&s_pa));
 
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, 5);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 5);
     feed(&s_chan_a, "CDE", 3);
 
     CHECK(wait_frame(&s_pa, 500));
@@ -351,9 +351,9 @@ static void test_zero_length_guard(void)
 {
     TEST_BEGIN("零长度 READY：不投递空帧，且不零进度死循环");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_READY, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 0);
     feed(&s_chan_a, "AB", 2);
 
     CHECK(!wait_frame(&s_pa, 150));
@@ -361,7 +361,7 @@ static void test_zero_length_guard(void)
 
     /* 死循环会让任务永远回不到队列等待，下面的帧就收不到 */
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, 2);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 2);
     feed(&s_chan_a, "CD", 2);
     CHECK_MSG(wait_frame(&s_pa, 500), "任务疑似卡死：后续帧未送达");
     CHECK(memcmp(RX->data, "CD", 2) == 0);
@@ -371,12 +371,12 @@ static void test_payload_max_guard(void)
 {
     TEST_BEGIN("超长 READY：被 payload_max 拒绝，且不越界读写");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
     static uint8_t big[FAKE_RB_SIZE];
     memset(big, 0xAA, sizeof(big));
 
-    script(&s_pa, PCB_PROBE_READY, FAKE_PAYLOAD_MAX + 1);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, FAKE_PAYLOAD_MAX + 1);
     feed(&s_chan_a, big, sizeof(big));
 
     CHECK(!wait_frame(&s_pa, 200));
@@ -384,13 +384,13 @@ static void test_payload_max_guard(void)
     /* 极端值：远超框架暂存区（未加守卫时 rb_read 会写穿 _msg_dispatch_buf，
        由 ASan 抓 global-buffer-overflow）*/
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, FRAME_DATA_MAX_LEN + 500);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, FRAME_DATA_MAX_LEN + 500);
     feed(&s_chan_a, big, sizeof(big));
     CHECK(!wait_frame(&s_pa, 200));
 
     /* 引擎仍须可用 */
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, 3);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 3);
     feed(&s_chan_a, "OK!", 3);
     CHECK(wait_frame(&s_pa, 500));
     CHECK(memcmp(RX->data, "OK!", 3) == 0);
@@ -400,11 +400,11 @@ static void test_two_protocols_one_channel(void)
 {
     TEST_BEGIN("同一通道绑定两个协议：各自独立缓冲区与队列");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    app_proto_bind(&s_pb.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pb.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_READY, 4);
-    script(&s_pb, PCB_PROBE_READY, 4);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 4);
+    script(&s_pb, APP_PCB_PROBE_STATE_READY, 4);
     feed(&s_chan_a, "DATA", 4);
 
     CHECK(wait_frame(&s_pa, 500));
@@ -417,9 +417,9 @@ static void test_channel_isolation(void)
 {
     TEST_BEGIN("通道隔离：数据只进绑定通道的协议缓冲区");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
-    script(&s_pa, PCB_PROBE_READY, 4);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 4);
     feed(&s_chan_b, "DATA", 4); /* pa 没绑 chan_b */
 
     CHECK(!wait_frame(&s_pa, 150));
@@ -431,8 +431,8 @@ static void test_bind_idempotent(void)
 {
     TEST_BEGIN("重复绑定同一 (协议, 通道) 不产生重复条目");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
     CHECK(s_chan_a.proto_cnt == 1);
 }
 
@@ -464,8 +464,8 @@ static void test_rx_listener(void)
     /* ① 外部协议、一整帧 → 触发一次 */
     scenario_begin();
     s_pa.base.internal_bus = false;
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    script(&s_pa, PCB_PROBE_READY, 1);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "Z", 1);
@@ -474,14 +474,14 @@ static void test_rx_listener(void)
 
     /* ② 半帧（WAIT）不算，补齐成整帧才算 —— 半帧那一下**不许**提前通知 */
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    script(&s_pa, PCB_PROBE_WAIT, 0);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, APP_PCB_PROBE_STATE_WAIT, 0);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "A", 1); /* 只有半帧 */
 
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, 2);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 2);
     feed(&s_chan_a, "B", 1); /* 补齐 */
     CHECK(wait_frame(&s_pa, 500));
     CHECK_MSG(s_listener_calls == 1, "半帧不该通知、整帧才通知：共应 1 次，得到 %d",
@@ -490,9 +490,9 @@ static void test_rx_listener(void)
     /* ③ 设备内部总线（级联）：整帧也不触发 */
     scenario_begin();
     s_pa.base.internal_bus = true;
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    script(&s_pa, PCB_PROBE_READY, 1);
-    script(&s_pa, PCB_PROBE_READY, 1);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "ZZ", 2);
@@ -503,9 +503,9 @@ static void test_rx_listener(void)
 
     /* ④ 伪帧（FAKE）：跳 1 字节重试，谁都还没收下 → 不触发 */
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    script(&s_pa, PCB_PROBE_FAKE, 0);
-    script(&s_pa, PCB_PROBE_READY, 1);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, APP_PCB_PROBE_STATE_FAKE, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "xZ", 2); /* 先一个伪字节，再一整帧 */
@@ -515,9 +515,9 @@ static void test_rx_listener(void)
 
     /* ⑤ 一批里的两条帧 → 两次（**每帧**一次，不是每批一次） */
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
-    script(&s_pa, PCB_PROBE_READY, 1);
-    script(&s_pa, PCB_PROBE_READY, 1);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 1);
 
     s_listener_calls = 0;
     feed(&s_chan_a, "ZZ", 2);
@@ -528,19 +528,19 @@ static void test_rx_listener(void)
 
 static void test_ccb_send(void)
 {
-    TEST_BEGIN("ccb_send：虚表分派、目的地透传与空守卫");
+    TEST_BEGIN("app_ccb_send：虚表分派、目的地透传与空守卫");
     scenario_begin();
 
     s_send_calls = 0;
-    s_send_dst   = (const ccb_dst_t *)&s_chan_a; /* 非空哨兵：确认被改写 */
+    s_send_dst   = (const app_ccb_dst_t *)&s_chan_a; /* 非空哨兵：确认被改写 */
 
-    ccb_send(&s_chan_a, (const uint8_t *)"AB", 2);
+    app_ccb_send(&s_chan_a, (const uint8_t *)"AB", 2);
     CHECK(s_send_calls == 1);
     CHECK(s_send_len == 2);
-    CHECK_MSG(s_send_dst == NULL, "ccb_send 应传 nullptr（回复到本帧来源）");
+    CHECK_MSG(s_send_dst == NULL, "app_ccb_send 应传 nullptr（回复到本帧来源）");
 
-    const ccb_dst_t dst = {.broadcast = true, .topic = "some/topic"};
-    ccb_send_to(&s_chan_a, &dst, (const uint8_t *)"CD", 2);
+    const app_ccb_dst_t dst = {.broadcast = true, .topic = "some/topic"};
+    app_ccb_send_to(&s_chan_a, &dst, (const uint8_t *)"CD", 2);
     CHECK(s_send_calls == 2);
     CHECK(s_send_dst == &dst); /* 目的地原样传到通道实现，由它自行解释 */
     if (s_send_dst != NULL) {  /* 先判空：断言失败时不要在这里解引用崩掉 */
@@ -548,9 +548,9 @@ static void test_ccb_send(void)
         CHECK(s_send_dst->topic != NULL);
     }
 
-    ccb_send(NULL, (const uint8_t *)"AB", 2); /* 不应崩溃 */
-    ccb_t broken = {.name = "broken", .ops = NULL};
-    ccb_send(&broken, (const uint8_t *)"AB", 2); /* 不应崩溃 */
+    app_ccb_send(NULL, (const uint8_t *)"AB", 2); /* 不应崩溃 */
+    app_ccb_t broken = {.name = "broken", .ops = NULL};
+    app_ccb_send(&broken, (const uint8_t *)"AB", 2); /* 不应崩溃 */
     CHECK(s_send_calls == 2);
 }
 
@@ -558,10 +558,10 @@ static void test_write_overflow_policy(void)
 {
     TEST_BEGIN("缓冲区装不下时：丢旧留新，不留半截帧");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
     /* 探针恒返回 WAIT（不消费），便于直接观察缓冲区里到底留下了什么 */
-    script(&s_pa, PCB_PROBE_WAIT, 0);
+    script(&s_pa, APP_PCB_PROBE_STATE_WAIT, 0);
 
     static uint8_t chunk1[1500];
     static uint8_t chunk2[1000];
@@ -588,14 +588,14 @@ static void test_src_passthrough(void)
 {
     TEST_BEGIN("接收来源随通知带到探针（协议据此分类，无需认识通道类型）");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
     /* 调用方缓冲在派发后被改写，模拟通道随即收到下一条消息 */
-    static char caller_buf[CCB_SRC_TOPIC_MAX];
+    static char caller_buf[APP_CCB_SRC_TOPIC_MAX];
     strcpy(caller_buf, "ASK/one");
-    const ccb_src_t src = {.topic = caller_buf};
+    const app_ccb_src_t src = {.topic = caller_buf};
 
-    script(&s_pa, PCB_PROBE_READY, 2);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 2);
     app_ccb_dispatch(&s_chan_a, &src, (const uint8_t *)"AB", 2);
     strcpy(caller_buf, "ASK/two"); /* 立刻覆盖：框架应已拷贝，不受影响 */
 
@@ -606,7 +606,7 @@ static void test_src_passthrough(void)
 
     /* 无来源概念的通道（RS485/TCP/UDP）传 nullptr，探针需能处理 */
     script_begin(&s_pa);
-    script(&s_pa, PCB_PROBE_READY, 2);
+    script(&s_pa, APP_PCB_PROBE_STATE_READY, 2);
     feed(&s_chan_a, "CD", 2);
     CHECK(wait_frame(&s_pa, 500));
     CHECK_MSG(!s_pa.seen_src_valid, "无来源时探针应收到 nullptr");
@@ -614,15 +614,15 @@ static void test_src_passthrough(void)
 
 static void test_aux_propagation(void)
 {
-    TEST_BEGIN("探针分类经 frame_msg_t.aux 逐帧投递给协议任务");
+    TEST_BEGIN("探针分类经 app_dispatch_msg_t.aux 逐帧投递给协议任务");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
     /* 三帧各带不同分类值 —— 验证是「逐帧携带」而不是「最后一次的值」，
        后者正是"把 per-message 的值寄存在长生命周期对象上"的典型症状 */
-    script_with_aux(&s_pa, PCB_PROBE_READY, 2, 0x11);
-    script_with_aux(&s_pa, PCB_PROBE_READY, 2, 0x22);
-    script_with_aux(&s_pa, PCB_PROBE_READY, 2, 0x33);
+    script_with_aux(&s_pa, APP_PCB_PROBE_STATE_READY, 2, 0x11);
+    script_with_aux(&s_pa, APP_PCB_PROBE_STATE_READY, 2, 0x22);
+    script_with_aux(&s_pa, APP_PCB_PROBE_STATE_READY, 2, 0x33);
     feed(&s_chan_a, "AABBCC", 6);
 
     for (uint8_t i = 0; i < 3; i++) {
@@ -636,7 +636,7 @@ static void test_empty_dispatch(void)
 {
     TEST_BEGIN("边界入参：空指针 / 零长度不崩溃、不入队");
     scenario_begin();
-    app_proto_bind(&s_pa.base, &s_chan_a);
+    app_dispatch_bind(&s_pa.base, &s_chan_a);
 
     app_ccb_dispatch(NULL, NULL, (const uint8_t *)"X", 1);
     app_ccb_dispatch(&s_chan_a, NULL, NULL, 1);
@@ -679,7 +679,7 @@ int main(void)
     proto_create(&s_pa, "pa");
     proto_create(&s_pb, "pb");
 
-    app_dispatch_init(); /* 建 ccb_queue 并启动真实的 frame_dispatch_task */
+    app_dispatch_init(); /* 建 ccb_queue 并启动真实的 app_dispatch_task */
     app_dispatch_register_rx_listener(rx_listener);
 
     test_single_frame();

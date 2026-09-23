@@ -1,5 +1,5 @@
 #include "app_ldi.h"
-#include "net_diag.h"
+#include "pl_net_diag.h"
 #include "FreeRTOS.h"
 #include "initcall.h"
 
@@ -18,8 +18,8 @@
 
 /* ---- proto_ldi_queue 静态分配 ---- */
 #define LDI_DATA_MAX  (512U)                                     /**< DATA 域最大长度 */
-#define LDI_FRAME_MAX (sizeof(ldi_frame_t) + LDI_DATA_MAX + 2U)  /**< 8 + 512 + 2 = 522 */
-#define LDI_MSG_SIZE (sizeof(frame_msg_t) + LDI_FRAME_MAX)
+#define LDI_FRAME_MAX (sizeof(app_ldi_frame_t) + LDI_DATA_MAX + 2U)  /**< 8 + 512 + 2 = 522 */
+#define LDI_MSG_SIZE (sizeof(app_dispatch_msg_t) + LDI_FRAME_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
 static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE] PL_CCMRAM;
@@ -31,42 +31,42 @@ static const osMessageQueueAttr_t s_ldi_queue_attr = {
     .mq_size = sizeof(s_ldi_queue_buf),
 };
 
-static_assert(sizeof(ldi_device_t) == 1, "ldi_device_t must be 1 byte");
-static_assert(sizeof(ldi_cmd_type_t) == 1, "ldi_cmd_type_t must be 1 byte");
+static_assert(sizeof(app_ldi_device_t) == 1, "app_ldi_device_t must be 1 byte");
+static_assert(sizeof(app_ldi_cmd_type_t) == 1, "app_ldi_cmd_type_t must be 1 byte");
 
-static const ldi_cmd_type_t cmd_index_table[] = {
-    LDI_CMD_SET_IP_REQ,
-    LDI_CMD_SET_PARA_REQ,
-    LDI_CMD_REBOOT_REQ,
-    LDI_CMD_GET_IP_REQ,
-    LDI_CMD_GET_PARA_REQ,
-    LDI_CMD_STA_RPT_RSP,
-    LDI_CMD_CERT_RSP,
-    LDI_CMD_UPDATE_RSP,
-    LDI_CMD_INIT_REQ,
-    LDI_CMD_CTRL_REQ,
-    LDI_CMD_FUNC_RPT_REQ,
-    LDI_CMD_SEARCH_REQ,
+static const app_ldi_cmd_type_t cmd_index_table[] = {
+    APP_LDI_CMD_TYPE_SET_IP_REQ,
+    APP_LDI_CMD_TYPE_SET_PARA_REQ,
+    APP_LDI_CMD_TYPE_REBOOT_REQ,
+    APP_LDI_CMD_TYPE_GET_IP_REQ,
+    APP_LDI_CMD_TYPE_GET_PARA_REQ,
+    APP_LDI_CMD_TYPE_STA_RPT_RSP,
+    APP_LDI_CMD_TYPE_CERT_RSP,
+    APP_LDI_CMD_TYPE_UPDATE_RSP,
+    APP_LDI_CMD_TYPE_INIT_REQ,
+    APP_LDI_CMD_TYPE_CTRL_REQ,
+    APP_LDI_CMD_TYPE_FUNC_RPT_REQ,
+    APP_LDI_CMD_TYPE_SEARCH_REQ,
 };
 
 /* ---- 协议上下文 ---- */
-ldi_ctx_t g_ldi = {
-    .state = LDI_ST_UNINIT,
+app_ldi_ctx_t g_ldi_ctx = {
+    .state = APP_LDI_STATE_UNINIT,
     .cfg   = {
         .module_count = 2,
         .modules      = {
-            {.device_type = LDI_DEV_TYPE_VMS, .device_index = 1},
-            // {.device_type = LDI_DEV_TYPE_CANOPY_LIGHT, .device_index = 1},
+            {.device_type = APP_LDI_DEVICE_VMS, .device_index = 1},
+            // {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 1},
         },
     },
 };
 
-void ldi_ctx_init(ldi_ctx_t *self)
+void app_ldi_ctx_init(app_ldi_ctx_t *self)
 {
     app_flash_ldi_cfg_info_t flash_cfg = {0};
 
     bool cfg_ok = app_flash_ldi_load_config(&flash_cfg);
-    NET_DIAG("LDI 配置%s（决定运行态 IP 是编译期默认值还是配置值）", cfg_ok ? "有效" : "无效/不存在");
+    PL_NET_DIAG("LDI 配置%s（决定运行态 IP 是编译期默认值还是配置值）", cfg_ok ? "有效" : "无效/不存在");
 
     if (cfg_ok) {
         /* Flash 有有效配置：应用到运行环境 */
@@ -98,17 +98,17 @@ void ldi_ctx_init(ldi_ctx_t *self)
         self->cfg_valid = true;
 
         /* 不再在这里显式同步 IAP 记录：上面第 81 行的 pl_net_set_ip 会触发 IP 变更
-           监听，IAP 侧据此做镜像同步（见 app_iap.c 的 iap_ip_change_cb）。
+           监听，IAP 侧据此做镜像同步（见 app_iap.c 的 _iap_ip_change_cb）。
            原先这里那段"仅当 IAP 已有有效配置且不一致时"的守卫，是为了绕开
            update_net_cfg 对空记录会写出永久无效记录的老 bug —— 那个 bug 已在
            app_flash_iap_update_net_cfg 里修掉，守卫连同调用一并去除。 */
 
     } else {
         /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
-        if (app_flash_iap_is_config_valid(g_config)) {
-            memcpy(self->cfg.device_ip, g_config->net_cfg.ip, 4);
-            memcpy(self->cfg.netmask, g_config->net_cfg.mask, 4);
-            memcpy(self->cfg.gateway, g_config->net_cfg.gw, 4);
+        if (app_flash_iap_is_config_valid(g_iap_sys_info)) {
+            memcpy(self->cfg.device_ip, g_iap_sys_info->net_cfg.ip, 4);
+            memcpy(self->cfg.netmask, g_iap_sys_info->net_cfg.mask, 4);
+            memcpy(self->cfg.gateway, g_iap_sys_info->net_cfg.gw, 4);
         } else {
             /* IAP 也无有效配置，使用上电默认 IP */
             uint8_t ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
@@ -133,9 +133,9 @@ void ldi_ctx_init(ldi_ctx_t *self)
  * 容量取成与单次写入相等时，恰好满的那一次会静默丢掉最后一个字节。 */
 RB_DEFINE_ATTR(s_ldi_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 522, 单次最大写入 2048 + 1) */
 
-static const pcb_ops_t s_ldi_ops = {.probe = ldi_probe_frame};
+static const app_pcb_ops_t s_ldi_ops = {.probe = app_ldi_probe_frame};
 
-static pcb_t s_ldi_pcb = {
+static app_pcb_t s_ldi_pcb = {
     .name        = "ldi",
     .ops         = &s_ldi_ops,
     .rb          = &s_ldi_rb,
@@ -145,7 +145,7 @@ static pcb_t s_ldi_pcb = {
 static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂存上限");
 
 /* ---- 协议自注册 ---- */
-[[maybe_unused]] static void ldi_module_init(void)
+[[maybe_unused]] static void _ldi_module_init(void)
 {
     rb_init(&s_ldi_rb, "ldi");
 
@@ -155,40 +155,40 @@ static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂
     s_ldi_pcb.queue = g_ldi_msg_queue;
 
     // 绑定协议使用到的通道
-    app_proto_bind(&s_ldi_pcb, app_tcp_server_ccb());
-    app_proto_bind(&s_ldi_pcb, app_tcp_client_ccb());
-    app_proto_bind(&s_ldi_pcb, app_udp_ccb());
+    app_dispatch_bind(&s_ldi_pcb, app_tcp_server_ccb());
+    app_dispatch_bind(&s_ldi_pcb, app_tcp_client_ccb());
+    app_dispatch_bind(&s_ldi_pcb, app_udp_ccb());
 
     /* 上下文初始化必须在创建任务之前，保证 IP/端口在通道任务启动前就绪 */
-    ldi_ctx_init(&g_ldi);
+    app_ldi_ctx_init(&g_ldi_ctx);
 
-    /* 保护 tx_buf，ldi_handle_task 和 ldi_timer_task 共享 */
+    /* 保护 tx_buf，app_ldi_task 和 app_ldi_timer_task 共享 */
     const osMutexAttr_t tx_lock_attr = {.name = "ldi_tx_lock", .attr_bits = osMutexPrioInherit};
-    g_ldi.tx_lock                    = osMutexNew(&tx_lock_attr);
+    g_ldi_ctx.tx_lock                    = osMutexNew(&tx_lock_attr);
 
     // 创建协议相关处理任务
-    g_ldi_task_handle       = pl_task_new(ldi_handle_task, nullptr, &ldi_task_attr);
-    g_ldi_timer_task_handle = pl_task_new(ldi_timer_task, nullptr, &ldi_timer_task_attr);
+    g_ldi_task_handle       = pl_task_new(app_ldi_task, nullptr, &g_ldi_task_attr);
+    g_ldi_timer_task_handle = pl_task_new(app_ldi_timer_task, nullptr, &g_ldi_timer_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */
-sw_post_initcall(ldi_module_init);
+sw_post_initcall(_ldi_module_init);
 
 osMessageQueueId_t g_ldi_msg_queue;
 osThreadId_t g_ldi_task_handle;
-const osThreadAttr_t ldi_task_attr = {
-    .name       = "ldi_handle_task",
+const osThreadAttr_t g_ldi_task_attr = {
+    .name       = "app_ldi_task",
     .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
 osThreadId_t g_ldi_timer_task_handle;
-const osThreadAttr_t ldi_timer_task_attr = {
-    .name = "ldi_timer_task",
+const osThreadAttr_t g_ldi_timer_task_attr = {
+    .name = "app_ldi_timer_task",
     /* 1536：实测峰值 768 字节（app_diag 的栈水位），留 2 倍余量。
        曾按 -fstack-usage 的函数帧估成 ~310 而收窄到 1024，实测只剩 256 字节 ——
-       那次估算漏了 LwIP 那段（ccb_send → netconn_write 走 mailbox，栈消耗不小）
-       与 vms_timer_poll → app_render → draw_bitmap 的渲染链。
+       那次估算漏了 LwIP 那段（app_ccb_send → netconn_write 走 mailbox，栈消耗不小）
+       与 app_vms_timer_poll → app_render → draw_bitmap 的渲染链。
        教训：函数帧累加低估库调用，以实测水位为准。 */
     .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
@@ -198,20 +198,20 @@ const osThreadAttr_t ldi_timer_task_attr = {
  *  状态门禁
  * ================================================================ */
 
-static bool ldi_cmd_allowed(ldi_state_t state, uint8_t cmd)
+static bool ldi_cmd_allowed(app_ldi_state_t state, uint8_t cmd)
 {
     /* 配置接口命令不受状态限制，任何时候都可执行 */
-    if (cmd == LDI_CMD_SET_IP_REQ || cmd == LDI_CMD_SET_PARA_REQ ||
-        cmd == LDI_CMD_REBOOT_REQ || cmd == LDI_CMD_GET_IP_REQ ||
-        cmd == LDI_CMD_GET_PARA_REQ || cmd == LDI_CMD_SEARCH_REQ)
+    if (cmd == APP_LDI_CMD_TYPE_SET_IP_REQ || cmd == APP_LDI_CMD_TYPE_SET_PARA_REQ ||
+        cmd == APP_LDI_CMD_TYPE_REBOOT_REQ || cmd == APP_LDI_CMD_TYPE_GET_IP_REQ ||
+        cmd == APP_LDI_CMD_TYPE_GET_PARA_REQ || cmd == APP_LDI_CMD_TYPE_SEARCH_REQ)
         return true;
 
     switch (state) {
-        case LDI_ST_UNINIT:
-            return cmd == LDI_CMD_CERT_RSP;
-        case LDI_ST_AUTHED:
-            return cmd == LDI_CMD_CERT_RSP || cmd == LDI_CMD_INIT_REQ;
-        case LDI_ST_READY:
+        case APP_LDI_STATE_UNINIT:
+            return cmd == APP_LDI_CMD_TYPE_CERT_RSP;
+        case APP_LDI_STATE_AUTHED:
+            return cmd == APP_LDI_CMD_TYPE_CERT_RSP || cmd == APP_LDI_CMD_TYPE_INIT_REQ;
+        case APP_LDI_STATE_READY:
             return true;
         default:
             return false;
@@ -225,13 +225,13 @@ static bool ldi_cmd_allowed(ldi_state_t state, uint8_t cmd)
 /**
  * @brief 从内部状态构建标准响应头（4 字节时间戳）
  *
- * Unix 时间戳取自内部 RTC，lane_code / cert_info 取自 g_ldi.cfg，
+ * Unix 时间戳取自内部 RTC，lane_code / cert_info 取自 g_ldi_ctx.cfg，
  * reserve 填零。不再从请求帧拷贝头部。
  *
  * @param head     待填充的响应头指针
- * @param cmd_type 响应命令码（如 LDI_CMD_SET_IP_RSP = 0xA0）
+ * @param cmd_type 响应命令码（如 APP_LDI_CMD_TYPE_SET_IP_RSP = 0xA0）
  */
-void ldi_build_rsp_head(ldi_req_head_t *head, uint8_t cmd_type)
+void app_ldi_build_rsp_head(app_ldi_req_head_t *head, uint8_t cmd_type)
 {
     uint32_t ts             = pl_rtc_get_timestamp(pl_rtc_get_handle());
     head->cmd_type          = cmd_type;
@@ -239,21 +239,21 @@ void ldi_build_rsp_head(ldi_req_head_t *head, uint8_t cmd_type)
     head->unix_timestamp[1] = (uint8_t)(ts >> 16);
     head->unix_timestamp[2] = (uint8_t)(ts >> 8);
     head->unix_timestamp[3] = (uint8_t)ts;
-    memcpy(head->lane_code, g_ldi.cfg.lane_hex, sizeof(head->lane_code));
-    memcpy(head->cert_info, g_ldi.cfg.cert, sizeof(head->cert_info));
+    memcpy(head->lane_code, g_ldi_ctx.cfg.lane_hex, sizeof(head->lane_code));
+    memcpy(head->cert_info, g_ldi_ctx.cfg.cert, sizeof(head->cert_info));
     memset(head->reserve, 0, sizeof(head->reserve));
 }
 
 /**
  * @brief 从内部状态构建控制/查询响应头（8 字节时间戳，毫秒精度）
  *
- * 与 ldi_build_rsp_head 同理，但时间戳为 8 字节毫秒格式（秒×1000）。
+ * 与 app_ldi_build_rsp_head 同理，但时间戳为 8 字节毫秒格式（秒×1000）。
  * 仅 B1H 控制查询应答使用。
  *
  * @param head     待填充的控制查询响应头指针
- * @param cmd_type 响应命令码（LDI_CMD_CTRL_RSP = 0xB1）
+ * @param cmd_type 响应命令码（APP_LDI_CMD_TYPE_CTRL_RSP = 0xB1）
  */
-void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
+void app_ldi_build_ctrl_rsp_head(app_ldi_ctrl_head_t *head, uint8_t cmd_type)
 {
     uint64_t ts_ms          = (uint64_t)pl_rtc_get_timestamp(pl_rtc_get_handle()) * 1000;
     head->cmd_type          = cmd_type;
@@ -265,8 +265,8 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
     head->unix_timestamp[5] = (uint8_t)(ts_ms >> 16);
     head->unix_timestamp[6] = (uint8_t)(ts_ms >> 8);
     head->unix_timestamp[7] = (uint8_t)ts_ms;
-    memcpy(head->lane_code, g_ldi.cfg.lane_hex, sizeof(head->lane_code));
-    memcpy(head->cert_info, g_ldi.cfg.cert, sizeof(head->cert_info));
+    memcpy(head->lane_code, g_ldi_ctx.cfg.lane_hex, sizeof(head->lane_code));
+    memcpy(head->cert_info, g_ldi_ctx.cfg.cert, sizeof(head->cert_info));
     memset(head->reserve, 0, sizeof(head->reserve));
 }
 
@@ -274,27 +274,27 @@ void ldi_build_ctrl_rsp_head(ldi_ctrl_head_t *head, uint8_t cmd_type)
  *  协议处理任务
  * ================================================================ */
 
-void ldi_handle_task(void *argument)
+void app_ldi_task(void *argument)
 {
     (void)argument;
 
     static uint8_t _msg_buf[LDI_MSG_SIZE];
-    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    app_dispatch_msg_t *msg = (app_dispatch_msg_t *)_msg_buf;
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_ldi_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        ldi_frame_t *ldi_frame   = (ldi_frame_t *)msg->data;
-        ldi_req_head_t *req_head = (ldi_req_head_t *)ldi_frame->data_crc;
+        app_ldi_frame_t *ldi_frame   = (app_ldi_frame_t *)msg->data;
+        app_ldi_req_head_t *req_head = (app_ldi_req_head_t *)ldi_frame->data_crc;
 
         /* 序号回显的来源。必须在**本任务内**、于分派之前取：探针不能写它（一次排空里
            会被反复调用），而本任务逐帧串行处理，处理完当前帧才会取下一帧，
            因此不会被后续帧覆盖。 */
-        g_ldi.rsp_seq = ldi_frame->seq;
+        g_ldi_ctx.rsp_seq = ldi_frame->seq;
 
         /* 状态门禁 */
-        if (!ldi_cmd_allowed(g_ldi.state, req_head->cmd_type))
+        if (!ldi_cmd_allowed(g_ldi_ctx.state, req_head->cmd_type))
             continue;
 
         /* 查表分派 */
@@ -317,7 +317,7 @@ static const uint8_t ldi_stx[2] = {0xFF, 0xFF};
 /**
  * @brief LDI 帧探测（pcb_ops.probe）
  *
- * **只窥视、不写全局**：序号回显所需的 seq 由处理任务从帧里取（见 ldi_handle_task）。
+ * **只窥视、不写全局**：序号回显所需的 seq 由处理任务从帧里取（见 app_ldi_task）。
  * 探针在一次排空里会被反复调用（FAKE 时逐字节重试），在此写全局状态会让后续帧
  * 覆盖前一帧的取值，而前一帧可能还排在队列里没被处理。
  *
@@ -325,7 +325,7 @@ static const uint8_t ldi_stx[2] = {0xFF, 0xFF};
  * avail, nullptr) 配一个 512 字节的 mem_pool，而 rb 有 2048 字节，avail 超过 512 时
  * 就会写穿栈数组（TCP 合并分段时是常态）。
  */
-pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                 uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
                                 uint8_t *aux)
 {
@@ -334,8 +334,8 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
     const ring_buffer_t *buff = self->rb;
 
     uint32_t avail = rb_avail(buff, nullptr);
-    if (avail < sizeof(ldi_frame_t) + sizeof(ldi_req_head_t) + 2)
-        return PCB_PROBE_WAIT;
+    if (avail < sizeof(app_ldi_frame_t) + sizeof(app_ldi_req_head_t) + 2)
+        return APP_PCB_PROBE_STATE_WAIT;
 
     /* 先窥视帧头（含 4 字节长度域），据此判断整帧是否已到齐。
        rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。
@@ -344,17 +344,17 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
        memcpy —— 实测一条 1427 字节的杂物 ~2MB、两个协议 ~4MB，把帧分发任务拖住
        几十毫秒，而这段时间里后到的帧会把前一条**完整但还没轮到解析**的帧从协议缓冲里
        挤掉（"装不下就丢旧留新"）。判"是不是本协议的帧"只要这 8 个字节。 */
-    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(ldi_frame_t))
+    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_ldi_frame_t))
                                   ? scratch_size
-                                  : (uint16_t)sizeof(ldi_frame_t);
-    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(ldi_frame_t))
-        return PCB_PROBE_SKIP;
-    ldi_frame_t *frame = (ldi_frame_t *)scratch;
+                                  : (uint16_t)sizeof(app_ldi_frame_t);
+    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(app_ldi_frame_t))
+        return APP_PCB_PROBE_STATE_SKIP;
+    app_ldi_frame_t *frame = (app_ldi_frame_t *)scratch;
 
     if (memcmp(ldi_stx, frame->stx, sizeof(ldi_stx)))
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
     if (frame->ver != 0x00)
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
 
     uint32_t data_len = ((uint32_t)frame->len[0] << 24) | ((uint32_t)frame->len[1] << 16) |
                         ((uint32_t)frame->len[2] << 8) | (uint32_t)frame->len[3];
@@ -363,16 +363,16 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
        必须在用 data_len 索引之前校验 —— 否则下面的 data_crc[data_len] 会越界读
        （data_len 是帧内取来的 32 位值，最远可索引到暂存区之外）。 */
     if (data_len > LDI_DATA_MAX)
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
 
-    uint32_t full_len = (uint32_t)sizeof(ldi_frame_t) + data_len + 2U;
+    uint32_t full_len = (uint32_t)sizeof(app_ldi_frame_t) + data_len + 2U;
 
     if (avail < full_len)
-        return PCB_PROBE_WAIT;
+        return APP_PCB_PROBE_STATE_WAIT;
 
     if (full_len > scratch_size) {
         *total_len = full_len; /* 暂存区装不下 → 无法校验，整帧丢弃 */
-        return PCB_PROBE_SKIP;
+        return APP_PCB_PROBE_STATE_SKIP;
     }
 
     /* 取整帧到暂存区（上面已保证 full_len ≤ scratch_size，且 avail ≥ full_len）。
@@ -385,38 +385,38 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
         (uint16_t)((frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1]);
     uint16_t calc_crc = crc16_xmodem(&frame->ver, data_len + sizeof(*frame) - sizeof(frame->stx));
     if (frame_crc != calc_crc)
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
 
     /* 配置指令 (0AH/0BH/0DH/1DH/1EH) 不校验 lane_code/cert_info，
        直接放行；其余指令需匹配设备身份 */
     uint8_t cmd = frame->data_crc[0];
-    if (!(cmd == LDI_CMD_SET_IP_REQ || cmd == LDI_CMD_SET_PARA_REQ ||
-          cmd == LDI_CMD_REBOOT_REQ || cmd == LDI_CMD_GET_IP_REQ ||
-          cmd == LDI_CMD_GET_PARA_REQ || cmd == LDI_CMD_SEARCH_REQ)) {
+    if (!(cmd == APP_LDI_CMD_TYPE_SET_IP_REQ || cmd == APP_LDI_CMD_TYPE_SET_PARA_REQ ||
+          cmd == APP_LDI_CMD_TYPE_REBOOT_REQ || cmd == APP_LDI_CMD_TYPE_GET_IP_REQ ||
+          cmd == APP_LDI_CMD_TYPE_GET_PARA_REQ || cmd == APP_LDI_CMD_TYPE_SEARCH_REQ)) {
 
-        /* 1BH/B1H 使用 ldi_ctrl_head_t (24B, UnixTimestamp 8B)，lane_code 偏移 9，cert_info 偏移 14 */
+        /* 1BH/B1H 使用 app_ldi_ctrl_head_t (24B, UnixTimestamp 8B)，lane_code 偏移 9，cert_info 偏移 14 */
         uint8_t lane_off, cert_off;
-        if (cmd == LDI_CMD_CTRL_REQ || cmd == LDI_CMD_CTRL_RSP) {
+        if (cmd == APP_LDI_CMD_TYPE_CTRL_REQ || cmd == APP_LDI_CMD_TYPE_CTRL_RSP) {
             lane_off = 9;
             cert_off = 14;
         } else {
-            lane_off = 5; /* ldi_req_head_t: cmd(1) + timestamp(4) */
+            lane_off = 5; /* app_ldi_req_head_t: cmd(1) + timestamp(4) */
             cert_off = 10;
         }
 
-        if (g_ldi.cfg_valid) {
+        if (g_ldi_ctx.cfg_valid) {
             /* 帧结构合法但车道/设备不匹配 → SKIP 整帧 */
-            if (memcmp(g_ldi.cfg.lane_hex, frame->data_crc + lane_off, sizeof(g_ldi.cfg.lane_hex)) ||
-                memcmp(g_ldi.cfg.cert, frame->data_crc + cert_off, sizeof(g_ldi.cfg.cert))) {
+            if (memcmp(g_ldi_ctx.cfg.lane_hex, frame->data_crc + lane_off, sizeof(g_ldi_ctx.cfg.lane_hex)) ||
+                memcmp(g_ldi_ctx.cfg.cert, frame->data_crc + cert_off, sizeof(g_ldi_ctx.cfg.cert))) {
                 *total_len = full_len;
-                return PCB_PROBE_SKIP;
+                return APP_PCB_PROBE_STATE_SKIP;
             }
         }
     }
 
     *aux       = cmd;
     *total_len = full_len;
-    return PCB_PROBE_READY;
+    return APP_PCB_PROBE_STATE_READY;
 }
 
 /* ================================================================
@@ -428,37 +428,37 @@ pcb_probe_sta_t ldi_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
  *  通道断开时自动重置状态到 UNINIT。
  * ================================================================ */
 
-void ldi_timer_task(void *argument)
+void app_ldi_timer_task(void *argument)
 {
     (void)argument;
 
     for (;;) {
         osDelay(1000);
 
-        vms_timer_poll(); /* VMS 定时清屏 — 不受通道状态影响 */
+        app_vms_timer_poll(); /* VMS 定时清屏 — 不受通道状态影响 */
 
         /* 主动上报固定走 TCP 客户端通道。控制块是静态对象、永不悬空，
            断线只置 state，所以这里可以直接持有指针而不必每次重新查找。 */
-        ccb_t *ccb = app_tcp_client_ccb();
+        app_ccb_t *ccb = app_tcp_client_ccb();
 
-        if (ccb == nullptr || ccb->state != CCB_STATE_UP) {
-            g_ldi.state = LDI_ST_UNINIT;
+        if (ccb == nullptr || ccb->state != APP_CCB_STATE_UP) {
+            g_ldi_ctx.state = APP_LDI_STATE_UNINIT;
             continue;
         }
 
         uint32_t now = osKernelGetTickCount();
 
-        if (g_ldi.state == LDI_ST_UNINIT) {
-            if (now - g_ldi.last_cert_tick >= 3000) {
-                ldi_send_cert_req(ccb);
-                g_ldi.last_cert_tick = now;
+        if (g_ldi_ctx.state == APP_LDI_STATE_UNINIT) {
+            if (now - g_ldi_ctx.last_cert_tick >= 3000) {
+                app_ldi_send_cert_req(ccb);
+                g_ldi_ctx.last_cert_tick = now;
             }
         }
 
-        if (g_ldi.state == LDI_ST_AUTHED || g_ldi.state == LDI_ST_READY) {
-            if (now - g_ldi.last_rpt_tick >= 5000) {
-                ldi_send_sta_rpt(ccb);
-                g_ldi.last_rpt_tick = now;
+        if (g_ldi_ctx.state == APP_LDI_STATE_AUTHED || g_ldi_ctx.state == APP_LDI_STATE_READY) {
+            if (now - g_ldi_ctx.last_rpt_tick >= 5000) {
+                app_ldi_send_state_rpt(ccb);
+                g_ldi_ctx.last_rpt_tick = now;
             }
         }
     }
@@ -468,17 +468,17 @@ void ldi_timer_task(void *argument)
  *  设备索引查表
  * ================================================================ */
 
-uint8_t ldi_get_device_index(ldi_device_t device_type)
+uint8_t app_ldi_get_device_idx(app_ldi_device_t device_type)
 {
-    for (uint8_t n = 0; n < g_ldi.cfg.module_count; n++)
-        if (g_ldi.cfg.modules[n].device_type == (uint8_t)device_type)
-            return g_ldi.cfg.modules[n].device_index;
+    for (uint8_t n = 0; n < g_ldi_ctx.cfg.module_count; n++)
+        if (g_ldi_ctx.cfg.modules[n].device_type == (uint8_t)device_type)
+            return g_ldi_ctx.cfg.modules[n].device_index;
     return 0xFF;
 }
 
-void ldi_set_device_index(ldi_device_t device_type, uint8_t device_index)
+void app_ldi_set_device_idx(app_ldi_device_t device_type, uint8_t device_index)
 {
-    for (uint8_t n = 0; n < g_ldi.cfg.module_count; n++)
-        if (g_ldi.cfg.modules[n].device_type == (uint8_t)device_type)
-            g_ldi.cfg.modules[n].device_index = device_index;
+    for (uint8_t n = 0; n < g_ldi_ctx.cfg.module_count; n++)
+        if (g_ldi_ctx.cfg.modules[n].device_type == (uint8_t)device_type)
+            g_ldi_ctx.cfg.modules[n].device_index = device_index;
 }

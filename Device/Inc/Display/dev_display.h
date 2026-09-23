@@ -2,7 +2,7 @@
  * @file    dev_display.h
  * @brief   HUB75 LED 点阵显示设备 — OCP 虚表基类
  *
- * 基类提供通用参数和 scan_task 调度骨架。
+ * 基类提供通用参数和 _scan_task 调度骨架。
  * 派生类通过 ops 虚表注入模组差异：像素映射、行地址编码、扫描策略。
  */
 
@@ -14,15 +14,15 @@
 
 /* ---- 颜色（上层 API 使用，不与 HUB75 引脚耦合）---- */
 typedef enum {
-    COLOR_BLACK  = 0,
-    COLOR_RED    = 1,
-    COLOR_GREEN  = 2,
-    COLOR_YELLOW = 3,
-    COLOR_BLUE   = 4,
-    COLOR_PURPLE = 5,
-    COLOR_CYAN   = 6,
-    COLOR_WHITE  = 7,
-} display_color_t;
+    DEV_DISPLAY_COLOR_BLACK  = 0,
+    DEV_DISPLAY_COLOR_RED    = 1,
+    DEV_DISPLAY_COLOR_GREEN  = 2,
+    DEV_DISPLAY_COLOR_YELLOW = 3,
+    DEV_DISPLAY_COLOR_BLUE   = 4,
+    DEV_DISPLAY_COLOR_PURPLE = 5,
+    DEV_DISPLAY_COLOR_CYAN   = 6,
+    DEV_DISPLAY_COLOR_WHITE  = 7,
+} dev_display_color_t;
 
 typedef struct dev_display dev_display_t;
 
@@ -72,20 +72,20 @@ struct dev_display {
 /** @brief 硬件初始化 (hw_dev_initcall): HUB75 引脚 + DBG 冻结 */
 void dev_display_init(void);
 
-/** @brief 软件初始化 (sw_dev_initcall): 创建 scan_task + 启动 TIM3/4 */
+/** @brief 软件初始化 (sw_dev_initcall): 创建 _scan_task + 启动 TIM3/4 */
 void dev_display_start(void);
 
 /** @brief 设置单个像素颜色，置脏标记 */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color);
 
 /** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记 */
-void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color);
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t color);
 
 /** @brief 叠加绘制位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color, bit=0不改变原像素。
  *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色 */
 void dev_display_draw_bitmap(dev_display_t *dev,
     uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-    const uint8_t *bitmap, display_color_t color);
+    const uint8_t *bitmap, dev_display_color_t color);
 
 /** @brief 获取 P20 模组显示实例 */
 dev_display_t *dev_display_p20_get(void);
@@ -101,7 +101,7 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
 
 /** @brief 把接下来的若干次绘制**当成一帧**输出（期间不置脏标记，`_end` 时置一次）
  *
- *  为什么需要它：多步更新（清背景 + 画内容）之间，`scan_task` 是
+ *  为什么需要它：多步更新（清背景 + 画内容）之间，`_scan_task` 是
  *  `osPriorityRealtime`，完全可能在两步之间跑一次 `prepare` —— 屏上就闪出中间态
  *  （一帧全黑、或半张新半张旧）。压住脏标记之后，屏上只出现最终那一帧。
  *

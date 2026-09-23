@@ -29,7 +29,7 @@
 #define RS485_TX_TIMEOUT_MS (200U)
 
 typedef struct {
-    ccb_t base; /**< 第一个成员：container_of 还原 */
+    app_ccb_t base; /**< 第一个成员：container_of 还原 */
     pl_uart_handle_t uart;
     osMessageQueueId_t rx_queue;
     uint8_t *rx_buf;
@@ -37,13 +37,13 @@ typedef struct {
 } rs485_ccb_t;
 
 /* ---- ops ---- */
-static int32_t rs485_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+static int32_t _rs485_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
     (void)dst; /* 半双工总线：目的地恒为总线对端，无广播/寻址概念，请求一律忽略 */
     rs485_ccb_t *self = container_of(ccb, rs485_ccb_t, base);
     /* state 置 UP 的唯一位置在任务里、UART 与 DMA 接收就绪之后，
        因此它同时表达了"uart 已绑定"，无需再单独判空 */
-    if (self->base.state != CCB_STATE_UP) return -1;
+    if (self->base.state != APP_CCB_STATE_UP) return -1;
 
     /* 长帧走 DMA：轮询会把调用任务按在整帧的物理时间上（1.4KB @115200 = 122ms），
        DMA 下这段时间交给硬件、任务阻塞在信号量上。
@@ -55,16 +55,16 @@ static int32_t rs485_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data,
     return pl_uart_send(self->uart, data, len, RS485_TX_TIMEOUT_MS);
 }
 
-static const ccb_ops_t rs485_ccb_ops = {.send = rs485_send};
+static const app_ccb_ops_t s_rs485_ccb_ops = {.send = _rs485_send};
 
 /* ---- 通道控制块（静态，协议绑定期间即可用） ---- */
-static rs485_ccb_t g_rs485 = {
-    .base = {.name = "rs485", .ops = &rs485_ccb_ops},
+static rs485_ccb_t s_rs485_ccb = {
+    .base = {.name = "rs485", .ops = &s_rs485_ccb_ops},
 };
 
-ccb_t *app_rs485_ccb(void)
+app_ccb_t *app_rs485_ccb(void)
 {
-    return &g_rs485.base;
+    return &s_rs485_ccb.base;
 }
 
 /* ---- rs485_rx_queue 静态分配 ---- */
@@ -85,7 +85,7 @@ ccb_t *app_rs485_ccb(void)
  * 放 CCMRAM：这是 ISR 里 memcpy 的目的地，CPU 访问，不需要 DMA 可达。 */
 /* ---- 收包槽位 ----
  *
- * **3 个**（原来 2 个）：`uart_idle_handle` 在**缓冲区环回处**会把一段拆成两次**背靠背**的
+ * **3 个**（原来 2 个）：`_uart_idle_handle` 在**缓冲区环回处**会把一段拆成两次**背靠背**的
  * 回调（先交缓冲末尾那一截、再交开头那一截）。也就是"一次交付"最多同时占 2 个槽，
  * 而任务手上最多还握着 1 个 —— 2 个槽在环回那一刻必然不够。实测：一条 1427 字节的帧
  * 跨过回绕点被拆成 1211 + 216，后半段**被丢掉**，整帧作废，只能靠主卡重发。
@@ -134,7 +134,7 @@ static const osMessageQueueAttr_t s_rs485_rx_attr = {
    而丢了不会有人重发（只能等对端超时重传），所以必须看得见；健康时它们一次都不出现。 */
 #define RS485_ANOMALY_LOG_MAX 8U
 
-static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
+static void _rs485_isr_fn(uint8_t *data, uint16_t len, void *ctx)
 {
     (void)data;
     rs485_ccb_t *self = (rs485_ccb_t *)ctx;
@@ -180,7 +180,7 @@ static void rs485_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 
 /* ---- 任务循环 ---- */
 
-/** @brief 建收包队列 —— **深度必须等于槽数**，理由见 rs485_isr_cb 里那段说明
+/** @brief 建收包队列 —— **深度必须等于槽数**，理由见 _rs485_isr_fn 里那段说明
  *
  *  单独一个函数是为了让 host 测试能走**同一条路**：测试若自己另建一个队列，
  *  改坏了这里（比如把深度写小）它一声不响 —— 那就成了假信心。 */
@@ -189,7 +189,7 @@ static osMessageQueueId_t _rx_queue_create(void)
     return osMessageQueueNew(RS485_RX_SLOTS, sizeof(rs485_rx_msg_t), &s_rs485_rx_attr);
 }
 
-static void rs485_task(void *argument)
+static void _rs485_task(void *argument)
 {
     rs485_ccb_t *self = (rs485_ccb_t *)argument;
 
@@ -199,9 +199,9 @@ static void rs485_task(void *argument)
         return;
     }
 
-    pl_uart_set_rx_cb(self->uart, rs485_isr_cb, self);
+    pl_uart_set_rx_fn(self->uart, _rs485_isr_fn, self);
     pl_uart_start_rx(self->uart, self->rx_buf, self->rx_buf_size);
-    self->base.state = CCB_STATE_UP;
+    self->base.state = APP_CCB_STATE_UP;
 
     for (;;) {
         rs485_rx_msg_t m = {0};
@@ -222,7 +222,7 @@ static void rs485_task(void *argument)
 
 osThreadId_t app_rs485_start(void)
 {
-    rs485_ccb_t *self  = &g_rs485;
+    rs485_ccb_t *self  = &s_rs485_ccb;
     self->uart        = pl_uart_get_handle(PL_UART1);
     self->rx_buf      = dev_rs485_get_buf();
     self->rx_buf_size = RS485_BUF_SIZE;
@@ -235,13 +235,13 @@ osThreadId_t app_rs485_start(void)
      *
      * （早先这里是"共享 rx_buf + 深 1 的长度队列"，那时队列**不能**加深：长度与数据
      * 会串。现在每段都拷进**自己的槽位**、队列投的是槽号，两者一一对应 ——
-     * 所以深度跟着槽数走是安全且必需的，见 rs485_isr_cb 里的说明。）
+     * 所以深度跟着槽数走是安全且必需的，见 _rs485_isr_fn 里的说明。）
      *
      * 提到分发任务之上后，ISR 投递完立刻抢占执行。本任务只做 rb_write + 通知，很短。 */
     osThreadAttr_t rs485_task_attr = {
-        .name       = "rs485_task",
+        .name       = "_rs485_task",
         .stack_size = 256 * 4,
         .priority   = osPriorityAboveNormal,
     };
-    return pl_task_new(rs485_task, self, &rs485_task_attr);
+    return pl_task_new(_rs485_task, self, &rs485_task_attr);
 }

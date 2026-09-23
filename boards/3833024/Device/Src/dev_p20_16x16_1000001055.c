@@ -49,18 +49,18 @@ typedef struct {
     pl_hub75_bsrr_t r, g, b;
 } p20_bsrr_t;
 
-[[gnu::section(".ccmram")]] static p20_bsrr_t g_bsrr[P20_TOTAL_CHANNELS][8];
+[[gnu::section(".ccmram")]] static p20_bsrr_t s_bsrr_table[P20_TOTAL_CHANNELS][8];
 
 /* ---- P20 实例 ---- */
 typedef struct {
-    dev_display_t me;
+    dev_display_t base;
 } dev_display_p20_t;
 
-[[gnu::section(".ccmram")]] static uint8_t p20_pixel_map[P20_BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t p20_hub75_buff[P20_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P20_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P20_BUFFER_SIZE];
 
-static dev_display_p20_t g_p20 = {
-    .me = {
+static dev_display_p20_t s_p20_dev = {
+    .base = {
         .ops                 = nullptr, /* 由 dev_display_p20_init 设置 */
         .module_rows         = P20_MODULE_PIXEL_ROW,
         .module_cols         = P20_MODULE_PIXEL_COL,
@@ -74,8 +74,8 @@ static dev_display_p20_t g_p20 = {
         .channel_pixels      = P20_CHANNEL_PIXELS,
         .scan_line_pixels    = P20_SCAN_LINE_PX,
         .buffer_size         = P20_BUFFER_SIZE,
-        .pixel_map           = p20_pixel_map,
-        .hub75_buff          = p20_hub75_buff,
+        .pixel_map           = s_pixel_map,
+        .hub75_buff          = s_hub75_buff,
         .light_level         = 1,
     },
 };
@@ -112,7 +112,7 @@ static void _p20_prepare(dev_display_t *dev)
 /* ================================================================
  *  scan: 逐像素输出 — BSRR 查表 + CLK 脉冲
  *
- *  hub75_buff[] 存储的是颜色索引 (0~7)，扫描时查 g_bsrr
+ *  hub75_buff[] 存储的是颜色索引 (0~7)，扫描时查 s_bsrr_table
  *  得到该通道、该颜色的 R/G/B 三组 {port, BSRR_val}，直接 flush 输出。
  * ================================================================ */
 
@@ -125,7 +125,7 @@ static inline void _p20_scan(dev_display_t *dev, uint8_t line)
         /* 同一像素位置同时输出所有通道的颜色数据 */
         for (uint8_t ch = 0; ch < dev->total_channels; ch++) {
             uint8_t color    = dev->hub75_buff[pixel_base + ch * dev->channel_pixels];
-            p20_bsrr_t *bsrr = &g_bsrr[ch][color];
+            p20_bsrr_t *bsrr = &s_bsrr_table[ch][color];
             pl_hub75_bsrr_flush(&bsrr->r);
             pl_hub75_bsrr_flush(&bsrr->g);
             pl_hub75_bsrr_flush(&bsrr->b);
@@ -143,7 +143,7 @@ static void _p20_set_row(uint8_t row)
 }
 
 /* ---- ops 虚表 ---- */
-static const dev_display_ops_t p20_ops = {
+static const dev_display_ops_t s_p20_ops = {
     .prepare = _p20_prepare,
     .scan    = _p20_scan,
     .set_row = _p20_set_row,
@@ -152,7 +152,7 @@ static const dev_display_ops_t p20_ops = {
 /* ================================================================
  *  dev_p20_16x16_1000001055_init: 预计算 BSRR 查表 + 绑定 ops
  *
- *  g_bsrr[ch][c] 存储通道 ch 在颜色 c (0~7) 时的 R/G/B 引脚输出值。
+ *  s_bsrr_table[ch][c] 存储通道 ch 在颜色 c (0~7) 时的 R/G/B 引脚输出值。
  *  颜色 c 的 bit0→R, bit1→G, bit2→B:
  *    - R 亮: (c & 1) != 0 → BSRR 置位（高电平）
  *    - R 灭: (c & 1) == 0 → BSRR 复位（低电平）
@@ -163,24 +163,24 @@ static const dev_display_ops_t p20_ops = {
 
 void dev_p20_16x16_1000001055_init(void)
 {
-    g_p20.me.ops = &p20_ops;
-    dev_display_register(&g_p20.me);
+    s_p20_dev.base.ops = &s_p20_ops;
+    dev_display_register(&s_p20_dev.base);
 
-    for (uint8_t ch = 0; ch < g_p20.me.total_channels; ch++) {
+    for (uint8_t ch = 0; ch < s_p20_dev.base.total_channels; ch++) {
         for (uint8_t color = 0; color < 8; color++) {
             /* R 通道: color bit0 决定亮灭 */
-            g_bsrr[ch][color].r.port = g_hub75_pin_r[ch].port;
-            g_bsrr[ch][color].r.val  = (color & 1) ? (uint32_t)g_hub75_pin_r[ch].pin        /* 置位: 输出高 */
+            s_bsrr_table[ch][color].r.port = g_hub75_pin_r[ch].port;
+            s_bsrr_table[ch][color].r.val  = (color & 1) ? (uint32_t)g_hub75_pin_r[ch].pin        /* 置位: 输出高 */
                                                    : (uint32_t)g_hub75_pin_r[ch].pin << 16; /* 复位: 输出低 */
 
             /* G 通道: color bit1 决定亮灭 */
-            g_bsrr[ch][color].g.port = g_hub75_pin_g[ch].port;
-            g_bsrr[ch][color].g.val  = (color & 2) ? (uint32_t)g_hub75_pin_g[ch].pin
+            s_bsrr_table[ch][color].g.port = g_hub75_pin_g[ch].port;
+            s_bsrr_table[ch][color].g.val  = (color & 2) ? (uint32_t)g_hub75_pin_g[ch].pin
                                                    : (uint32_t)g_hub75_pin_g[ch].pin << 16;
 
             /* B 通道: color bit2 决定亮灭 */
-            g_bsrr[ch][color].b.port = g_hub75_pin_b[ch].port;
-            g_bsrr[ch][color].b.val  = (color & 4) ? (uint32_t)g_hub75_pin_b[ch].pin
+            s_bsrr_table[ch][color].b.port = g_hub75_pin_b[ch].port;
+            s_bsrr_table[ch][color].b.val  = (color & 4) ? (uint32_t)g_hub75_pin_b[ch].pin
                                                    : (uint32_t)g_hub75_pin_b[ch].pin << 16;
         }
     }

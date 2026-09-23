@@ -1,9 +1,9 @@
 /**
  * @file    dev_display.c
- * @brief   HUB75 显示设备 — 通用 scan_task 骨架 + ISR 回调
+ * @brief   HUB75 显示设备 — 通用 _scan_task 骨架 + ISR 回调
  *
  * 派生的模组类型（P16、P10、静态等）通过 dev_display_ops 注入差异。
- * scan_task 负责调度，不被任何其他任务抢占（osPriorityRealtime）。
+ * _scan_task 负责调度，不被任何其他任务抢占（osPriorityRealtime）。
  */
 
 #include <stdio.h>
@@ -47,10 +47,10 @@ void dev_display_init(void)
 hw_dev_initcall(dev_display_init);
 
 /* ---- 扫描任务骨架 ---- */
-static void scan_task(void *arg)
+static void _scan_task(void *arg)
 {
     dev_display_t *dev = (dev_display_t *)arg;
-    static uint8_t scan_line;
+    static uint8_t s_scan_line;
 
     pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_SCAN));
     pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_PWM));
@@ -60,17 +60,17 @@ static void scan_task(void *arg)
 
         /* 脏标记 → 预计算（off critical path）
          *
-         * **只能在帧首做**（`scan_line == 0`）：`prepare` 重建的是**整屏**的扫描表
+         * **只能在帧首做**（`s_scan_line == 0`）：`prepare` 重建的是**整屏**的扫描表
          * （P10 是 [扫行][时序步][端口] 三维表），而扫描是**逐行**输出的 ——
          * 在行间做，前一行用旧表、后一行用新表，屏上就是**一帧撕裂**（新旧各半）。
          * 现场表现：切换内容时屏幕"抖一下"，且抖的那一帧只出现在某些次更新上
          * （取决于更新落在这个 5ms 窗口里的哪一段），很难复现。
          * 挪到帧首之后，一帧要么全是旧的、要么全是新的；代价是更新最多晚一帧
          * （P10 一帧 10ms），肉眼看不出来。 */
-        if (dev->dirty && scan_line == 0) {
+        if (dev->dirty && s_scan_line == 0) {
             dev->dirty = false;
             if (dev->ops->prepare) {
-                /* **量一下它到底多久**：这段跑在 osPriorityRealtime 的 scan_task 里，
+                /* **量一下它到底多久**：这段跑在 osPriorityRealtime 的 _scan_task 里，
                    期间**所有 Normal 任务都上不来**（协议任务就在那一档）。
                    估算过一次（~10ms）与实测差一个数量级，所以直接量，不再估。
                    查完把这几行去掉。 */
@@ -82,19 +82,19 @@ static void scan_task(void *arg)
         }
 
         /* 模组专用扫描输出 */
-        dev->ops->scan(dev, scan_line);
+        dev->ops->scan(dev, s_scan_line);
 
         /* OE/LAT 原子窗口（所有模组通用） */
         osKernelLock();
         pl_tim_irq_disable(pl_tim_irq_of(PL_TIM_DISPLAY_PWM));
         pl_hub75_oe_set(true); /* 消隐：行切换期间关断输出，避免鬼影 */
         if (dev->ops->set_row)
-            dev->ops->set_row(scan_line);
+            dev->ops->set_row(s_scan_line);
         pl_hub75_latch_pulse();
         pl_tim_irq_enable(pl_tim_irq_of(PL_TIM_DISPLAY_PWM));
         osKernelUnlock();
 
-        scan_line = (scan_line + 1) % dev->scan_lines;
+        s_scan_line = (s_scan_line + 1) % dev->scan_lines;
     }
 }
 
@@ -108,16 +108,16 @@ void dev_display_start(void)
     dev->dirty = true;
 
     const osThreadAttr_t attr = {
-        .name       = "scan_task",
+        .name       = "_scan_task",
         .stack_size = 512,
         .priority   = osPriorityRealtime,
     };
-    pl_task_new(scan_task, dev, &attr);
+    pl_task_new(_scan_task, dev, &attr);
 }
 sw_dev_initcall(dev_display_start);
 
 /* ---- 通用像素操作 ---- */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color)
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color)
 {
     if (x < dev->screen_rows && y < dev->screen_cols) {
         dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
@@ -153,7 +153,7 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
     dev->light_level = level;
 }
 
-void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t color)
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t color)
 {
     if (x + w > dev->screen_rows) w = dev->screen_rows - x;
     if (y + h > dev->screen_cols) h = dev->screen_cols - y;
@@ -164,7 +164,7 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
     else dev->frame_touched = true;
 }
 
-void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, display_color_t color)
+void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, dev_display_color_t color)
 {
     if (x + w > dev->screen_rows || y + h > dev->screen_cols) return;
 
@@ -189,8 +189,8 @@ static void _on_scan_period(void)
 static void _on_pwm_period(void)
 {
     dev_display_t *dev = dev_display_get();
-    static uint8_t pwm_cnt;
+    static uint8_t s_pwm_cnt;
 
-    pl_hub75_oe_set(pwm_cnt >= dev->light_level);
-    pwm_cnt = (pwm_cnt + 1) & 7;
+    pl_hub75_oe_set(s_pwm_cnt >= dev->light_level);
+    s_pwm_cnt = (s_pwm_cnt + 1) & 7;
 }

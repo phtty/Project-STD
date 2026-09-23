@@ -43,7 +43,7 @@ typedef struct dev_key_ops {
 struct dev_key {
     const dev_key_ops_t *ops;
     dev_key_id_t id;
-    pl_port_t port;
+    pl_gpio_port_t port;
     uint8_t    pin;
     bool       active_low;
     osSemaphoreId_t press_sem;    /* EXTI 释放，wait_press 获取 */
@@ -58,7 +58,7 @@ struct dev_key {
  *  拨码开关（DIPx）走纯轮询：has_exti=false，wait_press 恒为 NULL。 */
 typedef struct {
     dev_key_id_t id;
-    pl_port_t port;
+    pl_gpio_port_t port;
     uint8_t pin;
     bool active_low;
     bool has_exti;   /**< true = EXTI 型（wait_press 可用）；false = 纯轮询（拨码） */

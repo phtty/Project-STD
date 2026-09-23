@@ -1,5 +1,5 @@
 /**
- * @file    test_cascade_frame.c
+ * @file    test_casc_frame.c
  * @brief   级联协议探针：四态矩阵、地址过滤、长度域、与既有协议互不毒化
  *
  * **为什么需要这个测试**：探针是**帧同步的唯一入口**，它的四态判断错一个分支，
@@ -19,9 +19,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define BOARD_CASCADE_ENABLED 1 /* 本套件测级联，强制编进来 */
-#include "app_cascade.h"
-#include "app_screen.h" /* 新桩要用到 screen_card_state_t */
+#define BOARD_CASC_ENABLED 1 /* 本套件测级联，强制编进来 */
+#include "app_casc.h"
+#include "app_screen.h" /* 新桩要用到 app_screen_card_state_t */
 /* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
 #include "app_cfg_sched.h"
 #include "dev_key.h"
@@ -37,8 +37,8 @@ uint8_t  app_screen_get_brightness(void) { return 0; }
 bool     app_screen_brightness_take_pending(uint8_t *l) { (void)l; return false; }
 dev_display_t *dev_display_get(void) { return nullptr; } /* PRESENT 用，本套件不测那条 */
 uint8_t app_screen_index_of_addr(uint8_t a) { (void)a; return 0xFF; }
-screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return SCREEN_CARD_ONLINE; }
-void app_screen_card_set_state(uint8_t i, screen_card_state_t st) { (void)i; (void)st; }
+app_screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return APP_SCREEN_CARD_STATE_ONLINE; }
+void app_screen_card_set_state(uint8_t i, app_screen_card_state_t st) { (void)i; (void)st; }
 void app_screen_note_round(uint16_t seq) { (void)seq; }
 void app_screen_note_retrans(void) {}
 
@@ -46,11 +46,11 @@ void app_screen_note_retrans(void) {}
 void    app_screen_set_addr(uint8_t a) { (void)a; }
 void    app_screen_reinit_identity(void) {}
 bool    app_screen_canvas_touched(void) { return false; }
-uint8_t app_cfg_sched_register(const cfg_sched_desc_t *d) { (void)d; return 0xFF; }
-cfg_rec_sta_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
+uint8_t app_cfg_sched_register(const app_cfg_sched_desc_t *d) { (void)d; return 0xFF; }
+dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
 {
     (void)id; (void)p; (void)c; (void)l;
-    return CFG_REC_EMPTY; /* "没有记录" → 身份回落到板级默认 */
+    return DEV_CFG_RECORD_STATE_EMPTY; /* "没有记录" → 身份回落到板级默认 */
 }
 int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
 {
@@ -58,7 +58,7 @@ int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
     return 0;
 }
 dev_key_t *dev_key_get(dev_key_id_t id) { (void)id; return nullptr; } /* 两侧都没有拨码 */
-const screen_layout_t *app_screen_layout(void) { return nullptr; }
+const app_screen_layout_t *app_screen_layout(void) { return nullptr; }
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
 void app_render_save(void) {}
 bool app_render_peek_persist_req(void) { return false; }
@@ -73,18 +73,18 @@ uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t mc) { (void)mc; return add
 
 
 
-int32_t  ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+int32_t  app_ccb_send(app_ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
     (void)d;
     return (int32_t)l; /* 桩：装作发出去了 */
 }
-void     app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }
-ccb_t   *app_rs485_ccb(void) { return nullptr; }
+void     app_dispatch_bind(app_pcb_t *p, app_ccb_t *c) { (void)p; (void)c; }
+app_ccb_t   *app_rs485_ccb(void) { return nullptr; }
 void     pl_task_new_stub(void) {}
 
 /* 被测：生产源码本体 */
-#include "../Application/Src/CASCADE/app_cascade.c"
+#include "../Application/Src/CASC/app_casc.c"
 
 /* ================================================================ */
 /*  夹具                                                            */
@@ -94,7 +94,7 @@ void     pl_task_new_stub(void) {}
    裸 ring_buffer_t + rb_init 只绑锁、不设容量，size 为 0 会在取模时除零。 */
 RB_DEFINE(s_rb, 4096);
 
-static uint8_t s_scratch[FRAME_DATA_MAX_LEN];
+static uint8_t s_scratch_buf[FRAME_DATA_MAX_LEN];
 
 static void fixture_reset(void)
 {
@@ -119,18 +119,18 @@ static uint16_t build(uint8_t *out, uint8_t type, uint8_t dst, uint8_t src, uint
     out[2] = (uint8_t)((CASC_PROTO_VER << 6) | type);
     out[3] = dst;
     out[4] = src;
-    casc_put_u16(out + 5, seq);
+    _casc_put_u16(out + 5, seq);
     out[7] = 0;
     out[8] = 0;
-    casc_put_u16(out + 9, len);
+    _casc_put_u16(out + 9, len);
     if (plen) memcpy(out + 11, payload, plen);
-    casc_put_u32(out + len - 4U, pl_crc32_calc(pl_crc_get_handle(), out + 2, len - 6U));
+    _casc_put_u32(out + len - 4U, pl_crc32_calc(pl_crc_get_handle(), out + 2, len - 6U));
     return len;
 }
 
-static pcb_probe_sta_t probe(uint32_t *total_len, uint8_t *aux)
+static app_pcb_probe_state_t probe(uint32_t *total_len, uint8_t *aux)
 {
-    return casc_probe_frame(&s_casc_pcb, nullptr, nullptr, s_scratch, sizeof(s_scratch),
+    return _casc_probe_frame(&s_casc_pcb, nullptr, nullptr, s_scratch_buf, sizeof(s_scratch_buf),
                             total_len, aux);
 }
 
@@ -163,9 +163,9 @@ static void case_four_states(void)
 
     /* 不足一个帧头 → WAIT */
     fixture_reset();
-    uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
+    uint16_t n = build(s_f, APP_CASC_TYPE_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, 5);
-    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == PCB_PROBE_WAIT, "只有 5 字节时应 WAIT");
+    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == APP_PCB_PROBE_STATE_WAIT, "只有 5 字节时应 WAIT");
 
     /* 帧头错 → FAKE */
     fixture_reset();
@@ -173,35 +173,35 @@ static void case_four_states(void)
     memcpy(bad, s_f, n);
     bad[0] = 0x00;
     feed(bad, n);
-    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == PCB_PROBE_FAKE, "帧头错应 FAKE");
+    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == APP_PCB_PROBE_STATE_FAKE, "帧头错应 FAKE");
 
     /* 完整 → READY，且 total_len / aux 正确 */
     fixture_reset();
     feed(s_f, n);
     uint32_t tl = 0;
     uint8_t  ax = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "完整帧应 READY");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY, "完整帧应 READY");
     CHECK_MSG(tl == n, "total_len 应为 %u，得到 %u", (unsigned)n, (unsigned)tl);
-    CHECK_MSG(ax == CASC_T_PING, "aux 应为 PING(%02X)，得到 %02X", CASC_T_PING, ax);
+    CHECK_MSG(ax == APP_CASC_TYPE_PING, "aux 应为 PING(%02X)，得到 %02X", APP_CASC_TYPE_PING, ax);
 
     /* 帧尾少一字节 → WAIT（不是 READY、也不是 FAKE） */
     fixture_reset();
     feed(s_f, (uint16_t)(n - 1));
-    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == PCB_PROBE_WAIT, "少最后一字节时应 WAIT");
+    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == APP_PCB_PROBE_STATE_WAIT, "少最后一字节时应 WAIT");
 
     /* CRC 错一位 → FAKE */
     fixture_reset();
     memcpy(bad, s_f, n);
     bad[n - 1] ^= 0x01; /* 改 CRC 自身 */
     feed(bad, n);
-    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == PCB_PROBE_FAKE, "CRC 错应 FAKE");
+    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == APP_PCB_PROBE_STATE_FAKE, "CRC 错应 FAKE");
 
     /* 载荷错一位（CRC 未跟着改）→ FAKE —— 这条才是 CRC 真正要抓的 */
     fixture_reset();
     memcpy(bad, s_f, n);
     bad[2] ^= 0x01;
     feed(bad, n);
-    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == PCB_PROBE_FAKE, "载荷被改动应 FAKE");
+    CHECK_MSG(probe(&(uint32_t){0}, &(uint8_t){0}) == APP_PCB_PROBE_STATE_FAKE, "载荷被改动应 FAKE");
 }
 
 /** @brief 长度域：越界必须 FAKE，不得按伪长度 SKIP（那会吞掉后面的真帧） */
@@ -214,12 +214,12 @@ static void case_length_bounds(void)
     uint16_t bad_vals[] = {0, 1, CASC_FRAME_MIN - 1U, CASC_FRAME_MAX + 1U, 0xFFFF};
     for (unsigned i = 0; i < sizeof(bad_vals) / sizeof(bad_vals[0]); i++) {
         fixture_reset();
-        uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
-        casc_put_u16(s_f + 9, bad_vals[i]); /* 只改长度域，不动 CRC */
+        uint16_t n = build(s_f, APP_CASC_TYPE_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
+        _casc_put_u16(s_f + 9, bad_vals[i]); /* 只改长度域，不动 CRC */
         feed(s_f, 16);
 
         uint32_t tl = 0xDEADBEEF;
-        CHECK_MSG(probe(&tl, &(uint8_t){0}) == PCB_PROBE_FAKE, "长度 %u 应判 FAKE",
+        CHECK_MSG(probe(&tl, &(uint8_t){0}) == APP_PCB_PROBE_STATE_FAKE, "长度 %u 应判 FAKE",
                   (unsigned)bad_vals[i]);
         (void)n;
     }
@@ -229,19 +229,19 @@ static void case_length_bounds(void)
     fixture_reset();
     uint8_t junk[4] = {0xA5, 0x5A, 0xFF, 0xFF}; /* 像 SOF 但长度域荒谬 */
     feed(junk, sizeof(junk));
-    uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 7, nullptr, 0);
+    uint16_t n = build(s_f, APP_CASC_TYPE_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 7, nullptr, 0);
     feed(s_f, n);
 
     bool found = false;
     for (int guard = 0; guard < 64; guard++) {
         uint32_t tl = 0;
         uint8_t  ax = 0;
-        pcb_probe_sta_t st = probe(&tl, &ax);
-        if (st == PCB_PROBE_READY) {
+        app_pcb_probe_state_t st = probe(&tl, &ax);
+        if (st == APP_PCB_PROBE_STATE_READY) {
             found = true;
             break;
         }
-        if (st == PCB_PROBE_FAKE) continue; /* 框架会 rb_skip(1)，本用例只推进窥视位置 */
+        if (st == APP_PCB_PROBE_STATE_FAKE) continue; /* 框架会 rb_skip(1)，本用例只推进窥视位置 */
         break;
     }
     /* 说明：probe 只窥视不消费，上面的循环在 FAKE 时**不会**真的前进 ——
@@ -261,23 +261,23 @@ static void case_address_filter(void)
 
     /* 广播 */
     fixture_reset();
-    uint16_t n = build(s_f, CASC_T_SET_BRIGHT, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
+    uint16_t n = build(s_f, APP_CASC_TYPE_SET_BRIGHT, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, n);
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "广播帧应 READY");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY, "广播帧应 READY");
     CHECK_MSG(tl == n, "广播帧 total_len 应为 %u", (unsigned)n);
 
     /* 本机（从卡 1） */
     fixture_reset();
-    n = build(s_f, CASC_T_IMAGE, 1, CASC_ADDR_MASTER, 1, nullptr, 0);
+    n = build(s_f, APP_CASC_TYPE_IMAGE, 1, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, n);
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "发给本机的帧应 READY");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY, "发给本机的帧应 READY");
 
     /* 别人（从卡 2）—— 本用例把本卡设成 1 */
     fixture_reset();
-    n = build(s_f, CASC_T_IMAGE, 2, CASC_ADDR_MASTER, 1, nullptr, 0);
+    n = build(s_f, APP_CASC_TYPE_IMAGE, 2, CASC_ADDR_MASTER, 1, nullptr, 0);
     feed(s_f, n);
     tl = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_SKIP, "发给别人的帧应 SKIP");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_SKIP, "发给别人的帧应 SKIP");
     CHECK_MSG(tl == n, "SKIP 也要报出整帧长度（%u），得到 %u —— 否则框架不知道跳多少",
               (unsigned)n, (unsigned)tl);
 }
@@ -308,9 +308,9 @@ static void case_no_cross_poison(void)
 
         uint32_t tl = 0;
         uint8_t  ax = 0;
-        pcb_probe_sta_t st = probe(&tl, &ax);
-        CHECK_MSG(st != PCB_PROBE_READY, "%s 的字节流被判成级联帧", others[i].name);
-        CHECK_MSG(st == PCB_PROBE_FAKE, "%s 应判 FAKE（逐字节重跳），得到 %d", others[i].name,
+        app_pcb_probe_state_t st = probe(&tl, &ax);
+        CHECK_MSG(st != APP_PCB_PROBE_STATE_READY, "%s 的字节流被判成级联帧", others[i].name);
+        CHECK_MSG(st == APP_PCB_PROBE_STATE_FAKE, "%s 应判 FAKE（逐字节重跳），得到 %d", others[i].name,
                   (int)st);
     }
 
@@ -318,12 +318,12 @@ static void case_no_cross_poison(void)
     fixture_reset();
     uint8_t payload[16];
     memset(payload, 0x5A, sizeof(payload)); /* 载荷里全是 5A */
-    uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, payload,
+    uint16_t n = build(s_f, APP_CASC_TYPE_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, payload,
                        sizeof(payload));
     feed(s_f, n);
     uint32_t tl = 0;
     uint8_t  ax = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "载荷含 5A 序列时自己的帧反而认不出");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY, "载荷含 5A 序列时自己的帧反而认不出");
     CHECK_MSG(tl == n, "total_len 应仍为 %u", (unsigned)n);
 }
 
@@ -339,19 +339,19 @@ static void case_sof_in_payload(void)
     payload[10] = CASC_SOF0;
     payload[11] = CASC_SOF1;
 
-    uint16_t n = build(s_f, CASC_T_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, payload,
+    uint16_t n = build(s_f, APP_CASC_TYPE_PING, CASC_ADDR_BCAST, CASC_ADDR_MASTER, 1, payload,
                        sizeof(payload));
     feed(s_f, n);
 
     uint32_t tl = 0;
     uint8_t  ax = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY, "载荷含 SOF 时本帧应正常识别");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY, "载荷含 SOF 时本帧应正常识别");
     CHECK_MSG(tl == n, "total_len 应为整帧 %u，得到 %u", (unsigned)n, (unsigned)tl);
 }
 
 /** @brief **一条帧分两段写入、且第二段让协议 RB 自己回绕** → 探针必须仍能 READY
  *
- *  这不是假想的场景，而是上机实测到的：接收侧的 DMA 缓冲环回处，`uart_idle_handle`
+ *  这不是假想的场景，而是上机实测到的：接收侧的 DMA 缓冲环回处，`_uart_idle_handle`
  *  会把一段拆成两次回调（先交缓冲末尾那截、再交开头那截），于是传输层往协议 RB 里
  *  **写两次**；而第二次写很可能让 RB 的写指针在内部绕回去 —— 整帧在 RB 里就不连续了。
  *
@@ -380,7 +380,7 @@ static void case_split_across_rb_wrap(void)
     plen = want;
 
     static uint8_t frame[CASC_FRAME_MAX];
-    const uint16_t n = build(frame, CASC_T_IMAGE, 1, CASC_ADDR_MASTER, 7, payload, plen);
+    const uint16_t n = build(frame, APP_CASC_TYPE_IMAGE, 1, CASC_ADDR_MASTER, 7, payload, plen);
     CHECK_MSG(n == CASC_FRAME_MAX, "本用例要一条满长的帧（%u），得到 %u",
               (unsigned)CASC_FRAME_MAX, (unsigned)n);
 
@@ -413,10 +413,10 @@ static void case_split_across_rb_wrap(void)
     /* ③ 探针必须能认出它，且读回来的字节与发出去的一模一样 */
     uint32_t tl = 0;
     uint8_t  ax = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_READY,
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_READY,
               "分两段写入 + RB 内部回绕之后探针认不出这条帧 —— 现场就是协议层一行都没有");
     CHECK_MSG(tl == n, "total_len 应为 %u，得到 %u", (unsigned)n, (unsigned)tl);
-    CHECK_MSG(ax == CASC_T_IMAGE, "aux 应为 IMAGE(%02X)，得到 %02X", CASC_T_IMAGE, ax);
+    CHECK_MSG(ax == APP_CASC_TYPE_IMAGE, "aux 应为 IMAGE(%02X)，得到 %02X", APP_CASC_TYPE_IMAGE, ax);
 
     CHECK_MSG(rb_read(&s_rb, sink, n, nullptr) == n, "整帧应能一次读出来");
     CHECK_MSG(memcmp(sink, frame, n) == 0, "读回来的字节与写进去的不一致");
@@ -445,15 +445,15 @@ static void case_fake_does_not_copy_whole(void)
     feed(junk, sizeof(junk));
 
     /* 暂存区铺哨兵：探针跑完之后，**帧头以外的字节必须原封不动** */
-    memset(s_scratch, 0xEE, sizeof(s_scratch));
+    memset(s_scratch_buf, 0xEE, sizeof(s_scratch_buf));
 
     uint32_t tl = 0;
     uint8_t  ax = 0;
-    CHECK_MSG(probe(&tl, &ax) == PCB_PROBE_FAKE, "杂物应判 FAKE");
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_FAKE, "杂物应判 FAKE");
 
     bool untouched = true;
-    for (uint16_t i = sizeof(casc_hdr_t); i < sizeof(s_scratch); i++) {
-        if (s_scratch[i] != 0xEE) {
+    for (uint16_t i = sizeof(app_casc_hdr_t); i < sizeof(s_scratch_buf); i++) {
+        if (s_scratch_buf[i] != 0xEE) {
             untouched = false;
             break;
         }

@@ -1,12 +1,12 @@
 #include "text_cvt.h"
 
 /**
- * @brief Ê®Áù½øÖÆ×Ö·û×ªÊ®Áù½øÖÆÊı£¬Àı£º'A' -> 0xA
+ * @brief åå…­è¿›åˆ¶å­—ç¬¦è½¬åå…­è¿›åˆ¶æ•°ï¼Œä¾‹ï¼š'A' -> 0xA
  *
- * @param chr Òª×ª»»µÄÊ®Áù½øÖÆ×Ö·û
- * @return ×ª»»ºóµÄÖµ
+ * @param chr è¦è½¬æ¢çš„åå…­è¿›åˆ¶å­—ç¬¦
+ * @return è½¬æ¢åçš„å€¼
  */
-uint8_t chr2hex(uint8_t chr)
+uint8_t cvt_chr_to_hex(uint8_t chr)
 {
     if (chr >= '0' && chr <= '9')
         return chr - '0';
@@ -21,12 +21,12 @@ uint8_t chr2hex(uint8_t chr)
 }
 
 /**
- * @brief Ê®Áù½øÖÆÊı×ªÎª×Ö·û´®ĞÎÊ½£¬Àı£º0x0A->'A'
+ * @brief åå…­è¿›åˆ¶æ•°è½¬ä¸ºå­—ç¬¦ä¸²å½¢å¼ï¼Œä¾‹ï¼š0x0A->'A'
  *
- * @param hex Òª×ª»»µÄÊı£¬·¶Î§0~F
- * @return ×ª»»ºóµÄÖµ
+ * @param hex è¦è½¬æ¢çš„æ•°ï¼ŒèŒƒå›´0~F
+ * @return è½¬æ¢åçš„å€¼
  */
-uint8_t hex2chr(uint8_t hex)
+uint8_t cvt_hex_to_chr(uint8_t hex)
 {
     if (hex <= 9)
         return hex + '0';
@@ -38,43 +38,43 @@ uint8_t hex2chr(uint8_t hex)
 }
 
 /**
- * @brief Ê®Áù½øÖÆÃæÖµ×ª×Ö·û´®£¬Àı£º{0XAA,0XBB,0XCC} -> "AABBCC"
+ * @brief åå…­è¿›åˆ¶é¢å€¼è½¬å­—ç¬¦ä¸²ï¼Œä¾‹ï¼š{0XAA,0XBB,0XCC} -> "AABBCC"
  *
- * @param from ´ı×ª»»µÄÊ®Áù½øÖÆÊı¾İ
- * @param fromSize ´ı×ª»»µÄÊ®Áù½øÖÆÊı¾İ´óĞ¡
- * @param to ´æ·Å×ª»»µÄ×Ö·û´®
- * @param toSize ´æ·Å×ª»»µÄ×Ö·û´®µÄ´óĞ¡
+ * @param from å¾…è½¬æ¢çš„åå…­è¿›åˆ¶æ•°æ®
+ * @param fromSize å¾…è½¬æ¢çš„åå…­è¿›åˆ¶æ•°æ®å¤§å°
+ * @param to å­˜æ”¾è½¬æ¢çš„å­—ç¬¦ä¸²
+ * @param toSize å­˜æ”¾è½¬æ¢çš„å­—ç¬¦ä¸²çš„å¤§å°
  */
-void HexToStr(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_hex_to_str(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t size = 0;
 
     while (fromSize != 0) {
-        *to++ = hex2chr((*from >> 4) & 0X0F);
-        *to++ = hex2chr((*from) & 0X0F);
+        *to++ = cvt_hex_to_chr((*from >> 4) & 0X0F);
+        *to++ = cvt_hex_to_chr((*from) & 0X0F);
         size += 2;
         from++;
         fromSize--;
     }
 
-    *to     = 0; // Ìí¼Ó½áÊø·û
+    *to     = 0; // æ·»åŠ ç»“æŸç¬¦
     *toSize = size;
 }
 
 /**
- * @brief Ê®Áù½øÖÆ×Ö·û´®×ªÊıÖµ£¬Àı£º"AABBCC" -> {0XAA,0XBB,0XCC}
+ * @brief åå…­è¿›åˆ¶å­—ç¬¦ä¸²è½¬æ•°å€¼ï¼Œä¾‹ï¼š"AABBCC" -> {0XAA,0XBB,0XCC}
  *
- * @param from ´ı×ª»»µÄÊ®Áù½øÖÆ×Ö·û´®
- * @param fromSize ×Ö·û´®³¤¶È
- * @param to ´æ·Å×Ö·û´®µÄÊ®Áù½øÖÆÖµ
- * @param toSize ´æ·Å×Ö·û´®µÄÊ®Áù½øÖÆÖµµÄ´óĞ¡
+ * @param from å¾…è½¬æ¢çš„åå…­è¿›åˆ¶å­—ç¬¦ä¸²
+ * @param fromSize å­—ç¬¦ä¸²é•¿åº¦
+ * @param to å­˜æ”¾å­—ç¬¦ä¸²çš„åå…­è¿›åˆ¶å€¼
+ * @param toSize å­˜æ”¾å­—ç¬¦ä¸²çš„åå…­è¿›åˆ¶å€¼çš„å¤§å°
  */
-void StrToHex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize)
+void cvt_str_to_hex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize)
 {
     uint32_t size = 0;
 
     while (fromSize > 1) {
-        *to++ = (chr2hex(from[0]) << 4) | chr2hex(from[1]);
+        *to++ = (cvt_chr_to_hex(from[0]) << 4) | cvt_chr_to_hex(from[1]);
         size++;
         from += 2;
         fromSize -= 2;
@@ -83,19 +83,19 @@ void StrToHex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize
     *toSize = size;
 }
 
-#if (TEXTCODEC_ENABLE == 1)
+#if (CVT_TEXTCODEC_ENABLE == 1)
 
-static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode);
+static uint16_t _cvt_convert_encoding(uint16_t input_char, bool is_oem_to_unicode);
 
 /**
- * @brief GBKÂë×ªUTF8Âë
+ * @brief GBKç è½¬UTF8ç 
  *
- * @param from GBKÂë
- * @param fromSize GBKÂëµÄ´óĞ¡
- * @param to UTF8Âë
- * @param toSize UTF8ÂëµÄ´óĞ¡
+ * @param from GBKç 
+ * @param fromSize GBKç çš„å¤§å°
+ * @param to UTF8ç 
+ * @param toSize UTF8ç çš„å¤§å°
  */
-void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_gbk_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t unicode;
     uint32_t utfcode;
@@ -105,9 +105,9 @@ void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
         if (*from < 0X80) { // ASCII
             unicode = *from++;
             fromSize--;
-        } else {                                    // GBK
-            unicode = (from[0] << 8) | from[1];     // Ò»¸öGBK×Ö·ûÕ¼ÓÃÁ½¸ö×Ö½Ú(´ó¶ËÄ£Ê½)
-            unicode = convert_encoding(unicode, 1); // to unicode
+        } else {                                         // GBK
+            unicode = (from[0] << 8) | from[1];          // ä¸€ä¸ªGBKå­—ç¬¦å ç”¨ä¸¤ä¸ªå­—èŠ‚(å¤§ç«¯æ¨¡å¼)
+            unicode = _cvt_convert_encoding(unicode, 1); // to unicode
             from += 2;
             fromSize -= 2;
         }
@@ -151,14 +151,14 @@ void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 }
 
 /**
- * @brief UTF8Âë×ªGBKÂë
+ * @brief UTF8ç è½¬GBKç 
  *
- * @param from UTF8Âë
- * @param fromSize UTF8ÂëµÄ´óĞ¡
- * @param to GBKÂë
- * @param toSize GBKÂë´óĞ¡
+ * @param from UTF8ç 
+ * @param fromSize UTF8ç çš„å¤§å°
+ * @param to GBKç 
+ * @param toSize GBKç å¤§å°
  */
-void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_utf8_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t unicode;
     uint32_t utfcode;
@@ -170,7 +170,7 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
             fromSize--;
 
         } else {                                                  // UTF8
-            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8ÓÃÈı¸ö×Ö½Ú±íÊ¾Ò»¸öÖĞÎÄºº×Ö(´ó¶ËÄ£Ê½)
+            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8ç”¨ä¸‰ä¸ªå­—èŠ‚è¡¨ç¤ºä¸€ä¸ªä¸­æ–‡æ±‰å­—(å¤§ç«¯æ¨¡å¼)
             from += 3;
             fromSize -= 3;
         }
@@ -190,10 +190,10 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
             *to++ = unicode;
             size++;
 
-        } else {                                    // NOT ASCII
-            unicode = convert_encoding(unicode, 0); // UNICODE TO GBK
-            to[0]   = (unicode >> 8) & 0XFF;        // ´ó¶Ë´æ´¢
-            to[1]   = unicode & 0XFF;               // ´ó¶Ë´æ´¢
+        } else {                                         // NOT ASCII
+            unicode = _cvt_convert_encoding(unicode, 0); // UNICODE TO GBK
+            to[0]   = (unicode >> 8) & 0XFF;             // å¤§ç«¯å­˜å‚¨
+            to[1]   = unicode & 0XFF;                    // å¤§ç«¯å­˜å‚¨
             to += 2;
             size += 2;
         }
@@ -202,14 +202,14 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 }
 
 /**
- * @brief GBKÂë×ªË«×Ö½ÚUNICODEÂë
+ * @brief GBKç è½¬åŒå­—èŠ‚UNICODEç 
  *
- * @param from GBKÂë
- * @param fromSize GBKÂë´óĞ¡
- * @param to UNICODEÂë
- * @param toSize UNICODEÂë´óĞ¡
+ * @param from GBKç 
+ * @param fromSize GBKç å¤§å°
+ * @param to UNICODEç 
+ * @param toSize UNICODEç å¤§å°
  */
-void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_gbk_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t size = 0;
     uint16_t unicode;
@@ -220,15 +220,15 @@ void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSiz
             unicode = *from++;
             fromSize--;
 
-        } else {                                    // GBK
-            unicode = (from[0] << 8) | from[1];     // GBKÎª´ó¶ËÄ£Ê½
-            unicode = convert_encoding(unicode, 1); // to unicode
+        } else {                                         // GBK
+            unicode = (from[0] << 8) | from[1];          // GBKä¸ºå¤§ç«¯æ¨¡å¼
+            unicode = _cvt_convert_encoding(unicode, 1); // to unicode
             from += 2;
             fromSize -= 2;
         }
 
-        to[0] = unicode & 0XFF;        // Ğ¡¶ËÄ£Ê½´æ´¢UNICODEÂë
-        to[1] = (unicode >> 8) & 0XFF; // Ğ¡¶ËÄ£Ê½´æ´¢UNICODEÂë
+        to[0] = unicode & 0XFF;        // å°ç«¯æ¨¡å¼å­˜å‚¨UNICODEç 
+        to[1] = (unicode >> 8) & 0XFF; // å°ç«¯æ¨¡å¼å­˜å‚¨UNICODEç 
         to += 2;
         size += 2;
     }
@@ -236,28 +236,28 @@ void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSiz
 }
 
 /**
- * @brief Ë«×Ö½ÚUNICODEÂë×ªGBKÂë
+ * @brief åŒå­—èŠ‚UNICODEç è½¬GBKç 
  *
- * @param from Ë«×Ö½ÚUNICODEÂë
- * @param fromSize UNICODEÂë´óĞ¡
- * @param to GBKÂë
- * @param toSize GBKÂë´óĞ¡
+ * @param from åŒå­—èŠ‚UNICODEç 
+ * @param fromSize UNICODEç å¤§å°
+ * @param to GBKç 
+ * @param toSize GBKç å¤§å°
  */
-void UnicodeToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_unicode_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t size = 0;
     uint16_t unicode;
     while (fromSize != 0) {
 
-        unicode = (from[1] << 8) | from[0]; // unicodeÂëÎªĞ¡¶ËÄ£Ê½
+        unicode = (from[1] << 8) | from[0]; // unicodeç ä¸ºå°ç«¯æ¨¡å¼
         if (unicode < 0X80) {               // ASCII
             *to++ = unicode;
             size++;
 
-        } else {                                    // NOT ASCII
-            unicode = convert_encoding(unicode, 0); // TO GBK
-            to[0]   = (unicode >> 8) & 0XFF;        // ´ó¶ËÄ£Ê½´æ´¢GBKÂë
-            to[1]   = unicode & 0XFF;               // ´ó¶ËÄ£Ê½´æ´¢GBKÂë
+        } else {                                         // NOT ASCII
+            unicode = _cvt_convert_encoding(unicode, 0); // TO GBK
+            to[0]   = (unicode >> 8) & 0XFF;             // å¤§ç«¯æ¨¡å¼å­˜å‚¨GBKç 
+            to[1]   = unicode & 0XFF;                    // å¤§ç«¯æ¨¡å¼å­˜å‚¨GBKç 
             size += 2;
             to += 2;
         }
@@ -269,14 +269,14 @@ void UnicodeToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSiz
 }
 
 /**
- * @brief Èı×Ö½ÚUTF8Âë×ªË«×Ö½ÚUNICODEÂë
+ * @brief ä¸‰å­—èŠ‚UTF8ç è½¬åŒå­—èŠ‚UNICODEç 
  *
- * @param from UTF8Âë
- * @param fromSize UTF8Âë´óĞ¡
- * @param to GBKÂë
- * @param toSize GBKÂë´óĞ¡
+ * @param from UTF8ç 
+ * @param fromSize UTF8ç å¤§å°
+ * @param to GBKç 
+ * @param toSize GBKç å¤§å°
  */
-void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_utf8_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t unicode;
     uint32_t utfcode;
@@ -289,7 +289,7 @@ void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
             fromSize--;
 
         } else {                                                  // NOT ASCII
-            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8ÓÃÈı¸ö×Ö½Ú±íÊ¾Ò»¸öÖĞÎÄºº×Ö(´ó¶ËÄ£Ê½)
+            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8ç”¨ä¸‰ä¸ªå­—èŠ‚è¡¨ç¤ºä¸€ä¸ªä¸­æ–‡æ±‰å­—(å¤§ç«¯æ¨¡å¼)
             from += 3;
             fromSize -= 3;
         }
@@ -308,8 +308,8 @@ void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
                 break; // ERROR: not support
         }
 
-        to[0] = unicode & 0XFF;        // Ğ¡¶Ë´æ´¢UNICODE
-        to[1] = (unicode >> 8) & 0XFF; // Ğ¡¶Ë´æ´¢UNICODE
+        to[0] = unicode & 0XFF;        // å°ç«¯å­˜å‚¨UNICODE
+        to[1] = (unicode >> 8) & 0XFF; // å°ç«¯å­˜å‚¨UNICODE
         to += 2;
         size += 2;
     }
@@ -317,21 +317,21 @@ void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
 }
 
 /**
- * @brief Ë«×Ö½ÚUNICODEÂë×ªÈı×Ö½ÚUTF8Âë
+ * @brief åŒå­—èŠ‚UNICODEç è½¬ä¸‰å­—èŠ‚UTF8ç 
  *
  * @param from
  * @param fromSize
  * @param to
  * @param toSize
  */
-void UnicodeToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_unicode_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t unicode;
     uint32_t utfcode;
     uint32_t size = 0;
 
     while (fromSize != 0) {
-        unicode = (from[1] << 8) | from[0]; // unicodeÂëÎªĞ¡¶ËÄ£Ê½
+        unicode = (from[1] << 8) | from[0]; // unicodeç ä¸ºå°ç«¯æ¨¡å¼
         from += 2;
         fromSize -= 2;
 
@@ -375,13 +375,13 @@ void UnicodeToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
 }
 
 /**
- * @brief UNICODEºÍGBK»¥×ªº¯Êı
+ * @brief UNICODEå’ŒGBKäº’è½¬å‡½æ•°
  *
- * @param input_char ´ı×ª»»µÄÖµ
- * @param is_oem_to_unicode 0£ºunicode×ªgbk  1£ºgbk×ªunicode
- * @return ×ª»»ºóµÄÖµ
+ * @param input_char å¾…è½¬æ¢çš„å€¼
+ * @param is_oem_to_unicode 0ï¼šunicodeè½¬gbk  1ï¼šgbkè½¬unicode
+ * @return è½¬æ¢åçš„å€¼
  */
-static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
+static uint16_t _cvt_convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
 {
     static const uint16_t uni2oem[] = {
         /*  Unicode - OEM,  Unicode - OEM,  Unicode - OEM,  Unicode - OEM */
@@ -11290,31 +11290,31 @@ static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
     const uint16_t *lookup_table;
     uint16_t result_char = 0;
     int32_t mid, low = 0, high;
-    int32_t max_steps = 16; // ¼ÙÉè±í³¤¶È²»³¬¹ı2^16(65536)
+    int32_t max_steps = 16; // å‡è®¾è¡¨é•¿åº¦ä¸è¶…è¿‡2^16(65536)
 
-    // ´¦ÀíASCII×Ö·û(0x00 - 0x7F)
+    // å¤„ç†ASCIIå­—ç¬¦(0x00 - 0x7F)
     if (input_char < 0x80) {
         return input_char;
     }
 
-    // ¸ù¾İ×ª»»·½ÏòÑ¡ÔñÓ³Éä±í
+    // æ ¹æ®è½¬æ¢æ–¹å‘é€‰æ‹©æ˜ å°„è¡¨
     if (is_oem_to_unicode) {
         lookup_table = oem2uni;
-        high         = (sizeof(oem2uni) / 4) - 1; // ±íÖĞÃ¿¸öÌõÄ¿Õ¼2¸öuint16(KeyºÍValue)£¬ËùÒÔ×Ü´óĞ¡³ıÒÔ4
+        high         = (sizeof(oem2uni) / 4) - 1; // è¡¨ä¸­æ¯ä¸ªæ¡ç›®å 2ä¸ªuint16(Keyå’ŒValue)ï¼Œæ‰€ä»¥æ€»å¤§å°é™¤ä»¥4
 
     } else {
         lookup_table = uni2oem;
         high         = (sizeof(uni2oem) / 4) - 1;
     }
 
-    while (max_steps > 0 && low <= high) { // ¶ş·Ö²éÕÒ
+    while (max_steps > 0 && low <= high) { // äºŒåˆ†æŸ¥æ‰¾
         mid = low + (high - low) / 2;
 
-        // table[mid << 1]ÎªKey(Ô­Ê¼±àÂë)
+        // table[mid << 1]ä¸ºKey(åŸå§‹ç¼–ç )
         uint16_t current_key = lookup_table[mid << 1];
 
         if (input_char == current_key) {
-            // ÕÒµ½Æ¥ÅäÏî£¬table[(mid << 1) + 1]ÊÇValue(Ä¿±ê±àÂë)
+            // æ‰¾åˆ°åŒ¹é…é¡¹ï¼Œtable[(mid << 1) + 1]æ˜¯Value(ç›®æ ‡ç¼–ç )
             result_char = lookup_table[(mid << 1) + 1];
             break;
         }
@@ -11331,4 +11331,4 @@ static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
     return result_char;
 }
 
-#endif // TEXTCODEC_ENABLE
+#endif // CVT_TEXTCODEC_ENABLE

@@ -24,7 +24,7 @@ void pl_flash_clear_errors(void)
 }
 
 /* 电压范围枚举 → HAL 值映射 */
-static const uint32_t g_voltage_map[] = {
+static const uint32_t s_voltage_map[] = {
     [PL_FLASH_VOLTAGE_1] = FLASH_VOLTAGE_RANGE_1,
     [PL_FLASH_VOLTAGE_2] = FLASH_VOLTAGE_RANGE_2,
     [PL_FLASH_VOLTAGE_3] = FLASH_VOLTAGE_RANGE_3,
@@ -35,7 +35,7 @@ int32_t pl_flash_erase_sector(pl_flash_sector_t sector, pl_flash_voltage_t range
 {
     FLASH_EraseInitTypeDef cfg = {
         .TypeErase    = FLASH_TYPEERASE_SECTORS,
-        .VoltageRange = g_voltage_map[range],
+        .VoltageRange = s_voltage_map[range],
         .Sector       = (uint32_t)sector,
         .NbSectors    = 1,
     };

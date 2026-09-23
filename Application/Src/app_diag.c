@@ -39,11 +39,11 @@
 
 /* 放静态而不是栈上：诊断任务不该为了这份数组占 2KB 栈，
    否则它自己的栈高水位反而失去参考价值。 */
-static TaskStatus_t s_tasks[APP_DIAG_TASK_MAX] PL_CCMRAM;
+static TaskStatus_t s_task_table[APP_DIAG_TASK_MAX] PL_CCMRAM;
 
 static void _diag_dump(void)
 {
-    UBaseType_t n = uxTaskGetSystemState(s_tasks, APP_DIAG_TASK_MAX, NULL);
+    UBaseType_t n = uxTaskGetSystemState(s_task_table, APP_DIAG_TASK_MAX, NULL);
 
     /* 输出刻意紧凑：RTT 上行缓冲只有 1KB（SEGGER_RTT_Conf.h），而模式是
        NO_BLOCK_SKIP —— 一次打印超过缓冲容量就会被**截尾**，上一版就是这样
@@ -58,10 +58,10 @@ static void _diag_dump(void)
            (unsigned long)app_udp_get_tx_count());
 
     for (UBaseType_t i = 0; i < n; i++) {
-        if (s_tasks[i].pcTaskName == NULL) continue;
-        printf("[diag] %-16s %3u %4u\n", s_tasks[i].pcTaskName,
-               (unsigned)s_tasks[i].uxCurrentPriority,
-               (unsigned)s_tasks[i].usStackHighWaterMark);
+        if (s_task_table[i].pcTaskName == NULL) continue;
+        printf("[diag] %-16s %3u %4u\n", s_task_table[i].pcTaskName,
+               (unsigned)s_task_table[i].uxCurrentPriority,
+               (unsigned)s_task_table[i].usStackHighWaterMark);
     }
 }
 

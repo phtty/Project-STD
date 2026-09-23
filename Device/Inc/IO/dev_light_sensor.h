@@ -21,8 +21,8 @@ typedef struct {
      *  display->light_level 的话，从卡永远收不到主卡的调光。 */
     void (*apply)(void *ctx, uint8_t level);
     void *apply_ctx;
-} light_sensor_dev_t;
+} dev_light_sensor_dev_t;
 
-void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display);
-uint8_t dev_light_sensor_read(light_sensor_dev_t *dev);
-void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev);
+void dev_light_sensor_init(dev_light_sensor_dev_t *dev, dev_display_t *display);
+uint8_t dev_light_sensor_read(dev_light_sensor_dev_t *dev);
+void dev_light_sensor_auto_adjust(dev_light_sensor_dev_t *dev);

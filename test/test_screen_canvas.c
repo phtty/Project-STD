@@ -23,10 +23,10 @@
    这批基准行为，而 board.h 是**部署**配置（现场可能是 1×2、主卡在下）。
    跟着它变的话，同一份测试在别人的板子上会测出不同结论 —— 而且不会报错，
    只会静默地少测几条。 */
-#define BOARD_CASCADE_COLS        1
-#define BOARD_CASCADE_ROWS        1
-#define BOARD_CASCADE_MASTER_CELL 0
-#define BOARD_CASCADE_ADDR        0
+#define BOARD_CASC_COLS        1
+#define BOARD_CASC_ROWS        1
+#define BOARD_CASC_MASTER_CELL 0
+#define BOARD_CASC_ADDR        0
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -48,8 +48,8 @@ osThreadId_t pl_task_new(osThreadFunc_t fn, void *arg, const osThreadAttr_t *att
     return nullptr;
 }
 
-void app_render_set_target(const render_target_t *t) { (void)t; }
-void app_render_set_persist_hook(const render_persist_hook_t *h) { (void)h; }
+void app_render_set_target(const app_render_target_t *t) { (void)t; }
+void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h) { (void)h; }
 void app_render_save(void) {}
 bool app_render_restore(void) { return false; }
 /* "这一帧要落盘"的请求位：本套件桩成"从没有过请求"，落屏路径照跑 */
@@ -60,7 +60,7 @@ bool app_render_peek_persist_req(void) { return false; }
  *
  * 按真 dev_display.c 的语义写（含那两个坑：fill 只裁右下、draw_bitmap 越界整体放弃），
  * 因为画布要**产出与它相同的结果**，语义抄错就失去比对的意义。 */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color)
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color)
 {
     if (x < dev->screen_rows && y < dev->screen_cols) {
         dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
@@ -69,7 +69,7 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_c
 }
 
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                      display_color_t color)
+                      dev_display_color_t color)
 {
     if (x + w > dev->screen_rows) w = dev->screen_rows - x;
     if (y + h > dev->screen_cols) h = dev->screen_cols - y;
@@ -79,7 +79,7 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 }
 
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                             const uint8_t *bitmap, display_color_t color)
+                             const uint8_t *bitmap, dev_display_color_t color)
 {
     if (x + w > dev->screen_rows || y + h > dev->screen_cols) return;
     uint16_t row_bytes = (w + 7) / 8;
@@ -128,7 +128,7 @@ static uint8_t       s_fb[W * H];
 
 static void display_reset(void)
 {
-    memset(s_fb, COLOR_BLACK, sizeof(s_fb));
+    memset(s_fb, DEV_DISPLAY_COLOR_BLACK, sizeof(s_fb));
     s_dev.screen_rows = W;
     s_dev.screen_cols = H;
     s_dev.pixel_map   = s_fb;
@@ -146,7 +146,7 @@ static void canvas_reset(void)
 {
     display_reset();
     _screen_init();
-    s_pending = false; /* 手动比对，不要后台任务来插一脚 */
+    s_pending_flag = false; /* 手动比对，不要后台任务来插一脚 */
 }
 
 /** @brief 独立参考：逐像素把 pixel_map 打包成 1bpp（(宽+7)/8 行字节、MSB-first、黑=0） */
@@ -156,7 +156,7 @@ static void pack_reference(const uint8_t *fb, uint16_t rows, uint16_t cols, uint
     memset(out, 0, row_bytes * cols);
     for (uint16_t y = 0; y < cols; y++)
         for (uint16_t x = 0; x < rows; x++)
-            if (fb[y * rows + x] != COLOR_BLACK)
+            if (fb[y * rows + x] != DEV_DISPLAY_COLOR_BLACK)
                 out[y * row_bytes + x / 8] |= (uint8_t)(0x80U >> (x % 8));
 }
 
@@ -203,21 +203,21 @@ static void case_canvas_matches_direct(void)
 
     /* ---- 参考：直写实屏，然后打包 ---- */
     display_reset();
-    dev_display_fill(&s_dev, 0, 0, W, H, COLOR_BLACK);
+    dev_display_fill(&s_dev, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
     for (uint16_t y = 0; y < H; y += 3)
-        dev_display_fill(&s_dev, 4, y, 20, 1, COLOR_RED); /* 横条 */
+        dev_display_fill(&s_dev, 4, y, 20, 1, DEV_DISPLAY_COLOR_RED); /* 横条 */
     for (uint16_t x = 0; x < W; x += 8)
-        dev_display_fill(&s_dev, x, 0, 1, H, COLOR_RED); /* 每 8 像素一竖条 */
+        dev_display_fill(&s_dev, x, 0, 1, H, DEV_DISPLAY_COLOR_RED); /* 每 8 像素一竖条 */
     pack_reference(s_fb, W, H, ref);
 
     /* ---- 被测：同一组操作走画布 ---- */
     canvas_reset();
-    _sink_fill(nullptr, 0, 0, W, H, COLOR_BLACK);
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
     for (uint16_t y = 0; y < H; y += 3)
-        _sink_fill(nullptr, 4, y, 20, 1, COLOR_RED);
+        _sink_fill(nullptr, 4, y, 20, 1, DEV_DISPLAY_COLOR_RED);
     for (uint16_t x = 0; x < W; x += 8)
-        _sink_fill(nullptr, x, 0, 1, H, COLOR_RED);
-    memcpy(got, s_canvas, sizeof(got));
+        _sink_fill(nullptr, x, 0, 1, H, DEV_DISPLAY_COLOR_RED);
+    memcpy(got, s_canvas_buf, sizeof(got));
 
     check_bitmaps_equal(got, ref, sizeof(got), "横条+竖条");
 }
@@ -236,15 +236,15 @@ static void case_bitmap_overlay_semantics(void)
 
     /* 参考：先铺底再叠一层 */
     display_reset();
-    dev_display_fill(&s_dev, 0, 0, 8, 2, COLOR_GREEN);
-    dev_display_draw_bitmap(&s_dev, 0, 0, 8, 1, bm, COLOR_BLACK); /* 黑色位图 = 擦 */
+    dev_display_fill(&s_dev, 0, 0, 8, 2, DEV_DISPLAY_COLOR_GREEN);
+    dev_display_draw_bitmap(&s_dev, 0, 0, 8, 1, bm, DEV_DISPLAY_COLOR_BLACK); /* 黑色位图 = 擦 */
     pack_reference(s_fb, W, H, ref);
 
     /* 被测：同样两步走画布 */
     canvas_reset();
-    _sink_fill(nullptr, 0, 0, 8, 2, COLOR_GREEN);
-    _sink_bitmap(nullptr, 0, 0, 8, 1, bm, COLOR_BLACK);
-    memcpy(got, s_canvas, sizeof(got));
+    _sink_fill(nullptr, 0, 0, 8, 2, DEV_DISPLAY_COLOR_GREEN);
+    _sink_bitmap(nullptr, 0, 0, 8, 1, bm, DEV_DISPLAY_COLOR_BLACK);
+    memcpy(got, s_canvas_buf, sizeof(got));
 
     check_bitmaps_equal(got, ref, sizeof(got), "黑位图擦除");
 }
@@ -257,39 +257,39 @@ static void case_clipping(void)
     canvas_reset();
 
     /* 这些在图真 dev_display 上分别会：下溢冲出缓冲 / 整体放弃 */
-    _sink_fill(nullptr, W + 10, 0, 4, 4, COLOR_RED);   /* x 越界 */
-    _sink_fill(nullptr, 0, H + 10, 4, 4, COLOR_RED);   /* y 越界 */
-    _sink_fill(nullptr, W - 2, H - 2, 100, 100, COLOR_RED); /* 右下溢出 */
-    _sink_bitmap(nullptr, W - 4, 0, 8, 1, s_fb, COLOR_RED); /* 源可能越界，画布要裁 */
-    _sink_set_pixel(nullptr, W + 1, 0, COLOR_RED);
-    _sink_set_pixel(nullptr, 0, H + 1, COLOR_RED);
+    _sink_fill(nullptr, W + 10, 0, 4, 4, DEV_DISPLAY_COLOR_RED);   /* x 越界 */
+    _sink_fill(nullptr, 0, H + 10, 4, 4, DEV_DISPLAY_COLOR_RED);   /* y 越界 */
+    _sink_fill(nullptr, W - 2, H - 2, 100, 100, DEV_DISPLAY_COLOR_RED); /* 右下溢出 */
+    _sink_bitmap(nullptr, W - 4, 0, 8, 1, s_fb, DEV_DISPLAY_COLOR_RED); /* 源可能越界，画布要裁 */
+    _sink_set_pixel(nullptr, W + 1, 0, DEV_DISPLAY_COLOR_RED);
+    _sink_set_pixel(nullptr, 0, H + 1, DEV_DISPLAY_COLOR_RED);
 
     uint16_t stride = (W + 7) / 8;
 
     /* 画布尾部（几何之外的定长池余量）必须仍是 0 —— 越界写会踩到这里 */
     bool tail_clean = true;
-    for (uint32_t i = (uint32_t)stride * H; i < sizeof(s_canvas); i++)
-        if (s_canvas[i]) { tail_clean = false; break; }
+    for (uint32_t i = (uint32_t)stride * H; i < sizeof(s_canvas_buf); i++)
+        if (s_canvas_buf[i]) { tail_clean = false; break; }
     CHECK_MSG(tail_clean, "越界写踩到了画布尾部（几何之外的池余量不再是 0）");
-    CHECK_MSG((s_canvas[(H - 1) * stride + (W - 1) / 8] & (0x80U >> ((W - 1) % 8))) != 0,
+    CHECK_MSG((s_canvas_buf[(H - 1) * stride + (W - 1) / 8] & (0x80U >> ((W - 1) % 8))) != 0,
               "右下角溢出调用没有裁到位");
     /* 越界的那几次不得在画布上留下任何东西 */
-    CHECK_MSG(s_canvas[0] == 0, "越界 fill 写进了画布左上角");
+    CHECK_MSG(s_canvas_buf[0] == 0, "越界 fill 写进了画布左上角");
 }
 
-/** RENDER_FILL 的 w=h=0 全屏语义走的是目标几何，不是实屏几何 */
+/** APP_RENDER_TYPE_FILL 的 w=h=0 全屏语义走的是目标几何，不是实屏几何 */
 static void case_fullscreen_fill(void)
 {
     TEST_BEGIN("全屏填充覆盖整块画布");
 
     canvas_reset();
-    _sink_fill(nullptr, 0, 0, W, H, COLOR_WHITE);
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_WHITE);
 
     uint16_t stride = (W + 7) / 8;
     uint16_t ones   = 0;
     for (uint16_t i = 0; i < stride * H; i++)
         for (uint8_t b = 0; b < 8; b++)
-            if (s_canvas[i] & (0x80U >> b)) ones++;
+            if (s_canvas_buf[i] & (0x80U >> b)) ones++;
 
     /* 48 宽 × 16 高，末字节补位不算 —— 全屏白应该正好 W*H 个 1 */
     CHECK_MSG(ones == W * H, "置位数 %u != %u（末字节补位或裁剪有问题）", (unsigned)ones,
@@ -306,13 +306,13 @@ static void case_commit_length_guard(void)
     memset(good, 0xFF, sizeof(good));
 
     /* 先把屏画花，好分辨"有没有被动过" */
-    dev_display_fill(&s_dev, 0, 0, W, H, COLOR_RED);
+    dev_display_fill(&s_dev, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);
 
-    app_screen_commit_bitmap(good, (uint16_t)(sizeof(good) - 1), COLOR_GREEN);
-    CHECK_MSG(s_fb[0] == COLOR_RED, "长度不符却被落屏了");
+    app_screen_commit_bitmap(good, (uint16_t)(sizeof(good) - 1), DEV_DISPLAY_COLOR_GREEN);
+    CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_RED, "长度不符却被落屏了");
 
-    app_screen_commit_bitmap(good, (uint16_t)sizeof(good), COLOR_GREEN);
-    CHECK_MSG(s_fb[0] == COLOR_GREEN, "长度正确却没落屏");
+    app_screen_commit_bitmap(good, (uint16_t)sizeof(good), DEV_DISPLAY_COLOR_GREEN);
+    CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_GREEN, "长度正确却没落屏");
 }
 
 /* ================================================================ */

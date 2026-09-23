@@ -43,7 +43,7 @@ static bool _exti_wait_press(dev_key_t *key, uint32_t timeout_ms)
  * 在源头去抖，比在每个调用点做防御干净。 */
 #define KEY_DEBOUNCE_MS (50U)
 
-static const dev_key_ops_t exti_key_ops = {
+static const dev_key_ops_t s_exti_key_ops = {
     .get_state  = _exti_get_state,
     .wait_press = _exti_wait_press,
 };
@@ -53,7 +53,7 @@ static bool _dip_get_state(dev_key_t *key)
     return !pl_gpio_read(key->port, key->pin);
 }
 
-static const dev_key_ops_t dip_key_ops = {
+static const dev_key_ops_t s_dip_key_ops = {
     .get_state  = _dip_get_state,
     .wait_press = NULL,
 };
@@ -110,7 +110,7 @@ void dev_key_init(void)
         k->port         = d->port;
         k->pin          = d->pin;
         k->active_low   = d->active_low;
-        k->ops          = d->has_exti ? &exti_key_ops : &dip_key_ops;
+        k->ops          = d->has_exti ? &s_exti_key_ops : &s_dip_key_ops;
 
         if (d->exti_pin) pl_exti_register_cb(d->exti_pin, _exti_cb, NULL);
     }

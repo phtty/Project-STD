@@ -1,5 +1,4 @@
-#ifndef DEV_DP83848_H
-#define DEV_DP83848_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -245,4 +244,3 @@ int32_t dev_dp83848_it_status_get(dev_dp83848_obj_t *obj, uint32_t interrupt);
 #ifdef __cplusplus
 }
 #endif
-#endif /* DEV_DP83848_H */

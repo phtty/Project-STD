@@ -2,14 +2,14 @@
  * @file    test_cfg_sched.c
  * @brief   配置调度器 host 单测 —— 记录归属、块位扫描、容量门槛、持久化往返
  *
- * 被测代码是生产源码本体（Application/Src/app_cfg_sched.c + Device/Storage/cfg_record.c），
+ * 被测代码是生产源码本体（Application/Src/app_cfg_sched.c + Device/Storage/dev_cfg_record.c），
  * 不做任何替换。存储侧用一块 RAM 假 Flash + dev_w25qxx_get() 桩，按 NOR 语义实现
  * （写 = 按位与，目标区间非 0xFF 则先擦整扇区），与 dev_w25qxx._write 的 RMW 同构 ——
  * 否则测不出真实的位翻转约束与扇区擦除影响。
  *
  * 移植来源：参考工程 Project_STD_B/test/test_cfg_sched.c。三处按本工程改动：
- *   · CFG_RECORD_MAX_IMAGE 2048 → 2600（本工程最大载荷是 P10 320×64 显存 2565B）
- *   · s_ready 门槛改成 cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES
+ *   · DEV_CFG_RECORD_MAX_IMAGE 2048 → 2600（本工程最大载荷是 P10 320×64 显存 2565B）
+ *   · s_storage_ready 门槛改成 cap >= BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES
  *     → 假 Flash 容量必须 32MB 级；参考工程那版用 64KB，在这里会被判为"不可用"
  *   · 字库总量改成板级量 BOARD_FONT_LIB_TOTAL_BYTES（两版字库不同：
  *     3833024 是 GBK/5 字号 30,713,088，5006048 是 GB2312/4 字号 18,518,144）
@@ -34,7 +34,7 @@
  *     退回旧写法时，JEDEC 被误读成 8MB 会让块地址落进字库区，首次 save 就把字库擦了
  *     —— 该用例正是用一条"字库哨兵字节"把这个后果测出来的。
  *   · 绑定不在失败时闩锁（case_bind_recovers_when_capacity_appears）：容量 0 时
- *     _cfg_sched_bind 不置 s_bound，器件随后可用时能恢复；旧写法一旦在容量 0 时闩死，
+ *     _cfg_sched_bind 不置 s_storage_bound，器件随后可用时能恢复；旧写法一旦在容量 0 时闩死，
  *     本上电周期内持久化永久禁用且无重试机会。
  *   · LDI 的幂等加载不缓存 IO_ERR（case_ldi_cfg_retries_after_io_err）：
  *     首次读失败后不置 s_load_done，条件变好时再调用能读到。
@@ -52,7 +52,7 @@
 #include "app_cfg_sched.h"
 #include "app_render.h" /* RENDER_PERSIST_PAYLOAD_MAX */
 #include "board.h"      /* BOARD_FONT_LIB_TOTAL_BYTES（板级量） */
-#include "cfg_record.h"
+#include "dev_cfg_record.h"
 
 /* LDI 配置模块的实现 TU 直接包含进来（本文件因此**不能**再把 app_ldi_cfg.c
    列入编译源，否则符号重复）。原因：它的注册入口 _app_flash_ldi_cfg_register
@@ -195,8 +195,8 @@ static uint32_t block_addr(uint8_t blk)
 /** @brief 绕过调度器，直接往指定块写一条记录 —— 模拟"上一次固件留下的数据" */
 static void seed_record(uint8_t blk, const char *name, uint16_t ver, const char *payload)
 {
-    static uint8_t scratch[CFG_RECORD_HDR_SIZE + 64];
-    int32_t        r = cfg_record_save(&s_dev, block_addr(blk), name, ver, NULL,
+    static uint8_t scratch[DEV_CFG_RECORD_HDR_SIZE + 64];
+    int32_t        r = dev_cfg_record_save(&s_dev, block_addr(blk), name, ver, NULL,
                                        (const uint8_t *)payload, (uint16_t)strlen(payload),
                                        scratch, sizeof(scratch));
     if (r != 0) {
@@ -206,13 +206,13 @@ static void seed_record(uint8_t blk, const char *name, uint16_t ver, const char 
 }
 
 /** @brief 读某块的记录头（黑盒观察块位：不看调度器的内部数组）*/
-static bool read_hdr(uint8_t blk, cfg_record_hdr_t *hdr)
+static bool read_hdr(uint8_t blk, dev_cfg_record_hdr_t *hdr)
 {
     return fake_read(&s_dev, block_addr(blk), (uint8_t *)hdr, sizeof(*hdr)) == 0;
 }
 
-static const cfg_sched_desc_t desc_a = {.name = "mod_a", .version = 1, .load = NULL};
-static const cfg_sched_desc_t desc_b = {.name = "mod_b", .version = 1, .load = NULL};
+static const app_cfg_sched_desc_t desc_a = {.name = "mod_a", .version = 1, .load = NULL};
+static const app_cfg_sched_desc_t desc_b = {.name = "mod_b", .version = 1, .load = NULL};
 
 /** @brief 在子进程里跑 fn（用于模拟"重启"），返回它是否成功；定义在文件末尾 */
 static bool run_in_child(void (*fn)(void));
@@ -241,16 +241,16 @@ static void case_empty_flash(void)
 
     uint8_t  buf[64] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_EMPTY);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_EMPTY);
 
     CHECK(app_cfg_sched_save(id, (const uint8_t *)"hello", 5) == 0);
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 5 && memcmp(buf, "hello", 5) == 0);
 
     /* 首次上电（无记录）时落位在"注册序号那块" = 块 0 */
-    cfg_record_hdr_t hdr;
+    dev_cfg_record_hdr_t hdr;
     CHECK(read_hdr(0, &hdr));
-    CHECK(strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0);
+    CHECK(strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0);
     CHECK(hdr.version == 1 && hdr.len == 5);
 
     /* 不落位的块保持擦除态（不占块） */
@@ -265,7 +265,7 @@ static void case_empty_flash(void)
     /* 内容变了则必须真的落盘 */
     CHECK(app_cfg_sched_save(id, (const uint8_t *)"world", 5) == 0);
     CHECK(s_writes > writes_before);
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 5 && memcmp(buf, "world", 5) == 0);
 }
 
@@ -286,19 +286,19 @@ static void case_order_independent(void)
     uint8_t  buf[64] = {0};
     uint16_t len     = 0;
 
-    CHECK_MSG(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == CFG_REC_OK,
+    CHECK_MSG(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK,
               "mod_a 未被找到（块位仍依赖注册序号）");
     CHECK(len == 3 && memcmp(buf, "AAA", 3) == 0);
 
     memset(buf, 0, sizeof(buf));
-    CHECK_MSG(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == CFG_REC_OK,
+    CHECK_MSG(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK,
               "mod_b 未被找到（块位仍依赖注册序号）");
     CHECK(len == 3 && memcmp(buf, "BBB", 3) == 0);
 
     /* 认领后原地保存：不搬家 */
     CHECK(app_cfg_sched_save(ia, (const uint8_t *)"AAA2", 4) == 0);
-    cfg_record_hdr_t hdr;
-    CHECK(read_hdr(5, &hdr) && strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0);
+    dev_cfg_record_hdr_t hdr;
+    CHECK(read_hdr(5, &hdr) && strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0);
     CHECK(hdr.len == 4);
 }
 
@@ -308,19 +308,19 @@ static void case_version_bump_keeps_address(void)
 
     /* 记录以 version=1 写入，注册方声明 version=2 */
     seed_record(3, "mod_a", 1, "OLD");
-    static const cfg_sched_desc_t desc_v2 = {.name = "mod_a", .version = 2, .load = NULL};
+    static const app_cfg_sched_desc_t desc_v2 = {.name = "mod_a", .version = 2, .load = NULL};
     uint8_t id = app_cfg_sched_register(&desc_v2);
     CHECK(id != 0xFF);
 
     uint8_t  buf[64] = {0};
     uint16_t len     = 0;
-    CHECK_MSG(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_INVALID,
+    CHECK_MSG(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_INVALID,
               "版本不符应判失效（而非 EMPTY —— 那说明扫描没找到它）");
 
     /* 关键：记录仍在块 3，没有被搬到"注册序号"对应的块上，也没被改写 */
-    cfg_record_hdr_t hdr;
+    dev_cfg_record_hdr_t hdr;
     CHECK(fake_read(&s_dev, block_addr(3), (uint8_t *)&hdr, sizeof(hdr)) == 0);
-    CHECK(strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0);
+    CHECK(strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0);
     CHECK(hdr.version == 1);
 }
 
@@ -333,11 +333,11 @@ static void case_crc_corruption(void)
     CHECK(id != 0xFF);
 
     /* 破坏载荷首字节（只动 Flash，不动记录头）*/
-    s_flash[block_addr(4) + CFG_RECORD_HDR_SIZE] ^= 0x01U;
+    s_flash[block_addr(4) + DEV_CFG_RECORD_HDR_SIZE] ^= 0x01U;
 
     uint8_t  buf[64] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_INVALID);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_INVALID);
 }
 
 /* ================================================================
@@ -361,9 +361,9 @@ static void case_foreign_record(void)
     uint16_t len = 0;
     memset(buf, 0x5A, sizeof(buf));
 
-    cfg_rec_sta_t sta = app_cfg_sched_load(id, buf, sizeof(buf), &len);
-    CHECK_MSG(sta != CFG_REC_OK, "把别人的记录当成了自己的配置（归属校验失效）");
-    CHECK_MSG(sta == CFG_REC_INVALID, "名字不符应判 INVALID（EMPTY 说明扫描压根没看这块）");
+    dev_cfg_record_state_t sta = app_cfg_sched_load(id, buf, sizeof(buf), &len);
+    CHECK_MSG(sta != DEV_CFG_RECORD_STATE_OK, "把别人的记录当成了自己的配置（归属校验失效）");
+    CHECK_MSG(sta == DEV_CFG_RECORD_STATE_INVALID, "名字不符应判 INVALID（EMPTY 说明扫描压根没看这块）");
 
     /* 已知取舍（见 app_cfg_sched.c 的 _cfg_sched_scan 注释）：持有陌生记录的块
        不进 taken[]，需要落位的所有者会把它当"空块"认领，首次 save 直接覆盖。
@@ -372,13 +372,13 @@ static void case_foreign_record(void)
        不该被悄悄改掉。 */
     CHECK(app_cfg_sched_save(id, (const uint8_t *)"SAME", 4) == 0);
 
-    cfg_record_hdr_t hdr;
+    dev_cfg_record_hdr_t hdr;
     CHECK(read_hdr(0, &hdr));
-    CHECK_MSG(strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0,
+    CHECK_MSG(strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0,
               "落位没有覆盖陌生记录（行为已变：请同步 app_cfg_sched.c 的取舍说明）");
     CHECK(hdr.version == 1 && hdr.len == 4);
 
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 4 && memcmp(buf, "SAME", 4) == 0);
 }
 
@@ -405,13 +405,13 @@ static void reboot_phase1_write(void)
     CHECK(app_cfg_sched_save(ia, (const uint8_t *)"A1", 2) == 0);
     CHECK(app_cfg_sched_save(ib, (const uint8_t *)"B1", 2) == 0);
 
-    cfg_record_hdr_t hdr;
-    CHECK(read_hdr(1, &hdr) && strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0);
-    CHECK(read_hdr(0, &hdr) && strncmp(hdr.name, "mod_b", CFG_RECORD_NAME_MAX) == 0);
+    dev_cfg_record_hdr_t hdr;
+    CHECK(read_hdr(1, &hdr) && strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0);
+    CHECK(read_hdr(0, &hdr) && strncmp(hdr.name, "mod_b", DEV_CFG_RECORD_NAME_MAX) == 0);
 
     uint8_t  buf[16] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 2 && memcmp(buf, "A1", 2) == 0);
 }
 
@@ -425,13 +425,13 @@ static void reboot_phase2_read(void)
     uint8_t  buf[16] = {0};
     uint16_t len     = 0;
 
-    cfg_rec_sta_t sa = app_cfg_sched_load(ia, buf, sizeof(buf), &len);
-    CHECK_MSG(sa == CFG_REC_OK,
+    dev_cfg_record_state_t sa = app_cfg_sched_load(ia, buf, sizeof(buf), &len);
+    CHECK_MSG(sa == DEV_CFG_RECORD_STATE_OK,
               "重启后没找回自己写的记录（若为 INVALID：找的是块 0，那是 mod_b 的记录）");
     CHECK(len == 2 && memcmp(buf, "A1", 2) == 0);
 
     memset(buf, 0, sizeof(buf));
-    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 2 && memcmp(buf, "B1", 2) == 0);
 }
 
@@ -471,7 +471,7 @@ static void case_capacity_gate_font_contract(void)
 
     uint8_t  buf[16] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_IO_ERR);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_IO_ERR);
     CHECK_MSG(app_cfg_sched_save(id, (const uint8_t *)"x", 1) == -1,
               "未就绪时 save 必须可回报地失败");
 
@@ -481,7 +481,7 @@ static void case_capacity_gate_font_contract(void)
     CHECK_MSG(s_flash[would_be_blk0] == 0x5A, "字库区被擦写");
 
     /* 越界句柄：安全失败，不索引到别人头上 */
-    CHECK(app_cfg_sched_load(0xFF, buf, sizeof(buf), &len) == CFG_REC_IO_ERR);
+    CHECK(app_cfg_sched_load(0xFF, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_IO_ERR);
     CHECK(app_cfg_sched_save(0xFF, (const uint8_t *)"x", 1) == -1);
     CHECK(app_cfg_sched_save(id, NULL, 0) == -1);
 }
@@ -499,7 +499,7 @@ static void case_bind_recovers_when_capacity_appears(void)
 
     uint8_t  buf[32] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_IO_ERR);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_IO_ERR);
     CHECK(app_cfg_sched_save(id, (const uint8_t *)"early", 5) == -1);
     CHECK(s_reads == 0 && s_writes == 0);
 
@@ -510,7 +510,7 @@ static void case_bind_recovers_when_capacity_appears(void)
     CHECK_MSG(app_cfg_sched_ready(), "容量 0 时被闩死：器件后来可用也救不回来");
 
     CHECK(app_cfg_sched_save(id, (const uint8_t *)"early", 5) == 0);
-    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(id, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 5 && memcmp(buf, "early", 5) == 0);
 }
 
@@ -526,39 +526,39 @@ static void case_payload_bounds(void)
     CHECK(id != 0xFF);
 
     /* 本工程最大的真实载荷 = 渲染显存（P10 320×64 的 1bpp 位图 + 5B 头）。
-       把它写通就是"CFG_RECORD_MAX_IMAGE 取值够用"的守门人：照抄参考工程的
+       把它写通就是"DEV_CFG_RECORD_MAX_IMAGE 取值够用"的守门人：照抄参考工程的
        2048 时，这里会红（组包缓冲只有 24+2048，save 返回 -1）。 */
     static uint8_t big[RENDER_PERSIST_PAYLOAD_MAX];
-    static uint8_t rd[CFG_RECORD_MAX_IMAGE];
+    static uint8_t rd[DEV_CFG_RECORD_MAX_IMAGE];
     for (size_t i = 0; i < sizeof(big); i++)
         big[i] = (uint8_t)(i * 31U + 7U);
 
     CHECK_MSG(app_cfg_sched_save(id, big, (uint16_t)sizeof(big)) == 0,
-              "最大显存记录（%u 字节）存不下去：CFG_RECORD_MAX_IMAGE 偏小",
+              "最大显存记录（%u 字节）存不下去：DEV_CFG_RECORD_MAX_IMAGE 偏小",
               (unsigned)sizeof(big));
 
     uint16_t len = 0;
-    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == sizeof(big) && memcmp(rd, big, sizeof(big)) == 0);
 
-    /* 组包缓冲的硬上界：恰好 CFG_RECORD_MAX_IMAGE 可以 */
-    static uint8_t max_img[CFG_RECORD_MAX_IMAGE];
+    /* 组包缓冲的硬上界：恰好 DEV_CFG_RECORD_MAX_IMAGE 可以 */
+    static uint8_t max_img[DEV_CFG_RECORD_MAX_IMAGE];
     for (size_t i = 0; i < sizeof(max_img); i++)
         max_img[i] = (uint8_t)(0xFFU - (i & 0x3FU));
 
     CHECK(app_cfg_sched_save(id, max_img, (uint16_t)sizeof(max_img)) == 0);
-    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == CFG_REC_OK);
-    CHECK(len == CFG_RECORD_MAX_IMAGE && memcmp(rd, max_img, sizeof(max_img)) == 0);
+    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == DEV_CFG_RECORD_STATE_OK);
+    CHECK(len == DEV_CFG_RECORD_MAX_IMAGE && memcmp(rd, max_img, sizeof(max_img)) == 0);
 
     /* 超出一个字节：必须可回报地失败（返回负值），而不是静默截断或越界 */
     uint32_t writes_before = s_writes;
-    CHECK_MSG(app_cfg_sched_save(id, max_img, CFG_RECORD_MAX_IMAGE + 1U) < 0,
+    CHECK_MSG(app_cfg_sched_save(id, max_img, DEV_CFG_RECORD_MAX_IMAGE + 1U) < 0,
               "超限载荷没有可回报地失败");
     CHECK(s_writes == writes_before); /* 失败发生在动 Flash 之前 */
 
     /* uint16 回绕：payload_len 使 24 + payload_len 溢出 16 位时，容量校验必须仍然
        拦得住。此前 total 先在 uint16 里算，(65536 → 0) 会让校验放行，随后
-       memcpy 把 64KB 写穿 s_scratch（2624B）—— ASan 下是 global-buffer-overflow。
+       memcpy 把 64KB 写穿 s_scratch_buf（2624B）—— ASan 下是 global-buffer-overflow。
        这条是修复后才加的：修复前它会红（正是它该有的样子）。 */
     static uint8_t huge[65535];
     uint32_t       writes_before_huge = s_writes;
@@ -567,11 +567,11 @@ static void case_payload_bounds(void)
     CHECK(s_writes == writes_before_huge);
 
     /* 已有记录未被破坏 */
-    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == CFG_REC_OK);
-    CHECK(len == CFG_RECORD_MAX_IMAGE && memcmp(rd, max_img, sizeof(max_img)) == 0);
+    CHECK(app_cfg_sched_load(id, rd, sizeof(rd), &len) == DEV_CFG_RECORD_STATE_OK);
+    CHECK(len == DEV_CFG_RECORD_MAX_IMAGE && memcmp(rd, max_img, sizeof(max_img)) == 0);
 
     /* 调用方缓冲装不下记录长度 → INVALID，而不是写爆或截断 */
-    CHECK(app_cfg_sched_load(id, rd, CFG_RECORD_MAX_IMAGE - 1U, &len) == CFG_REC_INVALID);
+    CHECK(app_cfg_sched_load(id, rd, DEV_CFG_RECORD_MAX_IMAGE - 1U, &len) == DEV_CFG_RECORD_STATE_INVALID);
 }
 
 /* ================================================================
@@ -583,16 +583,16 @@ static void case_register_rules(void)
     TEST_BEGIN("注册规则：空名/超长名/重名/满员一律忽略（返回 0xFF）");
 
     CHECK(app_cfg_sched_register(NULL) == 0xFF);
-    CHECK(app_cfg_sched_register(&(cfg_sched_desc_t){.name = "", .version = 1}) == 0xFF);
+    CHECK(app_cfg_sched_register(&(app_cfg_sched_desc_t){.name = "", .version = 1}) == 0xFF);
     /* 16 字符正好填满 name[16]，没有 NUL 位置 → 拒绝（否则头里与注册名比较不等价）*/
-    CHECK(app_cfg_sched_register(&(cfg_sched_desc_t){.name = "0123456789abcdef", .version = 1}) ==
+    CHECK(app_cfg_sched_register(&(app_cfg_sched_desc_t){.name = "0123456789abcdef", .version = 1}) ==
           0xFF);
     /* 15 字符是允许的上界 */
-    static const cfg_sched_desc_t name15 = {.name = "0123456789abcde", .version = 1};
+    static const app_cfg_sched_desc_t name15 = {.name = "0123456789abcde", .version = 1};
     CHECK(app_cfg_sched_register(&name15) == 0);
 
     /* 重名忽略，且不消耗块位 */
-    static const cfg_sched_desc_t dup = {.name = "dup", .version = 1};
+    static const app_cfg_sched_desc_t dup = {.name = "dup", .version = 1};
     CHECK(app_cfg_sched_register(&dup) == 1);
     CHECK_MSG(app_cfg_sched_register(&dup) == 0xFF, "同名重复注册应被忽略");
 
@@ -600,7 +600,7 @@ static void case_register_rules(void)
     static char names[CFG_REGION_MAX_BLOCKS][8];
     for (uint8_t i = 0; i < CFG_REGION_MAX_BLOCKS; i++) {
         snprintf(names[i], sizeof(names[i]), "n%u", (unsigned)i);
-        cfg_sched_desc_t d   = {.name = names[i], .version = 1, .load = NULL};
+        app_cfg_sched_desc_t d   = {.name = names[i], .version = 1, .load = NULL};
         uint8_t          got = app_cfg_sched_register(&d);
         if (i < CFG_REGION_MAX_BLOCKS - 2U)
             CHECK(got == (uint8_t)(i + 2U));
@@ -627,9 +627,9 @@ static void case_load_all_and_rescan(void)
 
     seed_record(0, "mod_b", 1, "B0"); /* 上一次固件留下的记录 */
 
-    static const cfg_sched_desc_t da = {.name = "mod_a", .version = 1, .load = cb_a};
-    static const cfg_sched_desc_t db = {.name = "mod_b", .version = 1, .load = NULL};
-    static const cfg_sched_desc_t dc = {.name = "mod_c", .version = 1, .load = cb_c};
+    static const app_cfg_sched_desc_t da = {.name = "mod_a", .version = 1, .load = cb_a};
+    static const app_cfg_sched_desc_t db = {.name = "mod_b", .version = 1, .load = NULL};
+    static const app_cfg_sched_desc_t dc = {.name = "mod_c", .version = 1, .load = cb_c};
 
     uint8_t ia = app_cfg_sched_register(&da);
     uint8_t ib = app_cfg_sched_register(&db);
@@ -638,13 +638,13 @@ static void case_load_all_and_rescan(void)
     /* mod_b 认领块 0：记录是上一次固件写的，名字与版本都对 → 直接有效 */
     uint8_t  buf[32] = {0};
     uint16_t len     = 0;
-    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 2 && memcmp(buf, "B0", 2) == 0);
 
     /* mod_a 于是落位到块 1（与其注册序号 0 不符）*/
     CHECK(app_cfg_sched_save(ia, (const uint8_t *)"A1", 2) == 0);
-    cfg_record_hdr_t hdr;
-    CHECK(read_hdr(1, &hdr) && strncmp(hdr.name, "mod_a", CFG_RECORD_NAME_MAX) == 0);
+    dev_cfg_record_hdr_t hdr;
+    CHECK(read_hdr(1, &hdr) && strncmp(hdr.name, "mod_a", DEV_CFG_RECORD_NAME_MAX) == 0);
 
     /* 新增注册者 → 所有者数变化 → 下次使用触发整表重扫 */
     uint8_t ic = app_cfg_sched_register(&dc);
@@ -656,9 +656,9 @@ static void case_load_all_and_rescan(void)
     CHECK(s_load_seq[0] == 'A' && s_load_seq[1] == 'C'); /* db 的 load 为 NULL，跳过 */
 
     /* 重扫之后按名字找回原地址（块位表不是"记住的"，是"扫出来的"）*/
-    CHECK(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(ia, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
     CHECK(len == 2 && memcmp(buf, "A1", 2) == 0);
-    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == CFG_REC_OK);
+    CHECK(app_cfg_sched_load(ib, buf, sizeof(buf), &len) == DEV_CFG_RECORD_STATE_OK);
 }
 
 /* ================================================================

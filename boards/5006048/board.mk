@@ -15,4 +15,4 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_rs485.c \
 	$(BOARD_DIR)/Device/Src/dev_key_board.c \
 	$(BOARD_DIR)/Device/Src/dev_p10_112x10_1000000661.c \
-	$(BOARD_DIR)/Application/Src/font_lib_board.c
+	$(BOARD_DIR)/Application/Src/app_font_lib_board.c

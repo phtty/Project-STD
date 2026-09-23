@@ -20,27 +20,27 @@
 
 #include <stdint.h>
 
-typedef void (*initcall_fn)(void);
+typedef void (*initcall_fn_t)(void);
 
 typedef struct {
-    initcall_fn fn;
+    initcall_fn_t fn;
     const char *name;
 } initcall_entry_t;
 
 /* ---- 硬件 initcall（main.c 中 initcall_run 调用，RTOS 前） ---- */
 #define OS_HWINITCALL(lvl, fn) \
     static const initcall_entry_t __attribute__((used, section(".hw_initcall." #lvl))) \
-    __hw_initcall_##lvl##_##fn = { (initcall_fn)(fn), #fn }
+    __hw_initcall_##lvl##_##fn = { (initcall_fn_t)(fn), #fn }
 
 #define hw_pre_initcall(fn)    OS_HWINITCALL(0, fn)
 #define hw_pl_initcall(fn)     OS_HWINITCALL(1, fn)
 #define hw_dev_initcall(fn)    OS_HWINITCALL(2, fn)
 #define hw_post_initcall(fn)   OS_HWINITCALL(3, fn)
 
-/* ---- 软件 initcall（init_task 中 sw_board_init 调用，RTOS 后） ---- */
+/* ---- 软件 initcall（init_task 中 initcall_run_sw 调用，RTOS 后） ---- */
 #define OS_SWINITCALL(lvl, fn) \
     static const initcall_entry_t __attribute__((used, section(".sw_initcall." #lvl))) \
-    __sw_initcall_##lvl##_##fn = { (initcall_fn)(fn), #fn }
+    __sw_initcall_##lvl##_##fn = { (initcall_fn_t)(fn), #fn }
 
 #define sw_pre_initcall(fn)    OS_SWINITCALL(0, fn)
 #define sw_pl_initcall(fn)     OS_SWINITCALL(1, fn)
@@ -55,4 +55,4 @@ extern const initcall_entry_t __sw_initcall_start[];
 extern const initcall_entry_t __sw_initcall_end[];
 
 void initcall_run(const initcall_entry_t *start, const initcall_entry_t *end);
-void sw_board_init(void);
+void initcall_run_sw(void);

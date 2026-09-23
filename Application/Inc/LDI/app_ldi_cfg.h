@@ -21,7 +21,7 @@
  * 存储在 Flash 中供 1EH 参数采集命令回读。
  */
 typedef struct {
-    uint8_t device_type;   // ldi_device_t 枚举值 (E1H~EBH)
+    uint8_t device_type;   // app_ldi_device_t 枚举值 (E1H~EBH)
     uint8_t device_index;  // 功能模块序号，从 01H 开始
     uint8_t vendor[10];    // 厂商自定义参数段 (0BH 命令下发的 Vendor[] 段)
 } app_flash_ldi_module_cfg_t;

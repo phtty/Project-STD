@@ -11,7 +11,7 @@
 
 /* ---- 引脚映射表（从 main.h 的 CubeMX 引脚定义组装） ---- */
 
-const hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX] = {
+const pl_hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX] = {
     {HUB75_R1_GPIO_Port, HUB75_R1_Pin},
     {HUB75_R2_GPIO_Port, HUB75_R2_Pin},
     {HUB75_R3_GPIO_Port, HUB75_R3_Pin},
@@ -24,7 +24,7 @@ const hub75_pin_t g_hub75_pin_r[HUB75_CHANNEL_MAX] = {
     {HUB75_R10_GPIO_Port, HUB75_R10_Pin},
 };
 
-const hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX] = {
+const pl_hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX] = {
     {HUB75_G1_GPIO_Port, HUB75_G1_Pin},
     {HUB75_G2_GPIO_Port, HUB75_G2_Pin},
     {HUB75_G3_GPIO_Port, HUB75_G3_Pin},
@@ -37,7 +37,7 @@ const hub75_pin_t g_hub75_pin_g[HUB75_CHANNEL_MAX] = {
     {HUB75_G10_GPIO_Port, HUB75_G10_Pin},
 };
 
-const hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX] = {
+const pl_hub75_pin_t g_hub75_pin_b[HUB75_CHANNEL_MAX] = {
     {HUB75_B1_GPIO_Port, HUB75_B1_Pin},
     {HUB75_B2_GPIO_Port, HUB75_B2_Pin},
     {HUB75_B3_GPIO_Port, HUB75_B3_Pin},

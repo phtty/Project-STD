@@ -1,19 +1,19 @@
 /**
- * @file    app_cascade.c
+ * @file    app_casc.c
  * @brief   多控制卡级联同步显示协议 —— 探针、任务、枚举、整屏调光、一帧一轮的图传
  *
  * **一轮 = 一条 IMAGE 帧**：主卡把每张从卡那一块整块位图（一帧装得下，不再分片）
  * 单播过去，从卡收下即落屏并回 ACK。逐卡走完再下一张，最后主卡本地提交。
  *
  * 骨架照 `Application/Src/RLS/app_rls.c`（收-only 最干净的那个）：
- * RB_DEFINE_ATTR → 静态 pcb_t → sw_post_initcall 里 rb_init / 建队列 / 绑通道 / 起任务。
+ * RB_DEFINE_ATTR → 静态 app_pcb_t → sw_post_initcall 里 rb_init / 建队列 / 绑通道 / 起任务。
  *
- * **绑 RS485**，且地址必须写在帧里 —— `ccb_dst_t` 只有 broadcast/topic 两个字段、
+ * **绑 RS485**，且地址必须写在帧里 —— `app_ccb_dst_t` 只有 broadcast/topic 两个字段、
  * 没有地址，而 RS485 通道本来就忽略 dst（总线共享）。各从卡按帧里的 dst 过滤，
  * 与 LDI 用 lane_code 判"不属于本设备"→ SKIP 是同一做法。
  */
 
-#include "app_cascade.h"
+#include "app_casc.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -52,36 +52,36 @@
 /* ================================================================
  *  单卡板：本文件编译成空
  *
- *  见 app_cascade.h 的 `BOARD_CASCADE_ENABLED`。守卫放在 include 之后、所有
+ *  见 app_casc.h 的 `BOARD_CASC_ENABLED`。守卫放在 include 之后、所有
  *  静态量与函数之前 —— 于是单卡板上这个翻译单元**一个字节都不产生**
  *  （Flash、CCMRAM、以及"每 10 秒一次 PING"全都省掉），而两块板共用同一份
  *  构建清单（Makefile / EIDE 都不用改）。
  * ================================================================ */
-#if !BOARD_CASCADE_ENABLED
+#if !BOARD_CASC_ENABLED
 /* 本板不跑级联：这一整段（协议环、帧队列、任务、身份记录）都不产生代码。
  *
- * **但仍然提供一个同名的空定义**（见 app_cascade.h 的 inline 版本）：
+ * **但仍然提供一个同名的空定义**（见 app_casc.h 的 inline 版本）：
  * 增量构建只会按 `.c` 的时间戳重编，改了 `.h` 时调用方的旧目标文件可能没被重编、
  * 仍在引用这个符号 —— 有定义就不会变成"未定义引用"，而它没人调用，会被
  * `--gc-sections` 丢掉，不占 Flash。花一个符号换掉一整类构建顺序上的坑，值。 */
-void app_cascade_claim_master(void)
+void app_casc_claim_master(void)
 {
 }
 #else
 
 /* ---- 队列与缓冲区（容量取法见 app_iap.c / app_rls.c 的同名注释）---- */
 
-/* **本协议会发出的最长帧** = 一帧装下整块本卡位图（见 app_cascade.h 的 CASC_FRAME_MAX）。
+/* **本协议会发出的最长帧** = 一帧装下整块本卡位图（见 app_casc.h 的 CASC_FRAME_MAX）。
  * 它同时是 `pcb.payload_max`：框架据此拒收超长的帧，队列元素也因此有硬上界。 */
 #define CASC_MSG_MAX CASC_FRAME_MAX
 
-_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_present_t), "PRESENT 装不下");
-_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_nack_t), "NACK 装不下");
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(app_casc_present_t), "PRESENT 装不下");
+_Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(app_casc_nack_t), "NACK 装不下");
 
-#define CASC_MSG_SIZE (sizeof(frame_msg_t) + CASC_MSG_MAX)
+#define CASC_MSG_SIZE (sizeof(app_dispatch_msg_t) + CASC_MSG_MAX)
 
 /* **深度 2**。P2 时期是 2（帧稀疏，够用），P3 分片时被抬到 8 —— 因为一轮连发 4~5 帧，
-   而 ISR → rs485_task → frame_dispatch_task → 本协议任务四跳都是 Normal 优先级，
+   而 ISR → _rs485_task → app_dispatch_task → 本协议任务四跳都是 Normal 优先级，
    队列一满框架就**静默丢帧**（Put 超时为 0），现场表现为"总缺中间那几片"。
 
    一帧一轮之后连发没了：主卡发一条、从卡回一条，**任何时刻队列里最多一条**，
@@ -92,17 +92,17 @@ _Static_assert(CASC_MSG_MAX >= CASC_OVERHEAD + sizeof(casc_nack_t), "NACK 装不
 /* **发送缓冲**：组帧与 DMA 发送共用这一块。
  *
  * 必须在 **.bss（SRAM）**：RS485 通道按"指针是否落 CCMRAM"在 DMA 与轮询之间二选一
- * （app_rs485.c 的 rs485_send），挪进 CCMRAM 不会报错，只会**静默退化成轮询发送** ——
- * 一帧 1427 字节 @115200 就是 124ms 的 CPU 被烧在这条任务里。`_cascade_init` 里有
+ * （app_rs485.c 的 _rs485_send），挪进 CCMRAM 不会报错，只会**静默退化成轮询发送** ——
+ * 一帧 1427 字节 @115200 就是 124ms 的 CPU 被烧在这条任务里。`_casc_init` 里有
  * 一次性校验，真被挪了会打出来。
  *
- * 一块够所有卡轮着用：`ccb_send` 是**阻塞**语义（DMA 等 TC、轮询等发完），返回即发完。
+ * 一块够所有卡轮着用：`app_ccb_send` 是**阻塞**语义（DMA 等 TC、轮询等发完），返回即发完。
  *
  * **接收侧一律不碰它**（`_cmd_ack`/`_cmd_nack`/`_cmd_present` 只读 `msg->data`）——
- * 这是"位图能一直躺在 s_tx 里等应答"的前提：主卡把整块位图抽进 s_tx 之后要等最多
- * 200ms 的应答，这期间收进来的帧若也往 s_tx 写，等到的应答会把还没发出去的位图冲掉，
- * 或者重发的帧发出去的是应答的字节。**加新的接收处理函数时别用 s_tx。** */
-static uint8_t s_tx[CASC_FRAME_MAX];
+ * 这是"位图能一直躺在 s_tx_buf 里等应答"的前提：主卡把整块位图抽进 s_tx_buf 之后要等最多
+ * 200ms 的应答，这期间收进来的帧若也往 s_tx_buf 写，等到的应答会把还没发出去的位图冲掉，
+ * 或者重发的帧发出去的是应答的字节。**加新的接收处理函数时别用 s_tx_buf。** */
+static uint8_t s_tx_buf[CASC_FRAME_MAX];
 
 static StaticQueue_t s_casc_queue_cb;
 static uint8_t       s_casc_queue_buf[CASC_QUEUE_DEPTH * CASC_MSG_SIZE] PL_CCMRAM;
@@ -120,7 +120,7 @@ static const osMessageQueueAttr_t s_casc_queue_attr = {
  * **取 4096 而不是够用就行的 2112**：`app_ccb_dispatch` 在"装不下"时的策略是
  * **丢旧留新**（整段 flush 再写），而它分不清"旧数据是半截帧"与"旧数据是一条完整
  * 但还没轮到解析的帧"。实测就撞上了：帧分发任务被同一条总线上别的协议的探针拖住
- * 几十毫秒（见 casc_probe_frame 里那段 O(n²) 的说明），这期间**下一条帧的第一段**
+ * 几十毫秒（见 _casc_probe_frame 里那段 O(n²) 的说明），这期间**下一条帧的第一段**
  * 就到了 —— 2112 装不下 1427 + 1211，于是那条完整帧被 flush 掉，主卡只能重发。
  * 留够"两帧"的余量，这种抢占就不会发生（仍留有 flush 兜底，只是不再误伤整帧）。 */
 RB_DEFINE_ATTR(s_casc_rb, 4096, PL_CCMRAM);
@@ -189,8 +189,8 @@ static osMessageQueueId_t s_casc_queue;
  * 而那与"缓冲区被冲掉了""还没到点"分不开。而"从卡整个不答"与"答了但内容不对"
  * 是**完全相反**的两个排查方向（查线 vs 查协议），必须一刀切开。
  * 枚举与画布无关，所以这两个变量放在守卫之外。 */
-static uint32_t s_enum_deadline;
-static bool     s_enum_seen;
+static uint32_t s_enum_deadline_tick;
+static bool     s_enum_seen_flag;
 /** 本次枚举是不是**上电那一次** —— 只有它对"有没有应答"下判据。
  *  周期性重新枚举也判的话，每分钟会多出 6 行"有卡应答"，把 1KB 的 RTT 缓冲冲掉，
  *  而那个信息本来就没用（PRESENT 那行已经说明了）。 */
@@ -200,23 +200,23 @@ static bool s_enum_verdict;
 static bool s_first_enum_done;
 
 /* 上电枚举的剩余次数与下次发包时刻（0 = 枚举已收尾） */
-static uint8_t  s_ping_left;
-static uint32_t s_ping_next;
+static uint8_t  s_ping_left_cnt;
+static uint32_t s_ping_next_tick;
 
 /* 下一次重新枚举的时刻 —— 见 CASC_REENUM_MS 的说明 */
-static uint32_t s_reenum_at;
+static uint32_t s_reenum_at_tick;
 
 /* 每张从卡的**连续失败轮数**：成功一轮即清零。放协议侧而不是切分表里 ——
    "失败几轮算掉线"是本协议自己的策略，不是"这张卡长什么样"的部署事实。 */
-static uint8_t s_fail_run[SCREEN_CARD_MAX];
+static uint8_t s_fail_run[APP_SCREEN_CARD_MAX];
 
 /* 需要立刻开一轮：**刚上线的卡要马上拿到当前内容**。它可能刚插回来，
    屏上还是掉线前那幅旧的，而等下一次内容更新可能要几分钟。 */
-static bool s_force_round;
+static bool s_force_round_flag;
 
 /* 发完 PING 之后的"总线安静期"截止时刻 —— 半双工，从卡回 PRESENT 时主卡不能
    同时在发分片，否则两个节点同时驱动总线，两边都成乱码。 */
-static uint32_t s_bus_quiet_until;
+static uint32_t s_bus_quiet_until_tick;
 
 /** 轮次序号源。**放在守卫之外**：识别流程（认领时逐卡单播 `SET_ADDR` 并等 ACK）
  *  也用同一个序号源 —— ACK 一律按 (seq, src) 匹配，序号源分开会让匹配更难看出规律。 */
@@ -234,9 +234,9 @@ static uint8_t s_round_me;
 /** @brief 起一轮枚举；已在枚举中则不动 */
 static void _enum_start(uint32_t now)
 {
-    s_ping_left    = CASC_PING_TRIES;
-    s_ping_next    = now;
-    s_enum_seen    = false; /* 只认这一轮发出去之后的应答 */
+    s_ping_left_cnt    = CASC_PING_TRIES;
+    s_ping_next_tick    = now;
+    s_enum_seen_flag    = false; /* 只认这一轮发出去之后的应答 */
     s_enum_verdict = !s_first_enum_done; /* 上电那一次才判"有没有卡应答" */
 }
 
@@ -250,20 +250,20 @@ static void _enum_start(uint32_t now)
  *  内容当场刷黑 —— 所以它必须撤掉。
  *
  *  改为由"画布本上电周期内被写过"（`app_screen_canvas_touched()`）闸住轮次：
- *  上位机一下发新内容就恢复整屏同步；某张卡掉线回来时画布早已被写过，`s_force_round`
+ *  上位机一下发新内容就恢复整屏同步；某张卡掉线回来时画布早已被写过，`s_force_round_flag`
  *  照常给它补内容。 */
 static void _enum_finish(uint32_t now)
 {
-    s_ping_left        = 0;
-    s_enum_deadline    = now + CASC_BOOT_ALIGN_PING_GAP_MS;
-    s_reenum_at        = now + CASC_REENUM_MS; /* 到点再问一次：卡回来了只有靠问才知道 */
+    s_ping_left_cnt        = 0;
+    s_enum_deadline_tick    = now + CASC_BOOT_ALIGN_PING_GAP_MS;
+    s_reenum_at_tick        = now + CASC_REENUM_MS; /* 到点再问一次：卡回来了只有靠问才知道 */
     s_first_enum_done  = true;                 /* 之后都是运行期的重新枚举 */
 }
 
-/* pcb 的字段在 _cascade_init 里填（探针定义在本文件后部，ops 要指向它） */
-static pcb_t s_casc_pcb;
+/* pcb 的字段在 _casc_init 里填（探针定义在本文件后部，ops 要指向它） */
+static app_pcb_t s_casc_pcb;
 
-pcb_t *app_cascade_pcb(void)
+app_pcb_t *app_casc_pcb(void)
 {
     return &s_casc_pcb;
 }
@@ -297,7 +297,7 @@ static bool _is_for_me(uint8_t dst)
  *  就会连带吞掉后面一帧真帧；而 CRC 失败走 FAKE（只跳 1 字节重试），能在下一个
  *  真 SOF 处重新对上。代价是给别人的帧也要算一次 CRC（约 60µs @1KB），
  *  换回来的是可靠的再同步。 */
-static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+static app_pcb_probe_state_t _casc_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                         uint8_t *scratch, uint16_t scratch_size,
                                         uint32_t *total_len, uint8_t *aux)
 {
@@ -314,48 +314,48 @@ static pcb_probe_sta_t casc_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb
      * 一个字节都不多拷；只有确认是真帧、且整帧到齐，才拷进来算 CRC。
      *
      * 顺带：`avail` 用 rb_avail 问，不靠窥视的返回值（那次窥视只拷了 11 字节）。 */
-    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(casc_hdr_t))
+    const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_casc_hdr_t))
                                   ? scratch_size
-                                  : (uint16_t)sizeof(casc_hdr_t);
-    if (rb_peek_capped(self->rb, 0, scratch, head_cap, nullptr) < sizeof(casc_hdr_t))
-        return PCB_PROBE_WAIT;
+                                  : (uint16_t)sizeof(app_casc_hdr_t);
+    if (rb_peek_capped(self->rb, 0, scratch, head_cap, nullptr) < sizeof(app_casc_hdr_t))
+        return APP_PCB_PROBE_STATE_WAIT;
 
-    casc_hdr_t *h = (casc_hdr_t *)scratch;
-    if (h->sof[0] != CASC_SOF0 || h->sof[1] != CASC_SOF1) return PCB_PROBE_FAKE;
+    app_casc_hdr_t *h = (app_casc_hdr_t *)scratch;
+    if (h->sof[0] != CASC_SOF0 || h->sof[1] != CASC_SOF1) return APP_PCB_PROBE_STATE_FAKE;
 
-    uint16_t len = casc_get_u16(h->len);
+    uint16_t len = _casc_get_u16(h->len);
 
     /* 长度域先夹：合法级联帧永远在 [MIN, MAX] 内。越界说明这是伪同步，
        逐字节重跳能最快找回真帧；若返回 SKIP 会按伪长度把后面的真帧一起吞掉。 */
-    if (len < CASC_FRAME_MIN || len > CASC_FRAME_MAX) return PCB_PROBE_FAKE;
+    if (len < CASC_FRAME_MIN || len > CASC_FRAME_MAX) return APP_PCB_PROBE_STATE_FAKE;
 
     /* 整帧到齐前不碰帧尾/CRC —— 否则读到的是后续字节 */
-    if (rb_avail(self->rb, nullptr) < len) return PCB_PROBE_WAIT;
+    if (rb_avail(self->rb, nullptr) < len) return APP_PCB_PROBE_STATE_WAIT;
 
     if (len > scratch_size) {
         *total_len = len;
-        return PCB_PROBE_SKIP; /* 本设计下不可达（static_assert 保证），按契约保留 */
+        return APP_PCB_PROBE_STATE_SKIP; /* 本设计下不可达（static_assert 保证），按契约保留 */
     }
 
     /* 到这里才需要整帧（CRC 要覆盖到帧尾） */
-    if (rb_peek_capped(self->rb, 0, scratch, len, nullptr) < len) return PCB_PROBE_WAIT;
+    if (rb_peek_capped(self->rb, 0, scratch, len, nullptr) < len) return APP_PCB_PROBE_STATE_WAIT;
 
     /* CRC32 覆盖 [2, len-4)：不含 SOF（恒定值不增加信息量）、不含 CRC 自身。
        走硬件单元（1KB 约 9µs；软件 CRC16 要 71µs）。
        注意区段起点 scratch+2 **不对齐** —— pl_crc32_calc 原先对非对齐输入只算前
        256 字节，正是为此先修了它（见该提交）。 */
     uint32_t crc_calc = pl_crc32_calc(pl_crc_get_handle(), scratch + 2, (size_t)(len - 6U));
-    uint32_t crc_recv = casc_get_u32(scratch + len - 4U);
-    if (crc_calc != crc_recv) return PCB_PROBE_FAKE;
+    uint32_t crc_recv = _casc_get_u32(scratch + len - 4U);
+    if (crc_calc != crc_recv) return APP_PCB_PROBE_STATE_FAKE;
 
     if (!_is_for_me(h->dst)) {
         *total_len = len;
-        return PCB_PROBE_SKIP; /* 帧合法，只是不是给我这张卡的 */
+        return APP_PCB_PROBE_STATE_SKIP; /* 帧合法，只是不是给我这张卡的 */
     }
 
     *total_len = len;
     *aux       = CASC_TYPE_OF(h->ver_type);
-    return PCB_PROBE_READY;
+    return APP_PCB_PROBE_STATE_READY;
 }
 
 /* ================================================================
@@ -372,19 +372,19 @@ static uint16_t _finish_frame(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint
     const uint16_t len = (uint16_t)(CASC_OVERHEAD + payload_len);
     if (len > buf_cap || len > CASC_FRAME_MAX) return 0;
 
-    casc_hdr_t *h = (casc_hdr_t *)buf;
+    app_casc_hdr_t *h = (app_casc_hdr_t *)buf;
     h->sof[0]     = CASC_SOF0;
     h->sof[1]     = CASC_SOF1;
     h->ver_type   = (uint8_t)((CASC_PROTO_VER << 6) | CASC_TYPE_OF(type));
     h->dst        = dst;
     h->src        = app_screen_self_addr();
-    casc_put_u16(h->seq, seq);
+    _casc_put_u16(h->seq, seq);
     h->idx        = 0; /* 保留字段：一帧一轮，不再有分片号 */
     h->frag_n     = 0; /* 保留字段：同上 */
-    casc_put_u16(h->len, len);
+    _casc_put_u16(h->len, len);
 
     const uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), buf + 2, (size_t)(len - 6U));
-    casc_put_u32(buf + len - 4U, crc);
+    _casc_put_u32(buf + len - 4U, crc);
     return len;
 }
 
@@ -395,19 +395,19 @@ static uint16_t _build(uint8_t *buf, uint16_t buf_cap, uint8_t type, uint8_t dst
     const uint16_t len = (uint16_t)(CASC_OVERHEAD + payload_len);
     if (len > buf_cap || len > CASC_FRAME_MAX) return 0; /* 先判再拷，不能让 memcpy 越界 */
 
-    if (payload_len) memcpy(buf + sizeof(casc_hdr_t), payload, payload_len);
+    if (payload_len) memcpy(buf + sizeof(app_casc_hdr_t), payload, payload_len);
     return _finish_frame(buf, buf_cap, type, dst, seq, payload_len);
 }
 
-/** @brief 发一条**已组好**的帧（内容在 s_tx 里就位）；返回整帧长度，组帧失败为 -1
+/** @brief 发一条**已组好**的帧（内容在 s_tx_buf 里就位）；返回整帧长度，组帧失败为 -1
  *
- *  `ccb_send` 是阻塞的（DMA 等 TC / 轮询等发完），返回即代表已发完 —— 所以 s_tx
+ *  `app_ccb_send` 是阻塞的（DMA 等 TC / 轮询等发完），返回即代表已发完 —— 所以 s_tx_buf
  *  在返回后可以立刻被下一次组帧覆盖。 */
 static int32_t _send_tx(uint16_t len, uint8_t type)
 {
     if (!len) return -1;
 
-    const int32_t r = ccb_send(app_rs485_ccb(), s_tx, len);
+    const int32_t r = app_ccb_send(app_rs485_ccb(), s_tx_buf, len);
     if (r < 0) {
         /* 通道没 UP / 平台层拒收。**只报前几次**：真出问题时每轮都会失败，
            不限量会把 RTT 冲干净，反而看不到别的。 */
@@ -421,7 +421,7 @@ static int32_t _send_tx(uint16_t len, uint8_t type)
     return (int32_t)len;
 }
 
-/** @brief 组一帧（载荷拷进 s_tx）并发出；**序号由调用方给**。
+/** @brief 组一帧（载荷拷进 s_tx_buf）并发出；**序号由调用方给**。
  *
  *  轮次类命令（IMAGE）与应答（ACK/NACK）必须用**本轮那个 seq**，不能用发送方自己的
  *  计数器：主卡靠 seq 认"这条 ACK 是答哪一轮的"，从卡回的 ACK 若带自己的序号，
@@ -429,7 +429,7 @@ static int32_t _send_tx(uint16_t len, uint8_t type)
 static int32_t _send_seq(uint8_t type, uint8_t dst, uint16_t seq, const void *payload,
                          uint16_t payload_len)
 {
-    return _send_tx(_build(s_tx, sizeof(s_tx), type, dst, seq, payload, payload_len), type);
+    return _send_tx(_build(s_tx_buf, sizeof(s_tx_buf), type, dst, seq, payload, payload_len), type);
 }
 
 /** @brief 发一帧不需要轮次序号的（PING/PRESENT/SET_BRIGHT），序号取自增计数器 */
@@ -439,15 +439,15 @@ static int32_t _send(uint8_t type, uint8_t dst, const void *payload, uint16_t pa
     return _send_seq(type, dst, s_seq++, payload, payload_len);
 }
 
-int32_t app_cascade_ping(void)
+int32_t app_casc_ping(void)
 {
-    return _send(CASC_T_PING, CASC_ADDR_BCAST, nullptr, 0);
+    return _send(APP_CASC_TYPE_PING, CASC_ADDR_BCAST, nullptr, 0);
 }
 
-int32_t app_cascade_broadcast_bright(uint8_t level)
+int32_t app_casc_broadcast_bright(uint8_t level)
 {
-    casc_set_bright_t p = {.level = (uint8_t)(level > 7 ? 7 : level)};
-    return _send(CASC_T_SET_BRIGHT, CASC_ADDR_BCAST, &p, sizeof(p));
+    app_casc_set_bright_t p = {.level = (uint8_t)(level > 7 ? 7 : level)};
+    return _send(APP_CASC_TYPE_SET_BRIGHT, CASC_ADDR_BCAST, &p, sizeof(p));
 }
 
 /* ================================================================
@@ -458,7 +458,7 @@ int32_t app_cascade_broadcast_bright(uint8_t level)
  *  给出一条可控的越界函数调用）。
  * ================================================================ */
 
-static void _cmd_ping(frame_msg_t *msg)
+static void _cmd_ping(app_dispatch_msg_t *msg)
 {
     (void)msg;
     /* 主卡发 PING，从卡应答。主卡收到自己的 PING（或回声）时什么都不做 ——
@@ -470,49 +470,49 @@ static void _cmd_ping(frame_msg_t *msg)
     osDelay((uint32_t)(app_screen_self_addr() - 1U) * 3U);
 
     dev_display_t *d = dev_display_get();
-    casc_present_t p = {
+    app_casc_present_t p = {
         .addr      = app_screen_self_addr(),
         .bright    = app_screen_get_brightness(),
         .proto_ver = CASC_PROTO_VER,
     };
     uint16_t w = d ? d->screen_rows : 0;
     uint16_t h = d ? d->screen_cols : 0;
-    casc_put_u16(p.w, w);
-    casc_put_u16(p.h, h);
+    _casc_put_u16(p.w, w);
+    _casc_put_u16(p.h, h);
 
-    (void)_send(CASC_T_PRESENT, CASC_ADDR_MASTER, &p, sizeof(p));
+    (void)_send(APP_CASC_TYPE_PRESENT, CASC_ADDR_MASTER, &p, sizeof(p));
 }
 
-static void _cmd_present(frame_msg_t *msg)
+static void _cmd_present(app_dispatch_msg_t *msg)
 {
     /* 主卡收：枚举结果先打出来。P4 建卡表时这里改成填表 + 校验几何。 */
     if (!app_screen_is_master()) return;
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_present_t))) return;
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_present_t))) return;
 
-    const casc_present_t *p = (const casc_present_t *)(msg->data + sizeof(casc_hdr_t));
+    const app_casc_present_t *p = (const app_casc_present_t *)(msg->data + sizeof(app_casc_hdr_t));
 
-    s_enum_seen = true; /* 上电枚举据此判"有没有卡应答" */
+    s_enum_seen_flag = true; /* 上电枚举据此判"有没有卡应答" */
 
     /* **建表**：这张卡在线了。刚上线要**立刻**给它一轮 —— 它可能刚插回来，
        屏上还是掉线前那幅旧内容，而等下一次内容更新可能要几分钟。
        这也是"拔线→插回"能自愈的关键一步：枚举把状态改回 ONLINE，这一轮把内容补齐。 */
     const uint8_t i = app_screen_index_of_addr(p->addr);
-    if (i != 0xFF && app_screen_card_state(i) != SCREEN_CARD_ONLINE) {
-        app_screen_card_set_state(i, SCREEN_CARD_ONLINE);
+    if (i != 0xFF && app_screen_card_state(i) != APP_SCREEN_CARD_STATE_ONLINE) {
+        app_screen_card_set_state(i, APP_SCREEN_CARD_STATE_ONLINE);
         s_fail_run[i] = 0;
-        s_force_round = true;
+        s_force_round_flag = true;
     }
 
     printf("[casc] PRESENT addr=%u %ux%u bright=%u ver=%u\n", (unsigned)p->addr,
-           (unsigned)casc_get_u16(p->w), (unsigned)casc_get_u16(p->h), (unsigned)p->bright,
+           (unsigned)_casc_get_u16(p->w), (unsigned)_casc_get_u16(p->h), (unsigned)p->bright,
            (unsigned)p->proto_ver);
 }
 
-static void _cmd_set_bright(frame_msg_t *msg)
+static void _cmd_set_bright(app_dispatch_msg_t *msg)
 {
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_set_bright_t))) return;
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_set_bright_t))) return;
 
-    const casc_set_bright_t *p = (const casc_set_bright_t *)(msg->data + sizeof(casc_hdr_t));
+    const app_casc_set_bright_t *p = (const app_casc_set_bright_t *)(msg->data + sizeof(app_casc_hdr_t));
 
     /* 广播的接收方一律套用（包括主卡自己）—— 幂等，且省掉"谁是发出者"的特判。
        主卡本机亮度在生成广播时已经设过，这里再设一次无害。 */
@@ -537,13 +537,13 @@ static void _cmd_set_bright(frame_msg_t *msg)
  *  （格号写重、切分表不一致），而把两者混成一个静默超时，现场只能靠猜。 */
 static void _nack(uint16_t seq, uint8_t err, const char *why)
 {
-    const casc_nack_t nack = {.err = err};
+    const app_casc_nack_t nack = {.err = err};
 
     CASC_LOG("[casc·从] 拒绝 IMAGE seq=%u：%s\n", (unsigned)seq, why);
-    (void)_send_seq(CASC_T_NACK, CASC_ADDR_MASTER, seq, &nack, sizeof(nack));
+    (void)_send_seq(APP_CASC_TYPE_NACK, CASC_ADDR_MASTER, seq, &nack, sizeof(nack));
 }
 
-static void _cmd_image(frame_msg_t *msg)
+static void _cmd_image(app_dispatch_msg_t *msg)
 {
     /* 主卡不该收到发给从卡的帧（半双工回声、或两张卡地址配重时会）。
        不应答、不落屏 —— 否则总线上会多出一个应答源，主卡把自己当从卡。 */
@@ -551,7 +551,7 @@ static void _cmd_image(frame_msg_t *msg)
 
     /* **长度先判，再碰任何内容**：这样"两块板烧了不同版本固件"退化成一条 NACK，
        而不是按旧帧的偏移去读位图越界。（帧长上界由框架的 payload_max 兜着。） */
-    if (msg->data_len < (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t))) {
+    if (msg->data_len < (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_image_t))) {
         /* **静默返回是最坏的一种**：主卡只会超时重发，而两侧日志都看不出哪里不对。
            真出现这行说明"探针给的 aux 是 IMAGE，但帧短得装不下头" —— 多半是版本或
            长度域的错，所以必须报出来（限次，免得刷屏）。 */
@@ -560,39 +560,39 @@ static void _cmd_image(frame_msg_t *msg)
             s_short_logged++;
             CASC_LOG("[casc·从] IMAGE 帧太短（%u 字节 < %u）—— 长度域或版本不符？\n",
                      (unsigned)msg->data_len,
-                     (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t)));
+                     (unsigned)(CASC_OVERHEAD + sizeof(app_casc_image_t)));
         }
         return;
     }
 
-    const casc_hdr_t   *h       = (const casc_hdr_t *)msg->data;
-    const casc_image_t *p       = (const casc_image_t *)(msg->data + sizeof(casc_hdr_t));
-    const uint16_t      seq     = casc_get_u16(h->seq);
-    const uint16_t      bmp_len = casc_get_u16(p->bmp_len);
+    const app_casc_hdr_t   *h       = (const app_casc_hdr_t *)msg->data;
+    const app_casc_image_t *p       = (const app_casc_image_t *)(msg->data + sizeof(app_casc_hdr_t));
+    const uint16_t      seq     = _casc_get_u16(h->seq);
+    const uint16_t      bmp_len = _casc_get_u16(p->bmp_len);
 
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + bmp_len)) {
-        _nack(seq, CASC_NACK_LEN, "帧长与 bmp_len 不符");
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_image_t) + bmp_len)) {
+        _nack(seq, APP_CASC_NACK_LEN, "帧长与 bmp_len 不符");
         return;
     }
 
     /* 矩形必须与**本卡在本地切分表里那一项**逐字段相符（含 x/y）。核对的是
        "主卡与我对整屏切分的认识一致"，而不只是"这张图装得进我的屏"。
-       两块板若烧了不同的 BOARD_CASCADE_MASTER_CELL，同一地址对应的格子就相反 ——
+       两块板若烧了不同的 BOARD_CASC_MASTER_CELL，同一地址对应的格子就相反 ——
        旧的校验只比 w/h，那种情形下两块屏内容会**悄悄互换而所有检查通过**。 */
     const uint8_t        self = app_screen_self_index();
-    const screen_card_t *me   = app_screen_card(self);
+    const app_screen_card_t *me   = app_screen_card(self);
 
     if (!me) {
-        _nack(seq, CASC_NACK_GEOM, "本卡地址不在切分表里");
+        _nack(seq, APP_CASC_NACK_GEOM, "本卡地址不在切分表里");
         return;
     }
-    if (casc_get_u16(p->x) != me->x || casc_get_u16(p->y) != me->y || casc_get_u16(p->w) != me->w ||
-        casc_get_u16(p->h) != me->h) {
-        _nack(seq, CASC_NACK_GEOM, "矩形与本卡切分表不符");
+    if (_casc_get_u16(p->x) != me->x || _casc_get_u16(p->y) != me->y || _casc_get_u16(p->w) != me->w ||
+        _casc_get_u16(p->h) != me->h) {
+        _nack(seq, APP_CASC_NACK_GEOM, "矩形与本卡切分表不符");
         return;
     }
     if (!bmp_len || bmp_len != app_screen_card_bm_len(self)) {
-        _nack(seq, CASC_NACK_GEOM, "位图长度与本卡矩形不符");
+        _nack(seq, APP_CASC_NACK_GEOM, "位图长度与本卡矩形不符");
         return;
     }
 
@@ -611,7 +611,7 @@ static void _cmd_image(frame_msg_t *msg)
 
     /* 回带**本轮序号**（不是自己的发送计数器）—— 主卡的等待循环按 (seq, src) 匹配。
        ACK 无载荷："收下并落屏"就是它唯一的意思，拒绝走 NACK 那条类型。 */
-    (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
+    (void)_send_seq(APP_CASC_TYPE_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
 
     /* ---- 落盘：**必须在 ACK 之后** ----
      *
@@ -622,7 +622,7 @@ static void _cmd_image(frame_msg_t *msg)
      *
      * 存的是**本卡这一块**（各管各的）：从卡没注册画布钩子，`app_render_save()`
      * 走"直存实屏"那条路，而它的实屏就是它那一块 —— 与主卡本地的持久化同一条路。
-     * 内容与上次一致时 `cfg_record_save` 会读回比对后跳过擦写，所以重发无副作用。 */
+     * 内容与上次一致时 `dev_cfg_record_save` 会读回比对后跳过擦写，所以重发无副作用。 */
     if (p->persist) app_render_save();
 }
 
@@ -635,67 +635,67 @@ static void _cmd_image(frame_msg_t *msg)
  * ================================================================ */
 
 #define CASC_STA_ACK  (0x00U) /**< 从卡收下并落屏了 */
-#define CASC_STA_NACK (0xFFU) /**< 从卡明确回绝（配置错，重发没用）—— 不在线上出现，只在 s_ack 里 */
+#define CASC_STA_NACK (0xFFU) /**< 从卡明确回绝（配置错，重发没用）—— 不在线上出现，只在 s_ack_state 里 */
 
 static struct {
     uint16_t seq;   /**< 应答回带的轮次序号 */
     uint8_t  src;   /**< 谁答的（总线地址） */
     uint8_t  sta;   /**< CASC_STA_ACK / CASC_STA_NACK */
-    uint8_t  err;   /**< sta == CASC_STA_NACK 时是 casc_nack_err_t，否则 0 */
+    uint8_t  err;   /**< sta == CASC_STA_NACK 时是 app_casc_nack_err_t，否则 0 */
     bool     valid;
-} s_ack;
+} s_ack_state;
 
-static void _cmd_ack(frame_msg_t *msg)
+static void _cmd_ack(app_dispatch_msg_t *msg)
 {
     /* **不判主从**：识别流程里"被降级的那张卡"也要能收到对方的 ACK
-       （它就是主动认领/让位的一方）。`s_ack` 只被等待方读，谁收到都无害。 */
+       （它就是主动认领/让位的一方）。`s_ack_state` 只被等待方读，谁收到都无害。 */
     if (msg->data_len != CASC_OVERHEAD) return; /* ACK 无载荷 */
 
-    const casc_hdr_t *h = (const casc_hdr_t *)msg->data;
+    const app_casc_hdr_t *h = (const app_casc_hdr_t *)msg->data;
 
     /* **收到就打**，不等匹配：只有这一行能把"字节根本没到"与"到了但没对上"分开，
        而这两者排查方向相反（查接收链路 vs 查匹配条件）。 */
-    CASC_LOG("[casc·主] ← 收到 ACK seq=%u src=%u\n", (unsigned)casc_get_u16(h->seq),
+    CASC_LOG("[casc·主] ← 收到 ACK seq=%u src=%u\n", (unsigned)_casc_get_u16(h->seq),
              (unsigned)h->src);
 
-    s_ack.seq   = casc_get_u16(h->seq);
-    s_ack.src   = h->src;
-    s_ack.sta   = CASC_STA_ACK;
-    s_ack.err   = 0;
-    s_ack.valid = true;
+    s_ack_state.seq   = _casc_get_u16(h->seq);
+    s_ack_state.src   = h->src;
+    s_ack_state.sta   = CASC_STA_ACK;
+    s_ack_state.err   = 0;
+    s_ack_state.valid = true;
 }
 
-static void _cmd_nack(frame_msg_t *msg)
+static void _cmd_nack(app_dispatch_msg_t *msg)
 {
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_nack_t))) return; /* 同上：不判主从 */
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_nack_t))) return; /* 同上：不判主从 */
 
-    const casc_hdr_t *h   = (const casc_hdr_t *)msg->data;
-    const uint8_t     err = msg->data[sizeof(casc_hdr_t)];
+    const app_casc_hdr_t *h   = (const app_casc_hdr_t *)msg->data;
+    const uint8_t     err = msg->data[sizeof(app_casc_hdr_t)];
 
-    CASC_LOG("[casc·主] ← 收到 NACK seq=%u src=%u err=%u\n", (unsigned)casc_get_u16(h->seq),
+    CASC_LOG("[casc·主] ← 收到 NACK seq=%u src=%u err=%u\n", (unsigned)_casc_get_u16(h->seq),
              (unsigned)h->src, (unsigned)err);
 
-    s_ack.seq   = casc_get_u16(h->seq);
-    s_ack.src   = h->src;
-    s_ack.sta   = CASC_STA_NACK;
-    s_ack.err   = err;
-    s_ack.valid = true;
+    s_ack_state.seq   = _casc_get_u16(h->seq);
+    s_ack_state.src   = h->src;
+    s_ack_state.sta   = CASC_STA_NACK;
+    s_ack_state.err   = err;
+    s_ack_state.valid = true;
 }
 
 /* 前置声明：定义在文件后部的"主从识别"一节（识别帧与认领流程共处一段） */
-static void _cmd_set_addr(frame_msg_t *msg);
+static void _cmd_set_addr(app_dispatch_msg_t *msg);
 
-typedef void (*casc_cmd_fn_t)(frame_msg_t *msg);
+typedef void (*app_casc_cmd_fn_t)(app_dispatch_msg_t *msg);
 
 /* 按帧类型索引。0 项留空 = 未实现或不支持（SET_COLOR/SET_LAYOUT/BLANK 归后续期）。 */
-static const casc_cmd_fn_t g_casc_cmd[CASC_TYPE_MASK + 1U] = {
-    [CASC_T_IMAGE]      = _cmd_image,
-    [CASC_T_SET_ADDR]   = _cmd_set_addr,
-    [CASC_T_PING]       = _cmd_ping,
-    [CASC_T_PRESENT]    = _cmd_present,
-    [CASC_T_SET_BRIGHT] = _cmd_set_bright,
-    [CASC_T_ACK]        = _cmd_ack,
-    [CASC_T_NACK]       = _cmd_nack,
+static const app_casc_cmd_fn_t s_casc_cmd_table[CASC_TYPE_MASK + 1U] = {
+    [APP_CASC_TYPE_IMAGE]      = _cmd_image,
+    [APP_CASC_TYPE_SET_ADDR]   = _cmd_set_addr,
+    [APP_CASC_TYPE_PING]       = _cmd_ping,
+    [APP_CASC_TYPE_PRESENT]    = _cmd_present,
+    [APP_CASC_TYPE_SET_BRIGHT] = _cmd_set_bright,
+    [APP_CASC_TYPE_ACK]        = _cmd_ack,
+    [APP_CASC_TYPE_NACK]       = _cmd_nack,
 };
 
 /* ================================================================
@@ -713,12 +713,12 @@ static const casc_cmd_fn_t g_casc_cmd[CASC_TYPE_MASK + 1U] = {
 static bool _casc_pump(uint32_t timeout_ms)
 {
     static uint8_t     msg_buf[CASC_MSG_SIZE] __attribute__((aligned(4)));
-    frame_msg_t *const msg = (frame_msg_t *)msg_buf;
+    app_dispatch_msg_t *const msg = (app_dispatch_msg_t *)msg_buf;
 
     if (osMessageQueueGet(s_casc_queue, msg, nullptr, timeout_ms) != osOK) return false;
 
     const uint8_t type = msg->aux;
-    if (type <= CASC_TYPE_MASK && g_casc_cmd[type]) g_casc_cmd[type](msg);
+    if (type <= CASC_TYPE_MASK && s_casc_cmd_table[type]) s_casc_cmd_table[type](msg);
     return true;
 }
 
@@ -741,7 +741,7 @@ static bool _wait_ack(uint8_t from, uint16_t seq, uint32_t deadline)
 
     for (;;) {
         _casc_drain();
-        if (s_ack.valid && s_ack.seq == seq && s_ack.src == from) {
+        if (s_ack_state.valid && s_ack_state.seq == seq && s_ack_state.src == from) {
             /* **把等了多少打出来**：这是"超时该定多少"的唯一依据。40ms 那个数当初是
                估的，结果实测有 87ms 的回合 —— 以后照这行调，不再拍脑袋。 */
             CASC_LOG("[casc·主] ← 等应答 %u ms\n", (unsigned)(osKernelGetTickCount() - t0));
@@ -770,7 +770,7 @@ static bool _wait_ack(uint8_t from, uint16_t seq, uint32_t deadline)
  *  "这一轮这张卡没对齐"，由 `_round_run` 记失败轮数、到阈值剔除。 */
 static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool persist)
 {
-    const screen_card_t *c       = app_screen_card(idx);
+    const app_screen_card_t *c       = app_screen_card(idx);
     const uint16_t       bmp_len = app_screen_card_bm_len(idx);
     if (!c || !bmp_len) return false;
 
@@ -779,23 +779,23 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
 
     /* **位图直接抽进发送帧的载荷位置**：抽出来的格式（1bpp、行优先、MSB-first、
        末字节补位归零）与线上格式逐位一致，所以既不需要中间缓冲，也不用再 memcpy 一次。 */
-    casc_image_t  *p   = (casc_image_t *)(s_tx + sizeof(casc_hdr_t));
-    const uint16_t cap = (uint16_t)(sizeof(s_tx) - sizeof(casc_hdr_t) - sizeof(casc_image_t));
+    app_casc_image_t  *p   = (app_casc_image_t *)(s_tx_buf + sizeof(app_casc_hdr_t));
+    const uint16_t cap = (uint16_t)(sizeof(s_tx_buf) - sizeof(app_casc_hdr_t) - sizeof(app_casc_image_t));
 
     if (cap < bmp_len || !app_screen_extract(idx, p->bitmap, cap)) return false;
 
-    casc_put_u16(p->x, c->x);
-    casc_put_u16(p->y, c->y);
-    casc_put_u16(p->w, c->w);
-    casc_put_u16(p->h, c->h);
-    casc_put_u16(p->bmp_len, bmp_len);
+    _casc_put_u16(p->x, c->x);
+    _casc_put_u16(p->y, c->y);
+    _casc_put_u16(p->w, c->w);
+    _casc_put_u16(p->h, c->h);
+    _casc_put_u16(p->bmp_len, bmp_len);
     p->bright  = bright;
     p->color   = app_screen_output_color(c->color); /* 工厂逐色老化时会临时统一 */
     /* 上位机"这次内容要长期保留"的意图原样传到从卡：各卡各存自己那一块 */
     p->persist = persist ? 1U : 0U;
 
-    const uint16_t len = _finish_frame(s_tx, sizeof(s_tx), CASC_T_IMAGE, c->addr, seq,
-                                       (uint16_t)(sizeof(casc_image_t) + bmp_len));
+    const uint16_t len = _finish_frame(s_tx_buf, sizeof(s_tx_buf), APP_CASC_TYPE_IMAGE, c->addr, seq,
+                                       (uint16_t)(sizeof(app_casc_image_t) + bmp_len));
     if (!len) return false;
 
     for (uint8_t attempt = 0; attempt <= CASC_RETRY_MAX; attempt++) {
@@ -809,8 +809,8 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
 
         /* 应答槽要在**发之前**清：ACK 可能在这条帧还没收完时就回来了，而它是被
            `_wait_ack` 取走的 —— 若在发之后清，清掉的正是刚收到的那一条。 */
-        s_ack.valid = false;
-        (void)_send_tx(len, CASC_T_IMAGE);
+        s_ack_state.valid = false;
+        (void)_send_tx(len, APP_CASC_TYPE_IMAGE);
 
         const bool got_ack = _wait_ack(c->addr, seq, osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS);
 
@@ -829,12 +829,12 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
             continue;
         }
 
-        if (s_ack.sta == CASC_STA_NACK) {
+        if (s_ack_state.sta == CASC_STA_NACK) {
             /* 从卡明确回绝（矩形与本卡切分表不符 / 本卡地址不在表里）—— 重发没有意义。
                它每回绝一次，`_round_run` 的失败计数照常累加，所以配置错的卡最终会被剔除；
                而在此之前，这行日志是唯一能指出"是配置问题不是链路问题"的东西。 */
             CASC_LOG("[casc·主] seq=%u 卡%u 拒绝本轮（err=%u）—— 多半是两块板的切分表/地址不一致\n",
-                     (unsigned)seq, (unsigned)c->addr, (unsigned)s_ack.err);
+                     (unsigned)seq, (unsigned)c->addr, (unsigned)s_ack_state.err);
             return false;
         }
         return true; /* ACK：这一轮完成 */
@@ -846,7 +846,7 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
 }
 
 /** @brief 开一轮：逐张从卡下发它那一块，全部结算完后主卡自己也换帧 */
-/** @brief 现在该开一轮吗？（`casc_task` 周期活里的那一格，单独成函数便于 host 测）
+/** @brief 现在该开一轮吗？（`_casc_task` 周期活里的那一格，单独成函数便于 host 测）
  *
  *  三个闸，各自对应一种"这一眼的内容不对"：
  *   · **画布没被写过就不开**（`canvas_touched`）：上电时画布上只有本卡那一块是从
@@ -856,14 +856,14 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
  *     "已经清屏、文字还没画"的那一瞬间，推下去就是现场看到的"闪一下"。
  *   · **静默期**：内容连改几次（老化轮播就是）时，攒到不再变再推一轮。
  *
- *  `s_force_round`（有卡刚上线）**不跳过前两个闸**：它要的正是"一张完整的画布"。 */
+ *  `s_force_round_flag`（有卡刚上线）**不跳过前两个闸**：它要的正是"一张完整的画布"。 */
 static bool _round_ready(void)
 {
     if (!app_screen_canvas_touched()) return false;
     if (app_render_busy()) return false;
 
-    if (s_force_round) {
-        s_force_round = false; /* 有卡刚上线：立刻给它当前内容 */
+    if (s_force_round_flag) {
+        s_force_round_flag = false; /* 有卡刚上线：立刻给它当前内容 */
         return true;
     }
     return app_screen_take_pending_settled();
@@ -871,7 +871,7 @@ static bool _round_ready(void)
 
 static bool _round_run(void)
 {
-    const screen_layout_t *L      = app_screen_layout();
+    const app_screen_layout_t *L      = app_screen_layout();
     const uint8_t          me     = app_screen_self_addr();
     const uint16_t         seq    = ++s_round_seq;
 
@@ -894,7 +894,7 @@ static bool _round_run(void)
             break;
         }
 
-        const screen_card_t *c = app_screen_card(i);
+        const app_screen_card_t *c = app_screen_card(i);
         /* **按下标遍历，地址与矩形都从同一项里取** —— 两者顺序可以不同
            （主卡在下时 addr 与下标相反），拿地址当下标会把两块屏的内容对调。
            本卡那块不下发，由下面的本地提交处理。 */
@@ -905,7 +905,7 @@ static bool _round_run(void)
            别人的屏，也没法命令一张掉线的卡清屏。"替它涂黑"在这里是做不到的事，
            做了只会把内容毁掉（卡回来时拿到的是黑的）。
            让它回来的是枚举，不是往黑洞里发数据。 */
-        if (app_screen_card_state(i) != SCREEN_CARD_ONLINE) {
+        if (app_screen_card_state(i) != APP_SCREEN_CARD_STATE_ONLINE) {
             /* **没上线的卡也算"这轮没对上"**：否则从卡晚几秒起来时，对齐全在
                "没人应答"的状态下判成成功、只走一轮就收尾 —— 上电同步就**永远不会发生**，
                从卡要靠之后某次 force_round 碰巧补上（实测就是这样）。
@@ -924,7 +924,7 @@ static bool _round_run(void)
             if (++s_fail_run[i] >= CASC_FAIL_RUN_MAX) {
                 CASC_LOG("[casc·主] 卡 %u 连续 %u 轮未完成 → 剔除（不再发数据，等枚举找回来）\n",
                          (unsigned)c->addr, (unsigned)s_fail_run[i]);
-                app_screen_card_set_state(i, SCREEN_CARD_OFFLINE);
+                app_screen_card_set_state(i, APP_SCREEN_CARD_STATE_OFFLINE);
                 s_fail_run[i] = 0;
             }
         }
@@ -969,9 +969,9 @@ typedef struct [[gnu::packed]] {
     uint8_t src;         /**< 谁定的：0=默认 1=记录 2=拨码 3=识别帧（只为排障打印） */
     uint8_t master_cell; /**< 本机认定的**主卡格**（哪一格编 addr 0）—— 见 app_screen.h */
     uint8_t rsv;
-} casc_id_rec_t;
+} app_casc_id_rec_t;
 
-_Static_assert(sizeof(casc_id_rec_t) == 4, "身份记录载荷必须是 4 字节");
+_Static_assert(sizeof(app_casc_id_rec_t) == 4, "身份记录载荷必须是 4 字节");
 
 static uint8_t s_id_cfg = 0xFF; /* 记录句柄（注册失败即 0xFF，本次上电不落盘） */
 
@@ -1003,7 +1003,7 @@ static uint8_t _id_dip(void)
 static void _id_save(uint8_t addr, uint8_t master_cell, uint8_t src)
 {
     if (s_id_cfg == 0xFF) return;
-    const casc_id_rec_t r = {
+    const app_casc_id_rec_t r = {
         .addr        = addr,
         .src         = src,
         .master_cell = master_cell,
@@ -1034,17 +1034,17 @@ static bool _id_set_local(uint8_t addr, uint8_t master_cell, uint8_t src, bool p
 /** @brief 解析身份：地址（`*mc` 带回记录里的主卡格） */
 static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
 {
-    *mc = (uint8_t)BOARD_CASCADE_MASTER_CELL; /* 默认：板级配置里那一格 */
+    *mc = (uint8_t)BOARD_CASC_MASTER_CELL; /* 默认：板级配置里那一格 */
 
     if (_id_dip_present()) {
         *src = 2;
         return _id_dip(); /* 每次现读：现场拨一下即生效 */
     }
 
-    casc_id_rec_t r;
+    app_casc_id_rec_t r;
     uint16_t      n = 0;
     if (s_id_cfg != 0xFF &&
-        app_cfg_sched_load(s_id_cfg, (uint8_t *)&r, sizeof(r), &n) == CFG_REC_OK &&
+        app_cfg_sched_load(s_id_cfg, (uint8_t *)&r, sizeof(r), &n) == DEV_CFG_RECORD_STATE_OK &&
         n == sizeof(r) && r.addr <= 0x1FU) {
         /* 标签只能报"**记录**"：`r.src` 是这条记录**当初被写下来时**的来源
            （认领写的是 3=识别帧），拿它当"这次从哪读的"会打出一句
@@ -1055,7 +1055,7 @@ static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
     }
 
     *src = 0;
-    return (uint8_t)BOARD_CASCADE_ADDR; /* 板级默认（= 从卡） */
+    return (uint8_t)BOARD_CASC_ADDR; /* 板级默认（= 从卡） */
 }
 
 /** @brief 上电：解析身份 → 应用 → 打印 */
@@ -1074,7 +1074,7 @@ static void _casc_id_boot(void)
 sw_app_initcall(_casc_id_boot);
 
 /** @brief 注册身份记录（`sw_dev(2)`：只为拿句柄；真正的读在 `_casc_id_boot` 惰性做） */
-static const cfg_sched_desc_t s_id_desc = {
+static const app_cfg_sched_desc_t s_id_desc = {
     .name    = "casc_id",
     .version = CASC_ID_REC_VERSION,
     .load    = NULL, /* 不在加载遍里应用身份：那条路早于 _screen_init，装不了门面 */
@@ -1105,32 +1105,32 @@ static uint32_t s_my_claim = 0xFFFFFFFFU;
  *  （源地址对不上，主卡永远超时）。 */
 static void _identity_poke(void)
 {
-    const screen_layout_t *L = app_screen_layout();
+    const app_screen_layout_t *L = app_screen_layout();
 
     for (uint8_t i = 0; i < L->count; i++) {
-        app_screen_card_set_state(i, SCREEN_CARD_MISSING); /* 重新枚举才知道谁在 */
+        app_screen_card_set_state(i, APP_SCREEN_CARD_STATE_MISSING); /* 重新枚举才知道谁在 */
         s_fail_run[i] = 0;                                 /* 旧的失败计数同样作废 */
     }
 
-    s_ping_left       = 0;
-    s_enum_deadline   = 0;
+    s_ping_left_cnt       = 0;
+    s_enum_deadline_tick   = 0;
     s_enum_verdict    = false;                  /* 运行期枚举，不必下"有没有卡"的判据 */
-    s_reenum_at       = osKernelGetTickCount(); /* 下一圈立刻开始枚举 */
-    s_force_round     = false;
-    s_ack.valid       = false;
-    s_bus_quiet_until = 0; /* 认领期间可能刚发过帧，别让自己再等 300ms */
+    s_reenum_at_tick       = osKernelGetTickCount(); /* 下一圈立刻开始枚举 */
+    s_force_round_flag     = false;
+    s_ack_state.valid       = false;
+    s_bus_quiet_until_tick = 0; /* 认领期间可能刚发过帧，别让自己再等 300ms */
 }
 
 /** @brief 收到识别帧：按 `mine`/`yours`/`master_cell`/`claim` 决定改不改自己的身份 */
-static void _cmd_set_addr(frame_msg_t *msg)
+static void _cmd_set_addr(app_dispatch_msg_t *msg)
 {
-    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(casc_set_addr_t))) return;
+    if (msg->data_len != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_set_addr_t))) return;
 
-    const casc_hdr_t      *h = (const casc_hdr_t *)msg->data;
-    const casc_set_addr_t *p = (const casc_set_addr_t *)(msg->data + sizeof(casc_hdr_t));
-    const uint16_t         seq = casc_get_u16(h->seq);
+    const app_casc_hdr_t      *h = (const app_casc_hdr_t *)msg->data;
+    const app_casc_set_addr_t *p = (const app_casc_set_addr_t *)(msg->data + sizeof(app_casc_hdr_t));
+    const uint16_t         seq = _casc_get_u16(h->seq);
 
-    const uint32_t claim = casc_get_u32(p->claim);
+    const uint32_t claim = _casc_get_u32(p->claim);
     const uint8_t  mine  = p->mine;
     const uint8_t  yours = p->yours;
     const uint8_t  mc    = p->master_cell;
@@ -1144,7 +1144,7 @@ static void _cmd_set_addr(frame_msg_t *msg)
        一张从卡（例如拨码≠0 的板子）按了键，不能把唯一的主卡降级。 */
     if (mine != CASC_ADDR_MASTER) {
         CASC_LOG("[casc] ← 识别帧来自非主卡（mine=%u），忽略\n", (unsigned)mine);
-        _nack(seq, CASC_NACK_ADDR, "对方不是主卡（mine!=0）");
+        _nack(seq, APP_CASC_NACK_ADDR, "对方不是主卡（mine!=0）");
         return;
     }
 
@@ -1162,7 +1162,7 @@ static void _cmd_set_addr(frame_msg_t *msg)
             if ((int32_t)(claim - s_my_claim) < 0) {
                 CASC_LOG("[casc] ← 对方的 claim=%ums 早于本卡，回绝（本卡留主卡）\n",
                          (unsigned)claim);
-                _nack(seq, CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
+                _nack(seq, APP_CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
                 return;
             }
             /* 该让到哪一格：**第一个不是主卡格的格**。两卡设备上这就是另一块屏 ✓；
@@ -1183,7 +1183,7 @@ static void _cmd_set_addr(frame_msg_t *msg)
                只回绝。两卡对同一对数做同一个比较，结论一致，不会两张都让。 */
             CASC_LOG("[casc] ← 对方的 claim=%ums 早于本卡，回绝（本卡留主卡）\n",
                      (unsigned)claim);
-            _nack(seq, CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
+            _nack(seq, APP_CASC_NACK_ADDR, "本卡按得更晚，主卡位归本卡");
             return;
         }
         new_addr = yours;
@@ -1192,11 +1192,11 @@ static void _cmd_set_addr(frame_msg_t *msg)
     /* ② 改成算出来的地址 + 新的主卡格并持久化。**哪怕原来就是主卡，收到也照改**
        （用户定的规则："谁被按谁主卡"）。有拨码的板子由 _id_set_local 拒绝 → NACK。 */
     if (!_id_set_local(new_addr, mc, 3U, true)) {
-        _nack(seq, CASC_NACK_ADDR, "本板有拨码，地址以拨码为准");
+        _nack(seq, APP_CASC_NACK_ADDR, "本板有拨码，地址以拨码为准");
         return;
     }
     _identity_poke();
-    (void)_send_seq(CASC_T_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
+    (void)_send_seq(APP_CASC_TYPE_ACK, CASC_ADDR_MASTER, seq, nullptr, 0);
 }
 
 /** @brief 认领之后：把"我是主卡、主卡格是 M"告诉其余每一张卡；返回收到 ACK 的卡数
@@ -1216,10 +1216,10 @@ static uint8_t _claim_notify_peers(const uint8_t *addr_old, uint8_t count)
 
     /* ---- ① 广播：谁在听谁自算（含"另一张自称主卡"的那张） ---- */
     {
-        casc_set_addr_t p = {.mine = CASC_ADDR_MASTER, .yours = CASC_ADDR_SELF_CALC,
+        app_casc_set_addr_t p = {.mine = CASC_ADDR_MASTER, .yours = CASC_ADDR_SELF_CALC,
                              .master_cell = mc};
-        casc_put_u32(p.claim, s_my_claim);
-        if (_send_seq(CASC_T_SET_ADDR, CASC_ADDR_BCAST, ++s_round_seq, &p, sizeof(p)) >= 0)
+        _casc_put_u32(p.claim, s_my_claim);
+        if (_send_seq(APP_CASC_TYPE_SET_ADDR, CASC_ADDR_BCAST, ++s_round_seq, &p, sizeof(p)) >= 0)
             ++ok; /* 广播只要发出去就算一份：它到得了谁，对端自己会 ACK/让位 */
     }
 
@@ -1233,25 +1233,25 @@ static uint8_t _claim_notify_peers(const uint8_t *addr_old, uint8_t count)
 
         const uint8_t dst = addr_old[i];
 
-        casc_set_addr_t p = {.mine = CASC_ADDR_MASTER,
+        app_casc_set_addr_t p = {.mine = CASC_ADDR_MASTER,
                              .yours = app_screen_addr_of_cell(i, mc), /* 新表里它在几号 */
                              .master_cell = mc};
-        casc_put_u32(p.claim, s_my_claim);
+        _casc_put_u32(p.claim, s_my_claim);
 
         for (uint8_t attempt = 0; attempt <= CASC_RETRY_MAX; attempt++) {
             const uint16_t seq = ++s_round_seq; /* 借用同一个序号源：ACK 按 (seq,src) 匹配 */
-            s_ack.valid        = false;
-            if (_send_seq(CASC_T_SET_ADDR, dst, seq, &p, sizeof(p)) < 0) break;
+            s_ack_state.valid        = false;
+            if (_send_seq(APP_CASC_TYPE_SET_ADDR, dst, seq, &p, sizeof(p)) < 0) break;
 
             /* 对端改完地址后用**新地址**回 ACK（它就是从这个 seq 上答的） */
             if (!_wait_ack(p.yours == CASC_ADDR_MASTER ? dst : p.yours, seq,
                            osKernelGetTickCount() + CASC_ACK_TIMEOUT_MS))
                 continue;
 
-            if (s_ack.sta == CASC_STA_NACK) {
+            if (s_ack_state.sta == CASC_STA_NACK) {
                 printf("[casc·主] 卡 %u 拒绝识别帧（err=%u）—— 要么它那块的拨码与切分表"
                        "对不上，要么它按得比本卡更晚\n",
-                       (unsigned)dst, (unsigned)s_ack.err);
+                       (unsigned)dst, (unsigned)s_ack_state.err);
             } else {
                 unicast_ok++;
             }
@@ -1271,9 +1271,9 @@ static void _claim_run(void)
     s_my_claim = osKernelGetTickCount();
 
     /* ---- 先把旧表抄下来：应用新身份之后，旧地址就查不到了 ---- */
-    uint8_t       addr_old[SCREEN_CARD_MAX] = {0};
+    uint8_t       addr_old[APP_SCREEN_CARD_MAX] = {0};
     const uint8_t count                     = app_screen_layout()->count;
-    for (uint8_t i = 0; i < count && i < SCREEN_CARD_MAX; i++)
+    for (uint8_t i = 0; i < count && i < APP_SCREEN_CARD_MAX; i++)
         addr_old[i] = app_screen_card(i)->addr;
 
     /* ---- 我这一格 = 新主卡格（**"谁被按谁主卡"的落点**） ---- */
@@ -1300,22 +1300,22 @@ static void _claim_run(void)
     (void)_claim_notify_peers(addr_old, count);
 }
 
-/** @brief 按键请求位（由 `app_cascade_claim_master` 置、`casc_task` 取） */
-static volatile bool s_claim_req;
+/** @brief 按键请求位（由 `app_casc_claim_master` 置、`_casc_task` 取） */
+static volatile bool s_claim_req_flag;
 
-void app_cascade_claim_master(void)
+void app_casc_claim_master(void)
 {
-    s_claim_req = true;
+    s_claim_req_flag = true;
 }
 
-/** @brief 取走按键请求并执行认领 —— `casc_task` 里那一格
+/** @brief 取走按键请求并执行认领 —— `_casc_task` 里那一格
  *
- *  **单独成函数**是为了能在 host 上测：`casc_task` 是死循环，用例没法进去看认领
+ *  **单独成函数**是为了能在 host 上测：`_casc_task` 是死循环，用例没法进去看认领
  *  到底做了什么（写记录、重装门面、逐卡通知）。 */
 static void _claim_poll(void)
 {
-    if (!s_claim_req) return;
-    s_claim_req = false;
+    if (!s_claim_req_flag) return;
+    s_claim_req_flag = false;
     _claim_run();
 }
 
@@ -1323,12 +1323,12 @@ static void _claim_poll(void)
  *  任务
  * ================================================================ */
 
-static void casc_task(void *argument)
+static void _casc_task(void *argument)
 {
     (void)argument;
 
     /* 上电先等 3 秒（从卡通常比主卡晚就绪），之后由"到点重新枚举"那条驱动 */
-    s_reenum_at = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
+    s_reenum_at_tick = osKernelGetTickCount() + CASC_BOOT_PING_DELAY_MS;
 
     for (;;) {
         /* 阻塞等第一条（超时取轮询周期而不是 osWaitForever：本任务还兼着周期活，
@@ -1339,50 +1339,50 @@ static void casc_task(void *argument)
 
         /* 上电枚举的收卷：到点报一句"有没有卡应答" —— 没有应答时后面那些
            "本轮未完成 / 等应答超时"是必然的，这里先把话说在前面，免得白查协议。 */
-        if (s_enum_deadline && (int32_t)(now - s_enum_deadline) >= 0) {
+        if (s_enum_deadline_tick && (int32_t)(now - s_enum_deadline_tick) >= 0) {
             if (s_enum_verdict)
             CASC_LOG("[casc·主] 上电枚举：%s\n",
-                     s_enum_seen ? "有卡应答（从卡在，链路通）"
+                     s_enum_seen_flag ? "有卡应答（从卡在，链路通）"
                                  : "连发多次 PING 都没有应答 —— 从卡没上电/没接 485/没烧这份"
                                    "固件，或总线方向与接线不对；后面那些「本轮未完成」都是必然的");
-            s_enum_deadline = 0;
+            s_enum_deadline_tick = 0;
         }
 
         /* 上电枚举：从卡通常比主卡晚就绪（等待各自的初始化），故延后 3 秒起发，
            没等到应答就再发 —— 见 CASC_PING_TRIES 的说明。
            运行期的重新枚举（拔插、掉线恢复）留到 P4。 */
-        if (app_screen_is_master() && !s_ping_left && s_enum_deadline == 0 &&
-            (int32_t)(now - s_reenum_at) >= 0) {
+        if (app_screen_is_master() && !s_ping_left_cnt && s_enum_deadline_tick == 0 &&
+            (int32_t)(now - s_reenum_at_tick) >= 0) {
             _enum_start(now);
         }
-        if (app_screen_is_master() && s_ping_left && (int32_t)(now - s_ping_next) >= 0) {
-            s_ping_left--;
-            s_enum_seen = false; /* 只认**这一轮**发出去之后的应答 */
+        if (app_screen_is_master() && s_ping_left_cnt && (int32_t)(now - s_ping_next_tick) >= 0) {
+            s_ping_left_cnt--;
+            s_enum_seen_flag = false; /* 只认**这一轮**发出去之后的应答 */
             /* 只在上电那次报：周期性重新枚举每 10 秒一次，报出来会把 RTT 缓冲冲掉，
                而那个信息本来也没用（PRESENT 那行说明了） */
-            if (s_enum_verdict) CASC_LOG("[casc·主] 枚举 PING（还剩 %u 次）\n", (unsigned)s_ping_left);
-            (void)app_cascade_ping();
+            if (s_enum_verdict) CASC_LOG("[casc·主] 枚举 PING（还剩 %u 次）\n", (unsigned)s_ping_left_cnt);
+            (void)app_casc_ping();
             /* 从卡马上会回 PRESENT —— 这段时间主卡不能再发别的（半双工） */
-            s_bus_quiet_until = now + CASC_BOOT_ALIGN_PING_GAP_MS;
-            s_ping_next       = now + CASC_PING_RETRY_MS;
-            if (!s_ping_left) _enum_finish(now); /* 次数用尽：不再等 */
+            s_bus_quiet_until_tick = now + CASC_BOOT_ALIGN_PING_GAP_MS;
+            s_ping_next_tick       = now + CASC_PING_RETRY_MS;
+            if (!s_ping_left_cnt) _enum_finish(now); /* 次数用尽：不再等 */
         }
         /* 收到应答就提前收尾，不必把重试次数耗完 */
-        if (app_screen_is_master() && s_ping_left && s_enum_seen) _enum_finish(now);
+        if (app_screen_is_master() && s_ping_left_cnt && s_enum_seen_flag) _enum_finish(now);
 
         /* 亮度待下发：光传感器每秒钟都可能改，这里把"变了"攒成一次广播。
            广播本身**不要求应答** —— 亮度差一帧不可见，且它天然是渐变量。
            "从卡永久停在旧亮度"的防线是 P3 起每一轮 SYNC_BEGIN 都带 bright 重新断言。 */
         uint8_t lv;
         if (app_screen_is_master() && app_screen_brightness_take_pending(&lv)) {
-            (void)app_cascade_broadcast_bright(lv);
+            (void)app_casc_broadcast_bright(lv);
         }
 
         /* ---- 按键认领主卡 ----
-         * 请求由 `app_cascade_claim_master()`（按键所在的任务）投递，实际动作在这里做：
+         * 请求由 `app_casc_claim_master()`（按键所在的任务）投递，实际动作在这里做：
          * 写身份记录、重装门面、逐卡通知。**不判主从** —— "谁被按谁主卡"里就包含
          * "本来是从卡、按一下变成主卡"这一半。 */
-        if (s_claim_req) {
+        if (s_claim_req_flag) {
             _claim_poll();
             now = osKernelGetTickCount(); /* 认领最长约 1s，后面按新时刻算 */
         }
@@ -1392,15 +1392,15 @@ static void casc_task(void *argument)
            静默期任务在多卡时不启动，见 app_screen.c 的 _screen_init）。
            单卡时整屏就是本卡自己，走那个任务更直接，这儿不成立。
            放在周期活之后：一轮约 130ms/卡，跑起来本任务就顾不上别的了。 */
-        /* 总线安静期内不开轮：见 s_bus_quiet_until 的说明。
+        /* 总线安静期内不开轮：见 s_bus_quiet_until_tick 的说明。
 
            **`app_screen_canvas_touched()` 是本轮的关键闸**：上电时画布上只有本卡
            那一块是从记录恢复来的、其余区域是空的 —— 这时候开轮就是把一张不全的
            画布推下去，把从卡刚恢复的内容刷黑。闸住之后：整机掉电重启 → 一轮都不开、
            各卡显示各自记录的内容；上位机一下发内容 → 画布被重画 → 正常同步整屏；
-           某张卡掉线回来时画布早被写过，`s_force_round` 照常补内容。 */
+           某张卡掉线回来时画布早被写过，`s_force_round_flag` 照常补内容。 */
         if (app_screen_is_master() && app_screen_layout()->count > 1 &&
-            (int32_t)(now - s_bus_quiet_until) >= 0) {
+            (int32_t)(now - s_bus_quiet_until_tick) >= 0) {
             if (_round_ready()) (void)_round_run();
         }
 #endif
@@ -1412,12 +1412,12 @@ static void casc_task(void *argument)
  *  注册
  * ================================================================ */
 
-static const pcb_ops_t s_casc_ops = {.probe = casc_probe_frame};
+static const app_pcb_ops_t s_casc_ops = {.probe = _casc_probe_frame};
 
-static void _cascade_init(void)
+static void _casc_init(void)
 {
-    pcb_t *p = &s_casc_pcb;
-    p->name        = "cascade";
+    app_pcb_t *p = &s_casc_pcb;
+    p->name        = "casc";
     p->ops         = &s_casc_ops;
     p->rb          = &s_casc_rb;
     /* 本协议最长的一帧 = 整块位图那一帧。队列元素按它定，见 CASC_QUEUE_DEPTH 的说明。 */
@@ -1432,11 +1432,11 @@ static void _cascade_init(void)
     /* 发送缓冲必须 DMA 可达（RS485 按这个在 DMA 与轮询之间二选一，见 app_rs485.c）。
        真被挪进 CCMRAM 也不会报错，只会静默退化成 124ms 的轮询发送 —— 所以在这里
        一次性地把它喊出来。 */
-    if (!pl_mem_is_dma_capable(s_tx, sizeof(s_tx))) {
+    if (!pl_mem_is_dma_capable(s_tx_buf, sizeof(s_tx_buf))) {
         printf("[casc] 发送缓冲不在 DMA 可达区（SRAM）—— 长帧会退化成轮询发送\n");
     }
 
-    rb_init(&s_casc_rb, "cascade");
+    rb_init(&s_casc_rb, "casc");
 
     /* 队列必须在 initcall 内建好，不能等任务启动 —— 否则有"向空队列投递"的窗口 */
     s_casc_queue = osMessageQueueNew(CASC_QUEUE_DEPTH, CASC_MSG_SIZE, &s_casc_queue_attr);
@@ -1446,15 +1446,15 @@ static void _cascade_init(void)
     }
     p->queue = s_casc_queue;
 
-    app_proto_bind(p, app_rs485_ccb());
+    app_dispatch_bind(p, app_rs485_ccb());
 
     const osThreadAttr_t attr = {
-        .name       = "cascade",
+        .name       = "casc",
         .stack_size = 384 * 4,
         .priority   = osPriorityNormal,
     };
-    pl_task_new(casc_task, nullptr, &attr);
+    pl_task_new(_casc_task, nullptr, &attr);
 }
-sw_post_initcall(_cascade_init);
+sw_post_initcall(_casc_init);
 
-#endif /* BOARD_CASCADE_ENABLED */
+#endif /* BOARD_CASC_ENABLED */

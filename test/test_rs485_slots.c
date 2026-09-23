@@ -5,7 +5,7 @@
  * **为什么需要这个测试**：这两条都是**静默**失效，现场表现为"突然什么都收不到了"，
  * 而寄存器、状态机、日志都看不出任何异常 —— 上机排查一轮的代价是几天。
  *
- *   1. **环回拆帧**：`uart_idle_handle` 在接收缓冲环回处会把一段拆成**两次背靠背的回调**
+ *   1. **环回拆帧**：`_uart_idle_handle` 在接收缓冲环回处会把一段拆成**两次背靠背的回调**
  *      （先交缓冲末尾那一截、再交开头那一截）。也就是"一次交付"最多同时占 2 个槽，
  *      而任务手上最多还握着 1 个 —— 槽位只有 2 个时**必然**丢掉后半段，整帧作废。
  *      实测：一条 1427 字节的帧跨过回绕点被拆成 1211 + 216，216 被丢，只能靠主卡重发。
@@ -13,7 +13,7 @@
  *      （超时 0），而 busy 位已经置上 —— 那个槽再没人会来取。漏够槽数就**永久哑掉**，
  *      且一声不响。实测日志里"某一段没有对应的交付行"就是它。
  *
- * 用例 TU-include 生产源码（`rs485_isr_cb` 与槽位都是 static），只把 HAL/总线换成替身；
+ * 用例 TU-include 生产源码（`_rs485_isr_fn` 与槽位都是 static），只把 HAL/总线换成替身；
  * 队列用**生产的那份属性**（`s_rs485_rx_attr`），所以缓冲定容写错也会被抓到。
  */
 
@@ -36,7 +36,7 @@ uint8_t _eccmram[1];
 
 /* ---- 替身：发送路径与通道启动 ----
  * 本套件只测**收包槽位**，但这些符号和被测函数在同一个 TU 里（gc-sections 不会
- * 把 rs485_send 摘掉 —— 它被 ops 表引用），所以得给出定义让整体编得过。 */
+ * 把 _rs485_send 摘掉 —— 它被 ops 表引用），所以得给出定义让整体编得过。 */
 int32_t pl_uart_send(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
     (void)h;
@@ -56,7 +56,7 @@ pl_uart_handle_t pl_uart_get_handle(uint8_t id)
     (void)id;
     return nullptr;
 }
-void pl_uart_set_rx_cb(pl_uart_handle_t h, pl_uart_rx_cb_t cb, void *ctx)
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx)
 {
     (void)h;
     (void)cb;
@@ -76,7 +76,7 @@ void *pl_task_new(void (*fn)(void *), void *arg, const osThreadAttr_t *attr)
     (void)attr;
     return nullptr;
 }
-void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *data, uint16_t len)
+void app_ccb_dispatch(const app_ccb_t *ccb, const app_ccb_src_t *src, const uint8_t *data, uint16_t len)
 {
     (void)ccb;
     (void)src;
@@ -91,17 +91,17 @@ void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *dat
  *  夹具
  * ================================================================ */
 
-static rs485_ccb_t s_self;
+static rs485_ccb_t s_self_ccb;
 
 static void fixture_reset(void)
 {
-    memset(&s_self, 0, sizeof(s_self));
+    memset(&s_self_ccb, 0, sizeof(s_self_ccb));
     s_slot_next = 0;
     s_slot_busy = 0;
 
     /* **走生产的那条建队列路径**（`_rx_queue_create`）：测试自己另建一个的话，
        生产里把深度改小了它也不会红 —— 那就是假信心。 */
-    s_self.rx_queue = _rx_queue_create();
+    s_self_ccb.rx_queue = _rx_queue_create();
 }
 
 /** @brief 一段可辨认的数据：第 k 段全是 k，抄错/串段立刻看得出来
@@ -114,7 +114,7 @@ static uint16_t feed_chunk(uint8_t tag, uint16_t len)
 
     if (len > sizeof(buf)) len = sizeof(buf);
     memset(buf, tag, len);
-    rs485_isr_cb(buf, len, &s_self);
+    _rs485_isr_fn(buf, len, &s_self_ccb);
     return len;
 }
 
@@ -122,7 +122,7 @@ static uint16_t feed_chunk(uint8_t tag, uint16_t len)
 static uint8_t take_slot(void)
 {
     rs485_rx_msg_t m = {0};
-    if (osMessageQueueGet(s_self.rx_queue, &m, nullptr, 0) != osOK) return 0xFF;
+    if (osMessageQueueGet(s_self_ccb.rx_queue, &m, nullptr, 0) != osOK) return 0xFF;
     return m.slot;
 }
 
@@ -135,7 +135,7 @@ static uint16_t take_and_release(uint8_t *tag_out)
 
     const uint16_t n = s_slots[slot].len;
     if (n) *tag_out = s_slots[slot].data[0];
-    s_slot_busy &= (uint8_t)~(1U << slot); /* 与 rs485_task 同序：交出去之后才释放 */
+    s_slot_busy &= (uint8_t)~(1U << slot); /* 与 _rs485_task 同序：交出去之后才释放 */
     return n;
 }
 

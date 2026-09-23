@@ -24,12 +24,12 @@ void app_test_pixel_scan(void)
             dev_display_set_pixel(dsp,
                                   i % dsp->screen_rows, /* 逐行 x */
                                   i / dsp->screen_rows, /* 逐列 y */
-                                  COLOR_GREEN);
+                                  DEV_DISPLAY_COLOR_GREEN);
             osDelay(50);
             dev_display_set_pixel(dsp,
                                   i % dsp->screen_rows,
                                   i / dsp->screen_rows,
-                                  COLOR_RED);
+                                  DEV_DISPLAY_COLOR_RED);
         }
     }
 }
@@ -40,22 +40,22 @@ void app_test_pixel_scan(void)
 
 void app_test_render_text(void)
 {
-    app_render(&(render_cfg_t){
-        .type  = RENDER_TEXT,
+    app_render(&(app_render_cfg_t){
+        .type  = APP_RENDER_TYPE_TEXT,
         .x     = 0,
         .y     = 0,
         .w     = app_screen_rows(),
         .h     = app_screen_cols(),
-        .style = &(render_style_t){
-            .h_align = ALIGN_CENTER,
-            .v_align = ALIGN_CENTER,
+        .style = &(app_render_style_t){
+            .h_align = APP_RENDER_ALIGN_CENTER,
+            .v_align = APP_RENDER_ALIGN_CENTER,
         },
-        .color     = COLOR_GREEN,
+        .color     = DEV_DISPLAY_COLOR_GREEN,
         .text      = "测试",
         .len       = strlen("测试"),
-        .font_size = FONT_16,
-        .font_type = FONT_HT,
-        .text_enc  = FONT_ENC_UTF8,
+        .font_size = APP_FONT_SIZE_16,
+        .font_type = APP_FONT_TYPE_HT,
+        .text_enc  = APP_FONT_ENC_UTF8,
     });
 }
 
@@ -85,7 +85,7 @@ void app_test_led_mapping(void)
                 uint16_t pos = px + ch * dsp->channel_pixels; /* hub75_buff 线性位置 */
 
                 /* 点亮当前像素*/
-                dsp->hub75_buff[pos] = COLOR_GREEN;
+                dsp->hub75_buff[pos] = DEV_DISPLAY_COLOR_GREEN;
                 osDelay(200);
             }
             /* 通道切换停顿，方便标记 */

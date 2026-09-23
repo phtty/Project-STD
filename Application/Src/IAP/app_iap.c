@@ -25,7 +25,7 @@
  * 实际写入**延迟到本任务里做**：内部 Flash 擦除会硬停总线，不该阻塞改 IP 的调用方。 */
 static volatile bool s_sync_pending = true; /* 初始 true：上电必须对账一次 */
 
-static void iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+static void _iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
 {
     (void)ip;
     (void)mask;
@@ -36,7 +36,7 @@ static void iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const u
 
 /* ---- proto_iap_queue 静态分配 ---- */
 #define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
-#define IAP_MSG_SIZE (sizeof(frame_msg_t) + IAP_PAYLOAD_MAX)
+#define IAP_MSG_SIZE (sizeof(app_dispatch_msg_t) + IAP_PAYLOAD_MAX)
 
 static StaticQueue_t s_iap_queue_cb;
 static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE] PL_CCMRAM;
@@ -55,9 +55,9 @@ static const osMessageQueueAttr_t s_iap_queue_attr = {
  * 本协议承载 RS485/RS232（DMA 单次可达 2048）与 UDP，故取 2112 = 2048 + 余量。 */
 RB_DEFINE_ATTR(s_iap_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 1044, 单次最大写入 2048 + 1) */
 
-static const pcb_ops_t s_iap_ops = {.probe = iap_probe_frame};
+static const app_pcb_ops_t s_iap_ops = {.probe = app_iap_probe_frame};
 
-static pcb_t s_iap_pcb = {
+static app_pcb_t s_iap_pcb = {
     .name        = "iap",
     .ops         = &s_iap_ops,
     .rb          = &s_iap_rb,
@@ -66,13 +66,13 @@ static pcb_t s_iap_pcb = {
 
 static_assert(IAP_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "IAP 最长帧超过框架暂存上限");
 
-pcb_t *app_iap_pcb(void)
+app_pcb_t *app_iap_pcb(void)
 {
     return &s_iap_pcb;
 }
 
 /* ---- 协议模块自注册 ---- */
-[[maybe_unused]] static void iap_module_init(void)
+[[maybe_unused]] static void _iap_module_init(void)
 {
     rb_init(&s_iap_rb, "iap");
 
@@ -83,26 +83,26 @@ pcb_t *app_iap_pcb(void)
 
     /* 绑定两块板都有的通道。板级特有的通道（如 3833024 的两路 RS232）不在这里绑：
        由各板的板级文件调 app_iap_pcb() 自行绑定，否则共享文件要认识每块板的外设。 */
-    app_proto_bind(&s_iap_pcb, app_rs485_ccb());
-    app_proto_bind(&s_iap_pcb, app_udp_ccb());
+    app_dispatch_bind(&s_iap_pcb, app_rs485_ccb());
+    app_dispatch_bind(&s_iap_pcb, app_udp_ccb());
 
     /* 注册 IP 变更监听：任何协议改 IP 都触发 IAP 记录的镜像同步 */
-    pl_net_register_ip_listener(iap_ip_change_cb);
+    pl_net_register_ip_listener(_iap_ip_change_cb);
 
     /* 创建协议处理任务 */
-    g_iap_task_handle = pl_task_new(iap_handle_task, nullptr, &iap_task_attr);
+    g_iap_task_handle = pl_task_new(app_iap_task, nullptr, &g_iap_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，移动源文件即改变，
    不能用同层顺序表达依赖。 */
-sw_post_initcall(iap_module_init);
+sw_post_initcall(_iap_module_init);
 
 const uint8_t frame_len[] = {0, 0, 4, 0, 1, 0, 0, 0};
 
 osMessageQueueId_t g_iap_msg_queue;
 osThreadId_t g_iap_task_handle;
-const osThreadAttr_t iap_task_attr = {
-    .name       = "iap_handle_task",
+const osThreadAttr_t g_iap_task_attr = {
+    .name       = "app_iap_task",
     .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
@@ -112,12 +112,12 @@ const osThreadAttr_t iap_task_attr = {
  * ================================================================ */
 
 /** @brief IAP 协议处理任务：阻塞等待帧队列 → 按 cmd 字段查表分派到命令处理函数 */
-void iap_handle_task(void *argument)
+void app_iap_task(void *argument)
 {
     (void)argument;
 
     static uint8_t _msg_buf[IAP_MSG_SIZE];
-    frame_msg_t *msg = (frame_msg_t *)_msg_buf;
+    app_dispatch_msg_t *msg = (app_dispatch_msg_t *)_msg_buf;
 
     for (;;) {
         /* 带超时地取帧：空闲窗口用来做 IAP 记录的镜像同步（延迟写，不阻塞改 IP 的调用方） */
@@ -129,7 +129,7 @@ void iap_handle_task(void *argument)
             continue;
         }
 
-        iap_frame_t *frame_data = (iap_frame_t *)msg->data;
+        app_iap_frame_t *frame_data = (app_iap_frame_t *)msg->data;
 
         /* 命令码由探针在投递当下从帧头解出并经 aux 带来，此处不必再解析一遍。
          *
@@ -147,12 +147,12 @@ void iap_handle_task(void *argument)
  * @brief   IAP 帧探测函数
  *
  * 检测 0x5A5A5A5A 帧头 → 校验 len 合法性 (<=256) → CRC32 验证 → 返回完整帧长度
- * @retval PCB_PROBE_READY  帧就绪
- * @retval PCB_PROBE_WAIT   数据不足
- * @retval PCB_PROBE_FAKE   伪帧头，跳过 1 字节重试
- * @retval PCB_PROBE_SKIP   帧长超出暂存区，无法校验，交由框架整帧跳过
+ * @retval APP_PCB_PROBE_STATE_READY  帧就绪
+ * @retval APP_PCB_PROBE_STATE_WAIT   数据不足
+ * @retval APP_PCB_PROBE_STATE_FAKE   伪帧头，跳过 1 字节重试
+ * @retval APP_PCB_PROBE_STATE_SKIP   帧长超出暂存区，无法校验，交由框架整帧跳过
  */
-pcb_probe_sta_t iap_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                 uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
                                 uint8_t *aux)
 {
@@ -162,22 +162,22 @@ pcb_probe_sta_t iap_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
     uint32_t available        = rb_avail(buff, nullptr);
 
     /* min size check */
-    if (available < 4) return PCB_PROBE_WAIT;
+    if (available < 4) return APP_PCB_PROBE_STATE_WAIT;
 
     /* frame header check */
     uint32_t head = 0;
     rb_peek(buff, 0, (uint8_t *)&head, 4, nullptr);
     if (head != FRAME_HEAD)
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
 
     /* payload len sanity check (protocol max 256) */
     uint32_t payload_len = 0;
     if (available >= (FRAME_LEN_OFFSET + 1) * 4) {
         rb_peek(buff, FRAME_LEN_OFFSET * 4, (uint8_t *)&payload_len, 4, nullptr);
         if (payload_len > 256)
-            return PCB_PROBE_FAKE;
+            return APP_PCB_PROBE_STATE_FAKE;
     } else {
-        return PCB_PROBE_WAIT;
+        return APP_PCB_PROBE_STATE_WAIT;
     }
 
     uint32_t full_bytes = (payload_len + FRAME_MIN_LEN) * 4;
@@ -188,27 +188,27 @@ pcb_probe_sta_t iap_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *
             uint32_t next_head = 0;
             rb_peek(buff, i, (uint8_t *)&next_head, 4, nullptr);
             if (next_head == FRAME_HEAD)
-                return PCB_PROBE_FAKE;
+                return APP_PCB_PROBE_STATE_FAKE;
         }
-        return PCB_PROBE_WAIT;
+        return APP_PCB_PROBE_STATE_WAIT;
     }
 
     /* 暂存区容量校验：payload_len 已被限制在 256，full_bytes 最大 1044 = 框架暂存上限。
        此处显式拦截是为了暂存区一旦被调小即在此拦下，而不是越界写。 */
     if (full_bytes > scratch_size) {
         *total_len = full_bytes;
-        return PCB_PROBE_SKIP;
+        return APP_PCB_PROBE_STATE_SKIP;
     }
 
-    /* CRC32 validation（scratch 由框架提供且 4 字节对齐，可直接按 iap_frame_t 访问）*/
+    /* CRC32 validation（scratch 由框架提供且 4 字节对齐，可直接按 app_iap_frame_t 访问）*/
     rb_peek_capped(buff, 0, scratch, scratch_size, nullptr);
-    iap_frame_t *ptemp = (iap_frame_t *)scratch;
+    app_iap_frame_t *ptemp = (app_iap_frame_t *)scratch;
 
     uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), scratch, (ptemp->len + 4) * 4);
     if (crc != ptemp->data_crc[ptemp->len])
-        return PCB_PROBE_FAKE;
+        return APP_PCB_PROBE_STATE_FAKE;
 
     *total_len = full_bytes;
     *aux       = ptemp->cmd & 0xFF;
-    return PCB_PROBE_READY;
+    return APP_PCB_PROBE_STATE_READY;
 }

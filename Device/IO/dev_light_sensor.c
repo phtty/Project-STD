@@ -11,14 +11,14 @@
 #define MEAN_PARAMETER 8
 #define STABLE_N       5U /* 连续 N 次算出的等级相同才应用 (抗毛刺/抖动) */
 
-void dev_light_sensor_init(light_sensor_dev_t *dev, dev_display_t *display)
+void dev_light_sensor_init(dev_light_sensor_dev_t *dev, dev_display_t *display)
 {
     dev->adc                 = pl_adc_get_handle();
     dev->display             = display;
     dev->auto_adjust_enabled = true; /* 静态实例零初始化, 必须显式置 true */
 }
 
-uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
+uint8_t dev_light_sensor_read(dev_light_sensor_dev_t *dev)
 {
     uint32_t temp_val = 0;
 
@@ -40,34 +40,34 @@ uint8_t dev_light_sensor_read(light_sensor_dev_t *dev)
     return level;
 }
 
-void dev_light_sensor_auto_adjust(light_sensor_dev_t *dev)
+void dev_light_sensor_auto_adjust(dev_light_sensor_dev_t *dev)
 {
     if (!dev->auto_adjust_enabled)
         return; /* 固定亮度模式: 暂停自动调光 */
 
-    static uint8_t applied_level = 0; /* 已应用的等级 */
-    static uint8_t cand_level    = 0; /* 候选等级 */
-    static uint8_t cand_cnt      = 0; /* 候选等级连续出现次数 */
+    static uint8_t s_applied_level = 0; /* 已应用的等级 */
+    static uint8_t s_cand_level    = 0; /* 候选等级 */
+    static uint8_t s_cand_cnt      = 0; /* 候选等级连续出现次数 */
 
     uint8_t new_light = dev_light_sensor_read(dev);
 
     /* 连续 STABLE_N 次算出同一等级才算稳定 */
-    if (new_light == cand_level) {
-        if (cand_cnt < STABLE_N)
-            cand_cnt++;
+    if (new_light == s_cand_level) {
+        if (s_cand_cnt < STABLE_N)
+            s_cand_cnt++;
     } else {
-        cand_level = new_light;
-        cand_cnt   = 1;
+        s_cand_level = new_light;
+        s_cand_cnt   = 1;
     }
 
     /* light_level 被外部改写(固定亮度后恢复跟随)时跳过稳定门槛, 立即生效 */
-    bool external = (dev->display->light_level != applied_level);
+    bool external = (dev->display->light_level != s_applied_level);
 
-    if ((cand_cnt >= STABLE_N || external) && new_light != applied_level) {
+    if ((s_cand_cnt >= STABLE_N || external) && new_light != s_applied_level) {
         if (dev->apply)
             dev->apply(dev->apply_ctx, new_light);
         else
             dev->display->light_level = new_light;
-        applied_level = new_light;
+        s_applied_level = new_light;
     }
 }

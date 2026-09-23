@@ -1,6 +1,6 @@
 #include "bcc_utils.h"
 
-uint8_t bcc_calcu(const uint8_t data[], uint16_t len)
+uint8_t bcc_calc(const uint8_t data[], uint16_t len)
 {
     uint8_t bcc = 0;
 

@@ -1,10 +1,9 @@
-#ifndef PL_ETH_MAC_H
-#define PL_ETH_MAC_H
+#pragma once
 
 #include "lwip/err.h"
 #include "lwip/netif.h"
 #include "cmsis_os.h"
-#include "pl_gpio.h" /* pl_port_t（板级引脚表用） */
+#include "pl_gpio.h" /* pl_gpio_port_t（板级引脚表用） */
 
 /** @brief 链路状态（Platform 层抽象，隔离具体 PHY 型号的状态码） */
 typedef enum {
@@ -30,7 +29,7 @@ typedef pl_eth_link_state_t (*pl_phy_link_fn_t)(void);
  * 引脚号在 CubeMX 的 main.h 里没有标签（本工程不再重新生成 CubeMX 代码），
  * 故板级表直接写端口与引脚号。 */
 typedef struct {
-    pl_port_t port;      /**< 该组引脚所在端口 */
+    pl_gpio_port_t port;      /**< 该组引脚所在端口 */
     uint16_t  pins;      /**< 该组的引脚掩码，可多脚同组 */
     uint8_t   alternate; /**< 复用功能编号 */
 } pl_eth_pin_grp_t;
@@ -42,9 +41,9 @@ extern const uint8_t          g_pl_eth_pin_grp_count;
 void pl_eth_mac_hw_init(void);
 
 /* ---- ETH MAC 暴露给 Device 层的接口 ---- */
-err_t ethernetif_init(struct netif *netif);
-void  ethernetif_input(void *argument);
-void  ethernet_link_thread(void *argument);
+err_t pl_eth_netif_init(struct netif *netif);
+void  pl_eth_netif_input(void *argument);
+void  pl_eth_link_task(void *argument);
 void  Error_Handler(void);
 u32_t sys_jiffies(void);
 u32_t sys_now(void);
@@ -58,5 +57,3 @@ int32_t pl_eth_phy_io_get_tick(void);
 
 /* ---- 链路状态回调注册（Device 层 PHY 初始化后调用）---- */
 void pl_eth_set_phy_link_fn(pl_phy_link_fn_t fn);
-
-#endif

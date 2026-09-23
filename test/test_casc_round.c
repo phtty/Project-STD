@@ -1,5 +1,5 @@
 /**
- * @file    test_cascade_round.c
+ * @file    test_casc_round.c
  * @brief   级联图传 · **从卡侧**：收一条 IMAGE → 校验 → 落屏 → 回 ACK/NACK
  *
  * **为什么需要这个测试**：从卡这一侧错了，现场看到的是"某块屏上是别的内容"或
@@ -14,7 +14,7 @@
  *   3. **回带的 seq 不是主卡发来的那个**——主卡的等待循环按 (seq, src) 匹配，
  *      从卡若回自己的计数器，表现是"每张卡都超时"，而两侧日志都看不出问题。
  *
- * 用例走的是**真探针 + 真分派表**（`casc_probe_frame` → `g_casc_cmd[]`），
+ * 用例走的是**真探针 + 真分派表**（`_casc_probe_frame` → `s_casc_cmd_table[]`），
  * 只有总线与 app_screen 是替身；帧由用例独立构造，不复用被测的 `_build`。
  */
 
@@ -23,11 +23,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#define BOARD_CASC_ENABLED 1 /* 本套件测级联，强制编进来（必须早于会拉进 board.h 的头）*/
+
 /* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
 #include "app_cfg_sched.h"
 #include "dev_key.h"
-#define BOARD_CASCADE_ENABLED 1 /* 本套件测级联，强制编进来 */
-#include "app_cascade.h"
+#include "app_casc.h"
 #include "app_screen.h"
 #include "dev_display.h"
 #include "ring_buffer.h"
@@ -50,19 +51,19 @@ static void order_push(char c)
     if (s_order_n < (int)sizeof(s_order)) s_order[s_order_n++] = c;
 }
 
-int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+int32_t app_ccb_send(app_ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
     if (l <= sizeof(s_tx_frame)) {
         memcpy(s_tx_frame, d, l);
         s_tx_len = l;
     }
-    if (l >= CASC_OVERHEAD && CASC_TYPE_OF(d[2]) == CASC_T_ACK) order_push('A');
+    if (l >= CASC_OVERHEAD && CASC_TYPE_OF(d[2]) == APP_CASC_TYPE_ACK) order_push('A');
     s_tx_count++;
     return (int32_t)l;
 }
-ccb_t *app_rs485_ccb(void) { return nullptr; }
-void   app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }
+app_ccb_t *app_rs485_ccb(void) { return nullptr; }
+void   app_dispatch_bind(app_pcb_t *p, app_ccb_t *c) { (void)p; (void)c; }
 void   pl_task_new_stub(void) {}
 
 /* 本卡身份：默认是**从卡**（addr=1）。case_master_ignores 会临时翻过来。 */
@@ -101,8 +102,8 @@ bool    app_screen_brightness_take_pending(uint8_t *l)
     return false;
 }
 uint8_t app_screen_index_of_addr(uint8_t a) { (void)a; return 0xFF; }
-screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return SCREEN_CARD_ONLINE; }
-void app_screen_card_set_state(uint8_t i, screen_card_state_t st) { (void)i; (void)st; }
+app_screen_card_state_t app_screen_card_state(uint8_t i) { (void)i; return APP_SCREEN_CARD_STATE_ONLINE; }
+void app_screen_card_set_state(uint8_t i, app_screen_card_state_t st) { (void)i; (void)st; }
 void app_screen_note_round(uint16_t seq) { (void)seq; }
 void app_screen_note_retrans(void) {}
 
@@ -110,11 +111,11 @@ void app_screen_note_retrans(void) {}
 void    app_screen_set_addr(uint8_t a) { (void)a; }
 void    app_screen_reinit_identity(void) {}
 bool    app_screen_canvas_touched(void) { return false; }
-uint8_t app_cfg_sched_register(const cfg_sched_desc_t *d) { (void)d; return 0xFF; }
-cfg_rec_sta_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
+uint8_t app_cfg_sched_register(const app_cfg_sched_desc_t *d) { (void)d; return 0xFF; }
+dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
 {
     (void)id; (void)p; (void)c; (void)l;
-    return CFG_REC_EMPTY; /* "没有记录" → 身份回落到板级默认 */
+    return DEV_CFG_RECORD_STATE_EMPTY; /* "没有记录" → 身份回落到板级默认 */
 }
 int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
 {
@@ -122,7 +123,7 @@ int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
     return 0;
 }
 dev_key_t *dev_key_get(dev_key_id_t id) { (void)id; return nullptr; } /* 两侧都没有拨码 */
-const screen_layout_t *app_screen_layout(void) { return nullptr; }
+const app_screen_layout_t *app_screen_layout(void) { return nullptr; }
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
 static int s_save_calls;
 void       app_render_save(void)
@@ -151,26 +152,26 @@ dev_display_t *dev_display_get(void) { return &s_dev; }
 
 /* 本卡切分表：一张卡，就是本卡自己。用例可以改它来构造"切分表不符"。
    `app_screen_self_index()` 返回 0xFF 表示"本卡地址不在切分表里"（配置错）。 */
-static screen_card_t s_self_card = {.addr  = 1,
-                                    .color = COLOR_GREEN,
+static app_screen_card_t s_self_card = {.addr  = 1,
+                                    .color = DEV_DISPLAY_COLOR_GREEN,
                                     .x     = 0,
                                     .y     = 0,
                                     .w     = DEV_W,
                                     .h     = DEV_H,
-                                    .state = SCREEN_CARD_ONLINE};
+                                    .state = APP_SCREEN_CARD_STATE_ONLINE};
 static uint8_t       s_self_idx  = 0;
 
-const screen_card_t *app_screen_card(uint8_t idx) { return (idx == 0) ? &s_self_card : nullptr; }
+const app_screen_card_t *app_screen_card(uint8_t idx) { return (idx == 0) ? &s_self_card : nullptr; }
 uint8_t              app_screen_self_index(void) { return s_self_idx; }
 
 uint16_t app_screen_card_bm_len(uint8_t idx)
 {
-    const screen_card_t *c = app_screen_card(idx);
+    const app_screen_card_t *c = app_screen_card(idx);
     return c ? (uint16_t)(((c->w + 7U) / 8U) * c->h) : 0;
 }
 
 /* ---- 被测：生产源码本体（探针与分派表都是 static） ---- */
-#include "../Application/Src/CASCADE/app_cascade.c"
+#include "../Application/Src/CASC/app_casc.c"
 
 /* ================================================================
  *  夹具
@@ -178,8 +179,8 @@ uint16_t app_screen_card_bm_len(uint8_t idx)
 
 RB_DEFINE(s_rb, 4096);
 
-static uint8_t s_msg_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
-static frame_msg_t *s_msg = (frame_msg_t *)s_msg_buf;
+static uint8_t s_msg_buf[sizeof(app_dispatch_msg_t) + FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
+static app_dispatch_msg_t *s_msg = (app_dispatch_msg_t *)s_msg_buf;
 
 #define BMP_LEN (96U) /* ceil(48/8) × 16 */
 #define SEQ     (7U)
@@ -217,13 +218,13 @@ static void fixture_reset(void)
     memset(s_pixel_map, 0, sizeof(s_pixel_map));
 
     s_self_idx  = 0;
-    s_self_card = (screen_card_t){.addr  = 1,
-                                  .color = COLOR_GREEN,
+    s_self_card = (app_screen_card_t){.addr  = 1,
+                                  .color = DEV_DISPLAY_COLOR_GREEN,
                                   .x     = 0,
                                   .y     = 0,
                                   .w     = DEV_W,
                                   .h     = DEV_H,
-                                  .state = SCREEN_CARD_ONLINE};
+                                  .state = APP_SCREEN_CARD_STATE_ONLINE};
 
     bmp_pattern();
 }
@@ -238,10 +239,10 @@ static bool feed(const uint8_t *f, uint16_t len)
 
     uint32_t        tl  = 0;
     uint8_t         aux = 0;
-    pcb_probe_sta_t st =
-        casc_probe_frame(&s_casc_pcb, nullptr, nullptr, s_msg->data, FRAME_DATA_MAX_LEN, &tl, &aux);
+    app_pcb_probe_state_t st =
+        _casc_probe_frame(&s_casc_pcb, nullptr, nullptr, s_msg->data, FRAME_DATA_MAX_LEN, &tl, &aux);
 
-    if (st != PCB_PROBE_READY) {
+    if (st != APP_PCB_PROBE_STATE_READY) {
         rb_skip(&s_rb, 1, nullptr); /* 伪帧：与框架一样跳 1 字节重试 */
         return false;
     }
@@ -251,7 +252,7 @@ static bool feed(const uint8_t *f, uint16_t len)
     s_msg->aux      = aux;
     s_msg->ccb      = nullptr;
 
-    if (aux <= CASC_TYPE_MASK && g_casc_cmd[aux]) g_casc_cmd[aux](s_msg);
+    if (aux <= CASC_TYPE_MASK && s_casc_cmd_table[aux]) s_casc_cmd_table[aux](s_msg);
     return true;
 }
 
@@ -268,12 +269,12 @@ static uint16_t build(uint8_t *out, uint8_t type, uint16_t seq, const void *payl
     out[2] = (uint8_t)((CASC_PROTO_VER << 6) | type);
     out[3] = 1;                /* dst = 本卡（addr 1） */
     out[4] = CASC_ADDR_MASTER; /* src = 主卡 */
-    casc_put_u16(out + 5, seq);
+    _casc_put_u16(out + 5, seq);
     out[7] = 0; /* 保留字段 */
     out[8] = 0;
-    casc_put_u16(out + 9, len);
+    _casc_put_u16(out + 9, len);
     if (plen) memcpy(out + 11, payload, plen);
-    casc_put_u32(out + len - 4U, pl_crc32_calc(pl_crc_get_handle(), out + 2, len - 6U));
+    _casc_put_u32(out + len - 4U, pl_crc32_calc(pl_crc_get_handle(), out + 2, len - 6U));
     return len;
 }
 
@@ -284,20 +285,20 @@ static uint16_t image_payload(uint8_t *out, uint16_t x, uint16_t y, uint16_t w, 
                               uint16_t bmp_len, uint8_t bright, uint8_t color, const uint8_t *bmp,
                               uint8_t persist)
 {
-    casc_image_t *p = (casc_image_t *)out;
+    app_casc_image_t *p = (app_casc_image_t *)out;
     memset(p, 0, sizeof(*p));
 
-    casc_put_u16(p->x, x);
-    casc_put_u16(p->y, y);
-    casc_put_u16(p->w, w);
-    casc_put_u16(p->h, h);
-    casc_put_u16(p->bmp_len, bmp_len);
+    _casc_put_u16(p->x, x);
+    _casc_put_u16(p->y, y);
+    _casc_put_u16(p->w, w);
+    _casc_put_u16(p->h, h);
+    _casc_put_u16(p->bmp_len, bmp_len);
     p->bright  = bright;
     p->color   = color;
     p->persist = persist;
 
     if (bmp) memcpy(p->bitmap, bmp, BMP_LEN);
-    return (uint16_t)(sizeof(casc_image_t) + bmp_len);
+    return (uint16_t)(sizeof(app_casc_image_t) + bmp_len);
 }
 
 /** @brief 组一条 IMAGE 并喂进去（带 persist 的那一版）
@@ -313,7 +314,7 @@ static void feed_image_p(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint1
     static uint8_t fr[CASC_FRAME_MAX];
 
     const uint16_t plen = image_payload(pl, x, y, w, h, bmp_len, bright, color, bmp, persist);
-    const uint16_t n    = build(fr, CASC_T_IMAGE, seq, pl, (uint16_t)(plen + len_delta));
+    const uint16_t n    = build(fr, APP_CASC_TYPE_IMAGE, seq, pl, (uint16_t)(plen + len_delta));
     feed(fr, n);
 }
 
@@ -326,7 +327,7 @@ static void feed_image(uint16_t seq, uint16_t x, uint16_t y, uint16_t w, uint16_
 /** @brief 发一条正常的 IMAGE（本夹具的几何、位图、颜色） */
 static void send_image(uint16_t seq, uint8_t bright)
 {
-    feed_image(seq, 0, 0, DEV_W, DEV_H, BMP_LEN, bright, COLOR_GREEN, s_bmp, 0);
+    feed_image(seq, 0, 0, DEV_W, DEV_H, BMP_LEN, bright, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
 }
 
 /* ---- 收到的应答 ---- */
@@ -336,7 +337,7 @@ static bool last_is(uint8_t type)
     return s_tx_len >= CASC_OVERHEAD && CASC_TYPE_OF(s_tx_frame[2]) == type;
 }
 /** @brief 最近一条应答回带的 seq（从帧头读，不是载荷） */
-static uint16_t last_seq(void) { return casc_get_u16(s_tx_frame + 5); }
+static uint16_t last_seq(void) { return _casc_get_u16(s_tx_frame + 5); }
 /** @brief 最近一条 NACK 的 err；帧头 11 字节之后就是它 */
 static uint8_t last_nack_err(void) { return s_tx_frame[11]; }
 
@@ -372,10 +373,10 @@ static void case_image_ok(void)
     CHECK_MSG(s_commit_len == BMP_LEN, "落屏长度应为 %u，得到 %u", (unsigned)BMP_LEN,
               (unsigned)s_commit_len);
     CHECK_MSG(memcmp(s_commit_bm, s_bmp, BMP_LEN) == 0, "落屏内容与发出去的不一致");
-    CHECK_MSG(s_commit_color == COLOR_GREEN, "落屏颜色应取 IMAGE 里的本卡颜色，得到 %u",
+    CHECK_MSG(s_commit_color == DEV_DISPLAY_COLOR_GREEN, "落屏颜色应取 IMAGE 里的本卡颜色，得到 %u",
               (unsigned)s_commit_color);
 
-    CHECK_MSG(last_is(CASC_T_ACK), "应回一帧 ACK");
+    CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "应回一帧 ACK");
     CHECK_MSG(s_tx_len == CASC_OVERHEAD, "ACK 应无载荷（整帧 %u 字节），得到 %u",
               (unsigned)CASC_OVERHEAD, (unsigned)s_tx_len);
 }
@@ -392,7 +393,7 @@ static void case_image_idempotent(void)
     CHECK_MSG(s_commit_count == 2, "两次应各落屏一次（内容相同，无副作用），得到 %d 次",
               s_commit_count);
     CHECK_MSG(memcmp(s_commit_bm, s_bmp, BMP_LEN) == 0, "第二次落屏的内容仍应与发出去的一致");
-    CHECK_MSG(last_is(CASC_T_ACK), "第二次仍应回 ACK");
+    CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "第二次仍应回 ACK");
 }
 
 /** ACK 必须回带**主卡发来的那个 seq** —— 回自己的计数器会让主卡永远匹配不上 */
@@ -403,7 +404,7 @@ static void case_ack_echoes_seq(void)
     fixture_reset();
     send_image(0x1234, 4);
 
-    CHECK_MSG(last_is(CASC_T_ACK), "应回 ACK");
+    CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "应回 ACK");
     CHECK_MSG(last_seq() == 0x1234, "ACK 应回带 0x1234，得到 0x%04X", (unsigned)last_seq());
 }
 
@@ -413,10 +414,10 @@ static void case_len_mismatch_nack(void)
     TEST_BEGIN("帧长与 bmp_len 不符 → NACK(LEN)，不落屏");
 
     fixture_reset();
-    feed_image(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, -1);
+    feed_image(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, -1);
 
-    CHECK_MSG(last_is(CASC_T_NACK), "帧长不符应回 NACK（跨版本固件的第一道防线）");
-    CHECK_MSG(last_nack_err() == CASC_NACK_LEN, "NACK 原因应为 LEN，得到 %u",
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK), "帧长不符应回 NACK（跨版本固件的第一道防线）");
+    CHECK_MSG(last_nack_err() == APP_CASC_NACK_LEN, "NACK 原因应为 LEN，得到 %u",
               (unsigned)last_nack_err());
     CHECK_MSG(s_commit_count == 0, "帧长不符时绝不能落屏");
 }
@@ -428,15 +429,15 @@ static void case_geometry_nack(void)
 
     /* 尺寸不符 */
     fixture_reset();
-    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0);
-    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "尺寸不符应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
     CHECK_MSG(s_commit_count == 0, "几何不符时绝不能落屏");
 
     /* 尺寸对但**位置**不对：切分表不一致的典型形态（格子一样大、谁占哪格相反） */
     fixture_reset();
-    feed_image(SEQ, 0, (uint16_t)(DEV_H + 1U), DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0);
-    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+    feed_image(SEQ, 0, (uint16_t)(DEV_H + 1U), DEV_W, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "y 偏移不符也应回 NACK(GEOM) —— 这才是「两块屏内容互换」的那条防线");
     CHECK_MSG(s_commit_count == 0, "位置不符时绝不能落屏");
 
@@ -444,7 +445,7 @@ static void case_geometry_nack(void)
     fixture_reset();
     s_self_idx = 0xFF;
     send_image(SEQ, 4);
-    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "本卡地址不在切分表里应回 NACK(GEOM)");
     CHECK_MSG(s_commit_count == 0, "配置错时绝不能落屏");
 }
@@ -457,9 +458,9 @@ static void case_bmp_len_nack(void)
     fixture_reset();
     /* 声明 BMP_LEN+8，就真带 BMP_LEN+8 字节 —— 这样整帧长度是**自洽**的，
        只有"与本卡矩形算出来的长度不符"这一条能拦住它 */
-    feed_image(SEQ, 0, 0, DEV_W, DEV_H, (uint16_t)(BMP_LEN + 8U), 4, COLOR_GREEN, s_bmp, 0);
+    feed_image(SEQ, 0, 0, DEV_W, DEV_H, (uint16_t)(BMP_LEN + 8U), 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
 
-    CHECK_MSG(last_is(CASC_T_NACK) && last_nack_err() == CASC_NACK_GEOM,
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "bmp_len 不符应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
     CHECK_MSG(s_commit_count == 0, "bmp_len 不符时绝不能落屏");
 }
@@ -482,7 +483,7 @@ static void case_bright_asserted(void)
 
     /* 亮度断言在**参数校验之后**：几何不符时不改屏上任何东西 */
     fixture_reset();
-    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 6, COLOR_GREEN, s_bmp, 0);
+    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 6, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
     CHECK_MSG(s_bright_calls == 0, "被 NACK 的 IMAGE 不该改亮度");
 }
 
@@ -509,16 +510,16 @@ static void case_master_ignores(void)
  *  **反向验证**：把 `_cmd_image` 末尾那句 `if (p->persist) app_render_save()` 挪到
  *  回 ACK **之前**，本用例立刻红（"ACK 必须在落盘之前"）。
  *
- *  内容是否与上次一致、要不要真擦写由 cfg_record 那一层去重，不属于本套件。 */
+ *  内容是否与上次一致、要不要真擦写由 dev_cfg_record 那一层去重，不属于本套件。 */
 static void case_persist_slave_acks_before_saving(void)
 {
     TEST_BEGIN("IMAGE 带 persist → 先 ACK、后落盘（一次）");
 
     fixture_reset();
-    feed_image_p(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0, /*persist=*/1);
+    feed_image_p(SEQ, 0, 0, DEV_W, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0, /*persist=*/1);
 
     CHECK_MSG(s_commit_count == 1, "带 persist 的一轮照样要落屏，得到 %d 次", s_commit_count);
-    CHECK_MSG(last_is(CASC_T_ACK), "带 persist 的一轮必须回 ACK");
+    CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "带 persist 的一轮必须回 ACK");
     CHECK_MSG(s_save_calls == 1, "persist=1 应从卡落盘一次，得到 %d 次", s_save_calls);
     CHECK_MSG(s_order_n == 2 && s_order[0] == 'A' && s_order[1] == 'S',
               "ACK 必须在落盘之前（否则主卡每轮都超时重发）；实测顺序 %c%c",
@@ -527,12 +528,12 @@ static void case_persist_slave_acks_before_saving(void)
     /* 不带 persist：一次都不许写（flash 每扇区约 10 万次擦写，内容却可能几秒一变） */
     fixture_reset();
     send_image(SEQ, 4);
-    CHECK_MSG(last_is(CASC_T_ACK), "不带 persist 的一轮同样要回 ACK");
+    CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "不带 persist 的一轮同样要回 ACK");
     CHECK_MSG(s_save_calls == 0, "persist=0 时不该落盘，得到 %d 次", s_save_calls);
 
     /* 被拒绝的一轮更不该落盘（它连屏都没落） */
     fixture_reset();
-    feed_image_p(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, COLOR_GREEN, s_bmp, 0, 1);
+    feed_image_p(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0, 1);
     CHECK_MSG(s_save_calls == 0, "被 NACK 的一轮不该落盘，得到 %d 次", s_save_calls);
 }
 

@@ -10,7 +10,7 @@
 #include "app_screen.h"
 #include "pl_task.h"
 
-static light_sensor_dev_t s_sensor_dev;
+static dev_light_sensor_dev_t s_sensor_dev;
 osThreadId_t g_light_sensor_task_handle;
 
 void app_light_sensor_task(void *argument)

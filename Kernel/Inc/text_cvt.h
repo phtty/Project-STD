@@ -2,23 +2,23 @@
 
 #include <stdint.h>
 
-/*  ÊÇ·ñÆôÓÃUTF8¡¢GBK¡¢UNICODE±àÂëÖ®¼äµÄ×ª»»
-    ×¢Òâ£ºunicode±àÂë±íÕ¼ÓÃ´ó£¬Èô×ÊÔ´ÊÜÏŞ£¬½¨ÒéÓÅ»¯ff_convertº¯Êı£¬½«±àÂë±í·Åµ½SD¿¨»òÕßFLASHÖĞ
+/*  æ˜¯å¦å¯ç”¨UTF8ã€GBKã€UNICODEç¼–ç ä¹‹é—´çš„è½¬æ¢
+    æ³¨æ„ï¼šunicodeç¼–ç è¡¨å ç”¨å¤§ï¼Œè‹¥èµ„æºå—é™ï¼Œå»ºè®®ä¼˜åŒ–ff_convertå‡½æ•°ï¼Œå°†ç¼–ç è¡¨æ”¾åˆ°SDå¡æˆ–è€…FLASHä¸­
 */
-#define TEXTCODEC_ENABLE 1
+#define CVT_TEXTCODEC_ENABLE 1
 
-uint8_t chr2hex(uint8_t chr);
-uint8_t hex2chr(uint8_t hex);
-void HexToStr(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void StrToHex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize);
+uint8_t cvt_chr_to_hex(uint8_t chr);
+uint8_t cvt_hex_to_chr(uint8_t hex);
+void cvt_hex_to_str(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_str_to_hex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize);
 
-#if (TEXTCODEC_ENABLE == 1)
+#if (CVT_TEXTCODEC_ENABLE == 1)
 
-void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void UnicodeToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
-void UnicodeToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_gbk_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_utf8_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_gbk_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_unicode_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_utf8_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
+void cvt_unicode_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
 
 #endif

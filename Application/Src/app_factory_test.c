@@ -5,15 +5,15 @@
 
 #include "app_factory_test.h"
 
-#include "board.h" /* BOARD_CASCADE_ENABLED —— 必须先于下面的条件包含 */
+#include "board.h" /* BOARD_CASC_ENABLED —— 必须先于下面的条件包含 */
 
 #include <string.h>
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
 #include "dev_key.h"
-#if BOARD_CASCADE_ENABLED
-#include "app_cascade.h" /* 首次按键时认领主卡（单卡板不引：那一档没有级联） */
+#if BOARD_CASC_ENABLED
+#include "app_casc.h" /* 首次按键时认领主卡（单卡板不引：那一档没有级联） */
 #endif
 #include "app_render.h"
 #include "app_screen.h" /* app_screen_rows/cols：渲染要用**逻辑屏**几何，不是实屏 */
@@ -24,31 +24,31 @@
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
 #define PROGRAM_CODE "9210209C41"
 
-static const display_color_t s_dead_pixel_colors[] = {
-    COLOR_RED,
-    COLOR_GREEN,
-    COLOR_YELLOW,
+static const dev_display_color_t s_dead_pixel_colors[] = {
+    DEV_DISPLAY_COLOR_RED,
+    DEV_DISPLAY_COLOR_GREEN,
+    DEV_DISPLAY_COLOR_YELLOW,
 };
 #define DEAD_PIXEL_COLOR_COUNT (sizeof(s_dead_pixel_colors) / sizeof(s_dead_pixel_colors[0]))
 
-static const font_size_t s_aging_sizes[] = {
-    FONT_16,
-    FONT_24,
-    FONT_32,
+static const app_font_size_t s_aging_sizes[] = {
+    APP_FONT_SIZE_16,
+    APP_FONT_SIZE_24,
+    APP_FONT_SIZE_32,
 };
-static const font_type_t s_aging_types[] = {
-    FONT_ST,
-    FONT_FS,
-    FONT_KT,
-    FONT_HT,
+static const app_font_type_t s_aging_types[] = {
+    APP_FONT_TYPE_ST,
+    APP_FONT_TYPE_FS,
+    APP_FONT_TYPE_KT,
+    APP_FONT_TYPE_HT,
 };
 #define AGING_SIZE_COUNT (sizeof(s_aging_sizes) / sizeof(s_aging_sizes[0]))
 #define AGING_TYPE_COUNT (sizeof(s_aging_types) / sizeof(s_aging_types[0]))
 
-osThreadId_t g_factory_test;
+static osThreadId_t s_factory_test_task_handle;
 
 /** 工厂测试是否正在进行（IDLE 之外的所有阶段）。
- *  置位/清零都在 factory_monitor_task 内，app_factory_mode_interrupt 只读它 ——
+ *  置位/清零都在 _factory_monitor_task 内，app_factory_mode_interrupt 只读它 ——
  *  用它把"每收一包数据"的路径挡在 osThreadTerminate 之外。 */
 static volatile bool s_factory_active;
 
@@ -60,15 +60,15 @@ static volatile bool s_factory_active;
  *  两处调用点（SHOW_CODE、老化逐字）都是这个写法。 */
 static void _clear_screen(void)
 {
-    app_render(&(render_cfg_t){
-        .type  = RENDER_FILL,
+    app_render(&(app_render_cfg_t){
+        .type  = APP_RENDER_TYPE_FILL,
         .x     = 0,
         .y     = 0,
-        .color = COLOR_BLACK,
+        .color = DEV_DISPLAY_COLOR_BLACK,
     });
 }
 
-static void _aging_fill_screen(font_size_t size, font_type_t type, const char *ch_utf8, uint8_t ch_len)
+static void _aging_fill_screen(app_font_size_t size, app_font_type_t type, const char *ch_utf8, uint8_t ch_len)
 {
     /* **一律用逻辑屏几何**（`app_screen_rows/cols`），不用实屏（`dsp->screen_*`）：
        多卡时逻辑屏是整台设备（如 224×100），实屏只是本卡那半幅（224×50）。
@@ -99,21 +99,21 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
         pos += ch_len;
     }
 
-    app_render(&(render_cfg_t){
-        .type      = RENDER_TEXT,
+    app_render(&(app_render_cfg_t){
+        .type      = APP_RENDER_TYPE_TEXT,
         .x         = 0,
         .y         = 0,
         .w         = sw,
         .h         = sh,
-        .color     = COLOR_WHITE,
+        .color     = DEV_DISPLAY_COLOR_WHITE,
         .text      = buf,
         .len       = pos,
         .font_size = size,
         .font_type = type,
-        .text_enc  = FONT_ENC_UTF8,
-        .style     = &(render_style_t){
-            .h_align   = ALIGN_CENTER,
-            .v_align   = ALIGN_CENTER,
+        .text_enc  = APP_FONT_ENC_UTF8,
+        .style     = &(app_render_style_t){
+            .h_align   = APP_RENDER_ALIGN_CENTER,
+            .v_align   = APP_RENDER_ALIGN_CENTER,
             .word_wrap = true,
         },
     });
@@ -121,10 +121,10 @@ static void _aging_fill_screen(font_size_t size, font_type_t type, const char *c
 }
 
 /* ================================================================
- *  factory_monitor_task
+ *  _factory_monitor_task
  * ================================================================ */
 
-static void factory_monitor_task(void *argument)
+static void _factory_monitor_task(void *argument)
 {
     (void)argument;
 
@@ -138,34 +138,34 @@ static void factory_monitor_task(void *argument)
          * 用户定的口径：老化测试走 render API、而 render 已兼容级联，所以按主卡
          * 一个键就能触发整设备老化 —— **不必区分老化与主副卡识别**。
          *
-         * **只投递请求**：写身份记录要几十毫秒、发识别帧要占 s_tx 并等 ACK（最长约
-         * 1s）——那些必须由**级联任务**做（s_tx 与轮次都是它的）。本任务是
-         * factory_monitor_task，而 TEST 键只有它一个消费者，在这里投递不会冲突。 */
-#if BOARD_CASCADE_ENABLED
-        app_cascade_claim_master();
+         * **只投递请求**：写身份记录要几十毫秒、发识别帧要占 s_tx_buf 并等 ACK（最长约
+         * 1s）——那些必须由**级联任务**做（s_tx_buf 与轮次都是它的）。本任务是
+         * _factory_monitor_task，而 TEST 键只有它一个消费者，在这里投递不会冲突。 */
+#if BOARD_CASC_ENABLED
+        app_casc_claim_master();
 #endif
 
         /* ===== SHOW_CODE ===== */
         /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）
            —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格）。
-           两步**当成一帧**输出：中间不让 scan_task 跑 prepare（见 dev_display.h）。 */
+           两步**当成一帧**输出：中间不让 _scan_task 跑 prepare（见 dev_display.h）。 */
         dev_display_frame_begin(dev_display_get());
         _clear_screen();
-        app_render(&(render_cfg_t){
-            .type      = RENDER_TEXT,
+        app_render(&(app_render_cfg_t){
+            .type      = APP_RENDER_TYPE_TEXT,
             .x         = 0,
             .y         = 0,
             .w         = app_screen_rows(),
             .h         = app_screen_cols(),
-            .color     = COLOR_GREEN,
+            .color     = DEV_DISPLAY_COLOR_GREEN,
             .text      = PROGRAM_CODE,
             .len       = strlen(PROGRAM_CODE),
-            .font_size = FONT_16,
-            .font_type = FONT_ST,
-            .text_enc  = FONT_ENC_UTF8,
-            .style     = &(render_style_t){
-                .h_align = ALIGN_CENTER,
-                .v_align = ALIGN_CENTER,
+            .font_size = APP_FONT_SIZE_16,
+            .font_type = APP_FONT_TYPE_ST,
+            .text_enc  = APP_FONT_ENC_UTF8,
+            .style     = &(app_render_style_t){
+                .h_align = APP_RENDER_ALIGN_CENTER,
+                .v_align = APP_RENDER_ALIGN_CENTER,
             },
         });
         dev_display_frame_end(dev_display_get());
@@ -183,8 +183,8 @@ static void factory_monitor_task(void *argument)
                （来自切分表）—— 不覆盖的话十种纯色会全显示成每块屏自己的那个颜色。
                覆盖之后两块屏一起按这个颜色亮（单卡就是本卡那块）。 */
             app_screen_set_color_override(s_dead_pixel_colors[i]);
-            app_render(&(render_cfg_t){
-                .type  = RENDER_FILL,
+            app_render(&(app_render_cfg_t){
+                .type  = APP_RENDER_TYPE_FILL,
                 .x     = 0,
                 .y     = 0,
                 .color = s_dead_pixel_colors[i],
@@ -206,7 +206,7 @@ static void factory_monitor_task(void *argument)
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
             for (uint8_t size_idx = 0; size_idx < AGING_SIZE_COUNT; size_idx++) {
-                font_size_t fsize = s_aging_sizes[size_idx];
+                app_font_size_t fsize = s_aging_sizes[size_idx];
                 /* 字号能不能放下，判的是**逻辑屏**（多卡时整台设备更大，
                    大字在上面才排得开） */
                 if (fsize > app_screen_rows() || fsize > app_screen_cols()) continue;
@@ -232,11 +232,11 @@ static void factory_monitor_task(void *argument)
 
         /* 退出工厂模式 —— 同样清**逻辑屏**（多卡时两块一起清空） */
         s_factory_active = false;
-        app_render(&(render_cfg_t){
-            .type  = RENDER_FILL,
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
             .x     = 0,
             .y     = 0,
-            .color = COLOR_BLACK,
+            .color = DEV_DISPLAY_COLOR_BLACK,
         });
     }
 }
@@ -249,7 +249,7 @@ static void _factory_test_init(void)
         .stack_size = 512 * 4,
         .priority   = osPriorityBelowNormal,
     };
-    g_factory_test = pl_task_new(factory_monitor_task, NULL, &attr);
+    s_factory_test_task_handle = pl_task_new(_factory_monitor_task, NULL, &attr);
 }
 
 static void _factory_module_init(void)
@@ -273,7 +273,7 @@ void app_factory_mode_interrupt(void)
     if (!s_factory_active) return; /* 已在 IDLE：无可中断 */
 
     s_factory_active = false;
-    osThreadTerminate(g_factory_test);
+    osThreadTerminate(s_factory_test_task_handle);
 
     /* 终止点可能正好落在"挂起光传感器任务"与"恢复"之间（见 DEAD_PIXEL 段），
        那样光传感器就永久挂起了。补一次恢复 —— 对未挂起的线程是空操作。 */

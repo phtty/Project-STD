@@ -32,15 +32,15 @@
  * "整屏 1bpp"这个决策的真实价值就在这里。 */
 /* ---- 以下全部依赖画布：开关关闭时整段不进构建（省下画布池的 SRAM）---- */
 #if BOARD_SCREEN_CANVAS
-static uint8_t s_canvas[BOARD_SCREEN_CANVAS_MAX];
+static uint8_t s_canvas_buf[BOARD_SCREEN_CANVAS_MAX];
 #endif /* BOARD_SCREEN_CANVAS */
 
-static dev_display_t *s_display;
+static dev_display_t *s_display_dev;
 static uint16_t       s_rows;   /* **整屏**逻辑宽（单卡时 == 本屏宽） */
 static uint16_t       s_cols;   /* 整屏逻辑高 */
 static uint16_t       s_stride; /* = (s_rows + 7) / 8 */
 static uint16_t       s_bm_len; /* = s_stride * s_cols */
-static uint8_t        s_self;   /* 本卡在切分表里的下标 */
+static uint8_t        s_self_idx;   /* 本卡在切分表里的下标 */
 
 static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表本卡那一项） */
 
@@ -49,7 +49,7 @@ static uint8_t s_color = BOARD_SCREEN_COLOR; /**< 本卡颜色（来自切分表
  * 它 + 网格形状就是整张切分表：主卡格编 addr 0，其余格按网格顺序编 1..N。
  * 允许运行期改的理由见 app_screen.h —— 编译期钉死会让"谁被按谁主卡"变成
  * "被按的那张卡以为自己在另一块屏上"（两块屏的上下半幅对调）。 */
-static uint8_t s_master_cell = (uint8_t)BOARD_CASCADE_MASTER_CELL;
+static uint8_t s_master_cell = (uint8_t)BOARD_CASC_MASTER_CELL;
 
 uint8_t app_screen_master_cell(void)
 {
@@ -75,7 +75,7 @@ uint8_t app_screen_cell_of_addr(uint8_t addr, uint8_t master_cell)
 /* ---- 输出颜色的临时覆盖（只给工厂老化测试用）----
  *
  * 根因：画布是 **1bpp**（只记亮/灭），**颜色在协议里是逐卡给的**
- * （`casc_image_t.color`，来自切分表）。所以"整屏轮流点亮红/绿/蓝"这种
+ * （`app_casc_image_t.color`，来自切分表）。所以"整屏轮流点亮红/绿/蓝"这种
  * 逐色老化，在级联下没有别的表达方式 —— 不覆盖的话所有纯色填充都会显示成
  * **本卡那个颜色**（现场：十种颜色全是绿的）。 */
 #define SCREEN_COLOR_NO_OVERRIDE (0xFFU)
@@ -105,17 +105,17 @@ static bool    s_content_mixed;
 
 /** @brief 这一次填充是不是"整屏清屏"（= 新一帧的开始）
  *
- *  各个渲染调用点的清屏都是"整屏黑填充"（`RENDER_FILL` 的 w=h=0）——
+ *  各个渲染调用点的清屏都是"整屏黑填充"（`APP_RENDER_TYPE_FILL` 的 w=h=0）——
  *  它是唯一可靠的"上一帧结束"信号（画布本身被 memset 清只发生在重装门面时）。 */
-static bool _is_full_clear(uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
+static bool _is_full_clear(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
 {
-    return c == COLOR_BLACK && x == 0 && y == 0 && w >= s_rows && h >= s_cols;
+    return c == DEV_DISPLAY_COLOR_BLACK && x == 0 && y == 0 && w >= s_rows && h >= s_cols;
 }
 
 /** @brief 记下"这一帧用了哪个颜色"；只在写**亮**像素时调 */
-static void _note_content_color(display_color_t c)
+static void _note_content_color(dev_display_color_t c)
 {
-    if (c == COLOR_BLACK) return; /* 黑 = 灭，不算颜色 */
+    if (c == DEV_DISPLAY_COLOR_BLACK) return; /* 黑 = 灭，不算颜色 */
     if (s_content_color == SCREEN_COLOR_NO_OVERRIDE) {
         s_content_color = (uint8_t)c;
         return;
@@ -135,8 +135,8 @@ static void _reset_content_color(void)
 uint8_t app_screen_output_color(uint8_t card_color)
 {
     /* 优先级：工厂测试的强制覆盖 > 这一帧内容的颜色 > 切分表给这张卡的颜色 */
-    if (s_color_override <= (uint8_t)COLOR_WHITE) return s_color_override;
-    if (!s_content_mixed && s_content_color <= (uint8_t)COLOR_WHITE) return s_content_color;
+    if (s_color_override <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_color_override;
+    if (!s_content_mixed && s_content_color <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_content_color;
     return card_color;
 }
 
@@ -145,13 +145,13 @@ uint8_t app_screen_output_color(uint8_t card_color)
  *
  *  **`_persist_restore()` 直写画布、不经过 sink → 不置位** —— 这正是
  *  "上电恢复不算新内容"的干净表达。 */
-static bool s_canvas_touched;
+static bool s_canvas_touched_flag;
 
 /* 抽带缓冲：本卡矩形抽出来放这儿，再交给 commit_bitmap 落屏。
-   主卡本地提交与"单卡即整屏"共用它 —— 长度由 BOARD_CASCADE_BAND_MAX 兜底，
+   主卡本地提交与"单卡即整屏"共用它 —— 长度由 BOARD_CASC_BAND_MAX 兜底，
    _screen_init 按**运行期几何**校验一次（超了会明确打出来并停用门面）。 */
 #if BOARD_SCREEN_CANVAS
-static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
+static uint8_t s_band_buf[BOARD_CASC_BAND_MAX];
 #endif
 
 /* ================================================================
@@ -166,12 +166,12 @@ static uint8_t s_band[BOARD_CASCADE_BAND_MAX];
  *
  *  后续期这里改成"先查 W25Qxx 的切分表记录，没有才回落本网格" —— 那时才谈得上
  *  异形拼法与现场改址。 */
-static screen_card_t   s_cards[SCREEN_CARD_MAX];
-static screen_layout_t s_layout = {.cards = s_cards, .count = 0, .rows = 0, .cols = 0};
+static app_screen_card_t   s_card_table[APP_SCREEN_CARD_MAX];
+static app_screen_layout_t s_screen_layout = {.cards = s_card_table, .count = 0, .rows = 0, .cols = 0};
 
-const screen_layout_t *app_screen_layout(void)
+const app_screen_layout_t *app_screen_layout(void)
 {
-    return &s_layout;
+    return &s_screen_layout;
 }
 
 /** @brief 本上电周期内画布**被渲染过**没有（持久化恢复不算）
@@ -182,7 +182,7 @@ const screen_layout_t *app_screen_layout(void)
  *  → 画布被重画 → 恢复正常同步整屏。 */
 bool app_screen_canvas_touched(void)
 {
-    return s_canvas_touched;
+    return s_canvas_touched_flag;
 }
 
 /* 门面停用（显示未就绪 / 地址不在表里）时 s_rows/s_cols 还是 0，回落到本卡屏几何 ——
@@ -201,9 +201,9 @@ uint16_t app_screen_cols(void)
     return d ? d->screen_cols : 0;
 }
 
-const screen_card_t *app_screen_card(uint8_t card_idx)
+const app_screen_card_t *app_screen_card(uint8_t card_idx)
 {
-    return (card_idx < s_layout.count) ? &s_layout.cards[card_idx] : nullptr;
+    return (card_idx < s_screen_layout.count) ? &s_screen_layout.cards[card_idx] : nullptr;
 }
 
 /* ================================================================
@@ -213,38 +213,38 @@ const screen_card_t *app_screen_card(uint8_t card_idx)
 /* 最近一轮序号：**只存低 8 位**，只为日志对照，不参与任何判断 */
 static uint8_t s_status_seq_lo;
 
-static app_screen_alarm_fn_t s_alarm;
+static app_screen_alarm_fn_t s_alarm_fn;
 static uint16_t              s_retrans_cnt;
 static uint8_t               s_evict_cnt;
 static uint8_t               s_last_alarm;
 
-screen_card_state_t app_screen_card_state(uint8_t card_idx)
+app_screen_card_state_t app_screen_card_state(uint8_t card_idx)
 {
-    const screen_card_t *c = app_screen_card(card_idx);
-    return c ? (screen_card_state_t)c->state : SCREEN_CARD_MISSING;
+    const app_screen_card_t *c = app_screen_card(card_idx);
+    return c ? (app_screen_card_state_t)c->state : APP_SCREEN_CARD_STATE_MISSING;
 }
 
-void app_screen_card_set_state(uint8_t card_idx, screen_card_state_t st)
+void app_screen_card_set_state(uint8_t card_idx, app_screen_card_state_t st)
 {
-    /* **必须走 s_cards[] 而不是 s_layout.cards** —— 后者是 const 指针（表对外只读），
+    /* **必须走 s_card_table[] 而不是 s_screen_layout.cards** —— 后者是 const 指针（表对外只读），
        从这里改会被编译器拦下（或悄悄写进只读段）。 */
-    screen_card_t *c = (card_idx < s_layout.count) ? &s_cards[card_idx] : nullptr;
+    app_screen_card_t *c = (card_idx < s_screen_layout.count) ? &s_card_table[card_idx] : nullptr;
     if (!c || c->state == (uint8_t)st) return; /* 没变就不算一次跳变 */
 
     const uint8_t addr = c->addr;
     c->state           = (uint8_t)st;
 
-    if (st == SCREEN_CARD_OFFLINE) s_evict_cnt++;
+    if (st == APP_SCREEN_CARD_STATE_OFFLINE) s_evict_cnt++;
     s_last_alarm = addr;
 
     /* **不注册就什么都不发生** —— 协议只暴露状态，不决定去向，也不认识任何上层协议。
        要报的产品自己注册；不报的产品一个字节都不产生。 */
-    if (s_alarm) s_alarm(addr, (uint8_t)st);
+    if (s_alarm_fn) s_alarm_fn(addr, (uint8_t)st);
 }
 
 void app_screen_register_alarm(app_screen_alarm_fn_t fn)
 {
-    s_alarm = fn;
+    s_alarm_fn = fn;
 }
 
 void app_screen_note_retrans(void)
@@ -268,10 +268,10 @@ void app_screen_status(app_screen_status_t *out)
     out->last_alarm  = s_last_alarm;
 
     /* 位 i ↔ 地址 i+1：地址 0 是本卡，不进掩码。从卡地址上限 0x1F，8 位够放
-       （本工程 SCREEN_CARD_MAX=4，实际只用到低 3 位）。 */
-    for (uint8_t i = 0; i < s_layout.count; i++) {
-        const screen_card_t *c = &s_layout.cards[i];
-        if (c->addr >= 1U && c->addr <= 8U && c->state == (uint8_t)SCREEN_CARD_ONLINE)
+       （本工程 APP_SCREEN_CARD_MAX=4，实际只用到低 3 位）。 */
+    for (uint8_t i = 0; i < s_screen_layout.count; i++) {
+        const app_screen_card_t *c = &s_screen_layout.cards[i];
+        if (c->addr >= 1U && c->addr <= 8U && c->state == (uint8_t)APP_SCREEN_CARD_STATE_ONLINE)
             out->online_mask |= (uint8_t)(1U << (c->addr - 1U));
     }
 }
@@ -279,8 +279,8 @@ void app_screen_status(app_screen_status_t *out)
 
 uint8_t app_screen_index_of_addr(uint8_t addr)
 {
-    for (uint8_t i = 0; i < s_layout.count; i++)
-        if (s_layout.cards[i].addr == addr) return i;
+    for (uint8_t i = 0; i < s_screen_layout.count; i++)
+        if (s_screen_layout.cards[i].addr == addr) return i;
     return 0xFF;
 }
 
@@ -291,7 +291,7 @@ uint8_t app_screen_self_index(void)
 
 uint16_t app_screen_card_bm_len(uint8_t card_idx)
 {
-    const screen_card_t *c = app_screen_card(card_idx);
+    const app_screen_card_t *c = app_screen_card(card_idx);
     if (!c) return 0;
     return (uint16_t)(((c->w + 7U) / 8U) * c->h);
 }
@@ -309,13 +309,13 @@ uint16_t app_screen_card_bm_len(uint8_t card_idx)
  *  （持久化恢复也按本卡矩形映射，见 _persist_restore）。 */
 static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
 {
-    const uint16_t cw = s_display ? s_display->screen_rows : 0; /* 单卡屏宽 */
-    const uint16_t ch = s_display ? s_display->screen_cols : 0; /* 单卡屏高 */
+    const uint16_t cw = s_display_dev ? s_display_dev->screen_rows : 0; /* 单卡屏宽 */
+    const uint16_t ch = s_display_dev ? s_display_dev->screen_cols : 0; /* 单卡屏高 */
 
     if (!cw || !ch) return false;
-    if ((uint16_t)nx * ny > SCREEN_CARD_MAX) {
-        printf("[screen] 切分 %ux%u 张卡超过 SCREEN_CARD_MAX=%u\n", (unsigned)nx, (unsigned)ny,
-               (unsigned)SCREEN_CARD_MAX);
+    if ((uint16_t)nx * ny > APP_SCREEN_CARD_MAX) {
+        printf("[screen] 切分 %ux%u 张卡超过 APP_SCREEN_CARD_MAX=%u\n", (unsigned)nx, (unsigned)ny,
+               (unsigned)APP_SCREEN_CARD_MAX);
         return false;
     }
     if (master_cell >= (uint8_t)(nx * ny)) {
@@ -324,15 +324,15 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
         return false;
     }
 
-    s_layout.count = (uint8_t)(nx * ny);
-    s_layout.rows  = (uint16_t)(cw * nx); /* 整屏宽 */
-    s_layout.cols  = (uint16_t)(ch * ny); /* 整屏高 */
+    s_screen_layout.count = (uint8_t)(nx * ny);
+    s_screen_layout.rows  = (uint16_t)(cw * nx); /* 整屏宽 */
+    s_screen_layout.cols  = (uint16_t)(ch * ny); /* 整屏高 */
 
     uint8_t next_addr = 1; /* 0 留给主卡 */
     for (uint8_t r = 0; r < ny; r++)
         for (uint8_t c = 0; c < nx; c++) {
             const uint8_t i = (uint8_t)(r * nx + c);
-            s_cards[i]      = (screen_card_t){
+            s_card_table[i]      = (app_screen_card_t){
                 .addr  = (i == master_cell) ? 0U : next_addr++,
                 .color = BOARD_SCREEN_COLOR,
                 .x     = (uint16_t)(c * cw),
@@ -341,16 +341,16 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
                 .h     = ch,
                 /* 运行期状态：建表时谁都没应答过 —— MISSING 与 OFFLINE 的区别
                    就在这里起步（从卡根本没起来 vs 曾经在线后掉线）。 */
-                .state = SCREEN_CARD_MISSING,
+                .state = APP_SCREEN_CARD_STATE_MISSING,
             };
         }
     return true;
 }
 
-/** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASCADE_COLS/ROWS/MASTER_CELL） */
+/** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASC_COLS/ROWS/MASTER_CELL） */
 static bool _layout_build(void)
 {
-    return _layout_build_grid((uint8_t)BOARD_CASCADE_COLS, (uint8_t)BOARD_CASCADE_ROWS,
+    return _layout_build_grid((uint8_t)BOARD_CASC_COLS, (uint8_t)BOARD_CASC_ROWS,
                               s_master_cell);
 }
 
@@ -361,51 +361,51 @@ static bool _layout_build(void)
  *  @return false = 本卡地址不在表里，或画布池装不下整屏 */
 static bool _apply_layout(void)
 {
-    s_rows   = s_layout.rows;
-    s_cols   = s_layout.cols;
+    s_rows   = s_screen_layout.rows;
+    s_cols   = s_screen_layout.cols;
     s_stride = (uint16_t)((s_rows + 7U) / 8U);
     s_bm_len = (uint16_t)(s_stride * s_cols);
 
-    s_self = app_screen_self_index();
-    if (s_self >= s_layout.count) {
+    s_self_idx = app_screen_self_index();
+    if (s_self_idx >= s_screen_layout.count) {
         /* 本卡地址不在切分表里 = 板上的地址与部署对不上。**不静默降级成"单卡占满"**：
            那会让现场以为一切正常，只是别的卡永远不亮（而"别的卡不亮"最容易被当成
            硬件故障去查线）。 */
         printf("[screen] 本卡地址 %u 不在切分表里（表内 %u 张卡），整屏门面停用\n",
-               (unsigned)app_screen_self_addr(), (unsigned)s_layout.count);
+               (unsigned)app_screen_self_addr(), (unsigned)s_screen_layout.count);
         return false;
     }
-    s_color = s_layout.cards[s_self].color;
+    s_color = s_screen_layout.cards[s_self_idx].color;
 
 #if BOARD_SCREEN_CANVAS
     /* 尺寸校验必须在 memset 之前 —— 池子小了先清就是直接写穿 */
-    if (s_bm_len > sizeof(s_canvas)) {
+    if (s_bm_len > sizeof(s_canvas_buf)) {
         /* 拦下而不是截断：画布小了的表现是"右边/下边一块永远不更新"，很难查 */
         printf("[screen] 画布需要 %u 字节 > BOARD_SCREEN_CANVAS_MAX %u，整屏门面停用\n",
-               (unsigned)s_bm_len, (unsigned)sizeof(s_canvas));
+               (unsigned)s_bm_len, (unsigned)sizeof(s_canvas_buf));
         return false;
     }
     /* **每次重装都清**（换身份也一样）：换了身份之后画布上那份内容是不是
        "一整幅完整的逻辑屏"就说不准了 —— 从卡的画布只有它自己那一块（上电从记录
        恢复来的），把它当整幅推下去，别的卡当场被刷黑。而"按一下键屏上内容消失"
        只在**角色真的变了**的时候发生（没变的那条路在 `apply_identity` 就返回了）。 */
-    memset(s_canvas, 0, s_bm_len);
+    memset(s_canvas_buf, 0, s_bm_len);
     _reset_content_color(); /* 上一帧的颜色主张作废 */
 #endif
     return true;
 }
 
 
-static volatile uint32_t s_gen;             /* 内容代数：每次写入自增 */
+static volatile uint32_t s_gen_cnt;             /* 内容代数：每次写入自增 */
 static volatile uint32_t s_last_write_tick; /* 最后一次写入的时刻，静默期据此算 */
-static volatile bool     s_pending;         /* 有内容尚未落屏 */
+static volatile bool     s_pending_flag;         /* 有内容尚未落屏 */
 
 #define SCREEN_POLL_MS   (10U) /**< 检查静默期的周期 */
 #define SCREEN_SETTLE_MS (50U) /**< 静默多久算"这一屏画完了" */
 
 uint32_t app_screen_generation(void)
 {
-    return s_gen;
+    return s_gen_cnt;
 }
 
 /* ================================================================
@@ -414,7 +414,7 @@ uint32_t app_screen_generation(void)
 
 void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
 {
-    dev_display_t *d = s_display;
+    dev_display_t *d = s_display_dev;
     if (!d || !bm) return;
 
     /* 长度必须正好是本屏的位图长度。不符说明这块内容不是给这块屏的
@@ -425,11 +425,11 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
         return;
     }
 
-    /* 清底 + 画内容**当成一帧**：中间不让 scan_task 跑 prepare（否则屏上闪一帧全黑）。
+    /* 清底 + 画内容**当成一帧**：中间不让 _scan_task 跑 prepare（否则屏上闪一帧全黑）。
        见 dev_display_frame_begin 的说明 —— 以前这里是手写 `d->dirty = false`。 */
     dev_display_frame_begin(d);
-    dev_display_fill(d, 0, 0, d->screen_rows, d->screen_cols, COLOR_BLACK);
-    dev_display_draw_bitmap(d, 0, 0, d->screen_rows, d->screen_cols, bm, (display_color_t)color);
+    dev_display_fill(d, 0, 0, d->screen_rows, d->screen_cols, DEV_DISPLAY_COLOR_BLACK);
+    dev_display_draw_bitmap(d, 0, 0, d->screen_rows, d->screen_cols, bm, (dev_display_color_t)color);
     dev_display_frame_end(d);
 }
 
@@ -450,7 +450,7 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color)
 
 bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap)
 {
-    const screen_card_t *c = app_screen_card(card_idx); /* **下标**，不是地址 */
+    const app_screen_card_t *c = app_screen_card(card_idx); /* **下标**，不是地址 */
     if (!c || !buf) return false;
 
     const uint16_t stride = (uint16_t)((c->w + 7U) / 8U);
@@ -465,7 +465,7 @@ bool app_screen_extract(uint8_t card_idx, uint8_t *buf, uint16_t cap)
 
     for (uint16_t y = 0; y < c->h; y++) {
         uint8_t       *dst = &buf[(uint32_t)y * stride];
-        const uint8_t *row = &s_canvas[(uint32_t)(c->y + y) * s_stride];
+        const uint8_t *row = &s_canvas_buf[(uint32_t)(c->y + y) * s_stride];
 
         if ((c->x & 7U) == 0U) {
             /* 矩形按字节对齐 —— 两板的卡宽都是 8 的倍数，这是常见情形（整行 memcpy） */
@@ -493,14 +493,14 @@ static void _persist_save(void);
 
 bool app_screen_commit_self(void)
 {
-    if (s_self >= s_layout.count) return false;
-    const uint16_t len = app_screen_card_bm_len(s_self);
-    if (!len || len > sizeof(s_band)) return false;
-    if (!app_screen_extract(s_self, s_band, sizeof(s_band))) return false;
+    if (s_self_idx >= s_screen_layout.count) return false;
+    const uint16_t len = app_screen_card_bm_len(s_self_idx);
+    if (!len || len > sizeof(s_band_buf)) return false;
+    if (!app_screen_extract(s_self_idx, s_band_buf, sizeof(s_band_buf))) return false;
 
     /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致。
        颜色过一道"输出颜色"：正常就是本卡那个颜色，工厂逐色老化时被临时覆盖。 */
-    app_screen_commit_bitmap(s_band, len, app_screen_output_color(s_color));
+    app_screen_commit_bitmap(s_band_buf, len, app_screen_output_color(s_color));
 
     /* ---- 持久化请求**只能在这里**消费 ----
      * 上面那一行刚把内容写进实屏，此刻存下去才是这一帧。渲染时（app_render）存的话
@@ -521,10 +521,10 @@ bool app_screen_commit_self(void)
 
 static void _mark_dirty(void)
 {
-    s_gen++;
+    s_gen_cnt++;
     s_last_write_tick = osKernelGetTickCount();
-    s_pending         = true;
-    s_canvas_touched  = true;
+    s_pending_flag         = true;
+    s_canvas_touched_flag  = true;
 }
 
 /** @brief 把矩形裁到画布内；全裁掉返回 false */
@@ -539,7 +539,7 @@ static bool _clip(uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
 /** @brief 置/清一个像素位 */
 static inline void _set_bit(uint16_t x, uint16_t y, bool on)
 {
-    uint8_t *p   = &s_canvas[(uint32_t)y * s_stride + (x >> 3)];
+    uint8_t *p   = &s_canvas_buf[(uint32_t)y * s_stride + (x >> 3)];
     uint8_t  msk = (uint8_t)(0x80U >> (x & 7U));
     if (on)
         *p |= msk;
@@ -547,20 +547,20 @@ static inline void _set_bit(uint16_t x, uint16_t y, bool on)
         *p &= (uint8_t)~msk;
 }
 
-static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
+static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
 {
     (void)ctx;
     if (!_clip(&x, &y, &w, &h)) return;
 
     /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
        落屏时用它（见 app_screen_output_color） */
-    bool on = (c != COLOR_BLACK);
+    bool on = (c != DEV_DISPLAY_COLOR_BLACK);
     /* 整屏清屏 → 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
     if (_is_full_clear(x, y, w, h, c)) _reset_content_color();
     else _note_content_color(c);
 
     for (uint16_t r = 0; r < h; r++) {
-        uint8_t *row = &s_canvas[(uint32_t)(y + r) * s_stride];
+        uint8_t *row = &s_canvas_buf[(uint32_t)(y + r) * s_stride];
         for (uint16_t k = 0; k < w; k++) {
             uint16_t xx = (uint16_t)(x + k);
             uint8_t  m  = (uint8_t)(0x80U >> (xx & 7U));
@@ -574,14 +574,14 @@ static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h
 }
 
 static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                         const uint8_t *bm, display_color_t c)
+                         const uint8_t *bm, dev_display_color_t c)
 {
     (void)ctx;
     if (!bm || !_clip(&x, &y, &w, &h)) return;
 
     /* 与 dev_display_draw_bitmap 同语义：bit=1 才写（写 on 或 off），bit=0 不动。
        位序同为 MSB-first、(宽+7)/8 行字节。 */
-    bool         on        = (c != COLOR_BLACK);
+    bool         on        = (c != DEV_DISPLAY_COLOR_BLACK);
     uint16_t     src_stride = (uint16_t)((w + 7U) / 8U);
     _note_content_color(c);
 
@@ -594,11 +594,11 @@ static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t
     _mark_dirty();
 }
 
-static void _sink_set_pixel(void *ctx, uint16_t x, uint16_t y, display_color_t c)
+static void _sink_set_pixel(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c)
 {
     (void)ctx;
     if (x >= s_rows || y >= s_cols) return;
-    _set_bit(x, y, c != COLOR_BLACK);
+    _set_bit(x, y, c != DEV_DISPLAY_COLOR_BLACK);
     _mark_dirty();
 }
 
@@ -607,7 +607,7 @@ static void _sink_set_pixel(void *ctx, uint16_t x, uint16_t y, display_color_t c
 /* **不能加 const**：几何在 _screen_init 里填，而 const 对象住 .rodata ——
    在 STM32 上那就是 Flash，写进去会被静默丢弃（不报错！），于是 rows/cols 恒为 0，
    画布裁剪把所有内容裁光、屏上什么都不显示。host 单测用 ASan 抓到的就是这个写。 */
-static render_target_t s_target = {
+static app_render_target_t s_target = {
     .fill      = _sink_fill,
     .bitmap    = _sink_bitmap,
     .set_pixel = _sink_set_pixel,
@@ -618,13 +618,13 @@ static render_target_t s_target = {
 
 static void _persist_save(void);
 static bool _persist_restore(void);
-static const render_persist_hook_t s_persist_hook = {.save = _persist_save, .restore = _persist_restore};
+static const app_render_persist_hook_fn_t s_persist_hook = {.save = _persist_save, .restore = _persist_restore};
 
 /* ================================================================
  *  显存持久化：画布版本的存/取
  *
  *  接管之后存的**不再是实屏**，而是画布 —— 级联下这才是"整屏的内容"。
- *  格式沿用 render_persist_t（1bpp、MSB-first），但多带一个颜色字段已经够用
+ *  格式沿用 app_render_persist_t（1bpp、MSB-first），但多带一个颜色字段已经够用
  *  （本卡颜色由切分表给，不随内容变）。
  *
  *  P1 阶段画布 == 本屏，所以存画布与存实屏等价；改动的意义在于接上钩子这条缝。
@@ -636,7 +636,7 @@ static void _persist_save(void)
        那一块**画布刚刚经 app_screen_commit_self 提交给它，两者逐位一致。
        所以存实屏 == 存本卡矩形，是多卡下也对的一件事（画布其余部分属于别的卡）。
 
-       刻意**不**改成存整张画布：记录格式（render_persist_t）的尺寸域与位图上限
+       刻意**不**改成存整张画布：记录格式（app_render_persist_t）的尺寸域与位图上限
        （RENDER_PERSIST_BITMAP_MAX=2560）都是按**单块屏**定的，整屏画布 4 卡能到
        5600 字节，存不下。要存整屏得先改记录格式 —— 那是另一件事。 */
     app_render_set_persist_hook(nullptr);
@@ -653,16 +653,16 @@ static bool _persist_restore(void)
 
     /* 恢复了实屏，画布要跟着同步 —— 否则下一轮静默提交会拿一张空画布把屏刷黑。
      *
-     * 记录里存的是**本卡那块实屏**（render_persist_t 的尺寸域与位图上限都按单块屏
+     * 记录里存的是**本卡那块实屏**（app_render_persist_t 的尺寸域与位图上限都按单块屏
      * 算的），不是整屏画布。所以这里要把实屏按"本卡在画布上的矩形"摆回去 ——
      * 多卡时画布比实屏大，直接按画布尺寸索引 pixel_map 会读到屏外。
      * 索引一律用**实屏几何** dw/dh，与画布几何 s_rows/s_cols 是两回事。 */
-    if (ok && s_display && s_self < s_layout.count) {
-        const screen_card_t *c  = &s_layout.cards[s_self];
-        const uint16_t       dw = s_display->screen_rows;
-        const uint16_t       dh = s_display->screen_cols;
+    if (ok && s_display_dev && s_self_idx < s_screen_layout.count) {
+        const app_screen_card_t *c  = &s_screen_layout.cards[s_self_idx];
+        const uint16_t       dw = s_display_dev->screen_rows;
+        const uint16_t       dh = s_display_dev->screen_cols;
 
-        memset(s_canvas, 0, s_bm_len);
+        memset(s_canvas_buf, 0, s_bm_len);
         /* 恢复的内容**直写画布**、不经过 sink —— 内容色在这里补记：
            实屏上那份是 `app_render_restore` 用**记录里的颜色**画出来的
            （存的时候也是取"第一个非黑像素的颜色"，见 app_render_save），
@@ -670,15 +670,15 @@ static bool _persist_restore(void)
         _reset_content_color();
         for (uint16_t y = 0; y < dh && y < c->h; y++)
             for (uint16_t x = 0; x < dw && x < c->w; x++) {
-                const uint8_t px = s_display->pixel_map[(uint32_t)y * dw + x];
-                if (px == COLOR_BLACK) continue;
+                const uint8_t px = s_display_dev->pixel_map[(uint32_t)y * dw + x];
+                if (px == DEV_DISPLAY_COLOR_BLACK) continue;
 
-                _note_content_color((display_color_t)px);
+                _note_content_color((dev_display_color_t)px);
                 const uint16_t cx = (uint16_t)(c->x + x);
                 const uint16_t cy = (uint16_t)(c->y + y);
-                s_canvas[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
+                s_canvas_buf[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
             }
-        s_pending = false; /* 刚恢复的内容已经落过屏，不必再提交一遍 */
+        s_pending_flag = false; /* 刚恢复的内容已经落过屏，不必再提交一遍 */
     }
     return ok;
 }
@@ -688,40 +688,40 @@ static bool _persist_restore(void)
  *  亮度
  * ================================================================ */
 
-static volatile bool    s_bright_pending;
+static volatile bool    s_bright_pending_flag;
 static volatile uint8_t s_bright_level;
 
 void app_screen_set_brightness(uint8_t level)
 {
     if (level > 7) level = 7;
-    if (s_display) dev_display_set_brightness(s_display, level);
+    if (s_display_dev) dev_display_set_brightness(s_display_dev, level);
 
     s_bright_level   = level;
-    s_bright_pending = true; /* 由级联协议取走并广播给从卡 */
+    s_bright_pending_flag = true; /* 由级联协议取走并广播给从卡 */
 }
 
 uint8_t app_screen_get_brightness(void)
 {
-    return s_display ? s_display->light_level : 0;
+    return s_display_dev ? s_display_dev->light_level : 0;
 }
 
 bool app_screen_brightness_take_pending(uint8_t *level)
 {
-    if (!s_bright_pending) return false;
-    s_bright_pending = false;
+    if (!s_bright_pending_flag) return false;
+    s_bright_pending_flag = false;
     if (level) *level = s_bright_level;
     return true;
 }
 
 /* ---- 本卡身份（总线地址）----
  *
- * `board.h` 的 `BOARD_CASCADE_ADDR` 从"身份"**降级为出厂默认**：运行期可以由
+ * `board.h` 的 `BOARD_CASC_ADDR` 从"身份"**降级为出厂默认**：运行期可以由
  * 拨码（3833024）或识别帧（按键认领）改写，改完写 flash 记录、掉电不忘 ——
  * 这样两块板烧同一份固件，谁被按谁是主卡。
  *
  * **状态在这里、策略不在这里**："该取哪个值、记在哪"是部署/协议侧的事
- * （见 app_cascade.c 的身份解析与 `SET_ADDR`），本模块只存值并按新值重装门面。 */
-static uint8_t s_addr = (uint8_t)BOARD_CASCADE_ADDR;
+ * （见 app_casc.c 的身份解析与 `SET_ADDR`），本模块只存值并按新值重装门面。 */
+static uint8_t s_addr = (uint8_t)BOARD_CASC_ADDR;
 
 uint8_t app_screen_self_addr(void)
 {
@@ -743,14 +743,14 @@ void app_screen_flush(void)
 {
     /* 把"最后一次写入"往前推过静默窗，下一次轮询就提交 */
     s_last_write_tick = osKernelGetTickCount() - SCREEN_SETTLE_MS;
-    s_pending         = true;
+    s_pending_flag         = true;
 }
 
 /* ================================================================
  *  静默期自动提交
  *
  *  为什么不"每次 app_render 返回就提交"：
- *   · `vms_display_ctrl` 是"先 fill 再 bitmap"两次调用，逐次提交会推两遍整屏
+ *   · `_vms_display_ctrl` 是"先 fill 再 bitmap"两次调用，逐次提交会推两遍整屏
  *   · 文字是**逐字** fill+draw_bitmap，中间态会被推出去（屏上会闪）
  *   · 调用点有六处，靠人记得 flush 迟早会漏
  *  静默 50ms 之后才提交，上述三类问题一次解决，且现有调用点一行都不用改。
@@ -761,9 +761,9 @@ void app_screen_flush(void)
 
 bool app_screen_take_pending_settled(void)
 {
-    if (!s_pending) return false;
+    if (!s_pending_flag) return false;
     if ((osKernelGetTickCount() - s_last_write_tick) < SCREEN_SETTLE_MS) return false;
-    s_pending = false;
+    s_pending_flag = false;
     return true;
 }
 
@@ -799,11 +799,11 @@ static bool _apply_identity(void)
        `_apply_layout` 同时会定位本卡、并在尺寸合格后**清画布**。 */
     if (!_apply_layout()) return false;
 
-    /* board.h 的 BOARD_CASCADE_BAND_MAX 只是编译期上限，这里按**运行期**几何核一次 */
-    const uint16_t band = app_screen_card_bm_len(s_self);
-    if (band > BOARD_CASCADE_BAND_MAX) {
-        printf("[screen] 本卡矩形位图 %u > BOARD_CASCADE_BAND_MAX %u，整屏门面停用\n",
-               (unsigned)band, (unsigned)BOARD_CASCADE_BAND_MAX);
+    /* board.h 的 BOARD_CASC_BAND_MAX 只是编译期上限，这里按**运行期**几何核一次 */
+    const uint16_t band = app_screen_card_bm_len(s_self_idx);
+    if (band > BOARD_CASC_BAND_MAX) {
+        printf("[screen] 本卡矩形位图 %u > BOARD_CASC_BAND_MAX %u，整屏门面停用\n",
+               (unsigned)band, (unsigned)BOARD_CASC_BAND_MAX);
         return false;
     }
 
@@ -826,23 +826,23 @@ static bool _apply_identity(void)
 
     /* 画布刚清空：**待落屏必须清掉**（置着的话主卡会立刻把一张全黑推给所有从卡），
        "本周期被渲染过"这个闸也重新计 —— 新身份下这份内容要么没了、要么不完整。 */
-    s_pending        = false;
-    s_canvas_touched = false;
+    s_pending_flag        = false;
+    s_canvas_touched_flag = false;
 
-    const screen_card_t *c = app_screen_card(s_self);
+    const app_screen_card_t *c = app_screen_card(s_self_idx);
 #if BOARD_SCREEN_CANVAS
     printf("[screen] 整屏画布 %ux%u（%u 字节，1bpp）共 %u 卡；本卡 #%u addr=%u "
            "矩形 %ux%u@(%u,%u) 颜色 %u%s\n",
-           (unsigned)s_rows, (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_layout.count,
-           (unsigned)s_self, (unsigned)app_screen_self_addr(), (unsigned)c->w, (unsigned)c->h,
+           (unsigned)s_rows, (unsigned)s_cols, (unsigned)s_bm_len, (unsigned)s_screen_layout.count,
+           (unsigned)s_self_idx, (unsigned)app_screen_self_addr(), (unsigned)c->w, (unsigned)c->h,
            (unsigned)c->x, (unsigned)c->y, (unsigned)s_color,
            app_screen_is_master()
-               ? (s_layout.count > 1 ? "（主卡，落屏由级联轮次统一做）" : "（单卡）")
+               ? (s_screen_layout.count > 1 ? "（主卡，落屏由级联轮次统一做）" : "（单卡）")
                : "（从卡，内容由主卡下发）");
 #else
     printf("[screen] 整屏门面未启用（BOARD_SCREEN_CANVAS=0），渲染直写实屏；"
            "本卡 addr=%u 共 %u 卡\n",
-           (unsigned)app_screen_self_addr(), (unsigned)s_layout.count);
+           (unsigned)app_screen_self_addr(), (unsigned)s_screen_layout.count);
     (void)c;
 #endif
     return true;
@@ -861,7 +861,7 @@ void app_screen_apply_identity(uint8_t addr, uint8_t master_cell)
 
 void app_screen_reinit_identity(void)
 {
-    if (!s_display) return;
+    if (!s_display_dev) return;
 
     if (_apply_identity()) return;
 
@@ -869,7 +869,7 @@ void app_screen_reinit_identity(void)
        主卡身份残留会让这张卡继续往画布上画、而屏上什么都没有。 */
     app_render_set_target(nullptr);
     app_render_set_persist_hook(nullptr);
-    s_pending = false;
+    s_pending_flag = false;
 }
 
 static void _screen_init(void)
@@ -879,10 +879,10 @@ static void _screen_init(void)
         printf("[screen] 显示未就绪，整屏门面停用\n");
         return;
     }
-    s_display = d;
+    s_display_dev = d;
 
     if (!_apply_identity()) {
-        s_display = nullptr;
+        s_display_dev = nullptr;
         return;
     }
 
@@ -894,7 +894,7 @@ static void _screen_init(void)
      *
      * 本任务只在**画布打开**时存在（没有画布就没有"待落屏"，渲染是直写实屏的）。 */
 #if BOARD_SCREEN_CANVAS
-    if (s_layout.count <= 1) {
+    if (s_screen_layout.count <= 1) {
         const osThreadAttr_t attr = {
             .name       = "screen",
             .stack_size = 256 * 4,

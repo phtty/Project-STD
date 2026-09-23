@@ -1,5 +1,5 @@
 /**
- * @file    test_cascade_master.c
+ * @file    test_casc_master.c
  * @brief   级联图传 · **主卡侧**：一轮的开轮、整帧下发、结算与整帧重传
  *
  * **为什么需要这个测试**：主卡这一侧错了，现场看到的是"某块屏上不对"或"整轮变慢"，
@@ -13,7 +13,7 @@
  *   3. **从卡不回 ACK 时主卡冻结** —— 主卡自己的屏跟着一起不更新，是最坏的失效形态
  *      （整块屏全停）。用例断言"没有任何卡应答时主卡仍然提交本地"。
  *
- * 总线是假的：`ccb_send` 旁边坐着一个**假从卡**，它按协议收 IMAGE、组 ACK/NACK，再经
+ * 总线是假的：`app_ccb_send` 旁边坐着一个**假从卡**，它按协议收 IMAGE、组 ACK/NACK，再经
  * **真探针 + 真队列**喂回主卡 —— 所以走的是真的分帧、真的探针、真的等待循环。
  *
  * app_screen 是替身：抽带与落屏的**正确性**由 test_screen_layout.c 覆盖，
@@ -22,7 +22,7 @@
  */
 
 #define BOARD_SCREEN_CANVAS 1
-#define BOARD_CASCADE_ENABLED 1 /* 套件要测级联：单卡配置下也要把它编进来 */
+#define BOARD_CASC_ENABLED 1 /* 套件要测级联：单卡配置下也要把它编进来 */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,34 +32,34 @@
 /* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
 #include "app_cfg_sched.h"
 #include "dev_key.h"
-#include "app_cascade.h"
+#include "app_casc.h"
 #include "app_screen.h"
 #include "dev_display.h"
 #include "ring_buffer.h"
 
-/* ---- 本板的单卡几何：位图长度就是 BOARD_CASCADE_BAND_MAX ----
+/* ---- 本板的单卡几何：位图长度就是 BOARD_CASC_BAND_MAX ----
  * 5006048 是 224×50 → 28×50 = 1400；3833024 是 128×32 → 16×32 = 512。 */
-#if BOARD_CASCADE_BAND_MAX >= 1400
+#if BOARD_CASC_BAND_MAX >= 1400
 #define CARD_W (224U)
 #define CARD_H (50U)
 #else
 #define CARD_W (128U)
 #define CARD_H (32U)
 #endif
-#define CARD_BM (BOARD_CASCADE_BAND_MAX)
+#define CARD_BM (BOARD_CASC_BAND_MAX)
 
 _Static_assert(((CARD_W + 7U) / 8U) * CARD_H == CARD_BM,
-               "本板的单卡几何与 BOARD_CASCADE_BAND_MAX 对不上 —— 新板要在这里补一行");
+               "本板的单卡几何与 BOARD_CASC_BAND_MAX 对不上 —— 新板要在这里补一行");
 
 /* 一帧必须装得下整块位图 —— 这正是"一帧一轮"成立的前提，装不下就别谈删分片 */
-_Static_assert(CASC_FRAME_MAX >= CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM,
+_Static_assert(CASC_FRAME_MAX >= CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM,
                "本板位图一帧装不下");
 
 /* ---- 本卡身份：**夹具可改**（身份用例要换 addr、换格） ----
  *
  *  主从判据与格↔地址的规则都照生产的口径写，免得夹具自己造出一套与生产不同的
  *  规则 —— 那样测出来的"对"与屏上的"对"是两回事。
- *  本夹具的排布是 `s_cards = {格0: addr1, 格1: addr0}`（主卡在下）→ **主卡格 = 1**。 */
+ *  本夹具的排布是 `s_card_table = {格0: addr1, 格1: addr0}`（主卡在下）→ **主卡格 = 1**。 */
 static uint8_t s_self_addr   = 0;
 static uint8_t s_master_cell = 1;
 
@@ -102,19 +102,19 @@ void app_screen_apply_identity(uint8_t addr, uint8_t mc)
    （若按 addr==下标 排，那种错法在这套用例里完全测不出来。） */
 #define SELF_IDX (1U) /* 本卡（主卡 addr 0）落在下标 1 */
 
-static screen_card_t s_cards[2] = {
-    {.addr = 1, .color = COLOR_RED, .x = 0, .y = 0, .w = CARD_W, .h = CARD_H}, /* 上：从卡 */
-    {.addr = 0, .color = COLOR_GREEN, .x = 0, .y = CARD_H, .w = CARD_W, .h = CARD_H}, /* 下：主卡 */
+static app_screen_card_t s_card_table[2] = {
+    {.addr = 1, .color = DEV_DISPLAY_COLOR_RED, .x = 0, .y = 0, .w = CARD_W, .h = CARD_H}, /* 上：从卡 */
+    {.addr = 0, .color = DEV_DISPLAY_COLOR_GREEN, .x = 0, .y = CARD_H, .w = CARD_W, .h = CARD_H}, /* 下：主卡 */
 };
-static const screen_layout_t s_layout = {
-    .cards = s_cards,
+static const app_screen_layout_t s_screen_layout = {
+    .cards = s_card_table,
     .count = 2,
     .rows  = CARD_W,
     .cols  = (uint16_t)(CARD_H * 2),
 };
 
-const screen_layout_t *app_screen_layout(void) { return &s_layout; }
-const screen_card_t   *app_screen_card(uint8_t idx) { return (idx < 2) ? &s_cards[idx] : nullptr; }
+const app_screen_layout_t *app_screen_layout(void) { return &s_screen_layout; }
+const app_screen_card_t   *app_screen_card(uint8_t idx) { return (idx < 2) ? &s_card_table[idx] : nullptr; }
 uint16_t               app_screen_card_bm_len(uint8_t idx) { return (idx < 2) ? CARD_BM : 0; }
 uint8_t app_screen_self_index(void)
 {
@@ -125,22 +125,22 @@ uint8_t app_screen_self_index(void)
  *
  * P4 的策略（不在线就跳过、连续失败到阈值剔除、收到 PRESENT 就回到在线）全靠这几个
  * 函数与轮次配合。给空桩的话，那几条策略在这套用例里就一条也测不到。 */
-static uint8_t s_state[2] = {SCREEN_CARD_MISSING, SCREEN_CARD_MISSING};
+static uint8_t s_state[2] = {APP_SCREEN_CARD_STATE_MISSING, APP_SCREEN_CARD_STATE_MISSING};
 static uint16_t s_last_seq;
 static int      s_retrans_cnt;
 
-screen_card_state_t app_screen_card_state(uint8_t i)
+app_screen_card_state_t app_screen_card_state(uint8_t i)
 {
-    return (i < 2) ? (screen_card_state_t)s_state[i] : SCREEN_CARD_MISSING;
+    return (i < 2) ? (app_screen_card_state_t)s_state[i] : APP_SCREEN_CARD_STATE_MISSING;
 }
-void app_screen_card_set_state(uint8_t i, screen_card_state_t st)
+void app_screen_card_set_state(uint8_t i, app_screen_card_state_t st)
 {
     if (i < 2) s_state[i] = (uint8_t)st;
 }
 uint8_t app_screen_index_of_addr(uint8_t a)
 {
     for (uint8_t i = 0; i < 2; i++)
-        if (s_cards[i].addr == a) return i;
+        if (s_card_table[i].addr == a) return i;
     return 0xFF;
 }
 void app_screen_note_round(uint16_t seq) { s_last_seq = seq; }
@@ -152,29 +152,29 @@ void app_screen_note_retrans(void) { s_retrans_cnt++; }
 static bool           s_rec_present;                          /* 有没有记录 */
 static uint8_t        s_rec_addr, s_rec_src;                  /* 记录里的内容 */
 static uint8_t        s_rec_mc = 1;                           /* 记录里的主卡格 */
-static cfg_rec_sta_t  s_load_sta = CFG_REC_OK;                /* 用例可摆成 IO_ERR */
+static dev_cfg_record_state_t  s_load_state = DEV_CFG_RECORD_STATE_OK;                /* 用例可摆成 IO_ERR */
 static int            s_load_calls;
 static int            s_save_calls;
 static uint8_t        s_last_saved_addr, s_last_saved_src, s_last_saved_mc;
 
-uint8_t app_cfg_sched_register(const cfg_sched_desc_t *d)
+uint8_t app_cfg_sched_register(const app_cfg_sched_desc_t *d)
 {
     (void)d;
     return 0; /* 有效句柄：注册失败的话身份就永远不落盘，那是另一条用例 */
 }
-cfg_rec_sta_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
+dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, uint16_t *l)
 {
     (void)id;
     s_load_calls++;
-    if (s_load_sta != CFG_REC_OK) return s_load_sta; /* IO_ERR：**必须**原样上报，不许被缓存 */
-    if (!s_rec_present) return CFG_REC_EMPTY;
-    if (c < 4) return CFG_REC_EMPTY;
+    if (s_load_state != DEV_CFG_RECORD_STATE_OK) return s_load_state; /* IO_ERR：**必须**原样上报，不许被缓存 */
+    if (!s_rec_present) return DEV_CFG_RECORD_STATE_EMPTY;
+    if (c < 4) return DEV_CFG_RECORD_STATE_EMPTY;
     p[0] = s_rec_addr; /* 记录体 = {addr, src, master_cell, rsv} */
     p[1] = s_rec_src;
     p[2] = s_rec_mc;
     p[3] = 0;
     *l   = 4;
-    return CFG_REC_OK;
+    return DEV_CFG_RECORD_STATE_OK;
 }
 int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
 {
@@ -226,9 +226,9 @@ bool app_render_peek_persist_req(void) { return false; }
 uint8_t app_screen_output_color(uint8_t c) { return c; } /* 无颜色覆盖 */
 
 /* ---- 开轮三闸的输入：用例逐个摆（`_round_ready` 就是靠这三个判的） ---- */
-static bool s_canvas_touched, s_settled, s_render_busy;
+static bool s_canvas_touched_flag, s_settled, s_render_busy;
 
-bool app_screen_canvas_touched(void) { return s_canvas_touched; }
+bool app_screen_canvas_touched(void) { return s_canvas_touched_flag; }
 bool app_render_busy(void) { return s_render_busy; }
 bool app_screen_take_pending_settled(void)
 {
@@ -282,7 +282,7 @@ static uint8_t       s_pixel_map[DEV_W * DEV_H];
 dev_display_t       *dev_display_get(void) { return &s_dev; }
 
 /* ---- 被测：生产源码本体 ---- */
-#include "../Application/Src/CASCADE/app_cascade.c"
+#include "../Application/Src/CASC/app_casc.c"
 
 /* ================================================================
  *  假从卡 —— 坐在总线另一头，按协议收 IMAGE、组 ACK
@@ -306,9 +306,9 @@ static struct {
     /* 识别帧：单播（逐卡）与广播各记一份 */
     uint8_t         addr; /**< 本从卡的地址（默认 1；认领用例会把它设成旧主卡的 0） */
     int             set_addr_rx;
-    casc_set_addr_t set_addr_payload;
+    app_casc_set_addr_t set_addr_payload;
     int             bcast_set_addr_rx;
-    casc_set_addr_t bcast_payload;
+    app_casc_set_addr_t bcast_payload;
 
     /* 观察 */
     uint8_t last_x[2]; /**< 最近一条 IMAGE 里的矩形 x（大端） */
@@ -327,25 +327,25 @@ static void slave_reset(void)
 
 RB_DEFINE(s_rb, 4096);
 
-/** @brief 相当于 frame_dispatch_task 的那一圈：探针 → rb_read → 入队
+/** @brief 相当于 app_dispatch_task 的那一圈：探针 → rb_read → 入队
  *
  *  真框架是"等通道通知 → 遍历该通道的协议 → 探针 → rb_read → osMessageQueuePut"。
  *  本用例没有通道线程，所以由假从卡在"回了一帧之后"手动跑这一圈。 */
 static void dispatch_pending(void)
 {
-    static uint8_t     buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
-    frame_msg_t *const msg = (frame_msg_t *)buf;
+    static uint8_t     buf[sizeof(app_dispatch_msg_t) + FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
+    app_dispatch_msg_t *const msg = (app_dispatch_msg_t *)buf;
 
     for (;;) {
         uint32_t        tl  = 0;
         uint8_t         aux = 0;
-        pcb_probe_sta_t st  = casc_probe_frame(&s_casc_pcb, nullptr, nullptr, msg->data,
+        app_pcb_probe_state_t st  = _casc_probe_frame(&s_casc_pcb, nullptr, nullptr, msg->data,
                                                FRAME_DATA_MAX_LEN, &tl, &aux);
-        if (st == PCB_PROBE_FAKE) {
+        if (st == APP_PCB_PROBE_STATE_FAKE) {
             rb_skip(&s_rb, 1, nullptr);
             continue;
         }
-        if (st != PCB_PROBE_READY) return;
+        if (st != APP_PCB_PROBE_STATE_READY) return;
 
         rb_skip(&s_rb, tl, nullptr);
         msg->data_len = (uint16_t)tl;
@@ -368,10 +368,10 @@ static void peer_frame(uint8_t src, uint8_t dst, uint8_t type, uint16_t seq, con
     f[2]            = (uint8_t)((CASC_PROTO_VER << 6) | type);
     f[3]            = dst;
     f[4]            = src;
-    casc_put_u16(f + 5, seq);
-    casc_put_u16(f + 9, len);
+    _casc_put_u16(f + 5, seq);
+    _casc_put_u16(f + 9, len);
     if (plen) memcpy(f + 11, payload, plen);
-    casc_put_u32(f + len - 4U, pl_crc32_calc(pl_crc_get_handle(), f + 2, len - 6U));
+    _casc_put_u32(f + len - 4U, pl_crc32_calc(pl_crc_get_handle(), f + 2, len - 6U));
 
     rb_write(&s_rb, f, len, nullptr);
     dispatch_pending();
@@ -384,26 +384,26 @@ static void slave_reply(uint8_t type, uint16_t seq, const void *payload, uint16_
 }
 
 /** @brief 组一条识别帧的载荷（`claim` 由用例另外填：它决定回声过滤与让位裁决） */
-static casc_set_addr_t set_addr_payload(uint8_t mine, uint8_t yours, uint8_t master_cell)
+static app_casc_set_addr_t set_addr_payload(uint8_t mine, uint8_t yours, uint8_t master_cell)
 {
-    casc_set_addr_t p = {.mine = mine, .yours = yours, .master_cell = master_cell};
+    app_casc_set_addr_t p = {.mine = mine, .yours = yours, .master_cell = master_cell};
     return p;
 }
 
 static void slave_send_present(void)
 {
-    casc_present_t p;
+    app_casc_present_t p;
     memset(&p, 0, sizeof(p));
     p.addr = 1;
-    casc_put_u16(p.w, CARD_W);
-    casc_put_u16(p.h, CARD_H);
+    _casc_put_u16(p.w, CARD_W);
+    _casc_put_u16(p.h, CARD_H);
     p.bright    = 3;
     p.proto_ver = CASC_PROTO_VER;
-    slave_reply(CASC_T_PRESENT, 1, &p, sizeof(p));
+    slave_reply(APP_CASC_TYPE_PRESENT, 1, &p, sizeof(p));
 }
 
 /** @brief 回一条 ACK（**无载荷**：主卡只按 (seq, src) 认它） */
-static void slave_send_ack(uint16_t seq) { slave_reply(CASC_T_ACK, seq, nullptr, 0); }
+static void slave_send_ack(uint16_t seq) { slave_reply(APP_CASC_TYPE_ACK, seq, nullptr, 0); }
 
 static uint8_t s_tx_count; /**< 主卡一共发了多少帧 */
 
@@ -422,7 +422,7 @@ static int s_change_addr_after_rx = -1;
 static void slave_on_master_frame(const uint8_t *d, uint16_t l)
 {
     const uint8_t  type = CASC_TYPE_OF(d[2]);
-    const uint16_t seq  = casc_get_u16(d + 5);
+    const uint16_t seq  = _casc_get_u16(d + 5);
 
     /* 总线是共享的，但**不是发给本卡的帧一律不理** —— 与真从卡一样。
        少了这条，"主卡把帧发给了自己（dst=0）"这种错会被当成正常收到。 */
@@ -430,7 +430,7 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
 
     /* ---- 识别帧：**单播（dst=本卡地址）与广播（dst=0xFF）都收** ----
        广播那条是"两张都自称主卡"时唯一到得了对方的路（逐卡单播只发给表里的地址）。 */
-    if (type == CASC_T_SET_ADDR) {
+    if (type == APP_CASC_TYPE_SET_ADDR) {
         const bool bcast = (d[3] == CASC_ADDR_BCAST);
         if (bcast) s_slave.bcast_set_addr_rx++;
         else s_slave.set_addr_rx++;
@@ -439,7 +439,7 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
                                 : (uint8_t *)&s_slave.set_addr_payload;
         memset(dstbuf, 0, sizeof(s_slave.set_addr_payload));
         const uint16_t plen = (uint16_t)(l - CASC_OVERHEAD);
-        memcpy(dstbuf, d + sizeof(casc_hdr_t),
+        memcpy(dstbuf, d + sizeof(app_casc_hdr_t),
                plen < sizeof(s_slave.set_addr_payload) ? plen : sizeof(s_slave.set_addr_payload));
         if (bcast) return; /* 广播不需要本从卡应答（发起方按"发出去了"计数） */
 
@@ -448,15 +448,15 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
         if (!s_slave.nack_addr) s_slave.addr = s_slave.set_addr_payload.yours;
 
         if (s_slave.nack_addr) {
-            const casc_nack_t n = {.err = CASC_NACK_ADDR};
-            slave_reply(CASC_T_NACK, seq, &n, sizeof(n));
+            const app_casc_nack_t n = {.err = APP_CASC_NACK_ADDR};
+            slave_reply(APP_CASC_TYPE_NACK, seq, &n, sizeof(n));
         } else {
             slave_send_ack(seq);
         }
         return;
     }
 
-    if (type != CASC_T_IMAGE) return;
+    if (type != APP_CASC_TYPE_IMAGE) return;
 
     s_slave.image_rx++;
     s_slave.seq           = seq;
@@ -465,16 +465,16 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
     /* 一轮中途换身份（真正的触发点在"发帧"这一瞬，也就是 _round_one_card 还在跑的时候） */
     if (s_change_addr_after_rx >= 0) s_self_addr = (uint8_t)s_change_addr_after_rx;
 
-    const casc_image_t *p = (const casc_image_t *)(d + sizeof(casc_hdr_t));
-    s_slave.bmp_len       = casc_get_u16(p->bmp_len);
+    const app_casc_image_t *p = (const app_casc_image_t *)(d + sizeof(app_casc_hdr_t));
+    s_slave.bmp_len       = _casc_get_u16(p->bmp_len);
     memcpy(s_slave.last_x, p->x, 2);
     memcpy(s_slave.last_y, p->y, 2);
     memcpy(s_slave.last_w, p->w, 2);
     memcpy(s_slave.last_h, p->h, 2);
 
     if (s_slave.nack) { /* 矩形与本卡切分表不符：明确拒绝，重发没用 */
-        const casc_nack_t n = {.err = CASC_NACK_GEOM};
-        slave_reply(CASC_T_NACK, seq, &n, sizeof(n));
+        const app_casc_nack_t n = {.err = APP_CASC_NACK_GEOM};
+        slave_reply(APP_CASC_TYPE_NACK, seq, &n, sizeof(n));
         return;
     }
     if (s_slave.silent) return;              /* 卡掉线：连收都没收到 */
@@ -482,7 +482,7 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
     if (s_slave.drop_first && s_slave.image_rx == 1) return; /* 只丢首发 */
 
     /* 校验帧长自洽（真从卡也会这么做），然后收下整幅 */
-    if (l != (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + s_slave.bmp_len)) return;
+    if (l != (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_image_t) + s_slave.bmp_len)) return;
     if (s_slave.bmp_len != CARD_BM) return;
 
     memcpy(s_slave.stage, p->bitmap, s_slave.bmp_len);
@@ -490,7 +490,7 @@ static void slave_on_master_frame(const uint8_t *d, uint16_t l)
     slave_send_ack(seq);
 }
 
-int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
+int32_t app_ccb_send(app_ccb_t *c, const uint8_t *d, uint16_t l)
 {
     (void)c;
     s_tx_count++;
@@ -499,16 +499,16 @@ int32_t ccb_send(ccb_t *c, const uint8_t *d, uint16_t l)
         s_tx_last.type = CASC_TYPE_OF(d[2]);
         s_tx_last.dst  = d[3];
         s_tx_last.src  = d[4];
-        s_tx_last.seq  = casc_get_u16(d + 5);
+        s_tx_last.seq  = _casc_get_u16(d + 5);
         s_tx_last.len  = l;
         if (l - CASC_OVERHEAD <= sizeof(s_tx_last.payload))
-            memcpy(s_tx_last.payload, d + sizeof(casc_hdr_t), (size_t)(l - CASC_OVERHEAD));
+            memcpy(s_tx_last.payload, d + sizeof(app_casc_hdr_t), (size_t)(l - CASC_OVERHEAD));
         slave_on_master_frame(d, l);
     }
     return (int32_t)l;
 }
-ccb_t *app_rs485_ccb(void) { return nullptr; }
-void   app_proto_bind(pcb_t *p, ccb_t *c) { (void)p; (void)c; }
+app_ccb_t *app_rs485_ccb(void) { return nullptr; }
+void   app_dispatch_bind(app_pcb_t *p, app_ccb_t *c) { (void)p; (void)c; }
 void   pl_task_new_stub(void) {}
 
 /* ================================================================
@@ -522,7 +522,7 @@ static void fixture_reset(void)
     s_casc_pcb.rb    = &s_rb;
 
     /* **两处都要指到同一个队列**：假从卡往 pcb.queue 里投（那是框架投递的目标），
-       而主卡的排空读的是 s_casc_queue（`_cascade_init` 里那一份）——
+       而主卡的排空读的是 s_casc_queue（`_casc_init` 里那一份）——
        本用例没跑 initcall，所以得自己把两者接上。只接一处的话 ACK 进了没人读的
        队列，表现是"每张卡都超时"，与"卡掉线"完全一样。 */
     s_casc_queue     = osMessageQueueNew(2, CASC_MSG_SIZE, nullptr);
@@ -531,7 +531,7 @@ static void fixture_reset(void)
     s_tx_count          = 0;
     s_extract_calls     = 0;
     s_commit_self_calls = 0;
-    s_ack.valid         = false;
+    s_ack_state.valid         = false;
 
     /* 身份/记录/拨码：一律回出厂态（无记录、无拨码、主卡） */
     s_self_addr            = CASC_ADDR_MASTER;
@@ -542,7 +542,7 @@ static void fixture_reset(void)
     s_rec_src              = 0;
     s_rec_mc               = 1;
     s_last_saved_mc        = 0xFF;
-    s_load_sta             = CFG_REC_OK;
+    s_load_state             = DEV_CFG_RECORD_STATE_OK;
     s_load_calls           = 0;
     s_save_calls           = 0;
     s_last_saved_addr      = 0xFF;
@@ -552,10 +552,10 @@ static void fixture_reset(void)
     s_dip_bit[1]           = false;
     s_change_addr_after_rx = -1;
     s_my_claim             = 0xFFFFFFFFU;
-    s_canvas_touched       = false;
+    s_canvas_touched_flag       = false;
     s_settled              = false;
     s_render_busy          = false;
-    s_claim_req            = false;
+    s_claim_req_flag            = false;
     memset(&s_tx_last, 0, sizeof(s_tx_last));
 
     /* 身份记录的**注册**在生产里是 initcall（host 上不跑），不补这一下 `s_id_cfg`
@@ -564,14 +564,14 @@ static void fixture_reset(void)
 
     /* 默认：从卡在线。**不在线的卡会被轮次直接跳过**，所以每条用例都得先把它置在线，
        否则测的就不是它本来要测的东西了。 */
-    s_state[0]      = SCREEN_CARD_ONLINE;
-    s_state[1]      = SCREEN_CARD_ONLINE;
+    s_state[0]      = APP_SCREEN_CARD_STATE_ONLINE;
+    s_state[1]      = APP_SCREEN_CARD_STATE_ONLINE;
     s_last_seq      = 0;
     s_retrans_cnt   = 0;
-    s_force_round   = false;
-    /* 失败计数是 app_cascade.c 的文件级静态，**跨用例会累积** —— 不重置的话
+    s_force_round_flag   = false;
+    /* 失败计数是 app_casc.c 的文件级静态，**跨用例会累积** —— 不重置的话
        几条"让从卡不回 ACK"的用例合起来就把卡剔除了，后面的用例全跟着变。 */
-    for (uint8_t k = 0; k < SCREEN_CARD_MAX; k++) s_fail_run[k] = 0;
+    for (uint8_t k = 0; k < APP_SCREEN_CARD_MAX; k++) s_fail_run[k] = 0;
 
     s_dev.screen_rows = DEV_W;
     s_dev.screen_cols = DEV_H;
@@ -622,9 +622,9 @@ static void case_round_ok(void)
     CHECK_MSG(s_slave.image_rx == 1, "从卡应收到 1 条 IMAGE，得到 %d", s_slave.image_rx);
     CHECK_MSG(s_slave.bmp_len == CARD_BM, "从卡理解的位图长度应为 %u，得到 %u",
               (unsigned)CARD_BM, (unsigned)s_slave.bmp_len);
-    CHECK_MSG(s_slave.last_frame_len == (uint16_t)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM),
+    CHECK_MSG(s_slave.last_frame_len == (uint16_t)(CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM),
               "整帧长度应为 %u，得到 %u",
-              (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM),
+              (unsigned)(CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM),
               (unsigned)s_slave.last_frame_len);
     check_content_is_card(0, "正常一轮");
 
@@ -641,10 +641,10 @@ static void case_rect_matches_addr(void)
 
     /* 发给 addr 1 的必须是**它自己**那块（下标 0 = 上半屏 y=0），
        而不是主卡那块（下标 SELF_IDX = 下半屏 y=CARD_H）。 */
-    const uint16_t y = casc_get_u16(s_slave.last_y);
+    const uint16_t y = _casc_get_u16(s_slave.last_y);
     CHECK_MSG(y == 0, "发给 addr 1 的矩形 y 应为 0（上半屏），得到 %u（=%u 说明把主卡那块发过去了）",
               (unsigned)y, (unsigned)CARD_H);
-    CHECK_MSG(casc_get_u16(s_slave.last_w) == CARD_W && casc_get_u16(s_slave.last_h) == CARD_H,
+    CHECK_MSG(_casc_get_u16(s_slave.last_w) == CARD_W && _casc_get_u16(s_slave.last_h) == CARD_H,
               "矩形尺寸应是该卡自己的屏几何");
 
     /* 内容是"抽给这张卡的"而不是"抽给主卡自己的" —— 两张卡的图案不同，能分辨 */
@@ -657,9 +657,9 @@ static void case_rect_matches_addr(void)
 
     /* 自检：**addr 与下标必须不同序、两卡矩形必须不同位** ——
        否则"发错卡"和"拿地址当下标"这两条根本测不出来。 */
-    CHECK_MSG(s_cards[0].addr != 0 && s_cards[SELF_IDX].addr == 0,
+    CHECK_MSG(s_card_table[0].addr != 0 && s_card_table[SELF_IDX].addr == 0,
               "本夹具必须让 addr 与下标**不同序**，否则这条用例没有分辨力");
-    CHECK_MSG(s_cards[0].y != s_cards[SELF_IDX].y,
+    CHECK_MSG(s_card_table[0].y != s_card_table[SELF_IDX].y,
               "本夹具两张卡的矩形必须**不同位**，否则「发错卡」测不出来");
 
     /* 本卡（addr 0）那块**不该**被下发 —— 它由本地提交处理 */
@@ -758,7 +758,7 @@ static void case_evict_skip_recover(void)
 
     /* ---- 从未应答过（MISSING）：一帧都不发 ---- */
     fixture_reset();
-    s_state[0] = SCREEN_CARD_MISSING;
+    s_state[0] = APP_SCREEN_CARD_STATE_MISSING;
     /* **没上线的卡也算"这轮没对上"** —— 否则从卡晚几秒起来时，对齐全在"没人应答"
        的状态下判成成功、只走一轮就收尾，上电同步永远不会发生。 */
     CHECK_MSG(!_round_run(), "有卡还没上线时，这一轮不该算对齐完成");
@@ -770,13 +770,13 @@ static void case_evict_skip_recover(void)
     s_slave.silent = true;
     for (uint8_t r = 1; r < CASC_FAIL_RUN_MAX; r++) {
         (void)_round_run();
-        CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_ONLINE,
+        CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_ONLINE,
                   "第 %u 轮后不该剔除 —— 单轮失败多半是偶发冲突，下一轮自己就好，"
                   "剔了反而要等下一次枚举才叫得回来",
                   (unsigned)r);
     }
     (void)_round_run();
-    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_OFFLINE, "连续 %u 轮未完成应剔除",
+    CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_OFFLINE, "连续 %u 轮未完成应剔除",
               (unsigned)CASC_FAIL_RUN_MAX);
 
     /* ---- 被剔除的卡：**一帧都不再发**（这是剔除的全部收益）---- */
@@ -787,12 +787,12 @@ static void case_evict_skip_recover(void)
     CHECK_MSG(s_commit_self_calls >= 1, "剔除一张卡不该拖住主卡自己的更新");
 
     /* ---- 它回来了：PRESENT → 立刻复在线，并要求马上开一轮 ---- */
-    s_state[0]    = SCREEN_CARD_OFFLINE;
-    s_force_round = false;
+    s_state[0]    = APP_SCREEN_CARD_STATE_OFFLINE;
+    s_force_round_flag = false;
     slave_send_present();
     _casc_drain();
-    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_ONLINE, "收到 PRESENT 应复在线");
-    CHECK_MSG(s_force_round,
+    CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_ONLINE, "收到 PRESENT 应复在线");
+    CHECK_MSG(s_force_round_flag,
               "刚上线的卡应请求**立刻**开一轮 —— 它屏上还是掉线前那幅旧的，"
               "等下一次内容更新可能要几分钟");
 }
@@ -831,11 +831,11 @@ static void case_id_resolve_sources(void)
     fixture_reset();
     /* 先把本机摆成"出厂态"，才能验证"没变就不重装"这一条 —— 夹具的主卡格默认是 1
        （与它自己的卡表一致），而 3833024 板级配的 MASTER_CELL 是 0 */
-    s_self_addr   = (uint8_t)BOARD_CASCADE_ADDR;
-    s_master_cell = (uint8_t)BOARD_CASCADE_MASTER_CELL;
+    s_self_addr   = (uint8_t)BOARD_CASC_ADDR;
+    s_master_cell = (uint8_t)BOARD_CASC_MASTER_CELL;
     _casc_id_boot();
-    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASCADE_ADDR,
-              "出厂态应取板级默认 %u，得到 %u", (unsigned)BOARD_CASCADE_ADDR,
+    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASC_ADDR,
+              "出厂态应取板级默认 %u，得到 %u", (unsigned)BOARD_CASC_ADDR,
               (unsigned)s_self_addr);
     CHECK_MSG(s_reinit_calls == 0,
               "身份与本机现状一致时不该重装门面（会清掉屏上内容），得到 %d 次", s_reinit_calls);
@@ -844,7 +844,7 @@ static void case_id_resolve_sources(void)
     fixture_reset();
     s_self_addr = 1; /* 摆成与出厂默认不同的值 */
     _casc_id_boot();
-    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASCADE_ADDR && s_reinit_calls == 1,
+    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASC_ADDR && s_reinit_calls == 1,
               "身份真的变了就要重装门面一次，得到 %d 次", s_reinit_calls);
 
     /* ② 有记录 → 记录优先于默认（先把本机摆成别的，证明真的读了记录） */
@@ -862,14 +862,14 @@ static void case_id_resolve_sources(void)
     s_rec_present = true;
     s_rec_addr    = 0x40;
     _casc_id_boot();
-    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASCADE_ADDR,
-              "越界记录必须被拒、回落到默认 %u，得到 %u", (unsigned)BOARD_CASCADE_ADDR,
+    CHECK_MSG(s_self_addr == (uint8_t)BOARD_CASC_ADDR,
+              "越界记录必须被拒、回落到默认 %u，得到 %u", (unsigned)BOARD_CASC_ADDR,
               (unsigned)s_self_addr);
 
     /* ④ 读失败（IO_ERR）**不许被缓存**：每次上电/每次解析都要去问一次，
        否则一次瞬时读失败会让身份永远停在默认值上 */
     fixture_reset();
-    s_load_sta = CFG_REC_IO_ERR;
+    s_load_state = DEV_CFG_RECORD_STATE_IO_ERR;
     _casc_id_boot();
     _casc_id_boot();
     CHECK_MSG(s_load_calls == 2, "IO_ERR 不该被缓存：两次解析应两次都去读，得到 %d 次",
@@ -914,12 +914,12 @@ static void case_set_addr_branches(void)
     /* ① `mine != 0`：对方不是主卡 → 拒绝，本机身份不动。
        这一条守住"整个装置不会没有主卡"：从卡按键不能把唯一的主卡降级。 */
     fixture_reset();
-    casc_set_addr_t p = set_addr_payload(1, 2, 100);
-    peer_frame(1, CASC_ADDR_MASTER, CASC_T_SET_ADDR, 11, &p, sizeof(p));
+    app_casc_set_addr_t p = set_addr_payload(1, 2, 100);
+    peer_frame(1, CASC_ADDR_MASTER, APP_CASC_TYPE_SET_ADDR, 11, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_self_addr == 0, "非主卡的识别帧不该改本机身份，得到 %u", (unsigned)s_self_addr);
     CHECK_MSG(s_save_calls == 0, "被拒绝的识别帧不该写记录");
-    CHECK_MSG(s_tx_last.type == CASC_T_NACK && s_tx_last.payload[0] == CASC_NACK_ADDR,
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
               "应以 NACK(ADDR) 明确回绝（静默回绝会让现场只能猜）");
 
     /* ② 同址确认（`yours` 就是本机地址）→ 回 ACK，**而且要把身份写进记录**。
@@ -928,9 +928,9 @@ static void case_set_addr_branches(void)
     fixture_reset();
     s_self_addr = 1; /* 本机是从卡，与记录里那条一致 */
     p           = set_addr_payload(CASC_ADDR_MASTER, 1, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, CASC_T_SET_ADDR, 12, &p, sizeof(p));
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 12, &p, sizeof(p));
     _casc_drain();
-    CHECK_MSG(s_tx_last.type == CASC_T_ACK, "同址确认应回 ACK");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "同址确认应回 ACK");
     CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 1 && s_last_saved_mc == 1,
               "同址确认也要落记录（addr=1 主卡格=1），得到 save=%d addr=%u mc=%u", s_save_calls,
               (unsigned)s_last_saved_addr, (unsigned)s_last_saved_mc);
@@ -942,8 +942,8 @@ static void case_set_addr_branches(void)
     fixture_reset();
     s_my_claim = 100;
     p          = set_addr_payload(CASC_ADDR_MASTER, 0xFF, 1);
-    casc_put_u32(p.claim, s_my_claim);
-    peer_frame(s_self_addr, CASC_ADDR_MASTER, CASC_T_SET_ADDR, 13, &p, sizeof(p));
+    _casc_put_u32(p.claim, s_my_claim);
+    peer_frame(s_self_addr, CASC_ADDR_MASTER, APP_CASC_TYPE_SET_ADDR, 13, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_tx_last.len == 0, "回声不该有任何应答，却发了 %u 字节", (unsigned)s_tx_last.len);
     CHECK_MSG(s_self_addr == 0 && s_save_calls == 0, "回声不该改身份");
@@ -951,18 +951,18 @@ static void case_set_addr_branches(void)
     /* ④ 从卡收到**具体地址**的单播：改址 + 落记录（含主卡格）+ 回 ACK + 作废陈旧状态 */
     fixture_reset();
     s_self_addr = 1;
-    s_state[0]  = SCREEN_CARD_ONLINE;
-    s_state[1]  = SCREEN_CARD_ONLINE;
+    s_state[0]  = APP_SCREEN_CARD_STATE_ONLINE;
+    s_state[1]  = APP_SCREEN_CARD_STATE_ONLINE;
     p           = set_addr_payload(CASC_ADDR_MASTER, 2, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, CASC_T_SET_ADDR, 14, &p, sizeof(p));
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 14, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_self_addr == 2, "从卡收到识别帧应改成 yours=2，得到 %u", (unsigned)s_self_addr);
     CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 2 && s_last_saved_mc == 1,
               "改完必须**立刻写记录**（地址 + 主卡格），掉电不忘是这条的全部意义");
     CHECK_MSG(s_reinit_calls == 1, "改完必须重装门面（渲染目标/持久化钩子要跟着换）");
-    CHECK_MSG(s_tx_last.type == CASC_T_ACK, "改完应回 ACK，否则发起方以为没通知到");
-    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_MISSING &&
-                  app_screen_card_state(1) == SCREEN_CARD_MISSING,
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "改完应回 ACK，否则发起方以为没通知到");
+    CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_MISSING &&
+                  app_screen_card_state(1) == APP_SCREEN_CARD_STATE_MISSING,
               "身份变了就要把「谁在线」全部作废 —— 那是按**旧地址**建立的");
 
     /* ⑤ **两张卡都自称主卡**（F1，让位那条路）：对方广播一条 `yours=0xFF` 的识别帧，
@@ -972,23 +972,23 @@ static void case_set_addr_branches(void)
     fixture_reset();
     s_my_claim = 0xFFFFFFFFU; /* 本卡从没按过 → 一定让位 */
     p          = set_addr_payload(CASC_ADDR_MASTER, 0xFF, 1); /* 主卡格 = 1（本卡也这么认为） */
-    casc_put_u32(p.claim, 200);
-    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, CASC_T_SET_ADDR, 16, &p, sizeof(p));
+    _casc_put_u32(p.claim, 200);
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, APP_CASC_TYPE_SET_ADDR, 16, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_self_addr == 1, "两张都自称主卡时本卡应让到另一格（addr=1），得到 %u",
               (unsigned)s_self_addr);
-    CHECK_MSG(s_tx_last.type == CASC_T_ACK, "让位后要回 ACK");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "让位后要回 ACK");
     CHECK_MSG(s_save_calls == 1, "让位要落记录（不然重启又变回两张主卡）");
 
     /* ⑥ 本卡按得**更晚**时不让位：claim 比较（更晚者胜 = 最近按的那张卡作数） */
     fixture_reset();
     s_my_claim = 300; /* 本卡在 300ms 认领过 */
     p          = set_addr_payload(CASC_ADDR_MASTER, 0xFF, 1);
-    casc_put_u32(p.claim, 200); /* 对方更早 */
-    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, CASC_T_SET_ADDR, 17, &p, sizeof(p));
+    _casc_put_u32(p.claim, 200); /* 对方更早 */
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, APP_CASC_TYPE_SET_ADDR, 17, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_self_addr == 0, "本卡按得更晚就不该让位，得到 %u", (unsigned)s_self_addr);
-    CHECK_MSG(s_tx_last.type == CASC_T_NACK, "应明确回绝（静默会让对方一直等）");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK, "应明确回绝（静默会让对方一直等）");
 
     /* ⑦ **主卡格变了**（F3 的核心）：本卡是旧主卡（addr 0 = 格 1），对方按了键之后
        广播"主卡格 = 0" → 本卡**格不动**（还在格 1），地址按新表重算成 1。
@@ -996,8 +996,8 @@ static void case_set_addr_branches(void)
     fixture_reset();
     s_self_addr   = 0; /* 旧表：主卡格 1 → addr 0 = 格 1 */
     p             = set_addr_payload(CASC_ADDR_MASTER, 0xFF, 0); /* 新主卡格 = 0 */
-    casc_put_u32(p.claim, 400);
-    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, CASC_T_SET_ADDR, 18, &p, sizeof(p));
+    _casc_put_u32(p.claim, 400);
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, APP_CASC_TYPE_SET_ADDR, 18, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_master_cell == 0, "主卡格应跟着更新到 0，得到 %u", (unsigned)s_master_cell);
     CHECK_MSG(s_self_addr == 1, "本卡仍在格 1，在新表里那就是 addr 1，得到 %u",
@@ -1012,11 +1012,11 @@ static void case_set_addr_branches(void)
     s_dip_bit[0]  = true; /* 拨码 = 1 */
     s_self_addr   = 1;
     p             = set_addr_payload(CASC_ADDR_MASTER, 2, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, CASC_T_SET_ADDR, 15, &p, sizeof(p));
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 15, &p, sizeof(p));
     _casc_drain();
     CHECK_MSG(s_self_addr == 1, "拨码板不许被改成 2（拨码优先），得到 %u", (unsigned)s_self_addr);
     CHECK_MSG(s_save_calls == 0, "被拒绝时不该写记录");
-    CHECK_MSG(s_tx_last.type == CASC_T_NACK && s_tx_last.payload[0] == CASC_NACK_ADDR,
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
               "拨码冲突应以 NACK(ADDR) 回绝");
 #endif
 }
@@ -1031,16 +1031,16 @@ static void case_claim_master_flow(void)
     fixture_reset();
     s_self_addr  = 1;
     s_slave.addr = 0;
-    s_state[0]   = SCREEN_CARD_ONLINE;
-    s_state[1]   = SCREEN_CARD_ONLINE;
+    s_state[0]   = APP_SCREEN_CARD_STATE_ONLINE;
+    s_state[1]   = APP_SCREEN_CARD_STATE_ONLINE;
 
-    app_cascade_claim_master();
-    CHECK_MSG(s_claim_req, "按键只投递请求（写 flash + 等 ACK 最长约 1s，必须由级联任务做）");
+    app_casc_claim_master();
+    CHECK_MSG(s_claim_req_flag, "按键只投递请求（写 flash + 等 ACK 最长约 1s，必须由级联任务做）");
     CHECK_MSG(s_slave.set_addr_rx == 0, "投递请求时还不该发任何帧（动作在级联任务里）");
 
     const uint32_t t0 = osKernelGetTickCount();
-    _claim_poll(); /* casc_task 里那一格 */
-    CHECK_MSG(!s_claim_req, "取走请求后标志要清掉（否则每圈都认领一次）");
+    _claim_poll(); /* _casc_task 里那一格 */
+    CHECK_MSG(!s_claim_req_flag, "取走请求后标志要清掉（否则每圈都认领一次）");
 
     /* **本卡那一格变成主卡格**，地址随之变成 0 —— 两块屏仍然各显示自己那半幅 */
     CHECK_MSG(s_master_cell == 0, "主卡格应变成本卡那一格（0），得到 %u", (unsigned)s_master_cell);
@@ -1061,12 +1061,12 @@ static void case_claim_master_flow(void)
     CHECK_MSG(s_slave.set_addr_payload.yours == 1,
               "单播给旧主卡的新地址：主卡格翻到 0 之后，原来格 1 的它变成 addr 1（得到 %u）",
               (unsigned)s_slave.set_addr_payload.yours);
-    CHECK_MSG(casc_get_u32(s_slave.set_addr_payload.claim) == s_my_claim,
+    CHECK_MSG(_casc_get_u32(s_slave.set_addr_payload.claim) == s_my_claim,
               "claim 必须是本卡认领那一刻的 tick");
 
     /* 认领会把协议侧按旧身份建立的陈旧状态全部作废，并**立刻**重新枚举 */
-    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_MISSING, "认领后「谁在线」要全部作废");
-    CHECK_MSG(s_reenum_at >= t0 && s_reenum_at <= osKernelGetTickCount(),
+    CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_MISSING, "认领后「谁在线」要全部作废");
+    CHECK_MSG(s_reenum_at_tick >= t0 && s_reenum_at_tick <= osKernelGetTickCount(),
               "认领后应立刻重新枚举（否则新主卡要等下一个 10s 周期才被发现）");
 }
 
@@ -1094,23 +1094,23 @@ static void case_identity_poke(void)
     TEST_BEGIN("身份变了 → 作废陈旧状态并立刻重新枚举");
 
     fixture_reset();
-    s_state[0]    = SCREEN_CARD_ONLINE;
-    s_state[1]    = SCREEN_CARD_ONLINE;
+    s_state[0]    = APP_SCREEN_CARD_STATE_ONLINE;
+    s_state[1]    = APP_SCREEN_CARD_STATE_ONLINE;
     s_fail_run[0] = 3;
     s_fail_run[1] = 2;
-    s_ack.valid   = true;
-    s_force_round = true;
+    s_ack_state.valid   = true;
+    s_force_round_flag = true;
 
     const uint32_t t0 = osKernelGetTickCount();
     _identity_poke();
 
-    CHECK_MSG(app_screen_card_state(0) == SCREEN_CARD_MISSING &&
-                  app_screen_card_state(1) == SCREEN_CARD_MISSING,
+    CHECK_MSG(app_screen_card_state(0) == APP_SCREEN_CARD_STATE_MISSING &&
+                  app_screen_card_state(1) == APP_SCREEN_CARD_STATE_MISSING,
               "各卡状态必须回 MISSING：新身份要先重新枚举才知道谁在");
     CHECK_MSG(s_fail_run[0] == 0 && s_fail_run[1] == 0, "旧的失败计数同样作废");
-    CHECK_MSG(!s_force_round, "开轮请求不该跨身份继续（画布已重装）");
-    CHECK_MSG(!s_ack.valid, "等应答槽要作废（那是旧身份那一轮的回应）");
-    CHECK_MSG(s_reenum_at >= t0 && s_reenum_at <= osKernelGetTickCount(),
+    CHECK_MSG(!s_force_round_flag, "开轮请求不该跨身份继续（画布已重装）");
+    CHECK_MSG(!s_ack_state.valid, "等应答槽要作废（那是旧身份那一轮的回应）");
+    CHECK_MSG(s_reenum_at_tick >= t0 && s_reenum_at_tick <= osKernelGetTickCount(),
               "应把下一次枚举提前到**现在**，而不是等 10s 周期");
 }
 
@@ -1129,39 +1129,39 @@ static void case_round_ready_gates(void)
     fixture_reset();
 
     /* ① 画布没被写过：一轮都不许开 */
-    s_canvas_touched = false;
+    s_canvas_touched_flag = false;
     s_settled        = true;
     s_render_busy    = false;
     CHECK_MSG(!_round_ready(), "画布没被写过时不许开轮（上电恢复的内容会被刷黑）");
 
     /* ② 画布写过 + 静默期到 → 开 */
-    s_canvas_touched = true;
+    s_canvas_touched_flag = true;
     s_settled        = true;
     CHECK_MSG(_round_ready(), "画布写过且静默期已过应开轮");
 
     /* ③ **渲染途中**：静默期到了也不许（这一眼画布上只有半张，甚至刚清空） */
-    s_canvas_touched = true;
+    s_canvas_touched_flag = true;
     s_settled        = true;
     s_render_busy    = true;
     CHECK_MSG(!_round_ready(), "渲染途中不许开轮 —— 推下去的就是那一帧「闪一下」的中间态");
     s_render_busy = false;
 
     /* ④ 静默期没到：内容还在变，攒着 */
-    s_canvas_touched = true;
+    s_canvas_touched_flag = true;
     s_settled        = false;
     CHECK_MSG(!_round_ready(), "静默期没到不许开轮");
 
     /* ⑤ `force_round`（有卡刚上线）**也要过前两闸**，而且请求不许被白白吃掉 */
     s_settled        = false;
-    s_canvas_touched = false;
-    s_force_round    = true;
-    CHECK_MSG(!_round_ready() && s_force_round,
+    s_canvas_touched_flag = false;
+    s_force_round_flag    = true;
+    CHECK_MSG(!_round_ready() && s_force_round_flag,
               "新上线的卡也要等画布被写过 —— 且这一眼的请求必须留着");
-    s_canvas_touched = true;
+    s_canvas_touched_flag = true;
     s_render_busy    = true;
-    CHECK_MSG(!_round_ready() && s_force_round, "渲染途中 force_round 同样不许开");
+    CHECK_MSG(!_round_ready() && s_force_round_flag, "渲染途中 force_round 同样不许开");
     s_render_busy = false;
-    CHECK_MSG(_round_ready() && !s_force_round, "闸都过了才开，并把 force 请求清掉");
+    CHECK_MSG(_round_ready() && !s_force_round_flag, "闸都过了才开，并把 force 请求清掉");
 
     /* ⑥ 请求被清掉之后，下一下不再开（依赖画布内容，而不是依赖这个标志） */
     s_settled = false;
@@ -1173,7 +1173,7 @@ static void case_round_ready_gates(void)
 int main(void)
 {
     printf("\n\033[36m级联图传 · 主卡侧（本板单卡 %ux%u，一帧 %u 字节）\033[0m\n", (unsigned)CARD_W,
-           (unsigned)CARD_H, (unsigned)(CASC_OVERHEAD + sizeof(casc_image_t) + CARD_BM));
+           (unsigned)CARD_H, (unsigned)(CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM));
 
     case_round_ok();
     case_rect_matches_addr();

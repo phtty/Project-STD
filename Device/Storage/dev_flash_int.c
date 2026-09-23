@@ -1,6 +1,6 @@
 /**
  * @file    dev_flash_int.c
- * @brief   STM32 内部 Flash 存储 — flash_int_ops 虚表实现（不含实例）
+ * @brief   STM32 内部 Flash 存储 — g_flash_int_ops 虚表实现（不含实例）
  *
  * 实例和 ops 绑定由各自的配置模块负责：
  *   dev_flash_iap.c → g_flash_iap → hw_dev_initcall
@@ -10,6 +10,7 @@
 #include "dev_flash_int.h"
 
 #include <string.h>
+#include "container_of.h"
 #include "pl_flash.h"
 
 /* ---- OPS ---- */
@@ -22,14 +23,14 @@ static int32_t _init(dev_storage_t *dev)
 
 static int32_t _read(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
-    dev_flash_int_t *self = (dev_flash_int_t *)dev;
+    dev_flash_int_t *self = container_of(dev, dev_flash_int_t, base);
     memcpy(buf, (void *)(self->base_addr + addr), len);
     return 0; /* 约定: 0 = 成功（不返回字节数） */
 }
 
 static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
 {
-    dev_flash_int_t *self = (dev_flash_int_t *)dev;
+    dev_flash_int_t *self = container_of(dev, dev_flash_int_t, base);
     uint32_t abs_addr     = self->base_addr + addr;
     uint32_t word_cnt     = (len + 3) / 4;
     uint32_t tmp[word_cnt];
@@ -51,7 +52,7 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
 {
     (void)addr;
     (void)len;
-    dev_flash_int_t *self = (dev_flash_int_t *)dev;
+    dev_flash_int_t *self = container_of(dev, dev_flash_int_t, base);
 
     pl_flash_unlock();
     pl_flash_clear_errors();
@@ -63,7 +64,7 @@ static int32_t _erase(dev_storage_t *dev, uint32_t addr, uint32_t len)
 static uint32_t _capacity(dev_storage_t *dev)
 { return dev->capacity; }
 
-const dev_storage_ops_t flash_int_ops = {
+const dev_storage_ops_t g_flash_int_ops = {
     .init     = _init,
     .read     = _read,
     .write    = _write,

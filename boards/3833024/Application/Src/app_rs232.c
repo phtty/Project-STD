@@ -24,7 +24,7 @@
 #define RS232_BUF_SIZE (2048U)
 
 typedef struct {
-    ccb_t base; /**< 第一个成员：container_of 还原 */
+    app_ccb_t base; /**< 第一个成员：container_of 还原 */
     pl_uart_handle_t uart;
     osMessageQueueId_t rx_queue;
     uint8_t *rx_buf;
@@ -33,34 +33,34 @@ typedef struct {
 } rs232_ccb_t;
 
 /* ---- ops（两路共用：目的地恒为本 UART 对端，无寻址概念） ---- */
-static int32_t rs232_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+static int32_t _rs232_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
     (void)dst;
     rs232_ccb_t *self = container_of(ccb, rs232_ccb_t, base);
     /* state 置 UP 的唯一位置在任务里、UART 与 DMA 接收就绪之后，
        因此它同时表达了"uart 已绑定"，无需再单独判空 */
-    if (self->base.state != CCB_STATE_UP) return -1;
+    if (self->base.state != APP_CCB_STATE_UP) return -1;
     return pl_uart_send(self->uart, data, len, 100);
 }
 
-static const ccb_ops_t rs232_ccb_ops = {.send = rs232_send};
+static const app_ccb_ops_t s_rs232_ccb_ops = {.send = _rs232_send};
 
 /* ---- 通道控制块（静态，协议绑定期间即可用） ---- */
-static rs232_ccb_t g_rs232_0 = {
-    .base = {.name = "rs232_0", .ops = &rs232_ccb_ops},
+static rs232_ccb_t s_rs232_0 = {
+    .base = {.name = "rs232_0", .ops = &s_rs232_ccb_ops},
 };
-static rs232_ccb_t g_rs232_1 = {
-    .base = {.name = "rs232_1", .ops = &rs232_ccb_ops},
+static rs232_ccb_t s_rs232_1 = {
+    .base = {.name = "rs232_1", .ops = &s_rs232_ccb_ops},
 };
 
-ccb_t *app_rs232_0_ccb(void)
+app_ccb_t *app_rs232_0_ccb(void)
 {
-    return &g_rs232_0.base;
+    return &s_rs232_0.base;
 }
 
-ccb_t *app_rs232_1_ccb(void)
+app_ccb_t *app_rs232_1_ccb(void)
 {
-    return &g_rs232_1.base;
+    return &s_rs232_1.base;
 }
 
 /* ---- rs232_rx_queue 静态分配 ---- */
@@ -97,7 +97,7 @@ static const osThreadAttr_t s_rs232_1_attr = {
 };
 
 /* ---- ISR → 任务通知 ---- */
-static void rs232_isr_cb(uint8_t *data, uint16_t len, void *ctx)
+static void _rs232_isr_fn(uint8_t *data, uint16_t len, void *ctx)
 {
     (void)data;
     rs232_ccb_t *self = (rs232_ccb_t *)ctx;
@@ -105,7 +105,7 @@ static void rs232_isr_cb(uint8_t *data, uint16_t len, void *ctx)
 }
 
 /* ---- 任务循环（两路共用） ---- */
-static void rs232_task(void *argument)
+static void _rs232_task(void *argument)
 {
     rs232_ccb_t *self = (rs232_ccb_t *)argument;
 
@@ -115,9 +115,9 @@ static void rs232_task(void *argument)
         return;
     }
 
-    pl_uart_set_rx_cb(self->uart, rs232_isr_cb, self);
+    pl_uart_set_rx_fn(self->uart, _rs232_isr_fn, self);
     pl_uart_start_rx(self->uart, self->rx_buf, self->rx_buf_size);
-    self->base.state = CCB_STATE_UP;
+    self->base.state = APP_CCB_STATE_UP;
 
     for (;;) {
         uint16_t rx_len = 0;
@@ -128,25 +128,25 @@ static void rs232_task(void *argument)
 
 /* ---- 公开 API ---- */
 
-static osThreadId_t rs232_start(rs232_ccb_t *self, pl_uart_handle_t uart, uint8_t buf_index,
+static osThreadId_t _rs232_start(rs232_ccb_t *self, pl_uart_handle_t uart, uint8_t buf_index,
                                 const osThreadAttr_t *attr, const osMessageQueueAttr_t *rx_attr)
 {
     self->uart        = uart;
     self->rx_buf      = dev_rs232_get_buf(buf_index);
     self->rx_buf_size = RS232_BUF_SIZE;
     self->rx_attr     = rx_attr;
-    return pl_task_new(rs232_task, self, attr);
+    return pl_task_new(_rs232_task, self, attr);
 }
 
 osThreadId_t app_rs232_start(void)
 {
-    return rs232_start(&g_rs232_0, pl_uart_get_handle(PL_UART3), 0, &s_rs232_0_attr,
+    return _rs232_start(&s_rs232_0, pl_uart_get_handle(PL_UART3), 0, &s_rs232_0_attr,
                        &s_rs232_0_rx_attr);
 }
 
 osThreadId_t app_rs232_1_start(void)
 {
-    return rs232_start(&g_rs232_1, pl_uart_get_handle(PL_UART6), 1, &s_rs232_1_attr,
+    return _rs232_start(&s_rs232_1, pl_uart_get_handle(PL_UART6), 1, &s_rs232_1_attr,
                        &s_rs232_1_rx_attr);
 }
 
@@ -159,19 +159,19 @@ osThreadId_t app_rs232_1_start(void)
  * 对照：RS485 的 app_rs485_start() 仍由 app_boot.c 直接调用 —— 它在两块板上
  * 都有（app_rs485.c 是共享通道），不属于板级差异。
  *
- * 同层顺序说明：本函数与 iap_module_init 同在 sw_post(4)，而两者先后取决于链接
+ * 同层顺序说明：本函数与 _iap_module_init 同在 sw_post(4)，而两者先后取决于链接
  * 顺序（实测本函数排在前）。这里恰好安全，但**不是**因为顺序对：本函数只负责
- * 建任务，而 rs232_task 是 Normal 优先级、init_task 是 High，新建的下级任务不会
- * 抢占 init_task，因此整个 sw_board_init（含 iap_module_init 的 app_proto_bind）
- * 必定先跑完，rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
-static void rs232_channels_start(void)
+ * 建任务，而 _rs232_task 是 Normal 优先级、_init_task 是 High，新建的下级任务不会
+ * 抢占 _init_task，因此整个 initcall_run_sw（含 _iap_module_init 的 app_dispatch_bind）
+ * 必定先跑完，_rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
+static void _rs232_channels_start(void)
 {
     /* 本板的 RS232 端点承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
        RS232 只有 3833024 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
-    app_proto_bind(app_iap_pcb(), app_rs232_0_ccb());
-    app_proto_bind(app_iap_pcb(), app_rs232_1_ccb());
+    app_dispatch_bind(app_iap_pcb(), app_rs232_0_ccb());
+    app_dispatch_bind(app_iap_pcb(), app_rs232_1_ccb());
 
     app_rs232_start();
     app_rs232_1_start();
 }
-sw_post_initcall(rs232_channels_start);
+sw_post_initcall(_rs232_channels_start);

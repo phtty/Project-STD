@@ -31,12 +31,12 @@ typedef enum {
     APP_FLASH_IAP_UPDATED  = 0,
     APP_FLASH_IAP_UPDATING = 1,
     APP_FLASH_IAP_FAILED   = 2,
-} app_flash_iap_update_sta_t;
+} app_flash_iap_update_status_t;
 
 // 存储在 0x08004000
 __attribute__((aligned(4))) typedef struct {
     uint32_t magic;                   // 魔数，判断配置区是否有效
-    uint32_t update_sta;              // 升级状态机
+    uint32_t update_status;              // 升级状态机
     app_flash_iap_fw_info_t app_info; // main_app 状态
     app_flash_iap_net_cfg_t net_cfg;  // 网络配置
     uint32_t config_crc;              // 本结构体自身的 CRC32 校验
@@ -69,4 +69,4 @@ void app_flash_iap_sync_from_runtime(void);
 /** @brief 获取 IAP Flash 存储句柄（内部使用） */
 dev_storage_t *app_flash_iap_get_storage(void);
 
-extern app_flash_iap_sys_info_t *g_config; /* 内存映射指针 (0x08004000) */
+extern app_flash_iap_sys_info_t *g_iap_sys_info; /* 内存映射指针 (0x08004000) */

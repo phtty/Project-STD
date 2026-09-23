@@ -13,7 +13,7 @@
  * 帧构造用与探针相同的 CRC 函数，因此校验路径必然通过；这样测的是探针的
  * **结构判定与边界处理**，而不是 CRC 算法本身是否与硬件一致。
  *
- * 来源：从参考工程 Project_STD_B/test/test_probes.c 移植。本工程没有 AH_MQTT 的
+ * 来源：从参考工程 Project_STD_B/test/test_probes.c 移植。本工程没有 AHMQ 的
  * pcb（该模块改造中），故参考工程里对应的部分不存在，这里也没有。
  */
 
@@ -70,10 +70,10 @@ static int g_fail;
 static uint8_t s_rb_buf[RB_SIZE];
 static ring_buffer_t s_rb = {.data = s_rb_buf, .size = RB_SIZE, .mutex = NULL};
 
-static pcb_t s_pcb = {.name = "probe_ut", .rb = &s_rb};
-static ccb_t s_ccb = {.name = "chan", .ops = NULL};
+static app_pcb_t s_pcb = {.name = "probe_ut", .rb = &s_rb};
+static app_ccb_t s_ccb = {.name = "chan", .ops = NULL};
 
-static uint8_t s_scratch[FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
+static uint8_t s_scratch_buf[FRAME_DATA_MAX_LEN] __attribute__((aligned(4)));
 
 static uint8_t s_frame[1200] __attribute__((aligned(4)));
 
@@ -89,9 +89,9 @@ static void feed(const void *data, size_t len)
 static uint32_t s_iap_len;
 static uint8_t s_iap_aux;
 
-static pcb_probe_sta_t iap_probe(void)
+static app_pcb_probe_state_t iap_probe(void)
 {
-    return iap_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch), &s_iap_len,
+    return app_iap_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), &s_iap_len,
                            &s_iap_aux);
 }
 
@@ -102,7 +102,7 @@ static pcb_probe_sta_t iap_probe(void)
  */
 static size_t iap_build(uint32_t cmd, uint32_t len_words)
 {
-    iap_frame_t *f = (iap_frame_t *)s_frame;
+    app_iap_frame_t *f = (app_iap_frame_t *)s_frame;
     memset(s_frame, 0, sizeof(s_frame));
     f->head = FRAME_HEAD;
     f->seq  = 0x11223344U;
@@ -113,8 +113,8 @@ static size_t iap_build(uint32_t cmd, uint32_t len_words)
 
     /* CRC 覆盖帧头 + DATA（不含 CRC 字本身），与探针的调用完全一致 */
     f->data_crc[len_words] =
-        pl_crc32_calc(pl_crc_get_handle(), s_frame, sizeof(iap_frame_t) + len_words * 4);
-    return (size_t)sizeof(iap_frame_t) + len_words * 4 + 4;
+        pl_crc32_calc(pl_crc_get_handle(), s_frame, sizeof(app_iap_frame_t) + len_words * 4);
+    return (size_t)sizeof(app_iap_frame_t) + len_words * 4 + 4;
 }
 
 /* ---- LDI ---- */
@@ -122,9 +122,9 @@ static size_t iap_build(uint32_t cmd, uint32_t len_words)
 static uint32_t s_ldi_len;
 static uint8_t s_ldi_aux;
 
-static pcb_probe_sta_t ldi_probe(void)
+static app_pcb_probe_state_t ldi_probe(void)
 {
-    return ldi_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch), &s_ldi_len,
+    return app_ldi_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), &s_ldi_len,
                            &s_ldi_aux);
 }
 
@@ -133,7 +133,7 @@ static pcb_probe_sta_t ldi_probe(void)
 
 static size_t ldi_build(uint8_t cmd, uint32_t data_len)
 {
-    ldi_frame_t *f = (ldi_frame_t *)s_frame;
+    app_ldi_frame_t *f = (app_ldi_frame_t *)s_frame;
     memset(s_frame, 0, sizeof(s_frame));
     f->stx[0] = 0xFF;
     f->stx[1] = 0xFF;
@@ -149,10 +149,10 @@ static size_t ldi_build(uint8_t cmd, uint32_t data_len)
         f->data_crc[i] = (uint8_t)(0x30 + i);
 
     /* CRC 覆盖 VER ~ DATA 尾，与探针的 crc16_xmodem(&frame->ver, data_len + 6) 一致 */
-    uint16_t crc = crc16_xmodem(&f->ver, data_len + sizeof(ldi_frame_t) - sizeof(f->stx));
+    uint16_t crc = crc16_xmodem(&f->ver, data_len + sizeof(app_ldi_frame_t) - sizeof(f->stx));
     f->data_crc[data_len]     = (uint8_t)(crc >> 8);
     f->data_crc[data_len + 1] = (uint8_t)crc;
-    return (size_t)sizeof(ldi_frame_t) + data_len + 2;
+    return (size_t)sizeof(app_ldi_frame_t) + data_len + 2;
 }
 
 /* ---- RLS ---- */
@@ -160,9 +160,9 @@ static size_t ldi_build(uint8_t cmd, uint32_t data_len)
 static uint32_t s_rls_len;
 static uint8_t s_rls_aux;
 
-static pcb_probe_sta_t rls_probe(void)
+static app_pcb_probe_state_t rls_probe(void)
 {
-    return rls_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch), &s_rls_len,
+    return app_rls_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), &s_rls_len,
                            &s_rls_aux);
 }
 
@@ -171,7 +171,7 @@ static pcb_probe_sta_t rls_probe(void)
 
 static size_t rls_build(uint16_t total_len)
 {
-    rls_frame_t *f = (rls_frame_t *)s_frame;
+    app_rls_frame_t *f = (app_rls_frame_t *)s_frame;
     memset(s_frame, 0, sizeof(s_frame));
     f->head[0]   = 0xFF;
     f->head[1]   = 0xFE;
@@ -181,11 +181,11 @@ static size_t rls_build(uint16_t total_len)
     f->cmd[1]    = 0x42;
 
     /* 帧头之后、帧尾之前填数据（顺序无关，探针不校验 BCC）*/
-    for (size_t i = 0; i + 2 < (size_t)total_len - sizeof(rls_frame_t); i++)
+    for (size_t i = 0; i + 2 < (size_t)total_len - sizeof(app_rls_frame_t); i++)
         f->data_bcc_tail[i] = (uint8_t)i;
 
-    f->data_bcc_tail[total_len - 2 - sizeof(rls_frame_t)] = 0x0D; /* 帧尾 */
-    f->data_bcc_tail[total_len - 1 - sizeof(rls_frame_t)] = 0x0C;
+    f->data_bcc_tail[total_len - 2 - sizeof(app_rls_frame_t)] = 0x0D; /* 帧尾 */
+    f->data_bcc_tail[total_len - 1 - sizeof(app_rls_frame_t)] = 0x0C;
     return total_len;
 }
 
@@ -200,45 +200,45 @@ static void test_iap(void)
     /* 合法帧 */
     size_t n = iap_build(0x05, 4);
     feed(s_frame, n);
-    CHECK(iap_probe() == PCB_PROBE_READY);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_READY);
     CHECK(s_iap_len == n);
     CHECK(s_iap_aux == 0x05);
 
     /* 数据不足 → WAIT */
     feed(s_frame, 8);
-    CHECK(iap_probe() == PCB_PROBE_WAIT);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_WAIT);
 
     /* 帧头错 → FAKE */
     iap_build(0x05, 4);
     s_frame[0] = 0x00;
     feed(s_frame, n);
-    CHECK(iap_probe() == PCB_PROBE_FAKE);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* payload_len 超协议上限（256 字）→ FAKE */
     iap_build(0x05, 257);
-    feed(s_frame, sizeof(iap_frame_t) + 257 * 4 + 4);
-    CHECK(iap_probe() == PCB_PROBE_FAKE);
+    feed(s_frame, sizeof(app_iap_frame_t) + 257 * 4 + 4);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 边界：恰好 256 字是合法的 */
     iap_build(0x05, 256);
-    feed(s_frame, sizeof(iap_frame_t) + 256 * 4 + 4);
-    CHECK(iap_probe() == PCB_PROBE_READY);
+    feed(s_frame, sizeof(app_iap_frame_t) + 256 * 4 + 4);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_READY);
 
     /* CRC 错 → FAKE */
     n = iap_build(0x05, 4);
     s_frame[n - 1] ^= 0xFF;
     feed(s_frame, n);
-    CHECK(iap_probe() == PCB_PROBE_FAKE);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 数据不足但后面又出现一个新帧头 → 提前判定 FAKE（不等数据到齐）*/
     n = iap_build(0x05, 8); /* 需要 52 字节，只喂 40 */
     feed(s_frame, 40);
-    CHECK(iap_probe() == PCB_PROBE_WAIT);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_WAIT);
 
     iap_build(0x05, 8);
     memcpy(s_frame + 20, &(uint32_t){FRAME_HEAD}, 4); /* 半路插入帧头 */
     feed(s_frame, 40);
-    CHECK(iap_probe() == PCB_PROBE_FAKE);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 }
 
 /* ================================================================
@@ -249,70 +249,70 @@ static void test_ldi(void)
 {
     TEST_BEGIN("LDI 探针");
 
-    g_ldi.cfg_valid = true; /* 让身份校验分支可达 */
+    g_ldi_ctx.cfg_valid = true; /* 让身份校验分支可达 */
 
     /* 合法帧（配置指令 0AH 不校验身份）*/
-    size_t n = ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    size_t n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     feed(s_frame, n);
-    CHECK(ldi_probe() == PCB_PROBE_READY);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_READY);
     CHECK(s_ldi_len == n);
-    CHECK(s_ldi_aux == LDI_CMD_SET_IP_REQ);
+    CHECK(s_ldi_aux == APP_LDI_CMD_TYPE_SET_IP_REQ);
 
     /* 数据不足 → WAIT */
     feed(s_frame, 10);
-    CHECK(ldi_probe() == PCB_PROBE_WAIT);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_WAIT);
 
     /* 帧头错 → FAKE */
-    ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     s_frame[1] = 0x00;
     feed(s_frame, n);
-    CHECK(ldi_probe() == PCB_PROBE_FAKE);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 版本号错 → FAKE */
-    ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     s_frame[2] = 0x01;
     feed(s_frame, n);
-    CHECK(ldi_probe() == PCB_PROBE_FAKE);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 长度域超上限 → FAKE（此前未校验时会用 data_len 索引，越界读）*/
-    ldi_build(LDI_CMD_SET_IP_REQ, TEST_LDI_DATA_MAX + 1);
-    feed(s_frame, sizeof(ldi_frame_t) + TEST_LDI_DATA_MAX + 1 + 2);
-    CHECK(ldi_probe() == PCB_PROBE_FAKE);
+    ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, TEST_LDI_DATA_MAX + 1);
+    feed(s_frame, sizeof(app_ldi_frame_t) + TEST_LDI_DATA_MAX + 1 + 2);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 长度域为极大值（0xFFFFFFFF）→ FAKE，且不得越界 */
-    ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     s_frame[4] = 0xFF;
     s_frame[5] = 0xFF;
     s_frame[6] = 0xFF;
     s_frame[7] = 0xFF;
     feed(s_frame, 64);
-    CHECK(ldi_probe() == PCB_PROBE_FAKE);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 边界：恰好上限且数据齐全 → READY */
-    n = ldi_build(LDI_CMD_SET_IP_REQ, TEST_LDI_DATA_MAX);
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, TEST_LDI_DATA_MAX);
     feed(s_frame, n);
-    CHECK_MSG(ldi_probe() == PCB_PROBE_READY, "DATA 域上限边界应被接受（%u 字节）",
+    CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_READY, "DATA 域上限边界应被接受（%u 字节）",
               (unsigned)TEST_LDI_DATA_MAX);
 
     /* CRC 错 → FAKE */
-    n = ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     s_frame[n - 1] ^= 0xFF;
     feed(s_frame, n);
-    CHECK(ldi_probe() == PCB_PROBE_FAKE);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 身份不匹配 → SKIP（帧合法但不是本机）*/
-    memcpy(g_ldi.cfg.lane_hex, "99999", 5);
-    memcpy(g_ldi.cfg.cert, "AAAAAAAA", 8);
-    n = ldi_build(LDI_CMD_CTRL_REQ, 24); /* 非配置指令 → 走身份校验 */
+    memcpy(g_ldi_ctx.cfg.lane_hex, "99999", 5);
+    memcpy(g_ldi_ctx.cfg.cert, "AAAAAAAA", 8);
+    n = ldi_build(APP_LDI_CMD_TYPE_CTRL_REQ, 24); /* 非配置指令 → 走身份校验 */
     feed(s_frame, n);
-    CHECK(ldi_probe() == PCB_PROBE_SKIP);
+    CHECK(ldi_probe() == APP_PCB_PROBE_STATE_SKIP);
     CHECK(s_ldi_len == n);
 
-    /* 身份匹配 → READY（1BH 用 ldi_ctrl_head_t：lane_code 偏移 9、cert_info 偏移 14）*/
-    memcpy(g_ldi.cfg.lane_hex, s_frame + 8 + 9, 5);
-    memcpy(g_ldi.cfg.cert, s_frame + 8 + 14, 8);
+    /* 身份匹配 → READY（1BH 用 app_ldi_ctrl_head_t：lane_code 偏移 9、cert_info 偏移 14）*/
+    memcpy(g_ldi_ctx.cfg.lane_hex, s_frame + 8 + 9, 5);
+    memcpy(g_ldi_ctx.cfg.cert, s_frame + 8 + 14, 8);
     feed(s_frame, n);
-    CHECK_MSG(ldi_probe() == PCB_PROBE_READY, "身份匹配的帧应被接受");
+    CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_READY, "身份匹配的帧应被接受");
 }
 
 /* ================================================================
@@ -326,63 +326,63 @@ static void test_rls(void)
     /* 合法帧 */
     size_t n = rls_build(64);
     feed(s_frame, n);
-    CHECK(rls_probe() == PCB_PROBE_READY);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_READY);
     CHECK(s_rls_len == 64);
 
     /* 数据不足 → WAIT */
-    feed(s_frame, 8); /* 小于 sizeof(rls_frame_t) + 4 */
-    CHECK(rls_probe() == PCB_PROBE_WAIT);
+    feed(s_frame, 8); /* 小于 sizeof(app_rls_frame_t) + 4 */
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_WAIT);
 
     /* 帧头错 → FAKE */
     rls_build(64);
     s_frame[0] = 0x00;
     feed(s_frame, n);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 帧尾错 → FAKE */
     rls_build(64);
     s_frame[62] = 0x00;
     feed(s_frame, n);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 长度域超上限 → FAKE（此前会按 data_len 向后索引，越界读）*/
     rls_build(64);
     s_frame[2] = 0x02; /* 长度改成 0x02xx */
     s_frame[3] = 0x20;
     feed(s_frame, 64);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 长度域 = 0 → FAKE（此前 data_len-2 向前越界，且会让框架零进度空转）*/
     rls_build(64);
     s_frame[2] = 0x00;
     s_frame[3] = 0x00;
     feed(s_frame, 64);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 长度域 = 1 → FAKE（下边界，data_len-2 仍会向前越界）*/
     rls_build(64);
     s_frame[2] = 0x00;
     s_frame[3] = 0x01;
     feed(s_frame, 64);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
-    /* 长度域 = 帧长下限 -1 → FAKE（RLS_FRAME_MIN = sizeof(rls_frame_t) + 3 = 9）*/
+    /* 长度域 = 帧长下限 -1 → FAKE（RLS_FRAME_MIN = sizeof(app_rls_frame_t) + 3 = 9）*/
     rls_build(64);
     s_frame[2] = 0x00;
     s_frame[3] = 0x08;
     feed(s_frame, 64);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 
     /* 边界：恰好上限 → READY */
     n = rls_build(TEST_RLS_FRAME_MAX);
     feed(s_frame, n);
-    CHECK_MSG(rls_probe() == PCB_PROBE_READY, "上限边界应被接受（%u 字节）",
+    CHECK_MSG(rls_probe() == APP_PCB_PROBE_STATE_READY, "上限边界应被接受（%u 字节）",
               (unsigned)TEST_RLS_FRAME_MAX);
 
     /* 上限 +1 → FAKE */
     n = rls_build(TEST_RLS_FRAME_MAX + 1);
     feed(s_frame, n);
-    CHECK(rls_probe() == PCB_PROBE_FAKE);
+    CHECK(rls_probe() == APP_PCB_PROBE_STATE_FAKE);
 }
 
 /* ================================================================
@@ -399,23 +399,23 @@ static void test_scratch_contract(void)
     /* IAP：给一个肯定装不下的暂存区 */
     size_t n = iap_build(0x05, 8);
     feed(s_frame, n);
-    pcb_probe_sta_t st =
-        iap_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, 16, &len, &aux); /* 16 < 帧长 */
-    CHECK(st == PCB_PROBE_SKIP);
+    app_pcb_probe_state_t st =
+        app_iap_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, 16, &len, &aux); /* 16 < 帧长 */
+    CHECK(st == APP_PCB_PROBE_STATE_SKIP);
     CHECK(len == n);
 
     /* LDI 同理 */
-    n = ldi_build(LDI_CMD_SET_IP_REQ, 20);
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     feed(s_frame, n);
-    st = ldi_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, 16, &len, &aux);
-    CHECK(st == PCB_PROBE_SKIP);
+    st = app_ldi_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, 16, &len, &aux);
+    CHECK(st == APP_PCB_PROBE_STATE_SKIP);
     CHECK(len == n);
 
     /* RLS 同理 */
     n = rls_build(64);
     feed(s_frame, n);
-    st = rls_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch, 16, &len, &aux);
-    CHECK(st == PCB_PROBE_SKIP);
+    st = app_rls_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, 16, &len, &aux);
+    CHECK(st == APP_PCB_PROBE_STATE_SKIP);
     CHECK(len == n);
 }
 
@@ -444,11 +444,11 @@ static void test_fake_does_not_copy_whole(void)
 
     static const struct {
         const char     *name;
-        pcb_probe_fn_t  probe;
+        app_pcb_probe_fn_t  probe;
     } t[] = {
-        {"iap", iap_probe_frame},
-        {"ldi", ldi_probe_frame},
-        {"rls", rls_probe_frame},
+        {"iap", app_iap_probe_frame},
+        {"ldi", app_ldi_probe_frame},
+        {"rls", app_rls_probe_frame},
     };
 
     memset(junk, 0x43, sizeof(junk)); /* 一个 A5 5A / FF FE / 0x7E 都不给 */
@@ -458,18 +458,18 @@ static void test_fake_does_not_copy_whole(void)
         s_rb.write_index = 0;
         feed(junk, (uint16_t)sizeof(junk));
 
-        memset(s_scratch, 0xEE, sizeof(s_scratch));
+        memset(s_scratch_buf, 0xEE, sizeof(s_scratch_buf));
         uint32_t        len = 0;
         uint8_t         aux = 0;
-        pcb_probe_sta_t st  = t[i].probe(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch),
+        app_pcb_probe_state_t st  = t[i].probe(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf),
                                          &len, &aux);
 
-        CHECK_MSG(st != PCB_PROBE_READY, "%s：这段杂物不该判 READY（得到 %u）", t[i].name,
+        CHECK_MSG(st != APP_PCB_PROBE_STATE_READY, "%s：这段杂物不该判 READY（得到 %u）", t[i].name,
                   (unsigned)st);
 
         bool untouched = true;
-        for (uint16_t k = HDR_MAX; k < sizeof(s_scratch); k++) {
-            if (s_scratch[k] != 0xEE) {
+        for (uint16_t k = HDR_MAX; k < sizeof(s_scratch_buf); k++) {
+            if (s_scratch_buf[k] != 0xEE) {
                 untouched = false;
                 break;
             }
@@ -498,7 +498,7 @@ static void test_fake_does_not_copy_whole(void)
 
 typedef struct {
     const char       *name;
-    pcb_probe_fn_t  probe;
+    app_pcb_probe_fn_t  probe;
     uint16_t          payload_max;
     size_t          (*build)(uint32_t variant); /**< 在 s_frame 里造一帧，返回长度 */
 } probe_entry_t;
@@ -509,7 +509,7 @@ static size_t build_iap(uint32_t v)
 }
 static size_t build_ldi(uint32_t v)
 {
-    return ldi_build(LDI_CMD_SET_IP_REQ, 20 + (v % 64));
+    return ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20 + (v % 64));
 }
 static size_t build_rls(uint32_t v)
 {
@@ -517,9 +517,9 @@ static size_t build_rls(uint32_t v)
 }
 
 static const probe_entry_t s_probes[] = {
-    {"iap", iap_probe_frame, 1044, build_iap},
-    {"ldi", ldi_probe_frame, 522, build_ldi},
-    {"rls", rls_probe_frame, 530, build_rls},
+    {"iap", app_iap_probe_frame, 1044, build_iap},
+    {"ldi", app_ldi_probe_frame, 522, build_ldi},
+    {"rls", app_rls_probe_frame, 530, build_rls},
 };
 
 /* 确定性伪随机（xorshift32）：失败可复现，不依赖平台 rand 的实现 */
@@ -541,26 +541,26 @@ static void conformance_run(const probe_entry_t *pe)
 
         uint32_t total = 0;
         uint8_t aux    = 0;
-        pcb_probe_sta_t st =
-            pe->probe(&s_pcb, &s_ccb, nullptr, s_scratch, sizeof(s_scratch), &total, &aux);
+        app_pcb_probe_state_t st =
+            pe->probe(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), &total, &aux);
 
-        if (st == PCB_PROBE_WAIT) {
+        if (st == APP_PCB_PROBE_STATE_WAIT) {
             CHECK_MSG(rb_avail(&s_rb, NULL) == avail, "%s: WAIT 消费了数据", pe->name);
             return; /* 等更多数据，此处没有了 */
         }
 
-        if (st == PCB_PROBE_READY || st == PCB_PROBE_SKIP) {
+        if (st == APP_PCB_PROBE_STATE_READY || st == APP_PCB_PROBE_STATE_SKIP) {
             CHECK_MSG(total > 0, "%s: %s 返回帧长 0（会让框架零进度空转）", pe->name,
-                      st == PCB_PROBE_READY ? "READY" : "SKIP");
+                      st == APP_PCB_PROBE_STATE_READY ? "READY" : "SKIP");
             CHECK_MSG(total <= avail, "%s: %s 声明帧长 %u 超过可用字节 %u", pe->name,
-                      st == PCB_PROBE_READY ? "READY" : "SKIP", total, avail);
-            if (st == PCB_PROBE_READY)
+                      st == APP_PCB_PROBE_STATE_READY ? "READY" : "SKIP", total, avail);
+            if (st == APP_PCB_PROBE_STATE_READY)
                 CHECK_MSG(total <= pe->payload_max, "%s: READY 帧长 %u 超过 payload_max %u",
                           pe->name, total, pe->payload_max);
         }
 
         uint16_t skip = 0;
-        if (st == PCB_PROBE_READY || st == PCB_PROBE_SKIP)
+        if (st == APP_PCB_PROBE_STATE_READY || st == APP_PCB_PROBE_STATE_SKIP)
             skip = (uint16_t)total;
         else
             skip = 1; /* FAKE */

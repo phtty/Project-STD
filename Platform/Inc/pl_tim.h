@@ -69,7 +69,7 @@ uint8_t pl_tim_irq_of(uint8_t id);
 void pl_tim_dbg_freeze(pl_tim_handle_t h);
 
 /** @brief TIM 周期回调函数类型 */
-typedef void (*pl_tim_period_cb_t)(void);
+typedef void (*pl_tim_period_fn_t)(void);
 
 /** @brief 注册 TIM 周期回调（在 hw_dev_initcall 阶段调用） */
-void pl_tim_register_period_cb(uint8_t tim_id, pl_tim_period_cb_t cb);
+void pl_tim_register_period_cb(uint8_t tim_id, pl_tim_period_fn_t cb);

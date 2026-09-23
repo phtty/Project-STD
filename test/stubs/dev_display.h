@@ -30,15 +30,15 @@
 
 /* 与 Device/Inc/dev_display.h 保持一致 */
 typedef enum {
-    COLOR_BLACK  = 0,
-    COLOR_RED    = 1,
-    COLOR_GREEN  = 2,
-    COLOR_YELLOW = 3,
-    COLOR_BLUE   = 4,
-    COLOR_PURPLE = 5,
-    COLOR_CYAN   = 6,
-    COLOR_WHITE  = 7,
-} display_color_t;
+    DEV_DISPLAY_COLOR_BLACK  = 0,
+    DEV_DISPLAY_COLOR_RED    = 1,
+    DEV_DISPLAY_COLOR_GREEN  = 2,
+    DEV_DISPLAY_COLOR_YELLOW = 3,
+    DEV_DISPLAY_COLOR_BLUE   = 4,
+    DEV_DISPLAY_COLOR_PURPLE = 5,
+    DEV_DISPLAY_COLOR_CYAN   = 6,
+    DEV_DISPLAY_COLOR_WHITE  = 7,
+} dev_display_color_t;
 
 #define DEV_DISPLAY_SCREEN_ROWS (128U)
 #define DEV_DISPLAY_SCREEN_COLS (32U)
@@ -62,11 +62,11 @@ typedef struct dev_display {
     bool        frame_touched;
 } dev_display_t;
 
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, display_color_t color);
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color);
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                      display_color_t color);
+                      dev_display_color_t color);
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                             const uint8_t *bitmap, display_color_t color);
+                             const uint8_t *bitmap, dev_display_color_t color);
 void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
 void dev_display_frame_begin(dev_display_t *dev);
 void dev_display_frame_end(dev_display_t *dev);

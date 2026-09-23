@@ -15,7 +15,7 @@
  * 换成了 RAM：擦到一半、写到第 N 个 word 掉电、两线程强制交错都成了可控输入。
  *
  * 被测代码是生产源码本体（Application/Src/IAP/app_iap_cfg.c +
- * Device/Storage/dev_flash_int.c），不做任何替换；重定向只通过覆盖 g_config
+ * Device/Storage/dev_flash_int.c），不做任何替换；重定向只通过覆盖 g_iap_sys_info
  * 与存储实例的 base_addr 完成（见 flash_setup）。
  *
  * 构建与运行见 Makefile 的 test 目标。
@@ -99,7 +99,7 @@ static uint8_t *g_flash;
 
 /** @brief 把记录区重定向到 RAM，并把存储实例指向同一块
  *
- *  生产代码里两者都是 0x08004000 —— g_config 走内存映射读、dev_flash_int 走
+ *  生产代码里两者都是 0x08004000 —— g_iap_sys_info 走内存映射读、dev_flash_int 走
  *  base_addr 读，改完 ip 之后两条路径必须落到同一块内存，否则测试自欺。 */
 static void flash_setup(void)
 {
@@ -118,9 +118,9 @@ static void flash_setup(void)
 
     dev_flash_int_t *st = (dev_flash_int_t *)app_flash_iap_get_storage();
     st->base_addr       = base;
-    st->me.ops          = &flash_int_ops;
+    st->base.ops          = &g_flash_int_ops;
 
-    g_config = (app_flash_iap_sys_info_t *)(uintptr_t)base;
+    g_iap_sys_info = (app_flash_iap_sys_info_t *)(uintptr_t)base;
 
     pl_flash_stub_set_region(base, FAKE_SECTOR_SIZE);
     pl_flash_stub_reset();
@@ -163,9 +163,9 @@ static void case_write_path_is_short_circuited(void)
     app_flash_iap_sys_info_t good;
     memset(&good, 0, sizeof(good));
     good.magic      = APP_FLASH_IAP_MAGIC;
-    good.update_sta = APP_FLASH_IAP_UPDATED;
+    good.update_status = APP_FLASH_IAP_UPDATED;
     good.config_crc = _iap_cfg_crc(&good);
-    memcpy((void *)g_config, &good, sizeof(good));
+    memcpy((void *)g_iap_sys_info, &good, sizeof(good));
 
     pl_flash_stub_reset();
 
@@ -177,7 +177,7 @@ static void case_write_path_is_short_circuited(void)
               pl_flash_stub_program_count());
 
     /* 记录内容必须原封不动 —— 短路是"什么都不做"，不是"写一份新的" */
-    CHECK_MSG(memcmp((void *)g_config, &good, sizeof(good)) == 0, "短路径居然改动了记录区内容");
+    CHECK_MSG(memcmp((void *)g_iap_sys_info, &good, sizeof(good)) == 0, "短路径居然改动了记录区内容");
 
     /* 两个公开入口同样要报错而不是假装成功 */
     CHECK(0 != app_flash_iap_erase_config());
@@ -214,7 +214,7 @@ static void case_empty_is_seeded(void)
     app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
 
     CHECK(REC->magic == APP_FLASH_IAP_MAGIC);
-    CHECK(REC->update_sta == APP_FLASH_IAP_UPDATED);
+    CHECK(REC->update_status == APP_FLASH_IAP_UPDATED);
     CHECK(app_flash_iap_is_config_valid(REC));
     CHECK(memcmp(REC->net_cfg.ip, IP_A, 4) == 0);
     CHECK(REC->net_cfg.port == PORT);
@@ -253,7 +253,7 @@ static void case_power_loss_leaves_corrupt_and_is_repaired(void)
     CHECK(app_flash_iap_is_config_valid(REC));
     CHECK(memcmp(REC->net_cfg.ip, IP_B, 4) == 0);
     CHECK(REC->magic == APP_FLASH_IAP_MAGIC);
-    CHECK(REC->update_sta == APP_FLASH_IAP_UPDATED);
+    CHECK(REC->update_status == APP_FLASH_IAP_UPDATED);
 }
 
 /* ================================================================
@@ -326,7 +326,7 @@ static void case_corrupt_is_not_deduped(void)
 
 static void case_crc_covers_every_field(void)
 {
-    CHECK_FIELD_COVERED("update_sta",    REC->update_sta = APP_FLASH_IAP_FAILED);
+    CHECK_FIELD_COVERED("update_status",    REC->update_status = APP_FLASH_IAP_FAILED);
     CHECK_FIELD_COVERED("app_info.size", REC->app_info.size ^= 1U);
     CHECK_FIELD_COVERED("app_info.crc32", REC->app_info.crc32 ^= 1U);
     CHECK_FIELD_COVERED("app_info.version", REC->app_info.version[0] ^= 1U);

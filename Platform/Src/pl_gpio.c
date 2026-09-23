@@ -9,7 +9,7 @@
 #include "initcall.h"
 
 /* ---- 端口 ID → 芯片基地址映射（换芯片只改此表） ---- */
-static const uint32_t g_port_base[] = {
+static const uint32_t s_port_base[] = {
     [PL_PORT_A] = (uint32_t)GPIOA,
     [PL_PORT_B] = (uint32_t)GPIOB,
     [PL_PORT_C] = (uint32_t)GPIOC,
@@ -26,10 +26,10 @@ void pl_gpio_init(void)
 }
 hw_pl_initcall(pl_gpio_init);
 
-void pl_gpio_write(pl_port_t port, uint8_t pin, bool high)
+void pl_gpio_write(pl_gpio_port_t port, uint8_t pin, bool high)
 {
     if (port >= PL_PORT_MAX) return;
-    GPIO_TypeDef *gpio = (GPIO_TypeDef *)g_port_base[port];
+    GPIO_TypeDef *gpio = (GPIO_TypeDef *)s_port_base[port];
     uint16_t mask      = (uint16_t)(1U << pin);
     if (high)
         gpio->BSRR = mask;
@@ -37,14 +37,14 @@ void pl_gpio_write(pl_port_t port, uint8_t pin, bool high)
         gpio->BSRR = (uint32_t)mask << 16;
 }
 
-bool pl_gpio_read(pl_port_t port, uint8_t pin)
+bool pl_gpio_read(pl_gpio_port_t port, uint8_t pin)
 {
     if (port >= PL_PORT_MAX) return false;
-    GPIO_TypeDef *gpio = (GPIO_TypeDef *)g_port_base[port];
+    GPIO_TypeDef *gpio = (GPIO_TypeDef *)s_port_base[port];
     return (gpio->IDR & (1U << pin)) != 0;
 }
 
-void pl_gpio_clk_enable(pl_port_t port)
+void pl_gpio_clk_enable(pl_gpio_port_t port)
 {
     /* 逐个列：__HAL_RCC_GPIOx_CLK_ENABLE() 是宏，取不出数组，只能分支 */
     switch (port) {
@@ -60,8 +60,8 @@ void pl_gpio_clk_enable(pl_port_t port)
     }
 }
 
-void *pl_gpio_port_base(pl_port_t port)
+void *pl_gpio_port_base(pl_gpio_port_t port)
 {
     if (port >= PL_PORT_MAX) return NULL;
-    return (void *)g_port_base[port];
+    return (void *)s_port_base[port];
 }

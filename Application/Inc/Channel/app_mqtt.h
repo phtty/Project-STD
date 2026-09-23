@@ -6,10 +6,10 @@
  * 默认 Broker: 120.46.136.199:6000, Client ID: "CD_ZTP"
  *
  * 容器约定：
- *   - mqtt_ccb_t 为静态对象，base 是第一个成员（偏移 0），container_of 零开销还原；
+ *   - app_mqtt_ccb_t 为静态对象，base 是第一个成员（偏移 0），container_of 零开销还原；
  *   - 断线只销毁"连接"（ctx.client）并置 base.state = DOWN，控制块本身始终有效，
- *     协议侧保存的 ccb_t* 永不悬空，重连复用同一控制块；
- *   - 协议侧通过 app_mqtt_ccb() 取控制块（绑定用）；g_mqtt 仍对外可见，
+ *     协议侧保存的 app_ccb_t* 永不悬空，重连复用同一控制块；
+ *   - 协议侧通过 app_mqtt_ccb() 取控制块（绑定用）；g_mqtt_ccb 仍对外可见，
  *     AH 协议侧据其 state 判断何时可以签到/上报。
  *
  * 当前状态：app_mqtt_start() 无调用者，链路未激活。
@@ -23,11 +23,11 @@
 
 /** @brief MQTT 连接状态机 */
 typedef enum {
-    MQTT_ST_DISCONNECTED, /**< 未连接 */
-    MQTT_ST_CONNECTING,   /**< TCP + MQTT CONNECT 进行中 */
-    MQTT_ST_CONNECTED,    /**< MQTT CONNACK 已接受，等待 subscribe */
-    MQTT_ST_READY,        /**< subscribe 完成，可正常收发 */
-} mqtt_state_t;
+    APP_MQTT_STATE_DISCONNECTED, /**< 未连接 */
+    APP_MQTT_STATE_CONNECTING,   /**< TCP + MQTT CONNECT 进行中 */
+    APP_MQTT_STATE_CONNECTED,    /**< MQTT CONNACK 已接受，等待 subscribe */
+    APP_MQTT_STATE_READY,        /**< subscribe 完成，可正常收发 */
+} app_mqtt_state_t;
 
 /** @brief MQTT 运行上下文 — 散落全局资源的聚合 */
 typedef struct {
@@ -40,32 +40,32 @@ typedef struct {
     osSemaphoreId_t connect_sem; /**< CONNACK 同步信号量 */
     uint8_t rcv_buf[1044];       /**< 接收缓冲区 */
     uint32_t payload_offset;     /**< rcv_buf 写入偏移 */
-} mqtt_ctx_t;
+} app_mqtt_ctx_t;
 
-/** @brief MQTT 通道子类（单例，ccb_t 为第一个成员） */
+/** @brief MQTT 通道子类（单例，app_ccb_t 为第一个成员） */
 typedef struct {
-    ccb_t base;       /**< 第一个成员：container_of 还原 */
-    mqtt_state_t state; /**< MQTT 连接状态机 */
-    mqtt_ctx_t ctx;     /**< 运行时上下文 */
-    char topic[CCB_SRC_TOPIC_MAX]; /**< 最近一次收到的主题；作为 ccb_dst_t.topic 缺省值 */
+    app_ccb_t base;       /**< 第一个成员：container_of 还原 */
+    app_mqtt_state_t state; /**< MQTT 连接状态机 */
+    app_mqtt_ctx_t ctx;     /**< 运行时上下文 */
+    char topic[APP_CCB_SRC_TOPIC_MAX]; /**< 最近一次收到的主题；作为 app_ccb_dst_t.topic 缺省值 */
     /* 注：这里不再有 payload_len —— 帧长属于每条消息，寄存在通道对象上会被
        突发消息覆盖；改由探针按结尾 NUL 自行定界。 */
-} mqtt_ccb_t;
+} app_mqtt_ccb_t;
 
-extern const ccb_ops_t mqtt_ccb_ops;
-extern mqtt_ccb_t g_mqtt;
-extern osThreadId_t mqtt_task_handle;
-extern const osThreadAttr_t mqtt_task_attr;
+extern const app_ccb_ops_t g_mqtt_ccb_ops;
+extern app_mqtt_ccb_t g_mqtt_ccb;
+extern osThreadId_t g_mqtt_task_handle;
+extern const osThreadAttr_t g_mqtt_task_attr;
 
-void mqtt_task(void *argument);
+void app_mqtt_task(void *argument);
 
 static inline osThreadId_t app_mqtt_start(void)
 {
-    return osThreadNew(mqtt_task, NULL, &mqtt_task_attr);
+    return osThreadNew(app_mqtt_task, NULL, &g_mqtt_task_attr);
 }
 
-void mqtt_connection(void);
-void mqtt_send_data(const char *topic, const void *data, uint16_t len);
+void app_mqtt_connect(void);
+void app_mqtt_send(const char *topic, const void *data, uint16_t len);
 
 /**
  * @brief 登记要订阅的主题（协议侧调用）
@@ -85,10 +85,10 @@ int32_t app_mqtt_subscribe(const char *const *topics, uint8_t count);
  * @brief   设置 MQTT Broker 地址
  * @param   ip    Broker IP 地址（4 字节数组）
  * @param   port  Broker 端口号
- * @note    需在调用 mqtt_connection() 之前调用
+ * @note    需在调用 app_mqtt_connect() 之前调用
  */
 void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port);
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/
-ccb_t *app_mqtt_ccb(void);
+app_ccb_t *app_mqtt_ccb(void);

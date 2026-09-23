@@ -5,7 +5,7 @@
  * 字库布局: (字号, 编码, 字型) 三元组在 Flash 中顺序拼接。
  * 具体有哪些三元组、各自多大、怎么索引，**都是板级事实**（两板字库不是同一版：
  * 3833024 是 GBK/14-16-20-24-32，5006048 是 GB2312/16-24-32-48），由
- * boards/<板>/Src/font_lib_board.c 的 g_board_font 提供，本模块只消费。
+ * boards/<板>/Src/app_font_lib_board.c 的 g_board_font_lib 提供，本模块只消费。
  */
 
 #include "app_render.h"
@@ -18,25 +18,25 @@
 #include "initcall.h"
 #include "crc_utils.h"
 #include "dev_w25qxx.h"
-#include "cfg_record.h"   /* CFG_REC_OK */
+#include "dev_cfg_record.h"   /* DEV_CFG_RECORD_STATE_OK */
 #include "app_cfg_sched.h" /* 显存持久化走调度器 */
 
 /* 字库表、可用字号集合、总字节数全部是板级事实（两板的字号集合与字符集都不同：
  * 3833024 是 GBK 14/16/20/24/32，5006048 是 GB2312 16/24/32/48），见
- * app_render.h 的 font_lib_desc_t 与 board.h 的 BOARD_FONT_LIB_TOTAL_BYTES。
+ * app_render.h 的 app_font_lib_desc_t 与 board.h 的 BOARD_FONT_LIB_TOTAL_BYTES。
  * 本文件不再持有任何具体数字。 */
 
 /* ---- 内部: bytes_per_char ---- */
-static inline uint16_t _glyph_bytes(font_key_t k)
+static inline uint16_t _glyph_bytes(app_font_key_t k)
 {
-    uint8_t w = (k.charset == FONT_ENC_ASCII) ? k.size / 2 : k.size;
+    uint8_t w = (k.charset == APP_FONT_ENC_ASCII) ? k.size / 2 : k.size;
     return (uint16_t)k.size * ((w + 7) / 8);
 }
 
 /* ---- 内部: 字符宽度 ---- */
-static inline uint8_t _glyph_width_px(font_key_t k)
+static inline uint8_t _glyph_width_px(app_font_key_t k)
 {
-    return (k.charset == FONT_ENC_ASCII) ? k.size / 2 : k.size;
+    return (k.charset == APP_FONT_ENC_ASCII) ? k.size / 2 : k.size;
 }
 
 /* ---- 内部: 把请求字号解析为本板实际可用的字号 ----
@@ -48,18 +48,18 @@ static inline uint8_t _glyph_width_px(font_key_t k)
  * 字号用，渲染出完全无关的内容，且不报错、不打日志，是最难查的一种失效。
  *
  * 并列时取**较小**的一个：调用方的显示区域是按请求字号预留的，取小的不会溢出。
- * sizes[] 必须升序（font_lib_desc_t 的约定），下面"严格小于才替换"正是靠它
+ * sizes[] 必须升序（app_font_lib_desc_t 的约定），下面"严格小于才替换"正是靠它
  * 保证并列时留下先遇到的、也就是更小的那个。 */
-static font_size_t _resolve_size(font_size_t want)
+static app_font_size_t _resolve_size(app_font_size_t want)
 {
-    const font_lib_desc_t *d = &g_board_font;
-    if (d->size_count == 0) return (font_size_t)0; /* 板级表为空：调用方据此放弃渲染 */
+    const app_font_lib_desc_t *d = &g_board_font_lib;
+    if (d->size_count == 0) return (app_font_size_t)0; /* 板级表为空：调用方据此放弃渲染 */
 
-    font_size_t best   = d->sizes[0];
+    app_font_size_t best   = d->sizes[0];
     uint32_t    best_d = (want > best) ? (uint32_t)(want - best) : (uint32_t)(best - want);
 
     for (uint8_t i = 1; i < d->size_count; i++) {
-        font_size_t s   = d->sizes[i];
+        app_font_size_t s   = d->sizes[i];
         uint32_t    dif = (want > s) ? (uint32_t)(want - s) : (uint32_t)(s - want);
         if (dif < best_d) {
             best_d = dif;
@@ -70,12 +70,12 @@ static font_size_t _resolve_size(font_size_t want)
 }
 
 /* ---- 内部: 查字库单元并给出其 Flash 起始偏移 ----
- * 单元线性连续排列，偏移 = 前 i 项 unit_size 之和（见 font_lib_desc_t）。 */
-static bool _find_unit(const font_key_t *key, uint32_t *offset)
+ * 单元线性连续排列，偏移 = 前 i 项 unit_size 之和（见 app_font_lib_desc_t）。 */
+static bool _find_unit(const app_font_key_t *key, uint32_t *offset)
 {
     uint32_t off = 0;
-    for (uint16_t i = 0; i < g_board_font.lib_count; i++) {
-        const font_unit_t *u = &g_board_font.lib[i];
+    for (uint16_t i = 0; i < g_board_font_lib.lib_count; i++) {
+        const app_font_unit_t *u = &g_board_font_lib.lib[i];
         /* 逐字段比较而非 memcmp：结构体可能有填充字节，memcmp 会连填充一起比 */
         if (u->key.size == key->size && u->key.charset == key->charset && u->key.type == key->type) {
             *offset = off;
@@ -89,26 +89,26 @@ static bool _find_unit(const font_key_t *key, uint32_t *offset)
 /* ---- 内部: 单个字符在 Flash 中的地址 ----
  *
  * 单元缺失（板级表缺项）返回 false，**调用方跳过该字** —— 不要退回偏移 0 去读，
- * 那是别的字型的字形。索引式按 g_board_font 指定的方案选：两版字库的 ASCII 起点
+ * 那是别的字型的字形。索引式按 g_board_font_lib 指定的方案选：两版字库的 ASCII 起点
  * （0x20 / 0x00）与汉字区位基准（GBK 190 进制 / GB2312 94 进制）都不同。 */
-static bool _char_addr(const font_key_t *key, const uint8_t *ch, uint32_t *addr)
+static bool _char_addr(const app_font_key_t *key, const uint8_t *ch, uint32_t *addr)
 {
     uint32_t base;
     if (!_find_unit(key, &base)) return false;
 
     uint16_t bytes = _glyph_bytes(*key);
 
-    if (key->charset == FONT_ENC_ASCII) {
+    if (key->charset == APP_FONT_ENC_ASCII) {
         /* ASCII: 1字节, ch[0] = 字符码。起点由字库决定，不是想当然的 0x20 ——
            5006048 的映像就是 0x00 起、按原始码索引的 128 槽表。 */
-        if (ch[0] < g_board_font.asc_index_base) return false;
-        *addr = base + ((uint32_t)ch[0] - g_board_font.asc_index_base) * bytes;
+        if (ch[0] < g_board_font_lib.asc_index_base) return false;
+        *addr = base + ((uint32_t)ch[0] - g_board_font_lib.asc_index_base) * bytes;
         return true;
     }
 
     /* 汉字: 2字节, ch[0]=高字节, ch[1]=低字节 */
     uint32_t idx;
-    if (g_board_font.gb_index == FONT_IDX_GB2312) {
+    if (g_board_font_lib.gb_index == APP_FONT_IDX_KIND_GB2312) {
         /* hi 从 0x81 起也要拦：_is_gbk 放行 0x81~0xFE，而 (hi-0xA1) 在 hi<0xA1 时
            下溢；lo=0xA0 同理（参考工程对 0xA1~0xA9 区正是放行 lo>=0xA0 的）。
            两处下溢都会回绕成一个巨大索引，读到**别的字型的尾部** —— 真实可达。 */
@@ -134,8 +134,8 @@ static dev_storage_t *s_render_font;
 
 /* ---- 渲染目标（见 app_render.h）----
  * 未设置时回落"直写实屏"，与这条缝引入之前的行为完全一致。 */
-static const render_target_t *s_target;
-static const render_persist_hook_t *s_persist_hook;
+static const app_render_target_t *s_target;
+static const app_render_persist_hook_fn_t *s_persist_hook;
 
 /* ---- "这一帧要落盘"的请求位 ----
  *
@@ -173,16 +173,16 @@ bool app_render_busy(void)
     return s_render_busy > 0;
 }
 
-static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, display_color_t c)
+static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
 {
     dev_display_fill((dev_display_t *)ctx, x, y, w, h, c);
 }
 static void _direct_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                           const uint8_t *bm, display_color_t c)
+                           const uint8_t *bm, dev_display_color_t c)
 {
     dev_display_draw_bitmap((dev_display_t *)ctx, x, y, w, h, bm, c);
 }
-static void _direct_set_pixel(void *ctx, uint16_t x, uint16_t y, display_color_t c)
+static void _direct_set_pixel(void *ctx, uint16_t x, uint16_t y, dev_display_color_t c)
 {
     dev_display_set_pixel((dev_display_t *)ctx, x, y, c);
 }
@@ -191,9 +191,9 @@ static void _direct_set_pixel(void *ctx, uint16_t x, uint16_t y, display_color_t
  *
  *  每次现搭而不是缓存：几何来自 dev_display_t，而它在 hw initcall 里才注册，
  *  缓存在模块静态里会锁住一个可能为 NULL 的早期值。现搭是 6 次赋值，可以忽略。 */
-static const render_target_t *_rt(void)
+static const app_render_target_t *_rt(void)
 {
-    static render_target_t direct;
+    static app_render_target_t direct;
     if (s_target) return s_target;
 
     direct.fill      = _direct_fill;
@@ -205,12 +205,12 @@ static const render_target_t *_rt(void)
     return &direct;
 }
 
-void app_render_set_target(const render_target_t *t)
+void app_render_set_target(const app_render_target_t *t)
 {
     s_target = t;
 }
 
-void app_render_set_persist_hook(const render_persist_hook_t *h)
+void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h)
 {
     s_persist_hook = h;
 }
@@ -222,7 +222,7 @@ static uint8_t s_persist_id = 0xFF;
    放在这里是因为 _render_init 要创建它，而那在文件前部。 */
 static osMutexId_t s_persist_lock;
 
-static const cfg_sched_desc_t s_render_persist_desc = {
+static const app_cfg_sched_desc_t s_render_persist_desc = {
     .name    = "render_persist",
     .version = RENDER_PERSIST_VERSION,
     /* 不在启动加载遍里恢复显示：上电该显示什么由 app_boot 的 app_default_display
@@ -249,33 +249,33 @@ static void _render_init(void)
     /* 运行期交叉校验。三条都是"错了不会报错、只会让字库取到乱码"的失效模式，
        所以宁可每次上电多说一句。 */
     uint32_t sum = 0;
-    for (uint16_t i = 0; i < g_board_font.lib_count; i++)
-        sum += g_board_font.lib[i].unit_size;
+    for (uint16_t i = 0; i < g_board_font_lib.lib_count; i++)
+        sum += g_board_font_lib.lib[i].unit_size;
 
-    if (sum != g_board_font.total_bytes)
+    if (sum != g_board_font_lib.total_bytes)
         printf("[render] 板级字库表求和 %u != 表内 total_bytes %u，其后每个单元的偏移都错位了\n",
-               (unsigned)sum, (unsigned)g_board_font.total_bytes);
+               (unsigned)sum, (unsigned)g_board_font_lib.total_bytes);
 
     /* 表内 total_bytes 与编译期常量分居两处（前者板级 .c、后者 board.h）。不同步的
        后果不只是取字乱码 —— 配置区地址 = capacity - (blk+1)*4096，门槛按哪个值算的
        就是按哪个；常量偏小会让配置区落进字库区，首次擦写直接毁字库。 */
-    if (g_board_font.total_bytes != BOARD_FONT_LIB_TOTAL_BYTES)
+    if (g_board_font_lib.total_bytes != BOARD_FONT_LIB_TOTAL_BYTES)
         printf("[render] 板级字库 total_bytes %u != board.h 的 %u，配置区地址会算错\n",
-               (unsigned)g_board_font.total_bytes, (unsigned)BOARD_FONT_LIB_TOTAL_BYTES);
+               (unsigned)g_board_font_lib.total_bytes, (unsigned)BOARD_FONT_LIB_TOTAL_BYTES);
 
     /* sizes[] 必须升序 —— _resolve_size 的"并列取小"依赖这个前提，
        乱序时最近邻会挑错，且同样没有任何报错。 */
-    for (uint8_t i = 1; i < g_board_font.size_count; i++) {
-        if (g_board_font.sizes[i] <= g_board_font.sizes[i - 1]) {
+    for (uint8_t i = 1; i < g_board_font_lib.size_count; i++) {
+        if (g_board_font_lib.sizes[i] <= g_board_font_lib.sizes[i - 1]) {
             printf("[render] 板级字号集合非升序（%u 号在 %u 号之后），最近邻回落会选错\n",
-                   (unsigned)g_board_font.sizes[i], (unsigned)g_board_font.sizes[i - 1]);
+                   (unsigned)g_board_font_lib.sizes[i], (unsigned)g_board_font_lib.sizes[i - 1]);
             break;
         }
     }
 
 
     /* 持久化区的地址/容量门槛不再由本模块计算 —— 配置调度器统一管
-     * （见 app_cfg_sched.c 的 s_ready：要求"字库之后还放得下整个配置区"）。 */
+     * （见 app_cfg_sched.c 的 s_storage_ready：要求"字库之后还放得下整个配置区"）。 */
 
     /* 载荷组装锁。在本层创建：RTOS 已启动，且早于任何协议任务可能触发的 save。 */
     const osMutexAttr_t persist_attr = {.name = "render_persist", .attr_bits = osMutexPrioInherit};
@@ -285,7 +285,7 @@ sw_app_initcall(_render_init);
 
 /* ---- 渲染分支（各功能静态内联）---- */
 
-static inline void _render_text(const render_cfg_t *cfg)
+static inline void _render_text(const app_render_cfg_t *cfg)
 {
     // 入口参数检查
     if (!cfg->text || !cfg->len)
@@ -293,17 +293,17 @@ static inline void _render_text(const render_cfg_t *cfg)
     if (!cfg->w || !cfg->h)
         return;
 
-    font_key_t gbk_key = {.size = cfg->font_size, .type = cfg->font_type, .charset = FONT_ENC_GBK};
-    font_key_t asc_key = {.size = gbk_key.size, .type = gbk_key.type, .charset = FONT_ENC_ASCII};
+    app_font_key_t gbk_key = {.size = cfg->font_size, .type = cfg->font_type, .charset = APP_FONT_ENC_GBK};
+    app_font_key_t asc_key = {.size = gbk_key.size, .type = gbk_key.type, .charset = APP_FONT_ENC_ASCII};
 
     uint16_t cur_x = cfg->x, cur_y = cfg->y;
     static uint8_t font_buf[512];
     static char text_buf[256];
     uint16_t text_len;
 
-    if (cfg->text_enc == FONT_ENC_UTF8) {
+    if (cfg->text_enc == APP_FONT_ENC_UTF8) {
         uint32_t out_len = sizeof(text_buf);
-        UTF8ToGBK(cfg->text, cfg->len, text_buf, &out_len);
+        cvt_utf8_to_gbk(cfg->text, cfg->len, text_buf, &out_len);
         text_len = (uint16_t)out_len;
     } else {
         uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);
@@ -312,10 +312,10 @@ static inline void _render_text(const render_cfg_t *cfg)
     }
 
     /* ---- 字号落定 ---- */
-    const font_lib_desc_t *flib = &g_board_font;
+    const app_font_lib_desc_t *flib = &g_board_font_lib;
     if (flib->size_count == 0) return; /* 板级字库表为空：本板根本没有字库 */
 
-    if (cfg->font_size == FONT_SELF_ADAPT) {
+    if (cfg->font_size == APP_FONT_SIZE_SELF_ADAPT) {
         /* 自适应：按文本长度与渲染区域容量，从最大字号开始选能容纳的最大字号。
            都不放得下时用最小字号（下面的初值），由换行/截断逻辑收尾。 */
         gbk_key.size = flib->sizes[0];
@@ -332,7 +332,7 @@ static inline void _render_text(const render_cfg_t *cfg)
     } else {
         /* 请求字号不在本板上时回落到最近邻 —— 否则 _find_unit 找不到，会一路
            退化成"什么都不画"或（旧实现）拿偏移 0 的单元去读 */
-        font_size_t r = _resolve_size(cfg->font_size);
+        app_font_size_t r = _resolve_size(cfg->font_size);
         gbk_key.size  = r;
         asc_key.size  = r;
     }
@@ -388,9 +388,9 @@ static inline void _render_text(const render_cfg_t *cfg)
     /* ---- 垂直对齐 ---- */
     uint16_t text_h = line_count * line_h;
     if (cfg->style) {
-        if (cfg->style->v_align == ALIGN_CENTER && cfg->h > text_h)
+        if (cfg->style->v_align == APP_RENDER_ALIGN_CENTER && cfg->h > text_h)
             cur_y += (cfg->h - text_h) / 2;
-        else if (cfg->style->v_align == ALIGN_RIGHT_DOWN && cfg->h > text_h)
+        else if (cfg->style->v_align == APP_RENDER_ALIGN_RIGHT_DOWN && cfg->h > text_h)
             cur_y += (cfg->h - text_h);
     }
 
@@ -398,9 +398,9 @@ static inline void _render_text(const render_cfg_t *cfg)
     uint8_t line_idx       = 0;
     uint16_t line_origin_x = cfg->x;
     if (cfg->style) {
-        if (cfg->style->h_align == ALIGN_CENTER)
+        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
             line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
-        else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
+        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
             line_origin_x += (cfg->w - line_widths[line_idx]);
     }
     cur_x    = line_origin_x;
@@ -412,9 +412,9 @@ static inline void _render_text(const render_cfg_t *cfg)
             line_idx++;
             line_origin_x = cfg->x;
             if (cfg->style) {
-                if (cfg->style->h_align == ALIGN_CENTER)
+                if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
                     line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
-                else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
+                else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
                     line_origin_x += (cfg->w - line_widths[line_idx]);
             }
             cur_x = line_origin_x;
@@ -431,9 +431,9 @@ static inline void _render_text(const render_cfg_t *cfg)
                     line_idx++;
                     line_origin_x = cfg->x;
                     if (cfg->style) {
-                        if (cfg->style->h_align == ALIGN_CENTER)
+                        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
                             line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
-                        else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
+                        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
                             line_origin_x += (cfg->w - line_widths[line_idx]);
                     }
                     cur_x = line_origin_x;
@@ -450,8 +450,8 @@ static inline void _render_text(const render_cfg_t *cfg)
                否则后面的字会挤到同一个位置叠着画 */
             if (_char_addr(&asc_key, &ch_byte, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-                const render_target_t *rt = _rt();
-                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, COLOR_BLACK);
+                const app_render_target_t *rt = _rt();
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, DEV_DISPLAY_COLOR_BLACK);
                 rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
             }
 
@@ -468,9 +468,9 @@ static inline void _render_text(const render_cfg_t *cfg)
                     line_idx++;
                     line_origin_x = cfg->x;
                     if (cfg->style) {
-                        if (cfg->style->h_align == ALIGN_CENTER)
+                        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
                             line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
-                        else if (cfg->style->h_align == ALIGN_RIGHT_DOWN)
+                        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
                             line_origin_x += (cfg->w - line_widths[line_idx]);
                     }
                     cur_x = line_origin_x;
@@ -485,8 +485,8 @@ static inline void _render_text(const render_cfg_t *cfg)
             uint32_t addr;
             if (_char_addr(&gbk_key, gbk_ch, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-                const render_target_t *rt = _rt();
-                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, COLOR_BLACK);
+                const app_render_target_t *rt = _rt();
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, DEV_DISPLAY_COLOR_BLACK);
                 rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
             }
 
@@ -500,17 +500,17 @@ static inline void _render_text(const render_cfg_t *cfg)
     }
 }
 
-static inline void _render_bitmap(const render_cfg_t *cfg)
+static inline void _render_bitmap(const app_render_cfg_t *cfg)
 {
     if (!cfg->w || !cfg->h || !cfg->bitmap) return;
 
-    const render_target_t *rt = _rt();
+    const app_render_target_t *rt = _rt();
     rt->bitmap(rt->ctx, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
 }
 
-static inline void _render_fill(const render_cfg_t *cfg)
+static inline void _render_fill(const app_render_cfg_t *cfg)
 {
-    const render_target_t *rt = _rt();
+    const app_render_target_t *rt = _rt();
     uint16_t w = cfg->w, h = cfg->h;
     if (!w || !h) {
         w = rt->rows;
@@ -520,20 +520,20 @@ static inline void _render_fill(const render_cfg_t *cfg)
 }
 
 /* ---- 渲染跳表 ---- */
-typedef void (*render_fn_t)(const render_cfg_t *);
-static const render_fn_t g_render_fn[] = {
-    [RENDER_TEXT]   = _render_text,
-    [RENDER_BITMAP] = _render_bitmap,
-    [RENDER_FILL]   = _render_fill,
+typedef void (*app_render_fn_t)(const app_render_cfg_t *);
+static const app_render_fn_t s_render_fn_table[] = {
+    [APP_RENDER_TYPE_TEXT]   = _render_text,
+    [APP_RENDER_TYPE_BITMAP] = _render_bitmap,
+    [APP_RENDER_TYPE_FILL]   = _render_fill,
 };
 
 /* ---- 公开 API：tagged union 分派 ---- */
-void app_render(const render_cfg_t *cfg)
+void app_render(const app_render_cfg_t *cfg)
 {
     if (!cfg || !s_render_display) return;
     s_render_busy++;
-    if (cfg->type < sizeof(g_render_fn) / sizeof(g_render_fn[0]) && g_render_fn[cfg->type])
-        g_render_fn[cfg->type](cfg);
+    if (cfg->type < sizeof(s_render_fn_table) / sizeof(s_render_fn_table[0]) && s_render_fn_table[cfg->type])
+        s_render_fn_table[cfg->type](cfg);
     s_render_busy--;
 
     /* ---- 持久化请求（见 app_render.h 的 persist 说明）----
@@ -614,16 +614,16 @@ void app_render_save(void)
 
     _persist_lock(); /* 直到落盘返回前都持有：组装缓冲不能被另一个任务改写 */
 
-    render_persist_t *r = (render_persist_t *)s_persist_buf;
+    app_render_persist_t *r = (app_render_persist_t *)s_persist_buf;
     memset(r->bitmap, 0, bm_bytes);
 
-    uint8_t color = COLOR_BLACK;
+    uint8_t color = DEV_DISPLAY_COLOR_BLACK;
     for (uint16_t y = 0; y < cols; y++) {
         for (uint16_t x = 0; x < rows; x++) {
             uint8_t px = d->pixel_map[y * rows + x];
-            if (px != COLOR_BLACK) {
+            if (px != DEV_DISPLAY_COLOR_BLACK) {
                 r->bitmap[y * row_bytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
-                if (color == COLOR_BLACK) color = px;
+                if (color == DEV_DISPLAY_COLOR_BLACK) color = px;
             }
         }
     }
@@ -634,7 +634,7 @@ void app_render_save(void)
 
     /* 落盘失败必须可见：此前调用方一律忽略返回值，现场只表现为
      * "改了显示、重启回到旧内容"，无从查起。 */
-    uint32_t len = (uint32_t)sizeof(render_persist_t) + bm_bytes;
+    uint32_t len = (uint32_t)sizeof(app_render_persist_t) + bm_bytes;
     if (app_cfg_sched_save(s_persist_id, s_persist_buf, (uint16_t)len) != 0)
         printf("[render] 显存持久化失败（%u 字节）\n", (unsigned)len);
 
@@ -656,25 +656,25 @@ bool app_render_restore(void)
     uint16_t bm_bytes = _persist_bm_bytes(d);
     if (!bm_bytes) return false;
 
-    /* 传入的容量取"本屏实际需要"：记录里的 len 与之不符会被 cfg_record_load
+    /* 传入的容量取"本屏实际需要"：记录里的 len 与之不符会被 dev_cfg_record_load
      * 判为 INVALID —— 这正是我们要的（换了模组则旧显存不适用）。 */
-    uint16_t payload_cap = (uint16_t)(sizeof(render_persist_t) + bm_bytes);
+    uint16_t payload_cap = (uint16_t)(sizeof(app_render_persist_t) + bm_bytes);
     uint16_t rec_len     = 0;
 
     /* 与 save 共用同一个组装缓冲，故同样要持锁 */
     _persist_lock();
 
-    if (app_cfg_sched_load(s_persist_id, s_persist_buf, payload_cap, &rec_len) != CFG_REC_OK)
+    if (app_cfg_sched_load(s_persist_id, s_persist_buf, payload_cap, &rec_len) != DEV_CFG_RECORD_STATE_OK)
         goto fail;
     if (rec_len != payload_cap) goto fail;
 
-    render_persist_t *r = (render_persist_t *)s_persist_buf;
+    app_render_persist_t *r = (app_render_persist_t *)s_persist_buf;
     /* 几何已由 len 比对隐含校验（len 由本屏几何算出），这里再核一次字段，
      * 防止"长度碰巧相同但内容不是本屏"的情况。 */
     if (r->screen_rows != rows || r->screen_cols != cols) goto fail;
 
-    dev_display_fill(d, 0, 0, rows, cols, COLOR_BLACK);
-    dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (display_color_t)r->color);
+    dev_display_fill(d, 0, 0, rows, cols, DEV_DISPLAY_COLOR_BLACK);
+    dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (dev_display_color_t)r->color);
     _persist_unlock();
     return true;
 

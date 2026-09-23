@@ -18,6 +18,7 @@ virtualFolder:
         - path: Application/Src/app_factory_test.c
         - path: Application/Src/app_cfg_sched.c
         - path: Application/Src/app_diag.c
+        - path: Application/Src/app_screen.c
       folders:
         - name: channel
           files:
@@ -33,8 +34,8 @@ virtualFolder:
           folders:
             - name: ah
               files:
-                - path: Application/Src/AH_MQTT/ah_mqtt_cmd.c
-                - path: Application/Src/AH_MQTT/ah_mqtt.c
+                - path: Application/Src/AHMQ/app_ahmq_cmd.c
+                - path: Application/Src/AHMQ/app_ahmq.c
               folders: []
             - name: iap
               files:
@@ -53,6 +54,10 @@ virtualFolder:
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
                 - path: Application/Src/RLS/app_rls.c
+              folders: []
+            - name: cas
+              files:
+                - path: Application/Src/CASC/app_casc.c
               folders: []
     - name: Drivers
       files: []
@@ -236,7 +241,7 @@ virtualFolder:
           files:
             - path: Device/Storage/dev_flash_int.c
             - path: Device/Storage/dev_w25qxx.c
-            - path: Device/Storage/cfg_record.c
+            - path: Device/Storage/dev_cfg_record.c
           folders: []
         - name: IO
           files:
@@ -305,13 +310,13 @@ virtualFolder:
               files:
                 - path: boards/3833024/Application/Src/app_rs232.c
                 - path: boards/3833024/Application/Src/app_test_board.c
-                - path: boards/3833024/Application/Src/font_lib_board.c
+                - path: boards/3833024/Application/Src/app_font_lib_board.c
               folders: []
             - name: Device
               files:
                 - path: boards/3833024/Device/Src/dev_io_ctrl.c
                 - path: boards/3833024/Device/Src/dev_key_board.c
-                - path: boards/3833024/Device/Src/dev_P10_32x16_2200001703.c
+                - path: boards/3833024/Device/Src/dev_p10_32x16_2200001703.c
                 - path: boards/3833024/Device/Src/dev_p20_16x8_2200001667.c
                 - path: boards/3833024/Device/Src/dev_p20_16x16_1000001055.c
                 - path: boards/3833024/Device/Src/dev_rs232.c
@@ -326,7 +331,8 @@ virtualFolder:
                 - path: boards/3833024/Platform/Src/pl_uart_board.c
               folders: []
         - name: "5006048"
-          files: []
+          files:
+            - path: boards/5006048/board.h
           folders:
             - name: Core
               files:
@@ -349,7 +355,7 @@ virtualFolder:
               folders: []
             - name: App
               files:
-                - path: boards/5006048/Application/Src/font_lib_board.c
+                - path: boards/5006048/Application/Src/app_font_lib_board.c
               folders: []
             - name: Device
               files:
@@ -388,13 +394,17 @@ targets:
         - Compiler
         - Application/Inc
         - Device/Inc
+        - Device/Inc/Display
+        - Device/Inc/IO
+        - Device/Inc/Network
+        - Device/Inc/Storage
         - Kernel/Inc
         - Platform/Inc
         - Middlewares/Third_Party/SEGGER_RTT
         - Application/Inc/Channel
         - Application/Inc/IAP
         - Application/Inc/LDI
-        - Application/Inc/AH_MQTT
+        - Application/Inc/AHMQ
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
         - boards/3833024/Core/Inc
@@ -402,6 +412,7 @@ targets:
         - boards/3833024/Application/Inc
         - boards/3833024/Device/Inc
         - boards/3833024/Platform/Inc
+        - Application/Inc/CASC
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -409,8 +420,8 @@ targets:
       - <virtual_root>/Drivers/BSP/Display/scan.c
       - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
-      - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
-      - <virtual_root>/board/dev_P10_32x16_2200001703.c
+      - <virtual_root>/Device/Display/dev_p10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p10_32x16_2200001703.c
       - <virtual_root>/board/dev_p20_16x16_1000001055.c
       - <virtual_root>/Device/IO/dev_io_ctrl.c
       - <virtual_root>/Device/Comm/dev_rs232.c
@@ -419,14 +430,15 @@ targets:
       - <virtual_root>/Application/channel/app_rs232.c
       - <virtual_root>/Core
       - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
-      - <virtual_root>/board/3833024/dev_P10_32x16_2200001703.c
-      - <virtual_root>/boards/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/3833024/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
-      - <virtual_root>/boards/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
       - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
-      - <virtual_root>/boards/3833024/Device/dev_P10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
+      - <virtual_root>/Application/protocol/cas
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -543,19 +555,24 @@ targets:
         - Compiler
         - Application/Inc
         - Device/Inc
+        - Device/Inc/Display
+        - Device/Inc/IO
+        - Device/Inc/Network
+        - Device/Inc/Storage
         - Kernel/Inc
         - Platform/Inc
         - Middlewares/Third_Party/SEGGER_RTT
         - Application/Inc/Channel
         - Application/Inc/IAP
         - Application/Inc/LDI
-        - Application/Inc/AH_MQTT
+        - Application/Inc/AHMQ
         - Application/Inc/RLS
         - Application/Inc/CQ_P10
         - boards/5006048/Core/Inc
         - boards/5006048/Device/Inc
         - boards/5006048/Platform/Inc
         - boards/5006048
+        - Application/Inc/CASC
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -563,8 +580,8 @@ targets:
       - <virtual_root>/Drivers/BSP/Display/scan.c
       - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
-      - <virtual_root>/Device/Display/dev_P10_32x16_2200001703.c
-      - <virtual_root>/board/dev_P10_32x16_2200001703.c
+      - <virtual_root>/Device/Display/dev_p10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p10_32x16_2200001703.c
       - <virtual_root>/board/dev_p20_16x16_1000001055.c
       - <virtual_root>/Device/IO/dev_io_ctrl.c
       - <virtual_root>/Device/Comm/dev_rs232.c
@@ -573,8 +590,8 @@ targets:
       - <virtual_root>/Application/channel/app_rs232.c
       - <virtual_root>/Core
       - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
-      - <virtual_root>/board/3833024/dev_P10_32x16_2200001703.c
-      - <virtual_root>/boards/3833024/dev_P10_32x16_2200001703.c
+      - <virtual_root>/board/3833024/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/3833024
     settings:

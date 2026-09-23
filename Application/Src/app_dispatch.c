@@ -4,7 +4,7 @@
  *
  * 数据流（接收路径）:
  *   物理接口 → 通道任务 → app_ccb_dispatch() → 各协议自有环形缓冲区 + ccb_queue
- *       → frame_dispatch_task() → 协议探测 → 协议帧队列 → 协议处理任务
+ *       → app_dispatch_task() → 协议探测 → 协议帧队列 → 协议处理任务
  *
  * 通道发送通过 ccb_ops 虚表分派（OCP 模式），不依赖具体传输实现。
  *
@@ -38,9 +38,9 @@
 #define PRINTF_DISPATCH(...) ((void)0)
 #endif
 
-/* frame_msg_t 的 data 必须 4 字节对齐：探针会把 scratch 直接 cast 成
+/* app_dispatch_msg_t 的 data 必须 4 字节对齐：探针会把 scratch 直接 cast 成
  * uint32 字段的帧结构体（如 IAP）访问。 */
-static_assert(offsetof(frame_msg_t, data) % 4 == 0, "frame_msg_t.data 必须 4 字节对齐");
+static_assert(offsetof(app_dispatch_msg_t, data) % 4 == 0, "app_dispatch_msg_t.data 必须 4 字节对齐");
 
 /* ================================================================
  *  通道通知队列 — 编译期静态分配
@@ -53,15 +53,15 @@ static_assert(offsetof(frame_msg_t, data) % 4 == 0, "frame_msg_t.data 必须 4 �
  *   2. 记下本批字节数，排空按量计量 —— 先到的那批不会把后到者的字节算进自己的来源。
  *
  *   反方向没有保证：先到者未排完的余量会由后到者的来源解析（补齐需要"挂起
- *   来源"状态，未实现）。完整说明见 app_dispatch.h 里 ccb_src_t 的归属一节。 */
+ *   来源"状态，未实现）。完整说明见 app_dispatch.h 里 app_ccb_src_t 的归属一节。 */
 typedef struct {
-    ccb_t *ccb;
+    app_ccb_t *ccb;
     uint16_t len;                  /**< 本次派发写入的字节数 */
-    char topic[CCB_SRC_TOPIC_MAX]; /**< 来源副本；空串表示无来源 */
-} ccb_notify_t;
+    char topic[APP_CCB_SRC_TOPIC_MAX]; /**< 来源副本；空串表示无来源 */
+} app_ccb_notify_t;
 
 static StaticQueue_t s_ccb_queue_cb;
-static ccb_notify_t s_ccb_queue_buf[CCB_NOTIFY_MAX];
+static app_ccb_notify_t s_ccb_queue_buf[APP_CCB_NOTIFY_MAX];
 static const osMessageQueueAttr_t s_ccb_queue_attr = {
     .name    = "g_ccb_queue",
     .cb_mem  = &s_ccb_queue_cb,
@@ -79,36 +79,36 @@ static const osMessageQueueAttr_t s_ccb_queue_attr = {
  *  这一约定 —— 最终入队的内容只由 rb_read 决定。
  * ================================================================ */
 
-static uint8_t _msg_dispatch_buf[sizeof(frame_msg_t) + FRAME_DATA_MAX_LEN]
+static uint8_t _msg_dispatch_buf[sizeof(app_dispatch_msg_t) + FRAME_DATA_MAX_LEN]
     __attribute__((aligned(4))) PL_CCMRAM;
 
 /* ================================================================
  *  调度上下文
  * ================================================================ */
 
-dispatch_ctx_t g_dispatch;           /**< 全局调度上下文 */
+app_dispatch_ctx_t g_dispatch_ctx;           /**< 全局调度上下文 */
 osThreadId_t g_dispatch_task_handle; /**< 帧分发任务句柄（外部用于 Suspend/Resume） */
 
 /** 接收事件监听：框架不直接依赖任何业务模块，由模块自行注册 */
-static dispatch_rx_listener_t s_rx_listener;
+static app_dispatch_rx_listener_fn_t s_rx_listener_fn;
 
-void app_dispatch_register_rx_listener(dispatch_rx_listener_t fn)
+void app_dispatch_register_rx_listener(app_dispatch_rx_listener_fn_t fn)
 {
-    s_rx_listener = fn;
+    s_rx_listener_fn = fn;
 }
 
 /* ================================================================
  *  协议绑定 — 协议模块通过 sw_app_initcall 自注册
  *
  *  协议在自己的 init 里填好 pcb 字段（name/ops/rb/payload_max，建好 queue），
- *  然后对每个承载通道调用一次 app_proto_bind 即完成注册：
- *      app_proto_bind(&s_ldi_pcb, app_tcp_server_ccb());
+ *  然后对每个承载通道调用一次 app_dispatch_bind 即完成注册：
+ *      app_dispatch_bind(&s_ldi_pcb, app_tcp_server_ccb());
  *
- *  绑定只写 ccb->protos[]，而 frame_dispatch_task 只读它；只要所有绑定发生在
- *  任何通道任务启动之前（sw_board_init 早于各 app_xxx_start）即天然安全。
+ *  绑定只写 ccb->protos[]，而 app_dispatch_task 只读它；只要所有绑定发生在
+ *  任何通道任务启动之前（initcall_run_sw 早于各 app_xxx_start）即天然安全。
  * ================================================================ */
 
-void app_proto_bind(pcb_t *pcb, ccb_t *ccb)
+void app_dispatch_bind(app_pcb_t *pcb, app_ccb_t *ccb)
 {
     if (pcb == nullptr || ccb == nullptr) return;
 
@@ -116,8 +116,8 @@ void app_proto_bind(pcb_t *pcb, ccb_t *ccb)
     for (uint8_t i = 0; i < ccb->proto_cnt; i++)
         if (ccb->protos[i] == pcb) return;
 
-    if (ccb->proto_cnt >= CCB_PROTO_MAX) {
-        configASSERT(0); /* 槽位不足：调大 CCB_PROTO_MAX */
+    if (ccb->proto_cnt >= APP_CCB_PROTO_MAX) {
+        configASSERT(0); /* 槽位不足：调大 APP_CCB_PROTO_MAX */
         return;
     }
     ccb->protos[ccb->proto_cnt++] = pcb;
@@ -129,19 +129,19 @@ void app_proto_bind(pcb_t *pcb, ccb_t *ccb)
 
 void app_dispatch_init(void)
 {
-    g_dispatch.ccb_queue = osMessageQueueNew(CCB_NOTIFY_MAX, sizeof(ccb_notify_t), &s_ccb_queue_attr);
+    g_dispatch_ctx.ccb_queue = osMessageQueueNew(APP_CCB_NOTIFY_MAX, sizeof(app_ccb_notify_t), &s_ccb_queue_attr);
 
     const osThreadAttr_t frame_dispatch_task_attr = {
-        .name       = "frame_dispatch_task",
+        .name       = "app_dispatch_task",
         .stack_size = 256 * 4,
         .priority   = osPriorityNormal,
     };
-    g_dispatch_task_handle = pl_task_new(frame_dispatch_task, nullptr, &frame_dispatch_task_attr);
+    g_dispatch_task_handle = pl_task_new(app_dispatch_task, nullptr, &frame_dispatch_task_attr);
 }
 sw_app_initcall(app_dispatch_init);
 
 /* ================================================================
- *  frame_dispatch_task — 帧分发引擎（核心调度循环）
+ *  app_dispatch_task — 帧分发引擎（核心调度循环）
  *
  *  流程:
  *    1. 阻塞等待 ccb_queue 中的通道指针通知
@@ -153,26 +153,26 @@ sw_app_initcall(app_dispatch_init);
  *  读取结果也只由该协议自己的探针决定。
  * ================================================================ */
 
-void frame_dispatch_task(void *argument)
+void app_dispatch_task(void *argument)
 {
     (void)argument;
 
-    ccb_notify_t notify;
-    frame_msg_t *msg = (frame_msg_t *)_msg_dispatch_buf;
+    app_ccb_notify_t notify;
+    app_dispatch_msg_t *msg = (app_dispatch_msg_t *)_msg_dispatch_buf;
 
     for (;;) {
-        if (osMessageQueueGet(g_dispatch.ccb_queue, &notify, NULL, osWaitForever) != osOK)
+        if (osMessageQueueGet(g_dispatch_ctx.ccb_queue, &notify, NULL, osWaitForever) != osOK)
             continue;
 
-        ccb_t *ccb = notify.ccb;
+        app_ccb_t *ccb = notify.ccb;
         if (ccb == nullptr) continue;
 
         /* 探针看到的来源指向通知元素里的副本（框架自有存储，本次排空内稳定）*/
-        const ccb_src_t src   = {.topic = (notify.topic[0] != '\0') ? notify.topic : nullptr};
-        const ccb_src_t *psrc = (src.topic != nullptr) ? &src : nullptr;
+        const app_ccb_src_t src   = {.topic = (notify.topic[0] != '\0') ? notify.topic : nullptr};
+        const app_ccb_src_t *psrc = (src.topic != nullptr) ? &src : nullptr;
 
         for (uint8_t i = 0; i < ccb->proto_cnt; i++) {
-            pcb_t *p = ccb->protos[i];
+            app_pcb_t *p = ccb->protos[i];
             if (p == nullptr || p->ops == nullptr || p->ops->probe == nullptr) continue;
             if (p->rb == nullptr || p->queue == nullptr) continue;
 
@@ -182,7 +182,7 @@ void frame_dispatch_task(void *argument)
             /* 只消费本次派发写入的字节：否则先到的那批会把后到者的字节也算进
                自己的来源里。反方向不保证 —— 本批未排完的余量（半帧）留在缓冲
                区，会由后到者的来源解析；补齐需要"挂起来源"状态，未实现，
-               影响面见 app_dispatch.h 里 ccb_src_t 的归属一节。 */
+               影响面见 app_dispatch.h 里 app_ccb_src_t 的归属一节。 */
             uint32_t budget = notify.len;
 
             while (budget > 0 && rb_avail(p->rb, nullptr) > 0) {
@@ -191,7 +191,7 @@ void frame_dispatch_task(void *argument)
                 uint16_t before    = rb_avail(p->rb, nullptr);
 
                 /* 调用探测函数（调用者持锁，探测内部传 nullptr 跳过锁） */
-                pcb_probe_sta_t state = p->ops->probe(p, ccb, psrc, msg->data,
+                app_pcb_probe_state_t state = p->ops->probe(p, ccb, psrc, msg->data,
                                                       FRAME_DATA_MAX_LEN, &frame_len, &aux);
 
 #if DISPATCH_DIAG
@@ -200,7 +200,7 @@ void frame_dispatch_task(void *argument)
                    把 head / 声明长度 / avail 打出来，这两条与"字节根本没到"才能一刀切开。
                    **只报 READY/WAIT**：伪帧逐字节重跳会刷满屏（实测把 RTT 冲垮，
                    反而把要看的 IMAGE/交付行挤掉了），而那不是要找的东西。用完置 0。 */
-                if (state <= PCB_PROBE_WAIT && rb_avail(p->rb, nullptr) >= 256U) {
+                if (state <= APP_PCB_PROBE_STATE_WAIT && rb_avail(p->rb, nullptr) >= 256U) {
                     static uint8_t s_diag;
                     if (s_diag < 8U) {
                         s_diag++;
@@ -215,9 +215,9 @@ void frame_dispatch_task(void *argument)
                 }
 #endif
 
-                if (state == PCB_PROBE_WAIT) break; /* 数据不足：等下一批数据 */
+                if (state == APP_PCB_PROBE_STATE_WAIT) break; /* 数据不足：等下一批数据 */
 
-                if (state == PCB_PROBE_READY) {
+                if (state == APP_PCB_PROBE_STATE_READY) {
                     /* 探针契约：0 < frame_len ≤ payload_max ≤ FRAME_DATA_MAX_LEN。
                      * 违规时丢弃 1 字节并继续，避免零进度死循环。 */
                     if (frame_len == 0 || frame_len > p->payload_max ||
@@ -257,14 +257,14 @@ void frame_dispatch_task(void *argument)
                          测试反复打断：按第一下之后再也推不动）。
                         · 到了这一步说明**一整帧已经收齐并通过了本协议的帧头校验** ——
                          半帧、伪帧、别人的帧都不算"上位机下发了指令"。 */
-                    if (s_rx_listener && !p->internal_bus) s_rx_listener();
+                    if (s_rx_listener_fn && !p->internal_bus) s_rx_listener_fn();
                     goto account;
                 }
 
                 /* SKIP: 帧结构合法但不属于本设备 → 跳过整帧
                  * FAKE: 伪帧头 → 跳过 1 字节重试 */
                 uint16_t skip =
-                    (state == PCB_PROBE_SKIP && frame_len > 0) ? (uint16_t)frame_len : 1;
+                    (state == APP_PCB_PROBE_STATE_SKIP && frame_len > 0) ? (uint16_t)frame_len : 1;
                 rb_skip(p->rb, skip, nullptr);
 
             account: {
@@ -279,9 +279,9 @@ void frame_dispatch_task(void *argument)
 }
 
 /* ================================================================
- *  ccb_send / ccb_send_to — 通道发送（OCP：虚表分派）
+ *  app_ccb_send / app_ccb_send_to — 通道发送（OCP：虚表分派）
  *
- *  协议把数据交给通道，目的地用 ccb_dst_t 表达：nullptr = 回复到本帧来源，
+ *  协议把数据交给通道，目的地用 app_ccb_dst_t 表达：nullptr = 回复到本帧来源，
  *  否则由通道解释自己能认识的字段（broadcast / topic），其余忽略并退化为
  *  默认行为。协议只表达意图，通道翻译成自己的机制 —— 新增通道类型无需改此处，
  *  协议也不必认识具体通道类型。
@@ -289,7 +289,7 @@ void frame_dispatch_task(void *argument)
  *  安全守卫：ops / ops->send 为空表示通道尚未就绪，直接丢弃。
  * ================================================================ */
 
-int32_t ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
     /* **返回值必须露出来**：通道自己的 ops->send 会返回 -1（如 RS485 在通道未 UP 时
        直接返回），原先这里把它就地丢掉，于是"帧根本没发出去"与"发出去了"在调用方
@@ -298,9 +298,9 @@ int32_t ccb_send_to(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint1
     return ccb->ops->send(ccb, dst, data, len);
 }
 
-int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
+int32_t app_ccb_send(app_ccb_t *ccb, const uint8_t *data, uint16_t len)
 {
-    return ccb_send_to(ccb, nullptr, data, len);
+    return app_ccb_send_to(ccb, nullptr, data, len);
 }
 
 /* ================================================================
@@ -317,7 +317,7 @@ int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
  *  注意：通道任务不要直接操作 ring buffer 或 mutex。
  * ================================================================ */
 
-void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *data,
+void app_ccb_dispatch(const app_ccb_t *ccb, const app_ccb_src_t *src, const uint8_t *data,
                       uint16_t len)
 {
     if (ccb == nullptr || data == nullptr || len == 0) return;
@@ -352,9 +352,9 @@ void app_ccb_dispatch(const ccb_t *ccb, const ccb_src_t *src, const uint8_t *dat
     }
 
     /* 通知帧分发任务：来源在此拷进框架自有存储，调用方的指针随后即可失效 */
-    ccb_notify_t notify = {.ccb = (ccb_t *)ccb, .len = len, .topic = {0}};
+    app_ccb_notify_t notify = {.ccb = (app_ccb_t *)ccb, .len = len, .topic = {0}};
     if (src != nullptr && src->topic != nullptr)
         strncpy(notify.topic, src->topic, sizeof(notify.topic) - 1);
 
-    osMessageQueuePut(g_dispatch.ccb_queue, &notify, 0, 0);
+    osMessageQueuePut(g_dispatch_ctx.ccb_queue, &notify, 0, 0);
 }

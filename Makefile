@@ -52,10 +52,14 @@ INC_DIRS = \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
 	-I Application/Inc/RLS \
-	-I Application/Inc/AH_MQTT \
+	-I Application/Inc/AHMQ \
 	-I Application/Inc/Channel \
-	-I Application/Inc/CASCADE \
+	-I Application/Inc/CASC \
 	-I Device/Inc \
+	-I Device/Inc/Display \
+	-I Device/Inc/IO \
+	-I Device/Inc/Network \
+	-I Device/Inc/Storage \
 	-I Platform/Inc \
 	-I Kernel/Inc \
 	-I $(BOARD_DIR)/Core/Inc \
@@ -300,7 +304,7 @@ SRC_DEVICE = \
 	Device/IO/dev_light_sensor.c \
 	Device/Storage/dev_w25qxx.c \
 	Device/Storage/dev_flash_int.c \
-	Device/Storage/cfg_record.c \
+	Device/Storage/dev_cfg_record.c \
 	Device/Network/dev_dp83848.c \
 	Device/Network/dev_eth.c
 
@@ -313,7 +317,7 @@ SRC_APPLICATION = \
 	Application/Src/app_render.c \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/app_screen.c \
-	Application/Src/CASCADE/app_cascade.c \
+	Application/Src/CASC/app_casc.c \
 	Application/Src/app_diag.c \
 	Application/Src/app_key.c \
 	Application/Src/app_light_sensor.c \
@@ -326,8 +330,8 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_vms_ctrl.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c \
-	Application/Src/AH_MQTT/ah_mqtt.c \
-	Application/Src/AH_MQTT/ah_mqtt_cmd.c \
+	Application/Src/AHMQ/app_ahmq.c \
+	Application/Src/AHMQ/app_ahmq_cmd.c \
 	Application/Src/Channel/app_udp.c \
 	Application/Src/Channel/app_tcp_server.c \
 	Application/Src/Channel/app_tcp_client.c \
@@ -349,12 +353,12 @@ SRC_ALL = \
 	$(SRC_STARTUP)
 
 # ---- Object Files ----
-# 工程级排除：AH_MQTT 暂未启用，所有板都不编。
+# 工程级排除：AHMQ 暂未启用，所有板都不编。
 # **必须与 eIDE 保持一致** —— 两个 target 的 excludeList 里都有
 # <virtual_root>/Application/protocol/ah，这里不排的话，同一份源码在
 # Makefile 与 eIDE 下会产出不同的固件。
-SRC_EXCLUDE = Application/Src/AH_MQTT/ah_mqtt.c
-SRC_EXCLUDE += Application/Src/AH_MQTT/ah_mqtt_cmd.c
+SRC_EXCLUDE = Application/Src/AHMQ/app_ahmq.c
+SRC_EXCLUDE += Application/Src/AHMQ/app_ahmq_cmd.c
 
 # board.mk 还可以追加本板不参与编译的**共享源**（板级源直接不写进 SRC_BOARD 即可）。
 # 用 filter-out 而非让各板复制清单：排除项是少数、共享清单是多数，反过来的话
@@ -431,11 +435,15 @@ TEST_INC     = \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
 	-I Application/Inc/RLS \
-	-I Application/Inc/CASCADE \
+	-I Application/Inc/CASC \
 	-I Application/Inc/Channel \
 	-I Kernel/Inc \
 	-I Platform/Inc \
 	-I Device/Inc \
+	-I Device/Inc/Display \
+	-I Device/Inc/IO \
+	-I Device/Inc/Network \
+	-I Device/Inc/Storage \
 	-I Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
 
 TEST_CFLAGS  = -std=gnu23 -g -O1 -Wall -Wextra -fno-omit-frame-pointer \
@@ -480,7 +488,7 @@ TEST_PROBES_SRCS = \
 TEST_CFG_SCHED_SRCS = \
 	test/stubs/os_stub.c \
 	test/test_cfg_sched.c \
-	Device/Storage/cfg_record.c \
+	Device/Storage/dev_cfg_record.c \
 	Application/Src/app_cfg_sched.c \
 	Kernel/Src/crc_utils.c
 
@@ -513,7 +521,7 @@ TEST_LDI_0AH_SRCS = \
 	test/stubs/pl_flash_stub.c \
 	test/test_ldi_0ah.c \
 	Device/Storage/dev_flash_int.c \
-	Device/Storage/cfg_record.c \
+	Device/Storage/dev_cfg_record.c \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/LDI/app_ldi.c \
 	Kernel/Src/crc_utils.c \
@@ -534,7 +542,7 @@ TEST_ISR_PREINIT_SRCS = \
 # 按 BOARD 分板编译：两版字库的字号集合、字符集、单元顺序都不同。
 TEST_FONT_LIB_SRCS = \
 	test/test_font_lib.c \
-	$(BOARD_DIR)/Application/Src/font_lib_board.c
+	$(BOARD_DIR)/Application/Src/app_font_lib_board.c
 
 # 套件九：整屏画布（经画布渲染必须与直写实屏逐像素相等）
 # 用例直接 include app_screen.c（sink 是 static），并自己提供 dev_display 原语作为
@@ -552,19 +560,19 @@ TEST_SCREEN_LAYOUT_SRCS = \
 	test/stubs/os_stub.c
 
 # 套件十三：级联图传 · 从卡侧（分片暂存 / 陈旧分片 / 短分片 / 缺片应答 / NACK）
-# 用例 include app_cascade.c（探针与分派表都是 static），用真探针 + 真分派表，
+# 用例 include app_casc.c（探针与分派表都是 static），用真探针 + 真分派表，
 # 只把总线与 app_screen 换成替身。
-TEST_CASCADE_ROUND_SRCS = \
-	test/test_cascade_round.c \
+TEST_CASC_ROUND_SRCS = \
+	test/test_casc_round.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
 # 套件十四：级联图传 · 主卡侧（开轮、分片下发、结算、定向重传、本地提交门控）
-# 同套件十三：用例 include app_cascade.c。总线那头坐着一个**假从卡**，
+# 同套件十三：用例 include app_casc.c。总线那头坐着一个**假从卡**，
 # 它收到的分片经真探针 + 真队列喂回主卡 —— 分帧、探针、等待循环都是真的。
-TEST_CASCADE_MASTER_SRCS = \
-	test/test_cascade_master.c \
+TEST_CASC_MASTER_SRCS = \
+	test/test_casc_master.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
@@ -577,10 +585,10 @@ TEST_CRC_SRCS = \
 	test/stubs/os_stub.c
 
 # 套件十一：级联协议探针（四态 / 地址过滤 / 长度域 / 与既有协议互不毒化）
-# 用例 include app_cascade.c（探针是 static）；除探针真正用到的 rb 与 CRC 外，
+# 用例 include app_casc.c（探针是 static）；除探针真正用到的 rb 与 CRC 外，
 # 其余符号都要给桩 —— 探针只窥视，不碰通道与队列。
-TEST_CASCADE_FRAME_SRCS = \
-	test/test_cascade_frame.c \
+TEST_CASC_FRAME_SRCS = \
+	test/test_casc_frame.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
@@ -599,8 +607,8 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
-      $(TEST_BUILD)/test_cascade_frame $(TEST_BUILD)/test_screen_layout \
-      $(TEST_BUILD)/test_cascade_round $(TEST_BUILD)/test_cascade_master \
+      $(TEST_BUILD)/test_casc_frame $(TEST_BUILD)/test_screen_layout \
+      $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
@@ -633,16 +641,16 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_crc
 	@echo ""
 	@echo "──── 级联协议探针 ────"
-	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_frame
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_casc_frame
 	@echo ""
 	@echo "──── 切分表与抽带 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_layout
 	@echo ""
 	@echo "──── 级联图传 · 从卡侧 ────"
-	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_round
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_casc_round
 	@echo ""
 	@echo "──── 级联图传 · 主卡侧 ────"
-	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cascade_master
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_casc_master
 	@echo ""
 	@echo "──── RS485 收包槽位 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rs485_slots
@@ -680,14 +688,14 @@ $(TEST_BUILD)/test_crc: $(TEST_CRC_SRCS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CRC_SRCS) $(TEST_LDFLAGS)
 
-$(TEST_BUILD)/test_cascade_frame: $(TEST_CASCADE_FRAME_SRCS)
+$(TEST_BUILD)/test_casc_frame: $(TEST_CASC_FRAME_SRCS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_FRAME_SRCS) $(TEST_LDFLAGS)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASC_FRAME_SRCS) $(TEST_LDFLAGS)
 
-# **必须单独挂依赖**：用例 TU-include 了 app_cascade.c，它不在 SRCS 里，
+# **必须单独挂依赖**：用例 TU-include 了 app_casc.c，它不在 SRCS 里，
 # make 看不见 —— 不挂这行的话改了被测源码测试不重编，跑的是旧二进制。
 # （同 test_cfg_sched / test_iap_cfg / test_ldi_0ah / test_screen_canvas 的那几条。）
-$(TEST_BUILD)/test_cascade_frame: Application/Src/CASCADE/app_cascade.c
+$(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 
 # 同上：用例 TU-include 了 app_screen.c 与板级 board.h，都不在 SRCS 里。
 $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) Application/Src/app_screen.c
@@ -696,21 +704,21 @@ $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) Application/Src/app
 
 $(TEST_BUILD)/test_screen_layout: Application/Src/app_screen.c $(BOARD_DIR)/board.h
 
-# 同上：用例 TU-include 了 app_cascade.c。
-$(TEST_BUILD)/test_cascade_round: $(TEST_CASCADE_ROUND_SRCS) Application/Src/CASCADE/app_cascade.c
+# 同上：用例 TU-include 了 app_casc.c。
+$(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_casc.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_ROUND_SRCS) $(TEST_LDFLAGS)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASC_ROUND_SRCS) $(TEST_LDFLAGS)
 
-$(TEST_BUILD)/test_cascade_round: Application/Src/CASCADE/app_cascade.c \
-	Application/Inc/CASCADE/app_cascade.h $(BOARD_DIR)/board.h
+$(TEST_BUILD)/test_casc_round: Application/Src/CASC/app_casc.c \
+	Application/Inc/CASC/app_casc.h $(BOARD_DIR)/board.h
 
-$(TEST_BUILD)/test_cascade_master: $(TEST_CASCADE_MASTER_SRCS) \
-	Application/Src/app_screen.c Application/Src/CASCADE/app_cascade.c
+$(TEST_BUILD)/test_casc_master: $(TEST_CASC_MASTER_SRCS) \
+	Application/Src/app_screen.c Application/Src/CASC/app_casc.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASCADE_MASTER_SRCS) $(TEST_LDFLAGS)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CASC_MASTER_SRCS) $(TEST_LDFLAGS)
 
-$(TEST_BUILD)/test_cascade_master: Application/Src/CASCADE/app_cascade.c \
-	Application/Inc/CASCADE/app_cascade.h $(BOARD_DIR)/board.h
+$(TEST_BUILD)/test_casc_master: Application/Src/CASC/app_casc.c \
+	Application/Inc/CASC/app_casc.h $(BOARD_DIR)/board.h
 
 # 同理：用例 TU-include 了 app_rs485.c，它不在 SRCS 里，必须单独挂依赖。
 $(TEST_BUILD)/test_rs485_slots: $(TEST_RS485_SLOTS_SRCS)

@@ -19,8 +19,8 @@
 
 typedef struct {
     UART_HandleTypeDef *huart;
-    pl_uart_rx_cb_t rx_cb;
-    void *rx_cb_ctx;
+    pl_uart_rx_fn_t rx_fn;
+    void *rx_fn_ctx;
     pl_uart_dir_fn_t dir_cb;   /* Device 层注入的 RS485 方向控制，无则为 NULL */
     uint8_t *rx_buf;
     uint16_t rx_buf_size;
@@ -31,27 +31,27 @@ typedef struct {
     osSemaphoreId_t tx_done; /* DMA 完成（TC）由中断 release，发送任务 acquire */
 } uart_ctx_t;
 
-static uart_ctx_t g_uart_ctx[PL_UART_MAX];
+static uart_ctx_t s_uart_ctx[PL_UART_MAX];
 
 /* ---- 发送需要在 RTOS 起来之后建锁：hw_pl_initcall 阶段建内核对象会出事
  *      （见 Kernel/Inc/initcall.h 与 pl_tim.c 的说明）。sw_pl(1) 早于任何协议任务。 */
-static void pl_uart_tx_sync_init(void)
+static void _uart_tx_sync_init(void)
 {
     for (uint8_t i = 0; i < PL_UART_MAX; i++) {
         if (!g_pl_uart_board[i].huart) continue;
 
         const osMutexAttr_t mattr = {.name = "uart_tx", .attr_bits = osMutexPrioInherit};
-        g_uart_ctx[i].tx_lock     = osMutexNew(&mattr);
+        s_uart_ctx[i].tx_lock     = osMutexNew(&mattr);
 
         const osSemaphoreAttr_t sattr = {.name = "uart_tc"};
-        g_uart_ctx[i].tx_done         = osSemaphoreNew(1, 0, &sattr);
+        s_uart_ctx[i].tx_done         = osSemaphoreNew(1, 0, &sattr);
     }
 }
-sw_pl_initcall(pl_uart_tx_sync_init);
+sw_pl_initcall(_uart_tx_sync_init);
 
 /* ---- 本帧的物理发送时间（ms）----
  * 8N1 = 10 bit/字节。取整后 +2 兜住帧首帧尾与抢占。 */
-static uint32_t _wire_ms(uint32_t baud, size_t len)
+static uint32_t _uart_wire_ms(uint32_t baud, size_t len)
 {
     if (baud == 0) return 100;
     return (uint32_t)(((uint64_t)len * 10U * 1000U) / baud) + 2U;
@@ -62,9 +62,9 @@ static uint32_t _wire_ms(uint32_t baud, size_t len)
  * 补上它才不会让接收永久停摆。查完把这个开关连同那几行一起删掉。 */
 #define PL_UART_RX_DIAG 1
 #if PL_UART_RX_DIAG
-#define PLU_LOG(...) printf(__VA_ARGS__)
+#define PL_UART_LOG(...) printf(__VA_ARGS__)
 #else
-#define PLU_LOG(...) ((void)0)
+#define PL_UART_LOG(...) ((void)0)
 #endif
 
 /* ---- 重新武装接收 DMA ----
@@ -75,7 +75,7 @@ static uint32_t _wire_ms(uint32_t baud, size_t len)
  *
  * 传输层的接收是"空闲中断 → 停接收 DMA → 取走这一段 → 重新武装"，所以每收一段
  * 就走一次这个函数。任何一次没武装上，后面就全哑了。 */
-static bool _rx_rearm(uart_ctx_t *ctx)
+static bool _uart_rx_rearm(uart_ctx_t *ctx)
 {
     /* 重新武装 = DMA 从缓冲起点重新转，已交付位置随之归零（错误路径里
        丢掉的字节只能丢，不能重放） */
@@ -110,7 +110,7 @@ static bool _rx_rearm(uart_ctx_t *ctx)
  * （DMAR/EIE 都在），从寄存器上完全看不出问题。
  *
  * 循环模式没有中止动作，也就没有那个窗口。 */
-static void uart_idle_handle(uart_ctx_t *ctx)
+static void _uart_idle_handle(uart_ctx_t *ctx)
 {
     if (!(__HAL_UART_GET_FLAG(ctx->huart, UART_FLAG_IDLE))) return;
     __HAL_UART_CLEAR_IDLEFLAG(ctx->huart);
@@ -121,13 +121,13 @@ static void uart_idle_handle(uart_ctx_t *ctx)
 
     if (pos > ctx->rx_pos) {
         const uint16_t n = (uint16_t)(pos - ctx->rx_pos);
-        if (ctx->rx_cb) ctx->rx_cb(&ctx->rx_buf[ctx->rx_pos], n, ctx->rx_cb_ctx);
+        if (ctx->rx_fn) ctx->rx_fn(&ctx->rx_buf[ctx->rx_pos], n, ctx->rx_fn_ctx);
     } else {
         /* 绕过缓冲末尾：**分两段交**。协议侧的环形缓冲区本来就是流式的，
            一帧被拆成两次交付无妨（它按字节累积）。 */
         const uint16_t n1 = (uint16_t)(ctx->rx_buf_size - ctx->rx_pos);
-        if (n1 && ctx->rx_cb) ctx->rx_cb(&ctx->rx_buf[ctx->rx_pos], n1, ctx->rx_cb_ctx);
-        if (pos && ctx->rx_cb) ctx->rx_cb(ctx->rx_buf, pos, ctx->rx_cb_ctx);
+        if (n1 && ctx->rx_fn) ctx->rx_fn(&ctx->rx_buf[ctx->rx_pos], n1, ctx->rx_fn_ctx);
+        if (pos && ctx->rx_fn) ctx->rx_fn(ctx->rx_buf, pos, ctx->rx_fn_ctx);
     }
     ctx->rx_pos = pos;
 }
@@ -137,7 +137,7 @@ void pl_uart_init(void)
 {
     for (uint8_t i = 0; i < PL_UART_MAX; i++) {
         if (g_pl_uart_board[i].init) g_pl_uart_board[i].init();
-        g_uart_ctx[i].huart = (UART_HandleTypeDef *)g_pl_uart_board[i].huart;
+        s_uart_ctx[i].huart = (UART_HandleTypeDef *)g_pl_uart_board[i].huart;
     }
 }
 hw_pl_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
@@ -145,7 +145,7 @@ hw_pl_initcall(pl_uart_init); /* 优先级 2: 在 device 驱动之前 */
 /* ---- 公开 API ---- */
 pl_uart_handle_t pl_uart_get_handle(uint8_t id)
 {
-    return (id < PL_UART_MAX) ? &g_uart_ctx[id] : NULL;
+    return (id < PL_UART_MAX) ? &s_uart_ctx[id] : NULL;
 }
 
 int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_t timeout_ms,
@@ -174,7 +174,7 @@ int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint
      * 共同点：都必须大于物理发送时间，而调用方很难正确估算（要知道波特率、10 bit/字节、
      * 还要留余量）。原实现把 100ms 写死在 app_rs485.c 里，@115200 只够 1152 字节，
      * IAP 的 1044 字节帧只剩 9ms 余量、级联的 1.4KB 帧必被截断。这里兜住。 */
-    uint32_t need = _wire_ms(ctx->huart->Init.BaudRate, len);
+    uint32_t need = _uart_wire_ms(ctx->huart->Init.BaudRate, len);
     if (timeout_ms < need) timeout_ms = need;
 
     /* 两种模式共用同一把锁：都往同一条半双工总线上写。
@@ -205,7 +205,7 @@ int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint
             }
         } else {
             /* **这一条必须报**：DMA 起不来时（gState 不是 READY、或 DMA 流被占）本函数
-               原地返回 -1，而整条 ccb_send 链**没人看返回值**。表现是"帧根本没发出去"
+               原地返回 -1，而整条 app_ccb_send 链**没人看返回值**。表现是"帧根本没发出去"
                却一声不响 —— 与"发出去了但对端没收到"在现场完全分不开，而两者的排查
                方向相反（查本机状态机 vs 查线）。 */
             printf("[pl_uart] DMA 发送**没起来**（%u 字节）：uart gState=%u，TX DMA State=%u\n",
@@ -242,19 +242,19 @@ int32_t pl_uart_send_dma(pl_uart_handle_t h, const uint8_t *buf, size_t len, uin
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     for (uint8_t i = 0; i < PL_UART_MAX; i++) {
-        if (g_uart_ctx[i].huart == huart && g_uart_ctx[i].tx_done) {
-            osSemaphoreRelease(g_uart_ctx[i].tx_done);
+        if (s_uart_ctx[i].huart == huart && s_uart_ctx[i].tx_done) {
+            osSemaphoreRelease(s_uart_ctx[i].tx_done);
             return;
         }
     }
 }
 
-void pl_uart_set_rx_cb(pl_uart_handle_t h, pl_uart_rx_cb_t cb, void *ctx_arg)
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx_arg)
 {
     uart_ctx_t *ctx = (uart_ctx_t *)h;
     if (ctx) {
-        ctx->rx_cb     = cb;
-        ctx->rx_cb_ctx = ctx_arg;
+        ctx->rx_fn     = cb;
+        ctx->rx_fn_ctx = ctx_arg;
     }
 }
 
@@ -284,7 +284,7 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
     /* ---- **把接收流真正编成"循环 + 直接模式"** ----
      *
      * 这两条都是本文件的分帧方式（空闲中断 + `pos = 缓冲大小 − NDTR`，见
-     * uart_idle_handle）的**前提**，各有一个实测过的坑：
+     * _uart_idle_handle）的**前提**，各有一个实测过的坑：
      *
      * ① **循环**：`Init` 只是软件影子 —— `HAL_DMA_Init` 早在开机的板级 MX_DMA_Init 里
      *    就照着板级文件的 `DMA_NORMAL` 把 `DMA_SxCR` 编好了，之后**只改 Init 字段不会
@@ -310,7 +310,7 @@ int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)
         return -1;
     }
 
-    if (!_rx_rearm(ctx)) return -1;
+    if (!_uart_rx_rearm(ctx)) return -1;
 
     __HAL_UART_ENABLE_IT(ctx->huart, UART_IT_IDLE);
     return 0;
@@ -324,9 +324,9 @@ void pl_uart_irq_handler(uint8_t id)
 {
     if (id >= PL_UART_MAX) return;
 
-    /* 取句柄走**板级常量表**，不走 g_uart_ctx（那是 initcall 期才填的）。
+    /* 取句柄走**板级常量表**，不走 s_uart_ctx（那是 initcall 期才填的）。
      * 窗口是真实存在的：MX_USARTx_UART_Init() 自己就会 HAL_NVIC_EnableIRQ，
-     * 而 g_uart_ctx[i].huart 是在那之后才赋值 —— 这中间来一条 UART 中断，
+     * 而 s_uart_ctx[i].huart 是在那之后才赋值 —— 这中间来一条 UART 中断，
      * 读运行时 ctx 就会既不处理、也不清标志，变成中断风暴。
      * TIM7 上已经因为同一类问题卡死过一次（见 pl_tim.c 的说明）。 */
     UART_HandleTypeDef *h = (UART_HandleTypeDef *)g_pl_uart_board[id].huart;
@@ -336,7 +336,7 @@ void pl_uart_irq_handler(uint8_t id)
      *
      * `HAL_UART_IRQHandler` 处理溢出等错误时走的是 `__HAL_UART_CLEAR_PEFLAG`，
      * 而那个宏是"**读 SR、再读 DR**"——按 RM0090，**该序列同时会清掉 IDLE 位**。
-     * 于是顺序一反，`uart_idle_handle` 查不到 IDLE、静默返回，这一段的字节永不交付。
+     * 于是顺序一反，`_uart_idle_handle` 查不到 IDLE、静默返回，这一段的字节永不交付。
      *
      * 更糟的是 HAL 的 ORE 处理还会**中止接收 DMA**，且不会重新武装。两者叠加：
      * 突发帧期间一溢出，接收就死掉，直到某次空闲恰好没有伴随错误才活过来 ——
@@ -356,12 +356,12 @@ void pl_uart_irq_handler(uint8_t id)
             printf("[%8u] [pl_uart] ISR SR=%04X CR3=%04X CR1=%04X RxState=%u DMAState=%u\n",
                    (unsigned)osKernelGetTickCount(), (unsigned)(sr & 0xFFFFU),
                    (unsigned)(h->Instance->CR3 & 0xFFFFU), (unsigned)(h->Instance->CR1 & 0xFFFFU),
-                   (unsigned)(g_uart_ctx[id].huart ? h->RxState : 0xEEU),
+                   (unsigned)(s_uart_ctx[id].huart ? h->RxState : 0xEEU),
                    (unsigned)(h->hdmarx ? h->hdmarx->State : 0xFFU));
         }
     }
 
-    if (g_uart_ctx[id].huart) uart_idle_handle(&g_uart_ctx[id]);
+    if (s_uart_ctx[id].huart) _uart_idle_handle(&s_uart_ctx[id]);
 
     /* ---- **自己清掉错误标志，不让 HAL 的错误路径跑起来** ----
      *
@@ -384,13 +384,13 @@ void pl_uart_irq_handler(uint8_t id)
 
     /* HAL 可能刚把接收 DMA 中止掉（错误路径）。**DMA 的接收请求还在不在**是判断依据；
      * 不在就武装回去 —— 否则接收就此停摆，而这一点不会有任何报错。 */
-    if (g_uart_ctx[id].huart && !(h->Instance->CR3 & USART_CR3_DMAR)) {
+    if (s_uart_ctx[id].huart && !(h->Instance->CR3 & USART_CR3_DMAR)) {
         static uint8_t n;
         if (n < 8) {
             n++;
-            PLU_LOG("[pl_uart] HAL 之后接收 DMA 已不在，补武装（第 %u 次）\n", (unsigned)n);
+            PL_UART_LOG("[pl_uart] HAL 之后接收 DMA 已不在，补武装（第 %u 次）\n", (unsigned)n);
         }
-        (void)_rx_rearm(&g_uart_ctx[id]);
+        (void)_uart_rx_rearm(&s_uart_ctx[id]);
     }
 }
 
@@ -404,7 +404,7 @@ void pl_uart_dma_irq_handler(uint8_t id)
 void pl_uart_dma_tx_irq_handler(uint8_t id)
 {
     if (id >= PL_UART_MAX) return;
-    /* 同样走板级常量表而不是 g_uart_ctx（理由同 pl_uart_irq_handler） */
+    /* 同样走板级常量表而不是 s_uart_ctx（理由同 pl_uart_irq_handler） */
     DMA_HandleTypeDef *hdma = (DMA_HandleTypeDef *)g_pl_uart_board[id].dma_tx;
     if (hdma) HAL_DMA_IRQHandler(hdma);
 }

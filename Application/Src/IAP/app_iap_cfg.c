@@ -2,7 +2,7 @@
  * @file    app_iap_cfg.c
  * @brief   IAP 系统配置 Flash 存储（Sector 1, 0x08004000）
  *
- * app_flash_iap_sys_info_t 记录 = magic(4B) | update_sta(4B) | FWInfo(40B) | NetConfig(16B) | CRC32(4B)
+ * app_flash_iap_sys_info_t 记录 = magic(4B) | update_status(4B) | FWInfo(40B) | NetConfig(16B) | CRC32(4B)
  * 总长 68B（17 words），按 word 写入 Flash。
  *
  * 操作流程：
@@ -51,27 +51,27 @@ _Static_assert(BOARD_HAS_IAP_RECORD == 0 ||
                "BOARD_HAS_IAP_RECORD at 0");
 
 /* ---- IAP Flash 存储实例 ---- */
-static dev_flash_int_t g_flash_iap = {
-    .me        = {.capacity = IAP_SIZE},
+static dev_flash_int_t s_flash_iap = {
+    .base        = {.capacity = IAP_SIZE},
     .base_addr = ADDR_CONFIG_SECTOR,
     .sector    = PL_FLASH_SECTOR_1,
 };
 
 dev_storage_t *app_flash_iap_get_storage(void)
 {
-    return &g_flash_iap.me;
+    return &s_flash_iap.base;
 }
 
 /* ---- ops 绑定（hw_dev_initcall） ---- */
 static void _app_flash_iap_storage_init(void)
 {
-    g_flash_iap.me.ops = &flash_int_ops;
+    s_flash_iap.base.ops = &g_flash_int_ops;
 }
 hw_dev_initcall(_app_flash_iap_storage_init);
 
 /* ---- 串行化 ----
- * 写这条记录的有两条任务：iap_handle_task（队列超时空闲时做镜像对账，
- * app_iap.c 的 s_sync_pending）与 ldi_handle_task（0AH）。两边都是
+ * 写这条记录的有两条任务：app_iap_task（队列超时空闲时做镜像对账，
+ * app_iap.c 的 s_sync_pending）与 app_ldi_task（0AH）。两边都是
  * "读 → 判定 → 擦扇区 → 编程 17 个 word"。
  *
  * 不加锁的后果不是"某次更新被覆盖"（那种交错最后写者胜，记录仍是完好的），
@@ -102,8 +102,8 @@ sw_dev_initcall(_iap_cfg_lock_init);
 /* 记录区指针，直接映射到 Flash 地址。
  * 这里刻意暴露成**可写指针**而不是到处用 ADDR_CONFIG_SECTOR 宏：host 单测需要把
  * 记录区重定向到 RAM（0x08004000 在宿主机上不可访问），而重定向只能通过覆盖一个
- * 变量做到，宏做不到。生产代码里两者完全等价，故读取处统一走 g_config。 */
-app_flash_iap_sys_info_t *g_config = (app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR;
+ * 变量做到，宏做不到。生产代码里两者完全等价，故读取处统一走 g_iap_sys_info。 */
+app_flash_iap_sys_info_t *g_iap_sys_info = (app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR;
 
 /* ---- CRC32 覆盖范围 ----
  * 覆盖整条记录**除去 config_crc 字段自身**。这个公式原先在本文件里写了三遍
@@ -193,7 +193,7 @@ void app_flash_iap_init_config(app_flash_iap_sys_info_t *info)
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);
 
     info->magic      = APP_FLASH_IAP_MAGIC;
-    info->update_sta = APP_FLASH_IAP_FAILED;
+    info->update_status = APP_FLASH_IAP_FAILED;
     memset(&(info->app_info), 0, sizeof(info->app_info));
 
     app_flash_iap_net_cfg_t net_info = {
@@ -238,7 +238,7 @@ int32_t app_flash_iap_write_config(app_flash_iap_sys_info_t *info)
 
 /** @brief 同步设备网络配置到内部 Flash（读-改-net_cfg-写，不碰其他字段）
  *
- *  **空记录与损坏记录一视同仁，都以有效骨架重建**（magic + update_sta 置
+ *  **空记录与损坏记录一视同仁，都以有效骨架重建**（magic + update_status 置
  *  UPDATED，app_info 清零，net_cfg 随后覆盖）。
  *
  *  空记录要重建是旧版就有的（否则写出来的是 magic 仍为 0xFFFFFFFF 的永久
@@ -252,7 +252,7 @@ int32_t app_flash_iap_write_config(app_flash_iap_sys_info_t *info)
  *  is_config_valid() 假，卡死在这个状态。此时唯一的修复手段是整片擦除重烧。
  *
  *  并且它的表现很隐蔽：0AH 的保存状态取自 LDI 自己那条记录（是成功的），
- *  上位机看到"设置成功"而 IAP 镜像永远没跟上；cmd_ReportIp_01 读这条记录
+ *  上位机看到"设置成功"而 IAP 镜像永远没跟上；_iap_cmd_report_ip 读这条记录
  *  会报出全 0xFF。
  *
  *  内容未变时跳过擦除（内部 Flash 擦除会硬停总线）。注意"损坏"分支不走这条
@@ -268,7 +268,7 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
 
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);
 
-    memcpy(&info, (void *)g_config, sizeof(info));
+    memcpy(&info, (void *)g_iap_sys_info, sizeof(info));
 
     bool empty = app_flash_iap_is_config_empty(&info);
     bool valid = !empty && app_flash_iap_is_config_valid(&info);
@@ -278,7 +278,7 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
             printf("[iap_cfg] IAP 记录损坏（magic=0x%08X），按空记录以有效骨架重建\n",
                    (unsigned)info.magic);
         info.magic      = APP_FLASH_IAP_MAGIC;
-        info.update_sta = APP_FLASH_IAP_UPDATED;
+        info.update_status = APP_FLASH_IAP_UPDATED;
         memset(&info.app_info, 0, sizeof(info.app_info));
     } else if (memcmp(info.net_cfg.ip, ip, 4) == 0 && memcmp(info.net_cfg.mask, mask, 4) == 0 &&
                memcmp(info.net_cfg.gw, gw, 4) == 0 && info.net_cfg.port == port) {

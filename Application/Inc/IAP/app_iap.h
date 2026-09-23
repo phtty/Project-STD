@@ -21,22 +21,22 @@ typedef struct {
     uint32_t cmd;
     uint32_t len;
     uint32_t data_crc[];
-} iap_frame_t;
+} app_iap_frame_t;
 
 /** @brief 取 IAP 协议控制块
  *
  *  供板级代码把"本板才有的通道"绑到 IAP 上（如 3833024 的两路 RS232）。
  *  共享的 app_iap.c 只绑定两块板都有的通道（RS485 / UDP），板级特有的通道由
  *  各板自己绑——否则共享文件要认识每块板的外设。 */
-pcb_t *app_iap_pcb(void);
+app_pcb_t *app_iap_pcb(void);
 
 extern osMessageQueueId_t g_iap_msg_queue;
 extern osThreadId_t g_iap_task_handle;
-extern const osThreadAttr_t iap_task_attr;
+extern const osThreadAttr_t g_iap_task_attr;
 
-void iap_handle_task(void *argument);
+void app_iap_task(void *argument);
 
-/** @brief IAP 帧探测（pcb_ops.probe）—— 契约见 app_dispatch.h 的 pcb_probe_fn_t */
-pcb_probe_sta_t iap_probe_frame(pcb_t *self, const ccb_t *ccb, const ccb_src_t *src,
+/** @brief IAP 帧探测（pcb_ops.probe）—— 契约见 app_dispatch.h 的 app_pcb_probe_fn_t */
+app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                 uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
                                 uint8_t *aux);

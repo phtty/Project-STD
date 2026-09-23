@@ -4,7 +4,7 @@
  *
  * 为什么需要这个测试：0AH 一次操作写**两条互不相干的记录** ——
  *
- *   · LDI 自己的配置，在 W25Qxx 尾部（走 app_cfg_sched → cfg_record）
+ *   · LDI 自己的配置，在 W25Qxx 尾部（走 app_cfg_sched → dev_cfg_record）
  *   · IAP 记录里的 net_cfg 镜像，在内部 Flash Sector 1（走 dev_flash_int）
  *
  * 两条记录各有测试（test_cfg_sched / test_iap_cfg），但**它们之间的关系**没有：
@@ -37,12 +37,12 @@
 #include "app_cfg_sched.h"
 #include "app_ldi.h"
 #include "app_ldi_cfg.h"
-#include "cfg_record.h"
+#include "dev_cfg_record.h"
 #include "dev_flash_int.h"
 
 #include "../Application/Src/LDI/app_ldi_cfg.c" /* 静态注册入口 */
 #include "../Application/Src/IAP/app_iap_cfg.c" /* _iap_cfg_lock_init */
-#include "../Application/Src/LDI/app_ldi_cmd.c" /* cmd_set_ip 与 cmd_set_ip_t（后者在 .c 内定义） */
+#include "../Application/Src/LDI/app_ldi_cmd.c" /* _ldi_cmd_set_ip 与 cmd_set_ip_t（后者在 .c 内定义） */
 
 /* pl_flash 替身的控制接口（test/stubs/pl_flash_stub.c） */
 void pl_flash_stub_set_region(uint32_t base, uint32_t len);
@@ -82,32 +82,32 @@ static int g_fail;
 #define TEST_BEGIN(name) printf("\n\033[36m▶ %s\033[0m\n", name)
 
 /* ================================================================
- *  外发帧捕获 —— 替代 app_dispatch.c 的 ccb_send（本用例不测发送路径）
+ *  外发帧捕获 —— 替代 app_dispatch.c 的 app_ccb_send（本用例不测发送路径）
  * ================================================================ */
 
-static uint8_t  s_tx[512];
+static uint8_t  s_tx_buf[512];
 static uint16_t s_tx_len;
 static int      s_tx_count;
 
-int32_t ccb_send(ccb_t *ccb, const uint8_t *data, uint16_t len)
+int32_t app_ccb_send(app_ccb_t *ccb, const uint8_t *data, uint16_t len)
 {
     (void)ccb;
     s_tx_count++;
-    s_tx_len = len <= sizeof(s_tx) ? len : sizeof(s_tx);
-    if (data && s_tx_len) memcpy(s_tx, data, s_tx_len);
+    s_tx_len = len <= sizeof(s_tx_buf) ? len : sizeof(s_tx_buf);
+    if (data && s_tx_len) memcpy(s_tx_buf, data, s_tx_len);
     return (int32_t)len; /* 桩：装作发出去了 */
 }
 
 /** @brief 从捕获到的响应帧里取 status 字节
  *
- *  帧布局（ldi_send_response）：stx(2) ver(1) seq(1) len(4) data[...] crc(2)。
+ *  帧布局（_ldi_send_response）：stx(2) ver(1) seq(1) len(4) data[...] crc(2)。
  *  即 payload 从偏移 8 开始。**status 不是 payload 的首字节** ——
  *  ldi_status_rsp_t 是 { head; status; payload[] }，head 在前。
- *  （第一版就栽在这：直接读 s_tx[8]，读到的 0xA0 是 head 里的命令码。） */
+ *  （第一版就栽在这：直接读 s_tx_buf[8]，读到的 0xA0 是 head 里的命令码。） */
 static int rsp_status(void)
 {
     if (s_tx_count == 0) return -1;
-    return s_tx[8 + offsetof(ldi_status_rsp_t, status)];
+    return s_tx_buf[8 + offsetof(ldi_status_rsp_t, status)];
 }
 
 /* ================================================================
@@ -184,7 +184,7 @@ uint16_t app_tcp_server_get_port(void) { return 9529; }
  * g_ldi_cmd_table[] 是非 static 全局，实测在本 TU 里**没有**被 gc-sections 丢掉，
  * 于是 12 个处理函数全被拉进来，它们的依赖也得给全。都是本用例不关心的东西，
  * 给最小实现即可 —— 注意别在这里写"看起来合理"的逻辑，那会让别的用例产生假信心。 */
-pl_rtc_handle_t pl_rtc_get_handle(void) { return (pl_rtc_handle_t)&s_tx; }
+pl_rtc_handle_t pl_rtc_get_handle(void) { return (pl_rtc_handle_t)&s_tx_buf; }
 uint32_t        pl_rtc_get_timestamp(pl_rtc_handle_t h)
 {
     (void)h;
@@ -197,7 +197,7 @@ bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
     return true;
 }
 void pl_system_reset(void) {}
-void vms_ctrl(ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+void app_vms_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
     (void)ctx;
     (void)text_len;
@@ -244,8 +244,8 @@ static void env_setup(void)
 
     dev_flash_int_t *st = (dev_flash_int_t *)app_flash_iap_get_storage();
     st->base_addr       = s_int_base;
-    st->me.ops          = &flash_int_ops;
-    g_config            = (app_flash_iap_sys_info_t *)(uintptr_t)s_int_base;
+    st->base.ops          = &g_flash_int_ops;
+    g_iap_sys_info            = (app_flash_iap_sys_info_t *)(uintptr_t)s_int_base;
 
     pl_flash_stub_set_region(s_int_base, FAKE_SECTOR_SIZE);
     pl_flash_stub_reset();
@@ -254,12 +254,12 @@ static void env_setup(void)
     if (!s_lock) _iap_cfg_lock_init();
     _app_flash_ldi_cfg_register();
 
-    /* g_ldi 来自 app_ldi.c —— 用真实的那一份，不自己造 */
-    if (!g_ldi.tx_lock) {
+    /* g_ldi_ctx 来自 app_ldi.c —— 用真实的那一份，不自己造 */
+    if (!g_ldi_ctx.tx_lock) {
         const osMutexAttr_t attr = {.name = "ldi_tx", .attr_bits = osMutexPrioInherit};
-        g_ldi.tx_lock            = osMutexNew(&attr);
+        g_ldi_ctx.tx_lock            = osMutexNew(&attr);
     }
-    g_ldi.rsp_seq = 0x11;
+    g_ldi_ctx.rsp_seq = 0x11;
 
     s_tx_count    = 0;
     s_tx_len      = 0;
@@ -292,7 +292,7 @@ static bool iap_mirror_is(const uint8_t ip[4], uint16_t port)
     return memcmp(r->net_cfg.ip, ip, 4) == 0 && r->net_cfg.port == port;
 }
 
-/** @brief 从 LDI 记录里读回（重新加载，绕过 g_ldi 的 RAM 镜像） */
+/** @brief 从 LDI 记录里读回（重新加载，绕过 g_ldi_ctx 的 RAM 镜像） */
 static bool ldi_record_is(const uint8_t ip[4], uint16_t port)
 {
     app_flash_ldi_cfg_info_t got;
@@ -339,18 +339,18 @@ static void case_0ah_leaves_internal_flash_alone(void)
     app_flash_iap_sys_info_t good;
     memset(&good, 0, sizeof good);
     good.magic      = APP_FLASH_IAP_MAGIC;
-    good.update_sta = APP_FLASH_IAP_UPDATED;
+    good.update_status = APP_FLASH_IAP_UPDATED;
     good.config_crc = _iap_cfg_crc(&good);
-    memcpy((void *)g_config, &good, sizeof good);
+    memcpy((void *)g_iap_sys_info, &good, sizeof good);
     pl_flash_stub_reset();
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
 
     CHECK_MSG(pl_flash_stub_erase_count() == 0, "0AH 擦了内部 Flash %d 次 —— 会擦掉固件自身",
               pl_flash_stub_erase_count());
-    CHECK_MSG(memcmp((void *)g_config, &good, sizeof good) == 0, "0AH 改动了内部 Flash 内容");
+    CHECK_MSG(memcmp((void *)g_iap_sys_info, &good, sizeof good) == 0, "0AH 改动了内部 Flash 内容");
 
     /* LDI 自己那条记录照常写 —— 短路不该把 0AH 整条路径带停 */
     CHECK_MSG(ldi_record_is(IP_A, PORT), "LDI 记录没写进去，短路把 0AH 也挡住了");
@@ -386,7 +386,7 @@ static void case_both_records_written(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
 
     CHECK_MSG(iap_mirror_is(IP_A, PORT), "IAP 记录里的 net_cfg 镜像没跟上 0AH");
     CHECK_MSG(ldi_record_is(IP_A, PORT), "LDI 记录没写进去");
@@ -404,13 +404,13 @@ static void case_ldi_failure_does_not_block_mirror(void)
     env_setup();
 
     /* 让 W25Qxx 侧写失败。
-       不能改容量来制造失败 —— app_cfg_sched 绑定后会缓存结论（s_bound），
+       不能改容量来制造失败 —— app_cfg_sched 绑定后会缓存结论（s_storage_bound），
        改 capacity 对它无效（第一版就是这么写错的，白跑一遍才发现）。 */
     s_w25_fail_write = true;
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_B, MASK, GW, PORT);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
 
     CHECK_MSG(rsp_status() == 0x01, "LDI 那条没写成，回执 status 应为 0x01，实际 0x%02X",
               rsp_status());
@@ -430,7 +430,7 @@ static void case_mirror_failure_is_invisible_to_host(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_B, MASK, GW, PORT);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
 
     CHECK_MSG(rsp_status() == 0x00, "LDI 那条是成功的，回执应为 0x00，实际 0x%02X", rsp_status());
     CHECK_MSG(!iap_mirror_is(IP_B, PORT), "本用例的前提是镜像确实没写成 —— 它居然写成了？");
@@ -447,9 +447,9 @@ static void case_second_0ah_overwrites_both(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
     make_0ah(&req, IP_B, MASK, GW, PORT + 1);
-    cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req);
 
     CHECK(iap_mirror_is(IP_B, PORT + 1));
     CHECK(ldi_record_is(IP_B, PORT + 1));
@@ -467,7 +467,7 @@ static void case_second_0ah_overwrites_both(void)
 
 int main(void)
 {
-    /* 每个用例 fork 独立进程：注册表 / 块位表 / g_ldi 都是文件级静态且无重置接口，
+    /* 每个用例 fork 独立进程：注册表 / 块位表 / g_ldi_ctx 都是文件级静态且无重置接口，
        与 test_cfg_sched.c 同一处理方式。 */
     struct {
         const char *name;

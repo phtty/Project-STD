@@ -3,13 +3,13 @@
  * @brief   P10 模组派生类型 — 1/2 扫描、50 数据通道（自 B 工程 display.c 移植）
  *
  * 实现 dev_display_ops:
- *   prepare: convert_pixelmap (像素重排) + prepare_send_buffer (预计算 BSRR 整行表)
+ *   prepare: _convert_pixelmap (像素重排) + _prepare_send_buffer (预计算 BSRR 整行表)
  *   scan:    整行 336 步 × 7 端口 BSRR 推送 + CLK 脉冲（OE/LAT 原子窗口由框架负责）
  *   set_row: 1/2 扫描行地址编码（1-based, 框架传 0-based 需 +1；且 A/B 与二进制
  *            位序交叉，是本面板专有接法，故不走板级 pl_hub75_set_row）
  *
  * 屏幕 224×50, 2 行 × 5 列 P10 模组, 每模组 5 通道, 颜色不走固定 R/G/B 通道,
- * 由 convert_pixelmap 的组映射与 prepare_send_buffer 的逐通道位拆解共同决定。
+ * 由 _convert_pixelmap 的组映射与 _prepare_send_buffer 的逐通道位拆解共同决定。
  */
 
 #include "dev_display.h"
@@ -68,7 +68,7 @@ typedef struct {
 } channel_info_t;
 
 /* ---- 通道映射（B 工程 display.c 生效版本, 升序, 50 通道） ---- */
-static const channel_info_t channel_map[TOTAL_CHANNELS] = {
+static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
     // 模组第1排左
     {PF_IDX, LED_CH10_Pin},
     {PF_IDX, LED_CH9_Pin},
@@ -136,17 +136,17 @@ typedef struct {
     dev_display_t base;
 } dev_module_t;
 
-[[gnu::section(".ccmram")]] static uint8_t pixel_map[BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t hub75_buff[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
 /* BSRR 预计算表: [扫行][时序步][端口]
  *
  * **不做双缓冲**（B 原版是 [2][...] 双 bank + IO_Flag 翻转）。本框架下
- * prepare 与 scan 由同一个 scan_task 顺序调用（dev_display.c：dirty 时先
+ * prepare 与 scan 由同一个 _scan_task 顺序调用（dev_display.c：dirty 时先
  * prepare，紧接着 scan 当前行），不存在"一边填一边读"的并发，第二个 bank
  * 纯属从 B 原架构带过来的遗留。而它值 18816 字节 CCMRAM —— 双 bank 时
  * 本板 CCMRAM 超出 6988 字节根本链接不了。
  * 若日后 prepare 与 scan 被拆到不同上下文，必须把双缓冲加回来。 */
-[[gnu::section(".ccmram")]] static uint32_t hub75_IO[SCAN_LINES][TIMING_STEPS][USED_PORT_COUNT];
+[[gnu::section(".ccmram")]] static uint32_t s_hub75_io[SCAN_LINES][TIMING_STEPS][USED_PORT_COUNT];
 
 /* 直通格栅屏实例: 一左一右两模组构成一排 (modules_per_row=2),
    5 排堆叠 (modules_per_col=5), 每模组独占 1 接口 (total_channels=10×5)。
@@ -167,21 +167,21 @@ static dev_module_t s_module = {
         .channel_pixels      = CHANNEL_PIXELS,      /* 224: 每通道像素 (含 2 扫行) */
         .scan_line_pixels    = SCAN_LINE_PIXELS,    /* 112 */
         .buffer_size         = BUFFER_SIZE,         /* 11200 */
-        .pixel_map           = pixel_map,
-        .hub75_buff          = hub75_buff,
+        .pixel_map           = s_pixel_map,
+        .hub75_buff          = s_hub75_buff,
         .light_level         = 7,
     },
 };
 
 /* ================================================================
- *  convert_pixelmap: pixel_map → hub75_buff 像素重排（B 工程逐字移植）
+ *  _convert_pixelmap: pixel_map → hub75_buff 像素重排（B 工程逐字移植）
  *
  *  pixel_map[] 行优先 (y * screen_rows + x), x=0..223, y=0..49。
  *  屏幕左右两半（col < 112 为上排模组, 其余为下排）映射到不同模组组号,
  *  组号按行对 (y%2) 区分上下扫描行。
  * ================================================================ */
 
-static void convert_pixelmap(dev_display_t *dev)
+static void _convert_pixelmap(dev_display_t *dev)
 {
     uint16_t moduel_group = 0;
     uint16_t row_cnt = 0, col_cnt = 0;
@@ -206,21 +206,21 @@ static void convert_pixelmap(dev_display_t *dev)
 }
 
 /* ================================================================
- *  prepare_send_buffer: 显存 → 双缓冲 BSRR 整行表（B 工程逐字移植）
+ *  _prepare_send_buffer: 显存 → 双缓冲 BSRR 整行表（B 工程逐字移植）
  *
  *  每个时序步对应一个像素的一种颜色 (step%3 → RGB), 颜色位从显存像素值
- *  (bit0=R, bit1=G, bit2=B) 拆解, 逐通道按 channel_map 的端口/引脚累加
+ *  (bit0=R, bit1=G, bit2=B) 拆解, 逐通道按 s_channel_map 的端口/引脚累加
  *  到该端口该步的 BSRR 字 (置位 = 亮, 复位 = 灭)。
  * ================================================================ */
 
 /** @brief 按**端口**分好组的通道条目（启动时建一次）
  *
- *  内层循环是 2×336×50 = **33,600 次**迭代，原来每次都要"查 `channel_map` 取端口与
+ *  内层循环是 2×336×50 = **33,600 次**迭代，原来每次都要"查 `s_channel_map` 取端口与
  *  引脚 → 算 `pin << 16` → 读-或-写 BSRR 表"。按端口分组之后内层只剩
  *  "读一个字节 → 选一张掩码 → 或进累加器"，而且**每个时序步每端口只写一次**
  *  （整张表不再需要 memset）。
  *
- *  实测（-Og / Cortex-M4，见下面 prepare_send_buffer 的说明）：内层 20 条指令
+ *  实测（-Og / Cortex-M4，见下面 _prepare_send_buffer 的说明）：内层 20 条指令
  *  → 12 条，且去掉了每次迭代的读-改-写。 */
 typedef struct {
     uint32_t set; /**< 置位字（= 引脚掩码）*/
@@ -233,21 +233,21 @@ typedef struct {
 static p10_ch_t s_port_ch[USED_PORT_COUNT][P10_PORT_MAX_CH];
 static uint8_t  s_port_cnt[USED_PORT_COUNT];
 
-static void build_channel_table(void)
+static void _build_channel_table(void)
 {
     for (uint8_t p = 0; p < USED_PORT_COUNT; p++) s_port_cnt[p] = 0;
 
     for (uint8_t ch = 0; ch < TOTAL_CHANNELS; ch++) {
-        const uint8_t p = (uint8_t)channel_map[ch].port_idx;
+        const uint8_t p = (uint8_t)s_channel_map[ch].port_idx;
         if (p >= USED_PORT_COUNT || s_port_cnt[p] >= P10_PORT_MAX_CH) continue;
         p10_ch_t *e = &s_port_ch[p][s_port_cnt[p]++];
-        e->set      = channel_map[ch].pin;
-        e->rst      = (uint32_t)channel_map[ch].pin << 16;
+        e->set      = s_channel_map[ch].pin;
+        e->rst      = (uint32_t)s_channel_map[ch].pin << 16;
         e->off      = (uint16_t)(ch * CHANNEL_PIXELS);
     }
 }
 
-static void prepare_send_buffer(dev_display_t *dev)
+static void _prepare_send_buffer(dev_display_t *dev)
 {
     const uint8_t *buff = dev->hub75_buff;
 
@@ -268,17 +268,17 @@ static void prepare_send_buffer(dev_display_t *dev)
                 for (; c < last; c++) {
                     acc |= ((buff[pixel_offset + c->off] >> color_bit_shift) & 1U) ? c->set : c->rst;
                 }
-                hub75_IO[scan_idx][step_cnt][p] = acc;
+                s_hub75_io[scan_idx][step_cnt][p] = acc;
             }
         }
     }
 }
 
-/* ---- prepare: 像素重排 + 预计算（B 工程 convert_pixelmap 尾部即调用） ---- */
+/* ---- prepare: 像素重排 + 预计算（B 工程 _convert_pixelmap 尾部即调用） ---- */
 static void _prepare(dev_display_t *dev)
 {
-    convert_pixelmap(dev);
-    prepare_send_buffer(dev);
+    _convert_pixelmap(dev);
+    _prepare_send_buffer(dev);
 }
 
 /* ================================================================
@@ -290,7 +290,7 @@ static void _prepare(dev_display_t *dev)
 static void _scan(dev_display_t *dev, uint8_t line)
 {
     (void)dev;
-    uint32_t *pData = &hub75_IO[line][0][0];
+    uint32_t *pData = &s_hub75_io[line][0][0];
 
     /* 逐行发送该扫描行每个像素的每种颜色 */
     for (uint16_t line_cnt = 0; line_cnt < TIMING_STEPS; line_cnt++) {
@@ -337,16 +337,16 @@ static void _set_row(uint8_t row)
 }
 
 /* ---- ops 虚表 ---- */
-static const dev_display_ops_t ops = {
+static const dev_display_ops_t s_p10_ops = {
     .prepare = _prepare,
     .scan    = _scan,
     .set_row = _set_row,
 };
 
-void dev_module_init(void)
+void dev_p10_112x10_init(void)
 {
-    build_channel_table(); /* 通道→端口/掩码 展开一次，prepare 的内层不再查表 */
-    s_module.base.ops = &ops;
+    _build_channel_table(); /* 通道→端口/掩码 展开一次，prepare 的内层不再查表 */
+    s_module.base.ops = &s_p10_ops;
     dev_display_register(&s_module.base);
 }
-hw_dev_initcall(dev_module_init);
+hw_dev_initcall(dev_p10_112x10_init);
