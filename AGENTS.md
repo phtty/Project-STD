@@ -112,10 +112,17 @@ docs/                              命名约定.md（评审契约）、架构说
 10. **AHMQ 目前被排除在所有板之外**：根 `Makefile` 的 `SRC_EXCLUDE` 把 `Application/Src/AHMQ/*.c` 排除
     （`app_ahmq.c` / `app_ahmq_cmd.c`），EIDE 两个目标也加了对应 exclude。要启用必须**两处同时改**——
     注释里写明"不排的话同一份源码在两套构建下会产出不同固件"。
+11. **host 与 ARM 的 `char` 符号性相反**：host（x86）默认 signed、ARM 默认 unsigned。任何"字节值 ≥ 0x80
+    的比较/移位"在 host 上会走**另一条路** —— `Kernel/Src/text_cvt.c` 的 UTF-8 解析曾因此在 host 上
+    完整假绿（`out=0`，什么都不做），只有 ARM 上才暴露。处理字节一律**显式 `uint8_t`**；给这类函数
+    写 host 用例时要按 `-funsigned-char` 复核一次（`test_render` 的 cvt 用例即按此双跑过）。
+12. **`app_render` 的 `x/y/w/h` 是区域 `[x, x+w) × [y, y+h)`**（`w/h` 是**尺寸**，不是绝对右/下边界）；
+    越界语义是**裁剪**，且**两层各自防御**（`dev_display_*` 与画布 `_sink_*` 都自带裁剪）。改渲染/
+    裁剪相关代码前，先读 `Application/Inc/Render/app_render.h` 顶部的"区域契约"块。
 
 ## 7. 测试（host 侧，`make test`）
 
-15 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+16 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -134,6 +141,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_casc_frame` | 级联探针 4 态 / 地址 / 长度 |
 | `test_casc_round` / `test_casc_master` | 级联从卡/主卡的图传与轮次 |
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
+| `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
 
 **host 测试覆盖不到真实硬件时序**（TIM3/TIM4 扫描、BSRR、真实 SPI/DMA）——涉及显示路径或外设时序的改动，
 除 `make test` 外还应上机冒烟（两板、含级联显示与工厂逐色老化）。
