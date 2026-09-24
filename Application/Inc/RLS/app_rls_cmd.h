@@ -24,10 +24,13 @@ typedef struct {
 
 /**
  * @brief RLS 命令处理函数指针类型
- * @param ccb   通道元信息（来源通道类型、编号等）
- * @param data  指向帧 DATA 域首字节
+ * @param ccb      通道元信息（来源通道类型、编号等）
+ * @param data     指向帧 DATA 域首字节
+ * @param data_len **整帧**字节数（`app_dispatch_msg_t.data_len`，即帧内长度域）。
+ *                 这是**内部签名**、不是线上格式；处理器用它换算帧内还能带多少载荷
+ *                 （如显示帧的位图可用字节），以便在越界读之前拒绝。
  */
-typedef void (*app_rls_cmd_handler_fn_t)(app_ccb_t *ccb, void *data);
+typedef void (*app_rls_cmd_handler_fn_t)(app_ccb_t *ccb, void *data, uint16_t data_len);
 
 /** RLS 命令处理函数表，按命令码索引 */
 extern const app_rls_cmd_handler_fn_t g_rls_cmd_table[];

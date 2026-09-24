@@ -62,7 +62,7 @@ void app_rls_task(void *argument)
                 idx = i;
 
         if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_rls_cmd_table[idx](msg->ccb, rls_frame->data_bcc_tail);
+            g_rls_cmd_table[idx](msg->ccb, rls_frame->data_bcc_tail, msg->data_len);
     }
 }
 

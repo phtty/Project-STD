@@ -757,14 +757,16 @@ $(TEST_BUILD)/test_rs485_slots: $(TEST_RS485_SLOTS_SRCS)
 
 $(TEST_BUILD)/test_rs485_slots: Application/Src/Channel/app_rs485.c
 
-# 用例 TU-include 了 app_render.c，它不在 SRCS 里，必须单独挂依赖 ——
-# 否则改了被测源码测试不重编、跑的是旧二进制。
-$(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render.c
+# 用例 TU-include 了 app_render.c 与 app_rls_cmd.c，它们都不在 SRCS 里，必须单独挂
+# 依赖 —— 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render.c \
+	Application/Src/RLS/app_rls_cmd.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RENDER_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_render: Application/Src/Render/app_render.c \
-	Application/Inc/Render/app_render.h
+	Application/Inc/Render/app_render.h Application/Src/RLS/app_rls_cmd.c \
+	Application/Inc/RLS/app_rls_cmd.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

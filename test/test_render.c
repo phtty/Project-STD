@@ -131,8 +131,22 @@ dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *payload, uint16_t
 bool app_cfg_sched_ready(void) { return false; }
 void app_cfg_sched_load_all(void) {}
 
+/* ---- app_screen 逻辑屏几何桩 ----
+ * app_rls_cmd.c 的显示 handler 经 app_screen_rows/cols() 读**逻辑屏**几何来算所需
+ * 位图字节。这里给一组可调桩，用例按板级几何（128×32 / 224×100）设定。 */
+static uint16_t s_stub_rows = 64;
+static uint16_t s_stub_cols = 64;
+uint16_t        app_screen_rows(void) { return s_stub_rows; }
+uint16_t        app_screen_cols(void) { return s_stub_cols; }
+
 /* ---- 被测：生产源码本体（static 内部结构只能靠 TU-include 触达） ---- */
 #include "../Application/Src/Render/app_render.c"
+
+/* ---- 被测：RLS 命令处理（显示帧位图长度校验） ----
+ * 这里 TU-include 而不是在 test_probes.c 测：本套件已有**真实** app_render 与
+ * capture 目标，能直接断言"位图不足时一次 app_render 都不许调"；放 probes 那侧
+ * 还得再造一份 app_render/app_screen 桩与调用计数，两处更容易漂移。 */
+#include "../Application/Src/RLS/app_rls_cmd.c"
 
 /* ================================================================
  *  capture 渲染目标：只记几何
@@ -655,6 +669,69 @@ static void case_long_utf8_clamp(void)
               count_bitmaps());
 }
 
+/* ================================================================
+ *  用例：RLS 显示帧位图长度校验（P6）
+ * ================================================================ */
+
+static app_ccb_t s_rls_ccb = {.name = "rls_ut", .ops = nullptr};
+
+/**
+ * @brief RLS 显示帧：位图不足 → 拒显（不调 app_render）；足够 → 正常调用
+ *
+ * 口径取 **≥**：`帧内位图可用 = data_len − 帧头6 − 显示头4 − BCC1 − 尾2 = data_len − 13`，
+ * 只要 `≥ ceil(逻辑屏宽/8)×逻辑屏高` 就放行（多带的字节不用也不拒）。
+ * 两条实际几何：3833024 单卡 128×32 需 512 B（一帧 530B 装得下）；
+ * 5006048 级联 224×100 需 2800 B，而一帧最多 530 B —— **必然拒显**。
+ */
+static void case_rls_display_len(void)
+{
+    TEST_BEGIN("RLS 显示帧：位图不足 → 拒显（不调 app_render）；足够 → 正常调用");
+
+    /* 所需字节的纯函数：钉住两板的实际数字 */
+    CHECK_MSG(_rls_display_bitmap_bytes(128, 32) == 512, "3833024 128×32 应需 512 B，得到 %u",
+              (unsigned)_rls_display_bitmap_bytes(128, 32));
+    CHECK_MSG(_rls_display_bitmap_bytes(224, 100) == 2800, "5006048 224×100 应需 2800 B，得到 %u",
+              (unsigned)_rls_display_bitmap_bytes(224, 100));
+
+    static uint8_t s_frame_buf[600];
+    app_rls_display_t *disp = (app_rls_display_t *)s_frame_buf;
+    memset(s_frame_buf, 0, sizeof(s_frame_buf));
+    disp->color = DEV_DISPLAY_COLOR_RED;
+
+    /* --- 3833024 几何：need = 512 B --- */
+    s_stub_rows = 128;
+    s_stub_cols = 32;
+
+    /* 短帧：整帧 64 B → 位图可用 64−13 = 51 < 512 → 拒显（一次 app_render 都不许调） */
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 64);
+    CHECK_MSG(s_rec_cnt == 0, "位图不足时必须拒显：期望 0 次绘制，得到 %d", s_rec_cnt);
+
+    /* 恰好装下 512 B 位图：整帧 = 13 + 512 = 525 ≤ RLS_PAYLOAD_MAX(530) → 清屏 + 贴图 */
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_rec_cnt == 2, "位图足够时应清屏+贴图（2 次），得到 %d", s_rec_cnt);
+    CHECK_MSG(count_bitmaps() == 1, "应恰好贴一次位图，得到 %d", count_bitmaps());
+
+    /* 边界：差 1 字节 → 拒显（口径 ≥，不将就） */
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 524);
+    CHECK_MSG(s_rec_cnt == 0, "位图差 1 B 应拒显（口径取 ≥），得到 %d", s_rec_cnt);
+
+    /* --- 5006048 几何：need = 2800 B，一帧上限 530 B → 必然拒显 --- */
+    s_stub_rows = 224;
+    s_stub_cols = 100;
+    cap_reset(224, 100);
+    _rls_cmd_display(&s_rls_ccb, disp, 530); /* = RLS_PAYLOAD_MAX，帧能带的最大量 */
+    CHECK_MSG(s_rec_cnt == 0,
+              "5006048 逻辑屏 224×100 需 2800 B、一帧最多 530 B —— 必然拒显，得到 %d 次绘制",
+              s_rec_cnt);
+
+    /* 还原几何，免得影响后续用例 */
+    s_stub_rows = 64;
+    s_stub_cols = 64;
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -694,6 +771,7 @@ int main(void)
     case_cvt_truncated();
     case_cvt_unicode_bounds();
     case_long_utf8_clamp();
+    case_rls_display_len();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
