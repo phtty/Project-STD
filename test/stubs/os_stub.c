@@ -44,6 +44,11 @@ typedef struct {
     pthread_mutex_t mtx;
 } stub_mutex_t;
 
+/* 测试观测：成功获取/释放次数。用例可据此断言"某段调用恰好成对加解锁"
+   （如 test_render 断言 app_render 每次调用一次 Acquire/Release，含提前返回路径）。 */
+uint32_t g_os_mutex_acquire_count;
+uint32_t g_os_mutex_release_count;
+
 /* ================================================================
  *  时间辅助
  * ================================================================ */
@@ -180,8 +185,13 @@ osStatus_t osMutexAcquire(osMutexId_t mutex_id, uint32_t timeout)
     stub_mutex_t *m = (stub_mutex_t *)mutex_id;
     if (m == NULL) return osErrorParameter;
 
-    if (timeout == 0)
-        return pthread_mutex_trylock(&m->mtx) == 0 ? osOK : osErrorResource;
+    if (timeout == 0) {
+        if (pthread_mutex_trylock(&m->mtx) == 0) {
+            g_os_mutex_acquire_count++;
+            return osOK;
+        }
+        return osErrorResource;
+    }
 
     int rc = pthread_mutex_lock(&m->mtx);
     if (rc == EDEADLK) {
@@ -189,14 +199,22 @@ osStatus_t osMutexAcquire(osMutexId_t mutex_id, uint32_t timeout)
         fprintf(stderr, "osMutexAcquire: 同一线程重复加锁（非递归互斥量）\n");
         abort();
     }
-    return rc == 0 ? osOK : osError;
+    if (rc == 0) {
+        g_os_mutex_acquire_count++;
+        return osOK;
+    }
+    return osError;
 }
 
 osStatus_t osMutexRelease(osMutexId_t mutex_id)
 {
     stub_mutex_t *m = (stub_mutex_t *)mutex_id;
     if (m == NULL) return osErrorParameter;
-    return pthread_mutex_unlock(&m->mtx) == 0 ? osOK : osError;
+    if (pthread_mutex_unlock(&m->mtx) == 0) {
+        g_os_mutex_release_count++;
+        return osOK;
+    }
+    return osError;
 }
 
 /* ================================================================

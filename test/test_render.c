@@ -34,6 +34,11 @@
 #include "app_cfg_sched.h"
 #include "app_render.h"
 
+/* os_stub.c 的互斥获取/释放计数（见 os_stub.c 的互斥段）；
+ * 用于断言 app_render() 每次调用恰好一次 Acquire/Release。 */
+extern uint32_t g_os_mutex_acquire_count;
+extern uint32_t g_os_mutex_release_count;
+
 /* ================================================================
  *  合成字库（只需"能查到一个单元"；字形内容不参与断言）
  * ================================================================ */
@@ -250,6 +255,42 @@ static int g_fail;
     } while (0)
 
 #define TEST_BEGIN(name) printf("\n\033[36m▶ %s\033[0m\n", name)
+
+/* ================================================================
+ *  用例：模块互斥量（P7）
+ * ================================================================ */
+
+/** app_render 的模块锁：每次调用（含内部提前返回）恰好一次 acquire/release */
+static void case_render_lock_balance(void)
+{
+    TEST_BEGIN("app_render 每次调用恰好一次 acquire/release（含提前返回路径）");
+
+    app_render_style_t st = {.h_align = APP_RENDER_ALIGN_LEFT_UP};
+
+    const uint32_t a0 = g_os_mutex_acquire_count;
+    const uint32_t r0 = g_os_mutex_release_count;
+    int            calls = 0;
+
+    /* 正常渲染（走完整个内部流程） */
+    cap_reset(64, 64);
+    render_text("AB", 2, 0, 0, 64, LINE_H, &st);
+    calls++;
+
+    /* 提前返回：区域高 < 行高，_render_text 内部 return */
+    cap_reset(64, 64);
+    render_text("AB", 2, 0, 0, 64, LINE_H - 1, &st);
+    calls++;
+
+    /* 提前返回：type 越界，跳表取不到函数（仍要成对加解锁） */
+    app_render(&(app_render_cfg_t){.type = (app_render_type_t)7});
+    calls++;
+
+    const uint32_t da = g_os_mutex_acquire_count - a0;
+    const uint32_t dr = g_os_mutex_release_count - r0;
+    CHECK_MSG(da == (uint32_t)calls && dr == (uint32_t)calls,
+              "%d 次调用应各一次 acquire/release，得到 acquire=%u release=%u", calls,
+              (unsigned)da, (unsigned)dr);
+}
 
 /* ================================================================
  *  用例：高度
@@ -578,6 +619,12 @@ int main(void)
     s_cap.rows   = 64;
     s_cap.cols   = 64;
     app_render_set_target(&s_cap);
+
+    /* 建模块互斥量（host 上 sw_app_initcall 不执行，直接调用 production 的 _render_init） */
+    _render_init();
+
+    /* app_render 模块锁：每次调用恰好一次 Acquire/Release（含提前返回） */
+    case_render_lock_balance();
 
     case_height_too_small();
     case_exact_lines();

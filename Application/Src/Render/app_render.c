@@ -217,6 +217,11 @@ static uint8_t s_persist_id = 0xFF;
    放在这里是因为 _render_init 要创建它，而那在文件前部。 */
 static osMutexId_t s_persist_lock;
 
+/* 渲染模块互斥量：串行化 `app_render()` 的**整段执行**（见 app_render() 处的锁说明）。
+   它保护 font_buf / text_buf / s_line_widths 三个文件静态缓冲 —— app_render 会被
+   LDI / RLS / 工厂等多个任务并发调用。同样在本层创建：RTOS 已启动且早于任何调用。 */
+static osMutexId_t s_render_lock;
+
 static const app_cfg_sched_desc_t s_render_persist_desc = {
     .name    = "render_persist",
     .version = RENDER_PERSIST_VERSION,
@@ -275,6 +280,11 @@ static void _render_init(void)
     /* 载荷组装锁。在本层创建：RTOS 已启动，且早于任何协议任务可能触发的 save。 */
     const osMutexAttr_t persist_attr = {.name = "render_persist", .attr_bits = osMutexPrioInherit};
     s_persist_lock                   = osMutexNew(&persist_attr);
+
+    /* 渲染模块锁：见 s_render_lock / app_render() 的说明。同样在本层创建 ——
+       RTOS 已启动，且早于任何协议任务可能发起的渲染。 */
+    const osMutexAttr_t render_attr = {.name = "render", .attr_bits = osMutexPrioInherit};
+    s_render_lock                   = osMutexNew(&render_attr);
 }
 sw_app_initcall(_render_init);
 
@@ -298,7 +308,8 @@ sw_app_initcall(_render_init);
  * 原先它是 `_render_text` 内函数局部的 `uint16_t line_widths[32]`，而 LDI 文本可达
  * 33 行以上 —— 越界写栈。改成文件静态并加 push 上限门禁，读处（line_idx）也夹取。
  *
- * **后续片会在本模块加互斥量保护本缓冲（save/测量/渲染共用）；本片先不加锁。** */
+ * 本缓冲与 font_buf / text_buf 一样是文件静态，由 `s_render_lock` 在 `app_render()`
+ * 整段执行期间保护（见 app_render() 处的锁说明）。 */
 #define RENDER_LINE_MAX (258U) /**< ≥ sizeof(text_buf) + 2 */
 static uint16_t s_line_widths[RENDER_LINE_MAX];
 
@@ -579,10 +590,25 @@ static const app_render_fn_t s_render_fn_table[] = {
     [APP_RENDER_TYPE_FILL]   = _render_fill,
 };
 
-/* ---- 公开 API：tagged union 分派 ---- */
-void app_render(const app_render_cfg_t *cfg)
+/* ---- 公开 API：tagged union 分派 ----
+ *
+ * 锁的作用域是**整个 `app_render()` 调用**（含 `_render_locked` 内的所有提前返回
+ * 路径）。它保护 font_buf / text_buf / s_line_widths 三个文件静态缓冲 —— app_render
+ * 会被 LDI / RLS / 工厂等多个任务并发调用。**不能把锁放进 `_render_text` 内部**：
+ * 那会漏掉 `_render_bitmap` / `_render_fill` 与持久化这些同样碰共享状态的路径。
+ *
+ * 单一出口：真正实现收进 `_render_locked`，包装层无条件成对 Acquire/Release。内层从
+ * 哪条 return 出去都不会漏解锁。
+ *
+ * 锁序：本锁（render）只在 app_render 内持有，期间可能调 `app_render_save()`，后者取
+ * 的是另一把 `s_persist_lock`。没有任何路径"持 persist 锁再调 app_render"，故固定为
+ * render → persist 的嵌套顺序，不会死锁。`app_render` 亦无自嵌套调用（渲染目标原语
+ * 与持久化钩子都不回调 app_render），与 os_stub 的非递归互斥量语义一致。
+ *
+ * `s_render_lock` 为 NULL（`_render_init` 之前）时按"**不锁但照常执行**"处理：那时
+ * RTOS 尚未起来，也不会有第二个任务并发进到这里。 */
+static void _render_locked(const app_render_cfg_t *cfg)
 {
-    if (!cfg || !s_render_display) return;
     s_render_busy++;
     if (cfg->type < sizeof(s_render_fn_table) / sizeof(s_render_fn_table[0]) && s_render_fn_table[cfg->type])
         s_render_fn_table[cfg->type](cfg);
@@ -598,6 +624,15 @@ void app_render(const app_render_cfg_t *cfg)
         /* 没画布：画的就是实屏（单卡、或从卡直写实屏），此刻已在屏上 → 当场存 */
         app_render_save();
     }
+}
+
+void app_render(const app_render_cfg_t *cfg)
+{
+    if (!cfg || !s_render_display) return;
+
+    if (s_render_lock) osMutexAcquire(s_render_lock, osWaitForever);
+    _render_locked(cfg); /* 单一出口：内层所有 return 都回到此处成对释放 */
+    if (s_render_lock) osMutexRelease(s_render_lock);
 }
 
 /* ================================================================
