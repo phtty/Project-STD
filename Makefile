@@ -690,7 +690,8 @@ $(TEST_BUILD)/test_font_lib: $(TEST_FONT_LIB_SRCS)
 $(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
 
 $(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) \
-	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c
+	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c \
+	test/dev_display_ref.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
 
@@ -711,13 +712,13 @@ $(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 # 与板级 board.h，都不在 SRCS 里。
 $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) \
 	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c \
-	Application/Src/Render/app_screen_status.c
+	Application/Src/Render/app_screen_status.c test/dev_display_ref.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_LAYOUT_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_screen_layout: Application/Src/Render/app_screen.c \
 	Application/Src/Render/app_screen_canvas.c Application/Src/Render/app_screen_status.c \
-	$(BOARD_DIR)/board.h
+	test/dev_display_ref.h $(BOARD_DIR)/board.h
 
 # 同上：用例 TU-include 了 app_casc.c。
 $(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_casc.c

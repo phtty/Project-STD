@@ -39,6 +39,8 @@
 #include "app_screen.h"
 #include "board.h"
 
+#include "dev_display_ref.h" /* 两套件共用的 dev_display 参考实现（见该头） */
+
 /* ---- app_screen.c 依赖、本用例不关心的接口 ---- */
 dev_display_t *dev_display_get(void); /* 定义见下方夹具之后 */
 /* _screen_init 会建任务；本用例手动驱动提交，不需要真的起线程 */
@@ -56,68 +58,8 @@ bool app_render_restore(void) { return false; }
 bool app_render_take_persist_req(void) { return false; }
 bool app_render_peek_persist_req(void) { return false; }
 
-/* ---- dev_display 原语：本用例的参考实现 ----
- *
- * 按真 dev_display.c 的语义写（越界一律**裁剪**、源 stride 用裁剪前的宽度、
- * `x >= screen_rows` 直接返回），因为画布要**产出与它相同的结果**，语义抄错就失去
- * 比对的意义。 */
-void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color)
-{
-    if (!dev || x >= dev->screen_rows || y >= dev->screen_cols) return;
-    dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-    dev->dirty                               = true;
-}
-
-void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                      dev_display_color_t color)
-{
-    if (!dev) return;
-    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
-    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
-    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
-    if (w == 0 || h == 0) return;
-    for (uint16_t row = 0; row < h; row++)
-        memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
-    dev->dirty = true;
-}
-
-void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                             const uint8_t *bitmap, dev_display_color_t color)
-{
-    if (!dev || !bitmap) return;
-    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
-    uint16_t row_bytes = (uint16_t)((w + 7) / 8); /* 裁剪前的 w */
-    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
-    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
-    if (w == 0 || h == 0) return;
-    for (uint16_t row = 0; row < h; row++)
-        for (uint16_t col = 0; col < w; col++)
-            if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
-                dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
-    dev->dirty = true;
-}
-
-void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
-{
-    if (level > 7) level = 7;
-    dev->light_level = level;
-}
-/* ---- 多步绘制当成一帧：与生产同语义（test_screen_* 都 include app_screen.c）---- */
-void dev_display_frame_begin(dev_display_t *dev)
-{
-    if (!dev) return;
-    dev->dirty_hold    = true;
-    dev->frame_touched = false;
-}
-void dev_display_frame_end(dev_display_t *dev)
-{
-    if (!dev) return;
-    dev->dirty_hold = false;
-    if (dev->frame_touched) {
-        dev->dirty         = true;
-        dev->frame_touched = false;
-    }
-}
+/* dev_display 原语（参考实现）已提到共享头 test/dev_display_ref.h ——
+ * 与 test_screen_layout.c 共用一份，语义固定为真 dev_display.c 的裁剪语义。 */
 
 
 /* ---- 被测：生产源码本体 ----
