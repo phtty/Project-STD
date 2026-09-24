@@ -123,7 +123,7 @@ typedef enum {
 typedef struct {
     app_render_align_t h_align; /**< 水平对齐 */
     app_render_align_t v_align; /**< 垂直对齐 */
-    bool word_wrap; /**< 超宽时自动换行 */
+    bool word_wrap; /**< 超宽时自动换行；false = 逐字形截断（见 app_render_cfg_t 上方契约） */
 } app_render_style_t;
 
 /* ---- 渲染类型：告诉 app_render 如何解析 union ---- */
@@ -137,13 +137,34 @@ typedef enum {
 
 /* ---- 统一渲染参数 — tagged union — type 决定哪个 union 分支生效 ---- */
 
+/* ---- 区域契约（x/y/w/h 怎么解释；文字/位图/填充通用）----
+ *
+ * **区域 = `[x, x+w) × [y, y+h)`**：`x/y` 是左上角，`w/h` 是**尺寸**（不是绝对右/下边界）。
+ * "够不够放"一律用 `x+w` / `y+h` 判；对齐（`h_align`/`v_align`）都在**区域内**算。
+ *
+ * **越界 = 裁剪**：入口先把区域夹到目标几何（`app_render_target_t.rows/cols`），起点已在
+ * 目标外、或几何为 0 时**不画**。直写实屏与逻辑画布走同一段排版代码 —— 同一 cfg + 同一
+ * 目标几何必**逐位相同**。**两层各自防御**：本层自己夹，不指望目标层的绘制原语兜底
+ * （`dev_display_*` 也自带裁剪，见 `dev_display.h`）。
+ *
+ * **文字装不下时**：
+ *   · **高度**：首行放不下 → **整段不画**；否则**放得下几行显示几行**，不画半截字
+ *     （显式 `\n` 与自动换行**共用同一高度门禁**）
+ *   · **宽度**：`word_wrap=true` 自动换行（续行回区域左）；`false` 逐字形整体截断
+ *     （放不下的字不画、保留已放下的）；行宽 ≥ 区域宽时对齐偏移取 0（防无符号下溢）
+ *
+ * **位图**：`w/h` 是**位图自身尺寸**（源 stride = `(w+7)/8`、MSB-first）；超出目标的部分由
+ * **目标层**裁剪 —— 且裁剪时源 stride 必须用**裁剪前**的 `w`（可见性裁剪不能在入口做，
+ * 否则 stride 错位）。位图不使用 `style`（无对齐）。
+ */
+
 /** @brief 统一渲染参数（tagged union；type 决定哪个分支生效） */
 typedef struct {
     /* 公共 — 调用方设置后渲染器只读 */
-    const uint16_t x; /**< 目标起点 X 坐标 */
-    const uint16_t y; /**< 目标起点 Y 坐标 */
-    const uint16_t w; /**< 目标宽 (fill 时 w=0 表示全屏) */
-    const uint16_t h; /**< 目标高 (fill 时 h=0 表示全屏) */
+    const uint16_t x; /**< 区域左上角 X（区域语义见上方契约） */
+    const uint16_t y; /**< 区域左上角 Y（同上） */
+    const uint16_t w; /**< 区域宽（**尺寸**；fill 时 0 = 全屏） */
+    const uint16_t h; /**< 区域高（**尺寸**；fill 时 0 = 全屏） */
     const dev_display_color_t color; /**< 绘制颜色 */
     const app_render_type_t type; /**< 标签: 指定使用哪个 union 分支 */
 
@@ -167,11 +188,11 @@ typedef struct {
             const app_font_size_t font_size; /**< 字号 */
             const app_font_type_t font_type; /**< 字型 */
             const app_render_style_t *style; /**< 对齐/换行 (NULL=默认) */
-            const app_font_enc_t text_enc; /**< 输入文本编码 (UTF8需转换/GBK直通) */
+            const app_font_enc_t text_enc; /**< 输入文本编码 (UTF8 内部转 GBK / GBK 直通)；UTF8 路径内部缓冲 256B，超长截断 */
         };
 
         /* APP_RENDER_TYPE_BITMAP — 位图专属 */
-        const uint8_t *const bitmap; /**< 位图数据, 每行 (w+7)/8 字节, MSB first */
+        const uint8_t *const bitmap; /**< 位图数据，每行 (w+7)/8 字节、MSB-first（w/h = 位图自身尺寸，见契约） */
 
         /* APP_RENDER_TYPE_FILL — 无专属字段, 只用公共的 x/y/w/h/color */
     };
@@ -222,6 +243,9 @@ void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h);
 /* ---- API（模块自注册 sw_app_initcall，调用方无需传 display/font 句柄）---- */
 
 /** @brief 统一渲染入口 — 根据 cfg->type 分派到内部实现
+ *
+ *  **整段持模块互斥量**：字库单元 / 转换后的文本 / 行宽表都是模块级静态缓冲，
+ *  多任务（LDI、RLS、工厂……）并发调用由本函数串行化，调用方无需自己加锁。
  *  @param cfg 渲染参数；type 决定生效的 union 分支 */
 void app_render(const app_render_cfg_t *cfg);
 
