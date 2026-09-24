@@ -31,6 +31,30 @@ dev_display_t *dev_display_get(void)
     return s_active_display;
 }
 
+/* ---- 模组颜色能力查询 ----
+ *
+ * `supported_color_mask` 是**后加字段**：老驱动（以及任何漏填的指定初始化器）
+ * 初始化后该成员为 0 —— 字面意思是"什么色都不支持"，那是错的默认。漏填必须
+ * 保持旧行为（旧行为 = 8 色全通），所以 0 一律视为 DEV_DISPLAY_COLOR_ALL。
+ * 有蓝灯珠的模组显式填掩码；只有 R/G 灯珠的 P20 填 0x0E（去掉 B/紫/青/白）。
+ */
+bool dev_display_supports_color(const dev_display_t *dev, dev_display_color_t c)
+{
+    if (dev == nullptr) return false;
+    if (c == DEV_DISPLAY_COLOR_BLACK) return true;
+
+    const uint8_t mask = (dev->supported_color_mask == 0U) ? DEV_DISPLAY_COLOR_ALL
+                                                           : dev->supported_color_mask;
+    return (mask & DEV_DISPLAY_COLOR_BIT(c)) != 0U;
+}
+
+uint8_t dev_display_color_mask(const dev_display_t *dev)
+{
+    if (dev == nullptr) return 0U;
+    return (dev->supported_color_mask == 0U) ? DEV_DISPLAY_COLOR_ALL
+                                             : dev->supported_color_mask;
+}
+
 /* ---- TIM 周期回调（前向声明，实现在文件末尾）---- */
 static void _on_scan_period(void);
 static void _on_pwm_period(void);

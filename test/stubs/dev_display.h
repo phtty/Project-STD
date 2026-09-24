@@ -40,6 +40,10 @@ typedef enum {
     DEV_DISPLAY_COLOR_WHITE  = 7,
 } dev_display_color_t;
 
+/* 与真头一致的能力掩码宏（本轮无消费方，仅为影子结构体保持同步）*/
+#define DEV_DISPLAY_COLOR_ALL (0xFEU)
+#define DEV_DISPLAY_COLOR_BIT(c) ((uint8_t)(1U << (c)))
+
 #define DEV_DISPLAY_SCREEN_ROWS (128U)
 #define DEV_DISPLAY_SCREEN_COLS (32U)
 
@@ -53,6 +57,9 @@ typedef enum {
  * 自己的实现才好控制；链接真的 dev_display.c 反而要拖进 pl_tim/pl_task 一整串。 */
 typedef struct dev_display {
     const void *ops;
+    /* 与真头同步：模组物理色彩能力（bit N = 支持 DEV_DISPLAY_COLOR_<N>，bit0 黑不表示）。
+     * 与真头同位次（模组参数组），本影子结构体只留测试用到的字段，故仅此一项。 */
+    uint8_t     supported_color_mask;
     uint16_t    screen_rows; /* 宽（注意：本工程 screen_rows 是宽、screen_cols 是高） */
     uint16_t    screen_cols; /* 高 */
     uint8_t    *pixel_map;
@@ -71,3 +78,7 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
 void dev_display_frame_begin(dev_display_t *dev);
 void dev_display_frame_end(dev_display_t *dev);
 dev_display_t *dev_display_get(void);
+
+/* 与真头同步的能力查询声明（本轮无消费方；测试若调用需自备桩实现）*/
+bool dev_display_supports_color(const dev_display_t *dev, dev_display_color_t c);
+uint8_t dev_display_color_mask(const dev_display_t *dev);

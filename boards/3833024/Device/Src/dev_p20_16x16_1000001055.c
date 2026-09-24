@@ -73,6 +73,12 @@ static dev_display_p20_t s_p20_dev = {
         .modules_per_row     = P20_MODULE_ROWS,
         .modules_per_col     = P20_MODULE_COLS,
         .scan_lines          = P20_SCAN_LINES,
+        /* P20 只有 R/G 灯珠：黑/红/绿/黄 4 色（去掉 B/紫/青/白）*/
+        .supported_color_mask = DEV_DISPLAY_COLOR_ALL
+            & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE)
+              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE)
+              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN)
+              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
         .screen_rows         = P20_SCREEN_ROWS,
         .screen_cols         = P20_SCREEN_COLS,
         .total_channels      = P20_TOTAL_CHANNELS,

@@ -25,6 +25,17 @@ typedef enum {
     DEV_DISPLAY_COLOR_WHITE  = 7, /**< 白 */
 } dev_display_color_t;
 
+/** @brief 除黑外全支持的颜色掩码：bit N = 支持 `DEV_DISPLAY_COLOR_<N>`
+ *  （bit0 黑恒支持，掩码里不表示） */
+#define DEV_DISPLAY_COLOR_ALL (0xFEU)
+
+/**
+ * @brief 由颜色枚举拼出掩码中的一位（供驱动声明模组能力用）
+ * @param c 颜色枚举值
+ * @return 只含该颜色对应位的掩码
+ */
+#define DEV_DISPLAY_COLOR_BIT(c) ((uint8_t)(1U << (c)))
+
 /** @brief HUB75 显示设备（不透明句柄）*/
 typedef struct dev_display dev_display_t;
 
@@ -49,6 +60,9 @@ struct dev_display {
     uint8_t  modules_per_row;     /**< 每行模块数 */
     uint8_t  modules_per_col;     /**< 每列模块数 */
     uint8_t  scan_lines;          /**< 扫描行数 (静态=1, 1/4扫=4...) */
+    /** 模组物理色彩能力：bit N = 支持 `DEV_DISPLAY_COLOR_<N>`；
+     *  bit0（黑）恒支持，掩码里不表示。0 视为未填（全彩），见查询 API */
+    uint8_t  supported_color_mask;
 
     /* 派生参数 */
     uint16_t screen_rows;         /**< = modules_per_row * module_rows */
@@ -108,6 +122,22 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 void dev_display_draw_bitmap(dev_display_t *dev,
     uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     const uint8_t *bitmap, dev_display_color_t color);
+
+/** @brief 查询模组是否支持某颜色
+ *
+ *  bit N = 支持 `DEV_DISPLAY_COLOR_<N>`；黑恒支持。
+ *  `supported_color_mask` 未填（=0）视为全彩 —— 见实现处说明。
+ *  @param dev 目标显示设备；nullptr 返回 false
+ *  @param c   待查询的颜色
+ *  @return true 支持；false 不支持或 dev 为 nullptr */
+bool dev_display_supports_color(const dev_display_t *dev, dev_display_color_t c);
+
+/** @brief 取模组的整张颜色能力掩码（供"按能力枚举可用色"用）
+ *
+ *  `supported_color_mask` 未填（=0）视为 `DEV_DISPLAY_COLOR_ALL` —— 见实现处说明。
+ *  @param dev 目标显示设备；nullptr 返回 0
+ *  @return 掩码：bit N = 支持 `DEV_DISPLAY_COLOR_<N>`（bit0 黑不表示） */
+uint8_t dev_display_color_mask(const dev_display_t *dev);
 
 /** @brief 获取 P20 模组显示实例
  *  @return 实例指针；未注册时返回 nullptr */

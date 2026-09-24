@@ -161,6 +161,7 @@ static dev_module_t s_module = {
         .modules_per_row     = MODULES_PER_ROW,     /* 2: 左模组 + 右模组 */
         .modules_per_col     = MODULES_PER_COL,     /* 5: 排数 */
         .scan_lines          = SCAN_LINES,          /* 2: 1/2 扫描 */
+        .supported_color_mask = DEV_DISPLAY_COLOR_ALL, /* P10 全彩：8 色全支持 */
         .screen_rows         = SCREEN_ROWS,         /* 224: 屏宽 */
         .screen_cols         = SCREEN_COLS,         /* 50: 屏高 */
         .total_channels      = TOTAL_CHANNELS,      /* 50: 模组总数 × 每模组通道数 */

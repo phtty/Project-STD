@@ -55,6 +55,7 @@ static dev_display_module_t s_module = {
         .modules_per_row     = MODULE_ROWS,
         .modules_per_col     = MODULE_COLS,
         .scan_lines          = SCAN_LINES,
+        .supported_color_mask = DEV_DISPLAY_COLOR_ALL, /* P10 全彩：8 色全支持 */
         .screen_rows         = SCREEN_ROWS,
         .screen_cols         = SCREEN_COLS,
         .total_channels      = TOTAL_CHANNELS,
