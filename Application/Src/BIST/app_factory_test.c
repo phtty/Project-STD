@@ -25,13 +25,6 @@
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
 #define PROGRAM_CODE "9210209C41"
 
-static const dev_display_color_t s_dead_pixel_colors[] = {
-    DEV_DISPLAY_COLOR_RED,
-    DEV_DISPLAY_COLOR_GREEN,
-    DEV_DISPLAY_COLOR_YELLOW,
-};
-#define DEAD_PIXEL_COLOR_COUNT (sizeof(s_dead_pixel_colors) / sizeof(s_dead_pixel_colors[0]))
-
 static const app_font_size_t s_aging_sizes[] = {
     APP_FONT_SIZE_16,
     APP_FONT_SIZE_24,
@@ -184,6 +177,8 @@ static void _aging_fill_screen(app_font_size_t size, app_font_type_t type, const
         .y         = 0,
         .w         = sw,
         .h         = sh,
+        /* 老化文字用白：全彩模组是三通道全亮；只有 R/G 灯珠的模组（P20）上
+           B 位没有灯珠，物理呈现就是黄 —— 位与即物理现实，不必按能力特判。 */
         .color     = DEV_DISPLAY_COLOR_WHITE,
         .text      = buf,
         .len       = pos,
@@ -253,17 +248,26 @@ static void _factory_monitor_task(void *argument)
            从卡拿到的仍是每轮 IMAGE 里带的旧亮度 → 一块亮一块暗。
            `app_screen_set_brightness` 本地 + 置"待下发"，由级联广播给从卡。 */
         app_screen_set_brightness(7);
-        for (uint8_t i = 0; i < DEAD_PIXEL_COLOR_COUNT; i++) {
+        /* 逐色满屏点亮，清单**由本模组的颜色能力决定**（`dev_display_supports_color`）：
+           P20 只有 R/G 灯珠 → 红/绿/黄 三色，与旧硬编码清单逐项相同（3833024 行为不变）；
+           全彩模组（P10）→ 红/绿/黄/蓝/紫/青/白 七色全轮一遍（黑 = 灭，不点）。
+           旧清单是 P20 时代写死的三色 —— 在全彩模组上**蓝灯珠永远点不亮、坏点查不出来**，
+           死点检测会漏掉一整个通道。 */
+        const dev_display_t *dsp = dev_display_get();
+        for (uint8_t c = (uint8_t)DEV_DISPLAY_COLOR_RED; c <= (uint8_t)DEV_DISPLAY_COLOR_WHITE; c++) {
+            if (!dev_display_supports_color(dsp, (dev_display_color_t)c)) continue;
+
             /* 颜色要**覆盖**：画布是 1bpp（只记亮/灭），颜色在协议里是逐卡给的
-               （来自切分表）—— 不覆盖的话十种纯色会全显示成每块屏自己的那个颜色。
+               （来自切分表）—— 不覆盖的话纯色会全显示成每块屏自己的那个颜色。
                覆盖之后两块屏一起按这个颜色亮（单卡就是本卡那块）。 */
-            app_screen_set_color_override(s_dead_pixel_colors[i]);
+            app_screen_set_color_override(c);
             app_render(&(app_render_cfg_t){
                 .type  = APP_RENDER_TYPE_FILL,
                 .x     = 0,
                 .y     = 0,
-                .color = s_dead_pixel_colors[i],
+                .color = (dev_display_color_t)c,
             });
+            /* 每色等一次 TEST：技术员按一下换下一色（色数随模组能力可变） */
             dev_key_wait_press(DEV_KEY_TST, osWaitForever);
         }
         app_screen_set_color_override(0xFF); /* 取消覆盖：后面的老化轮播用各卡自己的颜色 */
