@@ -95,13 +95,16 @@ void dev_display_init(void);
 void dev_display_start(void);
 
 /** @brief 设置单个像素颜色，置脏标记
+ *  坐标越界（含 dev 为 nullptr）时直接忽略，不置脏标记
  *  @param[in,out] dev 目标显示设备
  *  @param x     像素列坐标
  *  @param y     像素行坐标
  *  @param color 目标颜色 */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color);
 
-/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕自动截断, 置脏标记
+/** @brief 矩形区域填充纯色: (x,y)起点, w宽h高, 超出屏幕的部分自动裁剪（只画可见部分）
+ *
+ *  无"w/h = 0 表示全屏"的约定——0 尺寸什么都不画。置脏标记。
  *  @param[in,out] dev 目标显示设备
  *  @param x     矩形左上角列坐标
  *  @param y     矩形左上角行坐标
@@ -111,6 +114,8 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_displ
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t color);
 
 /** @brief 叠加绘制位图: (x,y)起点, w宽h高, bitmap每行( (w+7)/8 )字节, bit=1写color, bit=0不改变原像素。
+ *  超出屏幕的部分自动裁剪（只画屏内可见部分）。
+ *  源位图行字节恒按**传入的 w** 算（裁剪只砍可见列，不改变源布局）。
  *  如需不透明绘制(bit=0置黑), 调用方先 dev_display_fill 填充背景色
  *  @param[in,out] dev 目标显示设备
  *  @param x      位图左上角列坐标

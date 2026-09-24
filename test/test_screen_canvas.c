@@ -58,21 +58,24 @@ bool app_render_peek_persist_req(void) { return false; }
 
 /* ---- dev_display 原语：本用例的参考实现 ----
  *
- * 按真 dev_display.c 的语义写（含那两个坑：fill 只裁右下、draw_bitmap 越界整体放弃），
- * 因为画布要**产出与它相同的结果**，语义抄错就失去比对的意义。 */
+ * 按真 dev_display.c 的语义写（越界一律**裁剪**、源 stride 用裁剪前的宽度、
+ * `x >= screen_rows` 直接返回），因为画布要**产出与它相同的结果**，语义抄错就失去
+ * 比对的意义。 */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color)
 {
-    if (x < dev->screen_rows && y < dev->screen_cols) {
-        dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-        dev->dirty                               = true;
-    }
+    if (!dev || x >= dev->screen_rows || y >= dev->screen_cols) return;
+    dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
+    dev->dirty                               = true;
 }
 
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                       dev_display_color_t color)
 {
-    if (x + w > dev->screen_rows) w = dev->screen_rows - x;
-    if (y + h > dev->screen_cols) h = dev->screen_cols - y;
+    if (!dev) return;
+    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
+    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
+    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
+    if (w == 0 || h == 0) return;
     for (uint16_t row = 0; row < h; row++)
         memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
     dev->dirty = true;
@@ -81,8 +84,12 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                              const uint8_t *bitmap, dev_display_color_t color)
 {
-    if (x + w > dev->screen_rows || y + h > dev->screen_cols) return;
-    uint16_t row_bytes = (w + 7) / 8;
+    if (!dev || !bitmap) return;
+    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
+    uint16_t row_bytes = (uint16_t)((w + 7) / 8); /* 裁剪前的 w */
+    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
+    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
+    if (w == 0 || h == 0) return;
     for (uint16_t row = 0; row < h; row++)
         for (uint16_t col = 0; col < w; col++)
             if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
@@ -259,7 +266,7 @@ static void case_clipping(void)
 
     canvas_reset();
 
-    /* 这些在图真 dev_display 上分别会：下溢冲出缓冲 / 整体放弃 */
+    /* 这些调用在旧 dev_display 上会：下溢冲出缓冲 / 整体放弃；修复后两路都裁剪 */
     _sink_fill(nullptr, W + 10, 0, 4, 4, DEV_DISPLAY_COLOR_RED);   /* x 越界 */
     _sink_fill(nullptr, 0, H + 10, 4, 4, DEV_DISPLAY_COLOR_RED);   /* y 越界 */
     _sink_fill(nullptr, W - 2, H - 2, 100, 100, DEV_DISPLAY_COLOR_RED); /* 右下溢出 */

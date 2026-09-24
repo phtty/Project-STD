@@ -143,11 +143,10 @@ sw_dev_initcall(dev_display_start);
 /* ---- 通用像素操作 ---- */
 void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color)
 {
-    if (x < dev->screen_rows && y < dev->screen_cols) {
-        dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-        if (!dev->dirty_hold) dev->dirty = true;
-        else dev->frame_touched = true;
-    }
+    if (!dev || x >= dev->screen_rows || y >= dev->screen_cols) return;
+    dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
+    if (!dev->dirty_hold) dev->dirty = true;
+    else dev->frame_touched = true;
 }
 
 /* ---- 多步绘制当成一帧（见 dev_display.h 的说明）---- */
@@ -179,8 +178,18 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
 
 void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t color)
 {
-    if (x + w > dev->screen_rows) w = dev->screen_rows - x;
-    if (y + h > dev->screen_cols) h = dev->screen_cols - y;
+    if (!dev) return;
+
+    /* 起点已在屏外 → 整块不可见，直接返回。**必须先判**：否则 `screen_rows - x` 是负的 int，
+       赋给 uint16_t 会回绕成巨大值，下面 memset 立刻冲出缓冲
+       （生产上 LDI 四行文本在 3833024 上就能命中）。
+       设备层**没有**"w/h = 0 表示全屏"的约定——0 尺寸就是什么都不画。 */
+    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
+
+    /* 夹取用 32 位比较：防 x+w / y+h 在 uint16 上回绕后被误判成"未越界" */
+    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
+    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
+    if (w == 0 || h == 0) return;
 
     for (uint16_t row = 0; row < h; row++)
         memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
@@ -190,9 +199,19 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, dev_display_color_t color)
 {
-    if (x + w > dev->screen_rows || y + h > dev->screen_cols) return;
+    if (!dev || !bitmap) return;
+    if (x >= dev->screen_rows || y >= dev->screen_cols) return;
 
-    uint16_t row_bytes = (w + 7) / 8;
+    /* 源 stride 用**裁剪前**的 w 算 —— 裁剪只砍可见列，不改变源位图的行字节布局。
+       若先裁再算，行偏移会错位（右边缘花屏）。 */
+    const uint16_t row_bytes = (uint16_t)((w + 7U) / 8U);
+
+    /* 越界语义：由"整张放弃"改为**裁剪**，只画屏内可见部分 —— 与画布路径
+       （app_screen_canvas.c 的 `_sink_bitmap`）逐位一致，契约要求两路同语义。 */
+    if ((uint32_t)x + w > dev->screen_rows) w = (uint16_t)(dev->screen_rows - x);
+    if ((uint32_t)y + h > dev->screen_cols) h = (uint16_t)(dev->screen_cols - y);
+    if (w == 0 || h == 0) return;
+
     for (uint16_t row = 0; row < h; row++) {
         for (uint16_t col = 0; col < w; col++) {
             if (bitmap[row * row_bytes + col / 8] & (0x80 >> (col % 8)))
