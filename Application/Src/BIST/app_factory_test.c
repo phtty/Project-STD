@@ -8,7 +8,6 @@
 #include "board.h" /* BOARD_CASC_ENABLED —— 必须先于下面的条件包含 */
 
 #include <string.h>
-#include <stdio.h> /* printf → RTT：只给工厂流程的判别用日志（确认后可移除） */
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
@@ -231,12 +230,6 @@ static void _factory_monitor_task(void *argument)
            因为残留多半是这次按压的抖动/回弹在渲染期间凑出来的第二、三个下降沿。 */
         _drain_test_tokens();
 
-        /* 【判别用日志·确认根因后可移除】记录进入 SHOW_CODE 的 tick，
-           与下面进 DEAD_PIXEL 那行对照：两行间隔 ≈0 ⇒"等第二下"消费的是残留
-           令牌（症状 A 成立），而不是用户真的又按了一下。 */
-        printf("[factory] tick=%u 进入 SHOW_CODE（来源：IDLE 中第 1 次 TEST 按下返回）\n",
-               (unsigned)osKernelGetTickCount());
-
         /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）
            —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格）。
            两步**当成一帧**输出：中间不让 _scan_task 跑 prepare（见 dev_display.h）。 */
@@ -255,11 +248,6 @@ static void _factory_monitor_task(void *argument)
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         /* ===== DEAD_PIXEL ===== */
-        /* 【判别用日志·确认根因后可移除】与上面 SHOW_CODE 那行对照：
-           间隔 ≈0 ⇒"等第二下"消费的是残留令牌（症状 A）。 */
-        printf("[factory] tick=%u 进入 DEAD_PIXEL（来源：SHOW_CODE 后第 2 次 TEST 等待返回）\n",
-               (unsigned)osKernelGetTickCount());
-
         osThreadSuspend(g_light_sensor_task_handle);
         /* 亮度走**整屏**那个入口：`dev_display_set_brightness` 只设本卡实屏，
            从卡拿到的仍是每轮 IMAGE 里带的旧亮度 → 一块亮一块暗。
