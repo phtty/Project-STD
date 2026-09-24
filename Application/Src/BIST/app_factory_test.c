@@ -8,6 +8,7 @@
 #include "board.h" /* BOARD_CASC_ENABLED —— 必须先于下面的条件包含 */
 
 #include <string.h>
+#include <stdio.h> /* printf → RTT：只给工厂流程的判别用日志（确认后可移除） */
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "dev_display.h"
@@ -16,7 +17,8 @@
 #include "app_casc.h" /* 首次按键时认领主卡（单卡板不引：那一档没有级联） */
 #endif
 #include "app_render.h"
-#include "app_screen.h" /* app_screen_rows/cols：渲染要用**逻辑屏**几何，不是实屏 */
+#include "app_screen.h" /* app_screen_rows/cols/layout/card：渲染用**逻辑屏**几何与切分表，
+                          * 不是实屏（程序码要按卡分带、不骑缝） */
 #include "app_dispatch.h"
 #include "app_light_sensor.h"
 #include "pl_task.h"
@@ -66,6 +68,84 @@ static void _clear_screen(void)
         .y     = 0,
         .color = DEV_DISPLAY_COLOR_BLACK,
     });
+}
+
+/** @brief 丢弃 TEST 键**已经累积**的信号量令牌（非阻塞排空）
+ *
+ *  **为什么需要它**：机械按键一次按压/释放可能产生**不止一个**下降沿
+ *  （`dev_key.c` 的去抖窗口只有 50ms，而实测抖动/释放回弹可以更晚），而
+ *  EXTI 回调是**每个边沿都释放一次**信号量（上限 1）。于是上一次操作会留下
+ *  一个"残留令牌"，被下一次 `dev_key_wait_press` 立刻消费。
+ *
+ *  现场症状 A：进入 SHOW_CODE 后，紧随的"等第二下"立刻返回，红色
+ *  DEAD_PIXEL 当场盖掉程序码 —— 排障结论就是那次等待消费了这次按键留下的
+ *  残留令牌（老代码只在进 AGING 轮播前排空，两处不对称，本函数补齐）。
+ *
+ *  语义：**进入一个新的等待阶段前，先丢弃之前累积的计数**。正常单击
+ *  （只有一个令牌、且已被上一次 wait 消费）不受影响；本函数不阻塞、不等待新按键。 */
+static void _drain_test_tokens(void)
+{
+    while (dev_key_wait_press(DEV_KEY_TST, 0)) {}
+}
+
+/** @brief 在**每张卡**的矩形内各居中渲染一份程序码
+ *
+ *  **为什么不沿用"整屏逻辑坐标垂直居中"**：5006048 是 1×2 双卡、逻辑屏
+ *  224×100，两块实屏的缝在 y=50；16px 高的程序码整屏居中后落在 y=42..58，
+ *  **骑在缝上**，每块实屏只剩 8 行 —— 症状 B。工厂测试的目的是"技术员在每块
+ *  卡上都能读到程序码"，所以按切分表逐卡分带渲染。
+ *
+ *  **不改 app_screen/app_render 语义**：级联下发的仍是"整块画布按卡抽带"，
+ *  主卡把每张卡那一份渲染进各自矩形，抽带时各得其所 —— 与既有契约一致。
+ *  单卡时切分表只有一项、且矩形 == 整屏，逐卡渲染等价于旧的一整份居中。 */
+static void _show_program_code(void)
+{
+    const app_screen_layout_t *L = app_screen_layout();
+    if (!L || L->count == 0) {
+        /* 兜底：门面停用（显示未就绪/地址不在表里）时按整屏逻辑几何渲染一份，
+           与加级联之前的行为一致（app_screen_rows/cols 会回落到本卡实屏几何）。 */
+        app_render(&(app_render_cfg_t){
+            .type      = APP_RENDER_TYPE_TEXT,
+            .x         = 0,
+            .y         = 0,
+            .w         = app_screen_rows(),
+            .h         = app_screen_cols(),
+            .color     = DEV_DISPLAY_COLOR_GREEN,
+            .text      = PROGRAM_CODE,
+            .len       = strlen(PROGRAM_CODE),
+            .font_size = APP_FONT_SIZE_16,
+            .font_type = APP_FONT_TYPE_ST,
+            .text_enc  = APP_FONT_ENC_UTF8,
+            .style     = &(app_render_style_t){
+                .h_align = APP_RENDER_ALIGN_CENTER,
+                .v_align = APP_RENDER_ALIGN_CENTER,
+            },
+        });
+        return;
+    }
+
+    for (uint8_t i = 0; i < L->count; i++) {
+        const app_screen_card_t *c = app_screen_card(i);
+        if (!c) continue;
+        /* 在卡自己的矩形内居中：不骑缝，每块实屏各得一份完整程序码。 */
+        app_render(&(app_render_cfg_t){
+            .type      = APP_RENDER_TYPE_TEXT,
+            .x         = c->x,
+            .y         = c->y,
+            .w         = c->w,
+            .h         = c->h,
+            .color     = DEV_DISPLAY_COLOR_GREEN,
+            .text      = PROGRAM_CODE,
+            .len       = strlen(PROGRAM_CODE),
+            .font_size = APP_FONT_SIZE_16,
+            .font_type = APP_FONT_TYPE_ST,
+            .text_enc  = APP_FONT_ENC_UTF8,
+            .style     = &(app_render_style_t){
+                .h_align = APP_RENDER_ALIGN_CENTER,
+                .v_align = APP_RENDER_ALIGN_CENTER,
+            },
+        });
+    }
 }
 
 static void _aging_fill_screen(app_font_size_t size, app_font_type_t type, const char *ch_utf8, uint8_t ch_len)
@@ -146,33 +226,40 @@ static void _factory_monitor_task(void *argument)
 #endif
 
         /* ===== SHOW_CODE ===== */
+        /* 进入本阶段先排空残留令牌（见 _drain_test_tokens 的说明）。
+           真正关键的一道在**渲染之后、等第二下之前**（下面的 _drain_test_tokens）——
+           因为残留多半是这次按压的抖动/回弹在渲染期间凑出来的第二、三个下降沿。 */
+        _drain_test_tokens();
+
+        /* 【判别用日志·确认根因后可移除】记录进入 SHOW_CODE 的 tick，
+           与下面进 DEAD_PIXEL 那行对照：两行间隔 ≈0 ⇒"等第二下"消费的是残留
+           令牌（症状 A 成立），而不是用户真的又按了一下。 */
+        printf("[factory] tick=%u 进入 SHOW_CODE（来源：IDLE 中第 1 次 TEST 按下返回）\n",
+               (unsigned)osKernelGetTickCount());
+
         /* 清屏与文字**都走逻辑屏**（多卡时是整台设备的屏，单卡时就是本卡）
            —— 用实屏几何的话，内容会整块落到左上那一格（多卡时就是从卡那一格）。
            两步**当成一帧**输出：中间不让 _scan_task 跑 prepare（见 dev_display.h）。 */
         dev_display_frame_begin(dev_display_get());
         _clear_screen();
-        app_render(&(app_render_cfg_t){
-            .type      = APP_RENDER_TYPE_TEXT,
-            .x         = 0,
-            .y         = 0,
-            .w         = app_screen_rows(),
-            .h         = app_screen_cols(),
-            .color     = DEV_DISPLAY_COLOR_GREEN,
-            .text      = PROGRAM_CODE,
-            .len       = strlen(PROGRAM_CODE),
-            .font_size = APP_FONT_SIZE_16,
-            .font_type = APP_FONT_TYPE_ST,
-            .text_enc  = APP_FONT_ENC_UTF8,
-            .style     = &(app_render_style_t){
-                .h_align = APP_RENDER_ALIGN_CENTER,
-                .v_align = APP_RENDER_ALIGN_CENTER,
-            },
-        });
+        /* 逐卡分带渲染：程序码落在每块实屏各自的矩形内居中，不再骑在 1×2 的缝上
+           （症状 B）。单卡时切分表只有一项、矩形 == 整屏，与旧行为等价。 */
+        _show_program_code();
         dev_display_frame_end(dev_display_get());
 
+        /* **关键的一道排空**：渲染 SHOW_CODE 要读字库（SPI）、多卡时还要走级联，
+           耗时足以让"释放回弹/长抖动"再凑出一个下降沿令牌（EXTI 只有下降沿、
+           dev_key 去抖窗口 50ms，都可能漏）。这个令牌若留到紧随其后的"等第二下"，
+           就会被立刻消费、红色当场盖掉程序码 —— 见 _drain_test_tokens。 */
+        _drain_test_tokens();
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         /* ===== DEAD_PIXEL ===== */
+        /* 【判别用日志·确认根因后可移除】与上面 SHOW_CODE 那行对照：
+           间隔 ≈0 ⇒"等第二下"消费的是残留令牌（症状 A）。 */
+        printf("[factory] tick=%u 进入 DEAD_PIXEL（来源：SHOW_CODE 后第 2 次 TEST 等待返回）\n",
+               (unsigned)osKernelGetTickCount());
+
         osThreadSuspend(g_light_sensor_task_handle);
         /* 亮度走**整屏**那个入口：`dev_display_set_brightness` 只设本卡实屏，
            从卡拿到的仍是每轮 IMAGE 里带的旧亮度 → 一块亮一块暗。
@@ -196,12 +283,12 @@ static void _factory_monitor_task(void *argument)
         /* ===== AGING ===== */
         osThreadResume(g_light_sensor_task_handle);
 
-        /* 进衰老轮播前排空残留的信号量令牌。
+        /* 进衰老轮播前排空残留的信号量令牌（沿用原有的这道防护，不删）。
            上面 DEAD_PIXEL 段用的是 osWaitForever，若那几次按键有抖动多释放了一次
            （信号量上限 1，去抖在 dev_key 的 EXTI 回调里，但历史遗留的窗口仍在），
            余下的令牌会被下面第一次 wait_press(…, 3000) 立刻消费 —— 表现为
            "只显示第一个字就退出轮播并清屏"。这里做最后一道保险。 */
-        while (dev_key_wait_press(DEV_KEY_TST, 0)) {}
+        _drain_test_tokens();
 
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
