@@ -291,6 +291,42 @@ static void case_clipping(void)
     CHECK_MSG(s_canvas_buf[0] == 0, "越界 fill 写进了画布左上角");
 }
 
+/** 位图右边缘裁剪：源 stride 必须按**裁剪前**的 w 算，否则行偏移错位 */
+static void case_bitmap_clip_stride(void)
+{
+    TEST_BEGIN("位图右边缘裁剪后源行 stride 不错位（w=16→裁到 4）");
+
+    /* 源 stride = (16+7)/8 = 2；裁到 4 后若错用裁剪后的宽度，(4+7)/8 = 1，第 2 行起
+       会按错的行偏移读源 —— 现有 case_clipping 的 8→4 两者 stride 都是 1，把这个缺陷
+       掩盖了，所以这里专门取一个"裁剪前后 stride 不同"的宽度。
+       位图刻意让第 0 行第二个源字节（0xF0）非零、而第 1 行可见部分是零：
+         · 正确（stride=2）：第 0 行右 4 列亮、第 1 行全灭（源 row1 看 bm[2]=0）
+         · 缺陷（stride=1）：第 1 行错读到 bm[1]=0xF0 而多点亮 4 个像素 */
+    uint8_t bm[4] = {0xF0, 0xF0, 0x00, 0xF0}; /* 行0: F0 F0 / 行1: 00 F0 */
+
+    uint8_t ref[W * H], got[W * H];
+
+    /* 参考：直写实屏（dev_display_draw_bitmap 独立实现），再按位打包 */
+    display_reset();
+    dev_display_fill(&s_dev, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
+    dev_display_draw_bitmap(&s_dev, (uint16_t)(W - 4), 0, 16, 2, bm, DEV_DISPLAY_COLOR_RED);
+    pack_reference(s_fb, W, H, ref);
+
+    /* 被测：同一操作走画布 sink */
+    canvas_reset();
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
+    _sink_bitmap(nullptr, (uint16_t)(W - 4), 0, 16, 2, bm, DEV_DISPLAY_COLOR_RED);
+    memcpy(got, s_canvas_buf, sizeof(got));
+
+    check_bitmaps_equal(got, ref, sizeof(got), "右边缘裁剪位图（两路对拍）");
+
+    /* 显式钉住判别位：第 1 行右端必须灭（stride 错位会把它点亮） */
+    const uint16_t stride = (uint16_t)((W + 7) / 8);
+    const uint8_t  row1   = got[(uint32_t)1 * stride + (W - 1) / 8];
+    CHECK_MSG((row1 & (uint8_t)(0x80U >> ((W - 1) % 8))) == 0,
+              "第 1 行右端被点亮 —— 源 stride 用了裁剪后的宽度（末字节 %02X）", row1);
+}
+
 /** APP_RENDER_TYPE_FILL 的 w=h=0 全屏语义走的是目标几何，不是实屏几何 */
 static void case_fullscreen_fill(void)
 {
@@ -338,6 +374,7 @@ int main(void)
     case_canvas_matches_direct();
     case_bitmap_overlay_semantics();
     case_clipping();
+    case_bitmap_clip_stride();
     case_fullscreen_fill();
     case_commit_length_guard();
 

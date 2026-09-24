@@ -310,12 +310,17 @@ static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t
                          const uint8_t *bm, dev_display_color_t c)
 {
     (void)ctx;
-    if (!bm || !_clip(&x, &y, &w, &h)) return;
+    if (!bm) return;
+
+    /* 源 stride 用**裁剪前**的 w 算：`_clip` 只砍可见列，不重排源位图的行字节。
+       若先裁再算，行偏移会按裁剪后的宽度走 —— 第 2 行起整体错位（右边缘花屏）。 */
+    const uint16_t src_stride = (uint16_t)((w + 7U) / 8U);
+
+    if (!_clip(&x, &y, &w, &h)) return;
 
     /* 与 dev_display_draw_bitmap 同语义：bit=1 才写（写 on 或 off），bit=0 不动。
        位序同为 MSB-first、(宽+7)/8 行字节。 */
-    bool     on         = (c != DEV_DISPLAY_COLOR_BLACK);
-    uint16_t src_stride = (uint16_t)((w + 7U) / 8U);
+    bool on = (c != DEV_DISPLAY_COLOR_BLACK);
     _note_content_color(c);
 
     /* 逐像素经内联的 `_set_bit`（它用的 s_stride 是本 TU 的静态量，无跨 TU 调用） */
