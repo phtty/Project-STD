@@ -22,7 +22,17 @@
  * 触发有两条：pl_net 的 IP 变更监听（任何协议调 pl_net_set_ip 都会走到），
  * 以及上电对账一次（兜底"本上电周期没有 set_ip 调用"的场景）。
  *
- * 实际写入**延迟到本任务里做**：内部 Flash 擦除会硬停总线，不该阻塞改 IP 的调用方。 */
+ * 实际写入**延迟到本任务里做**：内部 Flash 擦除会硬停总线，不该阻塞改 IP 的调用方。
+ *
+ * 上电对账的取源是**运行态**（app_flash_iap_sync_from_runtime → pl_net_get_ip），
+ * 因此必须跑在"各协议把自己的地址应用到运行态"之后。这个顺序由启动结构保证、
+ * 不依赖任何初值：`_init_task` 以 osPriorityHigh 同步跑完整个 initcall_run_sw，
+ * 而 app_iap_task 是 osPriorityNormal —— LDI 的 sw_post(4) initcall
+ * （app_ldi_ctx_init，两条分支都调 pl_net_set_ip）必定先于本任务首次取队列超时
+ * （100ms）完成，也就先于第一次对账。若把本任务提到 High、或让某个 initcall 让出
+ * CPU，上电对账会读到编译期默认值并把记录写歪（现场"LDI 报的 / 实际运行的 /
+ * 记录里的"三者漂移），届时正确的修法是"把对账推迟到 LDI 应用之后"（例如改由
+ * IP 变更监听被动触发），而不是去调这个初值。 */
 static volatile bool s_sync_pending = true; /* 初始 true：上电必须对账一次 */
 
 static void _iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])

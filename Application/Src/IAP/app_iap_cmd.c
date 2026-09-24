@@ -5,9 +5,11 @@
 
 #include "app_iap_cmd.h"
 #include "pl_crc.h"
+#include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_iwdg.h"
 #include "pl_sys.h"
+#include "app_tcp_server.h"
 #include "app_udp.h"
 
 #define U8_LEN(x)  ((x) * sizeof(uint32_t))
@@ -76,16 +78,39 @@ static void _iap_cmd_test(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
     (void)IAP_Data;
 }
 
-/** @brief 0x01: Report current IP config */
+/** @brief 0x01: Report current IP config
+ *
+ *  优先回传 IAP 记录的 net_cfg 镜像；**本板无记录区或记录无效时绝不裸读 Flash**，
+ *  改为回落到运行态（pl_net_get_ip + app_tcp_server_get_port）。
+ *
+ *  为什么必须守：0x08004000 在直烧板（5006048，BOARD_HAS_IAP_RECORD=0）上落在
+ *  固件映像内部，裸读出来是代码字节 —— 这就是现场"搜索"时 IAP 广播的地址变成
+ *  一团乱码的直接来源；记录为空/损坏（擦-写中途掉电）时裸读则是 255.255.255.255
+ *  或陈旧值。运行态才是设备"当前实际在用"的地址，也是 IAP 记录本应镜像的对象。
+ *
+ *  选回落运行态而非返回"无配置"错误码：① 不改回包长度/命令码（§13 禁改），上位机
+ *  解析逻辑无需变动；② 记录区在直烧板上根本不存在，"无配置"不是一个可恢复的错误，
+ *  而运行态地址始终有效；③ 与 app_flash_iap_sync_from_runtime() 取源一致。 */
 static void _iap_cmd_report_ip(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
 {
-    app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
+    uint8_t  ip[4] = {0}, mask[4] = {0}, gw[4] = {0};
+    uint32_t port  = app_tcp_server_get_port();
+
+    app_flash_iap_net_cfg_t rec;
+    if (app_iap_get_net_cfg(&rec)) {
+        memcpy(ip, rec.ip, 4);
+        memcpy(mask, rec.mask, 4);
+        memcpy(gw, rec.gw, 4);
+        port = rec.port;
+    } else {
+        pl_net_get_ip(ip, mask, gw);
+    }
 
     uint32_t ReData[4] = {0};
-    ReData[0]          = config_info.net_cfg.ip[0] << 24 | config_info.net_cfg.ip[1] << 16 | config_info.net_cfg.ip[2] << 8 | config_info.net_cfg.ip[3];
-    ReData[1]          = config_info.net_cfg.mask[0] << 24 | config_info.net_cfg.mask[1] << 16 | config_info.net_cfg.mask[2] << 8 | config_info.net_cfg.mask[3];
-    ReData[2]          = config_info.net_cfg.gw[0] << 24 | config_info.net_cfg.gw[1] << 16 | config_info.net_cfg.gw[2] << 8 | config_info.net_cfg.gw[3];
-    ReData[3]          = config_info.net_cfg.port;
+    ReData[0]          = (uint32_t)ip[0] << 24 | (uint32_t)ip[1] << 16 | (uint32_t)ip[2] << 8 | ip[3];
+    ReData[1]          = (uint32_t)mask[0] << 24 | (uint32_t)mask[1] << 16 | (uint32_t)mask[2] << 8 | mask[3];
+    ReData[2]          = (uint32_t)gw[0] << 24 | (uint32_t)gw[1] << 16 | (uint32_t)gw[2] << 8 | gw[3];
+    ReData[3]          = port;
 
     _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_01, U32_LEN(sizeof(ReData)), ReData);
 }

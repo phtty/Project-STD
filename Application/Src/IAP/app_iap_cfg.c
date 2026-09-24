@@ -135,13 +135,22 @@ bool app_flash_iap_is_config_valid(volatile const app_flash_iap_sys_info_t *info
 }
 
 /** @brief 取记录里的网段配置；唯一的合法性判据沿用 app_flash_iap_is_config_valid()，
- *         记录无效时不触碰 out */
+ *         记录无效时不触碰 out。
+ *
+ *  本板无记录区（直烧板）时直接判无效：0x08004000 落在固件映像内部，"读记录"读到的
+ *  是自己的代码字节，绝不能把它当成配置回传（现场表现：上位机搜索时 IAP 报出的地址
+ *  是一团乱码）。调用方据 false 回落运行态。 */
 bool app_iap_get_net_cfg(app_flash_iap_net_cfg_t *out)
 {
+#if !BOARD_HAS_IAP_RECORD
+    (void)out;
+    return false; /* 无记录区：不存在"记录里的网段配置"这回事 */
+#else
     if (!app_flash_iap_is_config_valid(g_iap_sys_info)) return false;
 
     *out = g_iap_sys_info->net_cfg;
     return true;
+#endif
 }
 
 /* ================================================================

@@ -756,6 +756,10 @@ $(TEST_BUILD)/test_iap_cfg: $(TEST_IAP_CFG_SRCS)
 
 $(TEST_BUILD)/test_iap_cfg: Application/Src/IAP/app_iap_cfg.c
 
+# 用例 TU-include 了 app_iap_cmd.c（为覆盖 static 的 _iap_cmd_report_ip），
+# 同样必须单独挂依赖，否则改了它测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_iap_cfg: Application/Src/IAP/app_iap_cmd.c
+
 $(TEST_BUILD)/test_ldi_0ah: $(TEST_LDI_0AH_SRCS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_LDI_0AH_SRCS) $(TEST_LDFLAGS)

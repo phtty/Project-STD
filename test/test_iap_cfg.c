@@ -38,6 +38,10 @@
  * 由测试显式补上这一步，与 test_cfg_sched.c 对 app_ldi_cfg.c 的做法一致。
  * 注意 Makefile 里**不能**再列 Application/Src/IAP/app_iap_cfg.c，否则符号重定义。 */
 #include "../Application/Src/IAP/app_iap_cfg.c"
+/* _iap_cmd_report_ip 是 static，要覆盖它只能把实现 TU 也 include 进来。
+   这也把 app_iap_cmd.c 挂进了"被测源码"——Makefile 里对应加了依赖行，否则改了它
+   测试不重编、跑的是旧二进制（同本文件与 app_iap_cfg.c 的关系）。 */
+#include "../Application/Src/IAP/app_iap_cmd.c"
 
 /* ---- pl_flash 替身的控制接口（test/stubs/pl_flash_stub.c）---- */
 void pl_flash_stub_set_region(uint32_t base, uint32_t len);
@@ -49,15 +53,59 @@ int  pl_flash_stub_erase_count(void);
 int  pl_flash_stub_program_count(void);
 bool pl_flash_stub_interleaved(void);
 
-/* ---- 生产代码依赖、本测试不关心的两个接口 ---- */
+/* ---- 生产代码依赖、本测试不关心的接口 ----
+ *
+ * 运行态 IP 做成可设置的全局：_iap_cmd_report_ip 在"记录无效/本板无记录"时必须
+ * 回落运行态，用例要能把两者区分开（默认全 0，不影响其它用例）。 */
+static uint8_t s_runtime_ip[4]   = {0, 0, 0, 0};
+static uint8_t s_runtime_mask[4] = {0, 0, 0, 0};
+static uint8_t s_runtime_gw[4]   = {0, 0, 0, 0};
+static uint16_t s_runtime_port   = 9529;
+
+/* _iap_cmd_report_ip 的抓包：app_ccb_send_to 把响应帧的数据域抄进这里 */
+static uint32_t s_resp_words[8];
+static int      s_resp_nwords;
+static uint32_t s_resp_cmd;
+
+static void set_runtime_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+{
+    memcpy(s_runtime_ip, ip, 4);
+    memcpy(s_runtime_mask, mask, 4);
+    memcpy(s_runtime_gw, gw, 4);
+}
+
 void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
 {
-    const uint8_t z[4] = {0, 0, 0, 0};
-    memcpy(ip, z, 4);
-    memcpy(mask, z, 4);
-    memcpy(gw, z, 4);
+    memcpy(ip, s_runtime_ip, 4);
+    memcpy(mask, s_runtime_mask, 4);
+    memcpy(gw, s_runtime_gw, 4);
 }
-uint16_t app_tcp_server_get_port(void) { return 9529; }
+uint16_t app_tcp_server_get_port(void) { return s_runtime_port; }
+
+/* ---- app_iap_cmd.c 的其余依赖（g_iap_cmd_table 被保留时会拉进全部 8 个处理函数）---- */
+int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+{
+    (void)ccb;
+    (void)dst;
+    const app_iap_frame_t *f = (const app_iap_frame_t *)data;
+    s_resp_cmd                = f->cmd;
+    s_resp_nwords             = (int)f->len;
+    if (s_resp_nwords > (int)(sizeof(s_resp_words) / sizeof(s_resp_words[0])))
+        s_resp_nwords = (int)(sizeof(s_resp_words) / sizeof(s_resp_words[0]));
+    for (int i = 0; i < s_resp_nwords; i++) s_resp_words[i] = f->data_crc[i];
+    return (int32_t)len;
+}
+pl_rtc_handle_t pl_rtc_get_handle(void) { return NULL; }
+bool pl_rtc_bkup_write(pl_rtc_handle_t h, uint32_t reg, uint32_t value)
+{
+    (void)h;
+    (void)reg;
+    (void)value;
+    return true;
+}
+pl_iwdg_handle_t pl_iwdg_get_handle(void) { return NULL; }
+void pl_iwdg_refresh(pl_iwdg_handle_t h) { (void)h; }
+void pl_system_reset(void) {}
 
 /* ---- 极简断言 ---- */
 static int g_failures;
@@ -138,6 +186,44 @@ static const uint8_t GW[4]      = {10, 0, 0, 254};
 #define PORT 9529
 
 /* ================================================================
+ *  _iap_cmd_report_ip 的装置
+ *
+ *  这条路径此前没有守卫，也一直没有 host 用例 —— 它在直烧板上裸读固件映像，
+ *  现场表现是"搜索时 IAP 广播的地址是一团乱码"。下面统一走真实处理函数、
+ *  从抓到的响应帧里解出网络参数，断言"记录无效/无记录时绝不回传裸 Flash"。
+ * ================================================================ */
+
+/** @brief 调用真实的 _iap_cmd_report_ip（cmd 0x01），响应被 app_ccb_send_to 抓进 s_resp_* */
+static void report_ip(void)
+{
+    s_resp_cmd    = 0;
+    s_resp_nwords = 0;
+    app_iap_frame_t req = {0};
+    req.seq = 0x55AA;
+    _iap_cmd_report_ip(NULL, &req);
+}
+
+/** @brief 断言上一帧报告回传的正是给定的 ip/mask/gw/port */
+static void expect_report(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
+                          uint32_t port)
+{
+    uint32_t w0 = ((uint32_t)ip[0] << 24) | ((uint32_t)ip[1] << 16) | ((uint32_t)ip[2] << 8) | ip[3];
+    uint32_t w1 = ((uint32_t)mask[0] << 24) | ((uint32_t)mask[1] << 16) | ((uint32_t)mask[2] << 8) | mask[3];
+    uint32_t w2 = ((uint32_t)gw[0] << 24) | ((uint32_t)gw[1] << 16) | ((uint32_t)gw[2] << 8) | gw[3];
+
+    CHECK_MSG(s_resp_cmd == APP_IAP_RTN_CMD_01, "回包命令码应为 0x01，实际 0x%X", (unsigned)s_resp_cmd);
+    CHECK_MSG(s_resp_nwords == 4, "报告 IP 应回 4 个字，实际 %d", s_resp_nwords);
+    CHECK_MSG(s_resp_words[0] == w0, "IP 不符：回包 0x%08X 期望 0x%08X", (unsigned)s_resp_words[0],
+              (unsigned)w0);
+    CHECK_MSG(s_resp_words[1] == w1, "mask 不符：回包 0x%08X 期望 0x%08X",
+              (unsigned)s_resp_words[1], (unsigned)w1);
+    CHECK_MSG(s_resp_words[2] == w2, "gw 不符：回包 0x%08X 期望 0x%08X", (unsigned)s_resp_words[2],
+              (unsigned)w2);
+    CHECK_MSG(s_resp_words[3] == port, "port 不符：回包 %u 期望 %u", (unsigned)s_resp_words[3],
+              (unsigned)port);
+}
+
+/* ================================================================
  *  分板：本板有没有 IAP 记录区
  *
  *  **下面那一整套用例只对"带 bootloader、Sector 1 是记录区"的板成立。**
@@ -186,6 +272,33 @@ static void case_write_path_is_short_circuited(void)
               "公开入口绕过了短路");
 }
 
+/* ================================================================
+ *  报告 IP：本板无记录区 → 绝不回传裸 Flash（那团"乱码"的直源）
+ *
+ *  0x08004000 在本板上落在固件映像内部。这里把假记录区铺成一段可识别字节来
+ *  模拟"代码字节"，若报告路径裸读它，回包就会是 0x5A5A5A5A。
+ *  反向验证：把 _iap_cmd_report_ip 改回裸读 ADDR_CONFIG_SECTOR，本用例立刻变红。
+ * ================================================================ */
+static void case_report_ip_falls_back_to_runtime(void)
+{
+    flash_setup();
+
+    /* 模拟固件映像：整块填 0x5A（既不是有效记录，也不是 0xFF 空记录） */
+    memset(g_flash, 0x5A, FAKE_SECTOR_SIZE);
+
+    const uint8_t RT[4] = {10, 20, 30, 40};
+    set_runtime_ip(RT, MASK, GW);
+    s_runtime_port = 7777;
+
+    report_ip();
+
+    /* 必须回落运行态 */
+    expect_report(RT, MASK, GW, 7777);
+    /* 且绝不能是裸 Flash 的字节 */
+    CHECK_MSG(s_resp_words[0] != 0x5A5A5A5AU, "报告 IP 回传了裸 Flash 里的字节（0x5A5A5A5A）");
+    CHECK_MSG(s_resp_words[3] != 0x5A5A5A5AU, "报告 port 回传了裸 Flash 里的字节");
+}
+
 int main(void)
 {
     printf("\n\033[33m⚠ 本板 BOARD_HAS_IAP_RECORD = 0（直烧板），"
@@ -197,7 +310,13 @@ int main(void)
     printf("  %s（本用例失败 %d）\n", g_failures == before ? "通过" : "**失败**",
            g_failures - before);
 
-    printf("\n用例 1 个，失败 %d 个\n", g_failures);
+    before = g_failures;
+    printf("▶ 本板无记录区：报告 IP 回落运行态、不回传裸 Flash\n");
+    case_report_ip_falls_back_to_runtime();
+    printf("  %s（本用例失败 %d）\n", g_failures == before ? "通过" : "**失败**",
+           g_failures - before);
+
+    printf("\n用例 2 个，失败 %d 个\n", g_failures);
     return g_failures ? 1 : 0;
 }
 
@@ -480,6 +599,42 @@ static void case_net_cfg_accessor_contract(void)
     CHECK_MSG(out.port == PORT, "port 不一致：%u != %u", (unsigned)out.port, (unsigned)PORT);
 }
 
+/* ================================================================
+ *  ⑪ 报告 IP：记录无效/损坏 → 回落运行态；记录有效 → 回传记录
+ *
+ *  缺陷 b 的回归守卫：此前 _iap_cmd_report_ip 原样解引用 ADDR_CONFIG_SECTOR，
+ *  记录空时报 255.255.255.255、损坏时报 0xFF/陈旧值。现在一律经
+ *  app_iap_get_net_cfg() 判有效，无效则回落运行态。
+ * ================================================================ */
+
+static void case_report_ip_never_returns_raw_flash(void)
+{
+    flash_setup();
+
+    const uint8_t RT[4] = {192, 168, 1, 50};
+    set_runtime_ip(RT, MASK, GW);
+    s_runtime_port = 1234; /* 与记录 port 区分开，验证"回落时端口也取自运行态" */
+
+    /* ① 空记录（flash_setup 把记录区清成 0xFF）→ 回落运行态 */
+    CHECK(app_flash_iap_is_config_empty(REC));
+    report_ip();
+    expect_report(RT, MASK, GW, 1234);
+
+    /* ② 损坏记录（magic 已写、CRC 未写：擦-写中途掉电的中间态）→ 回落运行态 */
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+    REC->config_crc = 0xFFFFFFFF;
+    CHECK_MSG(!app_flash_iap_is_config_empty(REC) && !app_flash_iap_is_config_valid(REC),
+              "构造的中间态应为既非空也非有效");
+    report_ip();
+    expect_report(RT, MASK, GW, 1234);
+
+    /* ③ 记录有效 → 回传记录值（而非运行态） */
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+    CHECK(app_flash_iap_is_config_valid(REC));
+    report_ip();
+    expect_report(IP_A, MASK, GW, PORT);
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -498,6 +653,7 @@ int main(void)
         {"写失败必须上报", case_write_failure_is_reported},
         {"存储接口 0 = 成功的约定", case_storage_returns_zero_on_success},
         {"跨模块访问器 app_iap_get_net_cfg()", case_net_cfg_accessor_contract},
+        {"报告 IP 绝不回传裸 Flash", case_report_ip_never_returns_raw_flash},
     };
 
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

@@ -103,7 +103,9 @@ dev_storage_t *app_flash_iap_get_storage(void);
 
 /** @brief 取 IAP 记录的网段配置（IP / 掩码 / 网关 / 端口）
  *  @param[out] out 接收网络配置
- *  @return true = 记录有效并已填充 out；false = 记录无效（out 不写） */
+ *  @return true = 记录有效并已填充 out；false = 记录无效（out 不写）
+ *  @note 本板无记录区（直接烧写、无 IAP bootloader）时恒返回 false 且不读裸 Flash ——
+ *        0x08004000 在那种板上落在固件映像内部，读出来是代码字节。调用方据此回落运行态。 */
 bool app_iap_get_net_cfg(app_flash_iap_net_cfg_t *out);
 
 /** @brief IAP 记录区内存映射指针 (0x08004000)

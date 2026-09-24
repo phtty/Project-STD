@@ -32,7 +32,7 @@ typedef enum : uint8_t {
     APP_LDI_DEVICE_CANOPY_LIGHT = 0xEA, /**< 雨棚信号灯 */
     APP_LDI_DEVICE_FOG_LIGHT    = 0xEB, /**< 雾灯 */
     APP_LDI_DEVICE_VOICE        = 0xF4, /**< 语音播报 */
-    APP_LDI_DEVICE_COUNT        = 13, /**< 本项目支持的设备类型数量 */
+    APP_LDI_DEVICE_COUNT        = 12,   /**< 本项目支持的设备类型数量 */
 } app_ldi_device_t;
 
 /**
@@ -46,10 +46,10 @@ typedef enum : uint8_t {
  * CRC-16/XMODEM 校验范围覆盖 VER ~ DATA 全部字节，多项式 0x8408，初始值 0xFFFF
  */
 typedef struct [[gnu::packed]] {
-    uint8_t stx[2]; /**< 帧开始标志, 固定值 0xFFFF */
-    uint8_t ver; /**< 协议版本号, 当前版本 0x00 */
-    uint8_t seq; /**< 帧序列号: 服务端主动=0x0X, 客户端主动=0xX0, X=1~9自动递增 */
-    uint8_t len[4]; /**< DATA域长度, 高2字节保留, 低2字节为实际长度 */
+    uint8_t stx[2];     /**< 帧开始标志, 固定值 0xFFFF */
+    uint8_t ver;        /**< 协议版本号, 当前版本 0x00 */
+    uint8_t seq;        /**< 帧序列号: 服务端主动=0x0X, 客户端主动=0xX0, X=1~9自动递增 */
+    uint8_t len[4];     /**< DATA域长度, 高2字节保留, 低2字节为实际长度 */
     uint8_t data_crc[]; /**< DATA内容 + CRC16校验值(2字节, 帧尾), 柔性数组成员 */
 } app_ldi_frame_t;
 
@@ -61,11 +61,11 @@ typedef struct [[gnu::packed]] {
  *   CmdType(1B) | UnixTime(4B) | LaneHex(5B) | CertInfo(8B) | Reserve(2B)
  */
 typedef struct [[gnu::packed]] {
-    uint8_t cmd_type; /**< 指令代码, 如 0AH=IP设置请求, B0H=参数配置应答 */
+    uint8_t cmd_type;          /**< 指令代码, 如 0AH=IP设置请求, B0H=参数配置应答 */
     uint8_t unix_timestamp[4]; /**< Unix时间戳, 格林威治1970-01-01起的总秒数, 大端 */
-    uint8_t lane_code[5]; /**< 车道HEX编号: 网络号(2B,BCD) + 站点号(2B,BCD) + 车道号(1B) */
-    uint8_t cert_info[8]; /**< 设备验证信息, 由平台生成的唯一设备验证码 */
-    uint8_t reserve[2]; /**< 保留字节, 默认填 00H */
+    uint8_t lane_code[5];      /**< 车道HEX编号: 网络号(2B,BCD) + 站点号(2B,BCD) + 车道号(1B) */
+    uint8_t cert_info[8];      /**< 设备验证信息, 由平台生成的唯一设备验证码 */
+    uint8_t reserve[2];        /**< 保留字节, 默认填 00H */
 } app_ldi_req_head_t;
 
 /**
@@ -76,11 +76,11 @@ typedef struct [[gnu::packed]] {
  *   CmdType(1B) | UnixTime(8B) | LaneHex(5B) | CertInfo(8B) | Reserve(2B)
  */
 typedef struct [[gnu::packed]] {
-    uint8_t cmd_type; /**< 指令代码, 1BH=控制查询请求, B1H=控制查询应答 */
+    uint8_t cmd_type;          /**< 指令代码, 1BH=控制查询请求, B1H=控制查询应答 */
     uint8_t unix_timestamp[8]; /**< Unix时间戳, 毫秒精度, 大端 */
-    uint8_t lane_code[5]; /**< 车道HEX编号 */
-    uint8_t cert_info[8]; /**< 设备验证信息 */
-    uint8_t reserve[2]; /**< 保留字节, 默认填 00H */
+    uint8_t lane_code[5];      /**< 车道HEX编号 */
+    uint8_t cert_info[8];      /**< 设备验证信息 */
+    uint8_t reserve[2];        /**< 保留字节, 默认填 00H */
 } app_ldi_ctrl_head_t;
 
 /**
@@ -135,22 +135,22 @@ typedef enum : uint8_t {
 typedef enum {
     APP_LDI_STATE_UNINIT, /**< 仅接受 0AH(IP设置)、E0H(认证结果) */
     APP_LDI_STATE_AUTHED, /**< 已认证，可接受 1AH(初始化) */
-    APP_LDI_STATE_READY, /**< 正常运行，全部命令可用 */
+    APP_LDI_STATE_READY,  /**< 正常运行，全部命令可用 */
 } app_ldi_state_t;
 
 /** @brief LDI 协议上下文：配置 RAM 镜像、序号与发送缓冲 */
 typedef struct {
     app_ldi_state_t state; /**< 协议状态机 */
-    uint8_t rsp_seq; /**< 响应序号（app_ldi_task 在处理每帧前从帧里取，回显 host 请求帧） */
-    uint8_t rpt_seq; /**< 主动上报序号计数器（→ 0x10, 0x20...） */
+    uint8_t rsp_seq;       /**< 响应序号（app_ldi_task 在处理每帧前从帧里取，回显 host 请求帧） */
+    uint8_t rpt_seq;       /**< 主动上报序号计数器（→ 0x10, 0x20...） */
 
     app_flash_ldi_cfg_info_t cfg; /**< RAM 镜像 — 唯一配置真源 */
-    bool cfg_valid; /**< 配置是否有效 */
+    bool cfg_valid;               /**< 配置是否有效 */
 
     uint32_t last_cert_tick; /**< 上次发送 0EH 的 RTOS tick（3 秒间隔） */
-    uint32_t last_rpt_tick; /**< 上次发送 0CH 的 RTOS tick（5 秒间隔） */
+    uint32_t last_rpt_tick;  /**< 上次发送 0CH 的 RTOS tick（5 秒间隔） */
 
-    osMutexId_t tx_lock; /**< 保护 tx_buf，两个任务共享 */
+    osMutexId_t tx_lock;             /**< 保护 tx_buf，两个任务共享 */
     uint8_t tx_buf[LDI_TX_BUF_SIZE]; /**< 响应帧拼装缓冲区 */
 } app_ldi_ctx_t;
 
@@ -162,10 +162,10 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self);
 
 /* ---- API ---- */
 
-extern osMessageQueueId_t g_ldi_msg_queue; /**< LDI 帧队列 */
-extern osThreadId_t g_ldi_task_handle; /**< LDI 协议任务句柄 */
-extern const osThreadAttr_t g_ldi_task_attr; /**< LDI 协议任务属性 */
-extern osThreadId_t g_ldi_timer_task_handle; /**< LDI 定时任务句柄 */
+extern osMessageQueueId_t g_ldi_msg_queue;         /**< LDI 帧队列 */
+extern osThreadId_t g_ldi_task_handle;             /**< LDI 协议任务句柄 */
+extern const osThreadAttr_t g_ldi_task_attr;       /**< LDI 协议任务属性 */
+extern osThreadId_t g_ldi_timer_task_handle;       /**< LDI 定时任务句柄 */
 extern const osThreadAttr_t g_ldi_timer_task_attr; /**< LDI 定时任务属性 */
 
 /** @brief LDI 协议任务入口：从队列取帧并分派处理 */
@@ -186,8 +186,8 @@ void app_ldi_timer_task(void *argument);
  * @return 探测状态，取值见 app_pcb_probe_state_t
  */
 app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
-                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
-                                uint8_t *aux);
+                                          uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                          uint8_t *aux);
 
 /** @brief 按设备类型查本机配置的模块序号
  *  @param device_type 设备类型

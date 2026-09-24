@@ -127,6 +127,16 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self)
         memcpy(self->cfg.host_ip, app_tcp_client_get_host_ip(), 4);
         self->cfg.host_port = app_tcp_client_get_host_port();
         self->cfg_valid     = true;
+
+        /* 与上面"W25Qxx 有效"分支对称：把采纳的地址应用到运行态。**这一步不能省** ——
+           少了它，采纳只停留在 RAM 里的 self->cfg，运行态仍是 pl_net_init 的编译期默认值，
+           且不会经 IP 变更监听触发 IAP 记录镜像同步（见 app_iap.c 的 _iap_ip_change_cb）。
+           现场表现就是 IAP 报出的地址、实际运行的地址与记录里的地址三者漂移。
+           放在这里不会引入"启动早期写 Flash"的新风险：监听器只置 s_sync_pending，
+           真正的擦写由 IAP 任务在空闲超时里做，且 update_net_cfg 自带内容去重
+           （本分支采纳的 IAP 地址与记录一致时零擦写）。 */
+        pl_net_set_ip(self->cfg.device_ip, self->cfg.netmask, self->cfg.gateway);
+
         /* 不在上电阶段写 Flash：擦除会暂停 CPU 总线 1~2s，损坏 LwIP 时序。
            配置由 0AH 命令在出厂配置阶段写入，写入时网络负载低，风险可控。 */
     }

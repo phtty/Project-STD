@@ -180,6 +180,22 @@ void          pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
 }
 uint16_t app_tcp_server_get_port(void) { return 9529; }
 
+/* ---- app_ldi_ctx_init 的依赖 ----
+ * 本用例直接调 app_ldi_ctx_init，--gc-sections 不再能把这段丢掉，故它引用的
+ * TCP 客户端/服务端接口也得给全。都是本用例不关心的东西，最小实现即可。 */
+void app_tcp_server_set_port(uint16_t port) { (void)port; }
+void app_tcp_client_set_remote(const uint8_t ip[4], uint16_t port)
+{
+    (void)ip;
+    (void)port;
+}
+uint8_t *app_tcp_client_get_host_ip(void)
+{
+    static uint8_t z[4];
+    return z;
+}
+uint16_t app_tcp_client_get_host_port(void) { return 0; }
+
 /* ---- 其余 11 个命令的依赖 ----
  * g_ldi_cmd_table[] 是非 static 全局，实测在本 TU 里**没有**被 gc-sections 丢掉，
  * 于是 12 个处理函数全被拉进来，它们的依赖也得给全。都是本用例不关心的东西，
@@ -208,13 +224,18 @@ void app_udp_broadcast(const uint8_t *data, uint16_t len)
     (void)len;
 }
 
-/* 运行态改 IP 的入口。0AH **不应**调它（"下次上电生效"语义），用例据此断言。 */
-static int s_set_ip_calls;
-void       pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+/* 运行态改 IP 的入口。0AH **不应**调它（"下次上电生效"语义），用例据此断言。
+   app_ldi_ctx_init 的 else 分支则**必须**调它（"漏调通知"缺陷的守卫），故同时
+   记录最后一次调用的参数，供 else 分支用例比对采纳的地址。 */
+static int     s_set_ip_calls;
+static uint8_t s_set_ip_last[4];
+static uint8_t s_set_ip_mask[4];
+static uint8_t s_set_ip_gw[4];
+void           pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
 {
-    (void)ip;
-    (void)mask;
-    (void)gw;
+    memcpy(s_set_ip_last, ip, 4);
+    memcpy(s_set_ip_mask, mask, 4);
+    memcpy(s_set_ip_gw, gw, 4);
     s_set_ip_calls++;
 }
 
@@ -264,6 +285,9 @@ static void env_setup(void)
     s_tx_count    = 0;
     s_tx_len      = 0;
     s_set_ip_calls = 0;
+    memset(s_set_ip_last, 0, sizeof s_set_ip_last);
+    memset(s_set_ip_mask, 0, sizeof s_set_ip_mask);
+    memset(s_set_ip_gw, 0, sizeof s_set_ip_gw);
     s_w25_fail_write = false;
 }
 
@@ -360,6 +384,25 @@ static void case_0ah_leaves_internal_flash_alone(void)
     CHECK_MSG(s_set_ip_calls == 0, "0AH 改了运行态 IP（应为下次上电生效）");
 }
 
+/* ================================================================
+ *  app_ldi_ctx_init 的 else 分支：W25Qxx 无配置 → 必须调 pl_net_set_ip
+ *
+ *  "漏调通知"缺陷的守卫。直烧板上 IAP 记录区不存在（app_iap_get_net_cfg 恒 false），
+ *  else 分支用运行态默认值，但**仍必须**把这个决定应用到运行态并触发 IP 变更监听，
+ *  否则 LDI 报的 / 实际运行的 / IAP 记录三者漂移。
+ *  反向验证：删掉 else 分支里的 pl_net_set_ip，本用例立刻变红（s_set_ip_calls 为 0）。
+ * ================================================================ */
+static void case_ctx_init_else_notifies_runtime(void)
+{
+    TEST_BEGIN("直烧板：W25Qxx 无配置 → app_ldi_ctx_init 仍通知运行态");
+    env_setup();
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK_MSG(g_ldi_ctx.cfg_valid, "ctx_init 后 cfg_valid 应为 true");
+    CHECK_MSG(s_set_ip_calls == 1, "else 分支漏调 pl_net_set_ip（调了 %d 次）", s_set_ip_calls);
+}
+
 int main(void)
 {
     printf("\n\033[33m⚠ 本板 BOARD_HAS_IAP_RECORD = 0（直烧板），"
@@ -368,8 +411,9 @@ int main(void)
 
     int failed = 0;
     if (!run_case(case_0ah_leaves_internal_flash_alone)) failed++;
+    if (!run_case(case_ctx_init_else_notifies_runtime)) failed++;
 
-    printf("\n用例 1 个，失败 %d 个\n", failed);
+    printf("\n用例 2 个，失败 %d 个\n", failed);
     return failed ? 1 : 0;
 }
 
@@ -456,6 +500,32 @@ static void case_second_0ah_overwrites_both(void)
     CHECK(s_tx_count == 2);
 }
 
+/* ================================================================
+ *  app_ldi_ctx_init 的 else 分支：W25Qxx 无配置 → 采纳 IAP 记录并通知运行态
+ *
+ *  "漏调通知"缺陷的守卫。env_setup 后 W25Qxx 是空的（不放 LDI 记录），
+ *  load_config 返回 false 走 else 分支；在 IAP 记录区放一份有效记录作为采纳源。
+ *  断言：① g_ldi_ctx.cfg 采纳了 IAP 的地址；② pl_net_set_ip 被调用且参数正确。
+ *  反向验证：删掉 else 分支里的 pl_net_set_ip，s_set_ip_calls 保持 0，本用例变红。
+ * ================================================================ */
+static void case_ctx_init_else_adopts_iap_and_notifies(void)
+{
+    TEST_BEGIN("W25Qxx 无配置：app_ldi_ctx_init 采纳 IAP 记录并通知运行态");
+    env_setup();
+
+    /* 只写 IAP 记录，W25Qxx 保持空 → 逼出 else 分支 */
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+    CHECK(iap_mirror_is(IP_A, PORT));
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK_MSG(g_ldi_ctx.cfg_valid, "ctx_init 后 cfg_valid 应为 true");
+    CHECK_MSG(memcmp(g_ldi_ctx.cfg.device_ip, IP_A, 4) == 0, "else 分支没采纳 IAP 记录里的 IP");
+    CHECK_MSG(s_set_ip_calls == 1, "else 分支漏调 pl_net_set_ip（调了 %d 次）—— 运行态与 IAP 镜像不会同步",
+              s_set_ip_calls);
+    CHECK_MSG(memcmp(s_set_ip_last, IP_A, 4) == 0, "pl_net_set_ip 收到的不是采纳的地址");
+}
+
 /* ================================================================ */
 
 /** @brief 在子进程里跑一个用例
@@ -477,6 +547,7 @@ int main(void)
         {"LDI 写失败不阻塞 IAP 镜像", case_ldi_failure_does_not_block_mirror},
         {"IAP 镜像失败对上位机不可见", case_mirror_failure_is_invisible_to_host},
         {"连续两次 0AH 两条都跟着走", case_second_0ah_overwrites_both},
+        {"W25Qxx 无配置：ctx_init 采纳 IAP 并通知运行态", case_ctx_init_else_adopts_iap_and_notifies},
     };
 
     int failed = 0;
