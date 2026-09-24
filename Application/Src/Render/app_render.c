@@ -278,6 +278,35 @@ static void _render_init(void)
 }
 sw_app_initcall(_render_init);
 
+/* ---- 行宽测量缓冲 ----
+ *
+ * 行数上限 = **源文本字节数 + 1**：每个源字节最多起一个新行（`\n` 占一个字节起一行；
+ * 自动换行也至少消耗一个字形对应的源字节），末尾再加"最后一行"。源文本先落进
+ * 256 字节的 text_buf，故上限 ≤ 257；+2 留余量（text_buf 若加大，这里要同步）。
+ *
+ * 原先它是 `_render_text` 内函数局部的 `uint16_t line_widths[32]`，而 LDI 文本可达
+ * 33 行以上 —— 越界写栈。改成文件静态并加 push 上限门禁，读处（line_idx）也夹取。
+ *
+ * **后续片会在本模块加互斥量保护本缓冲（save/测量/渲染共用）；本片先不加锁。** */
+#define RENDER_LINE_MAX (258U) /**< ≥ sizeof(text_buf) + 2 */
+static uint16_t s_line_widths[RENDER_LINE_MAX];
+
+/** @brief 追加一行宽度；已达上限返回 false（调用方据此**停止测量**） */
+static inline bool _line_push(uint16_t *line_count, uint16_t line_w)
+{
+    if (*line_count >= RENDER_LINE_MAX) return false;
+    s_line_widths[(*line_count)++] = line_w;
+    return true;
+}
+
+/** @brief 读一行宽度：下标越界（测量被上限截断时）取最后一个已测量值 */
+static inline uint16_t _line_width_at(uint16_t line_idx, uint16_t line_count)
+{
+    if (line_count == 0) return 0;
+    if (line_idx >= line_count) line_idx = (uint16_t)(line_count - 1);
+    return s_line_widths[line_idx];
+}
+
 /* ---- 渲染分支（各功能静态内联）---- */
 
 static inline void _render_text(const app_render_cfg_t *cfg)
@@ -342,15 +371,14 @@ static inline void _render_text(const app_render_cfg_t *cfg)
     }
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
-    uint16_t line_widths[32];
-    uint8_t line_count = 0;
+    uint16_t line_count = 0;
     uint16_t line_w    = 0;
     uint16_t line_h    = gbk_key.size;
     uint16_t char_pos  = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
-            line_widths[line_count++] = line_w;
+            if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
             line_w                    = 0;
             char_pos++;
             continue;
@@ -370,7 +398,7 @@ static inline void _render_text(const app_render_cfg_t *cfg)
 
         if (line_w + glyph_w > cfg->w) {
             if (cfg->style && cfg->style->word_wrap) {
-                line_widths[line_count++] = line_w;
+                if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
                 line_w                    = glyph_w;
             }
             /* 不换行：超出部分截断，不计入宽度 */
@@ -378,7 +406,7 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             line_w += glyph_w;
         }
     }
-    line_widths[line_count++] = line_w; /* 最后一行 */
+    (void)_line_push(&line_count, line_w); /* 最后一行 */
 
     /* ---- 垂直对齐 ---- */
     uint16_t text_h = line_count * line_h;
@@ -394,9 +422,9 @@ static inline void _render_text(const app_render_cfg_t *cfg)
     uint16_t line_origin_x = cfg->x;
     if (cfg->style) {
         if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-            line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
+            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
         else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-            line_origin_x += (cfg->w - line_widths[line_idx]);
+            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
     }
     cur_x    = line_origin_x;
     char_pos = 0;
@@ -408,9 +436,9 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             line_origin_x = cfg->x;
             if (cfg->style) {
                 if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                    line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
+                    line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
                 else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                    line_origin_x += (cfg->w - line_widths[line_idx]);
+                    line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
             }
             cur_x = line_origin_x;
             char_pos++;
@@ -427,9 +455,9 @@ static inline void _render_text(const app_render_cfg_t *cfg)
                     line_origin_x = cfg->x;
                     if (cfg->style) {
                         if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                            line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
+                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
                         else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                            line_origin_x += (cfg->w - line_widths[line_idx]);
+                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
                     }
                     cur_x = line_origin_x;
                     if (cur_y + line_h > cfg->h) return;
@@ -464,9 +492,9 @@ static inline void _render_text(const app_render_cfg_t *cfg)
                     line_origin_x = cfg->x;
                     if (cfg->style) {
                         if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                            line_origin_x += (cfg->w - line_widths[line_idx]) / 2;
+                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
                         else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                            line_origin_x += (cfg->w - line_widths[line_idx]);
+                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
                     }
                     cur_x = line_origin_x;
                     if (cur_y + line_h > cfg->h) return;
