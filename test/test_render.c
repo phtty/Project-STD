@@ -210,6 +210,26 @@ static void render_text(const char *text, uint16_t len, uint16_t x, uint16_t y, 
     });
 }
 
+/** @brief 走 APP_RENDER_TYPE_TEXT + APP_FONT_ENC_UTF8（入口会先 UTF8→GBK 再排版） */
+static void render_text_utf8(const char *text, uint16_t len, uint16_t x, uint16_t y, uint16_t w,
+                             uint16_t h, app_render_style_t *style)
+{
+    app_render(&(app_render_cfg_t){
+        .type      = APP_RENDER_TYPE_TEXT,
+        .x         = x,
+        .y         = y,
+        .w         = w,
+        .h         = h,
+        .color     = DEV_DISPLAY_COLOR_RED,
+        .text      = text,
+        .len       = len,
+        .font_size = APP_FONT_SIZE_16,
+        .font_type = APP_FONT_TYPE_HT,
+        .text_enc  = APP_FONT_ENC_UTF8,
+        .style     = style,
+    });
+}
+
 /* ================================================================
  *  断言
  * ================================================================ */
@@ -451,6 +471,95 @@ static void case_many_lines(void)
               (unsigned)(32 * LINE_H));
 }
 
+/* ================================================================
+ *  用例：cvt 边界安全（P4）
+ * ================================================================ */
+
+/** 2 字节 + 3 字节 + 4 字节混合：前后文字必须仍在、emoji 被安全跳过 */
+static void case_cvt_mixed(void)
+{
+    TEST_BEGIN("cvt：2/3/4 字节混合——前后文字仍在、emoji 安全跳过");
+
+    char     out[64];
+    uint32_t n = 0;
+
+    /* é(2B, U+00E9→A8A6) 中(3B, D6D0) 😀(4B, 跳过) 文(3B, CEC4) */
+    const char *mixed = "é中😀文";
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_gbk(mixed, (uint32_t)strlen(mixed), out, &n);
+
+    const uint8_t exp[] = {0xA8, 0xA6, 0xD6, 0xD0, 0xCE, 0xC4};
+    bool          same  = (n == sizeof(exp));
+    for (size_t i = 0; i < sizeof(exp) && same; i++)
+        if ((uint8_t)out[i] != exp[i]) same = false;
+    CHECK_MSG(same, "é中😀文 应为 A8A6 D6D0 CEC4（6 字节），得到 out=%u", (unsigned)n);
+
+    /* emoji 在开头：它后面的文字一个字都不能丢 */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_gbk("😀中文", (uint32_t)strlen("😀中文"), out, &n);
+    CHECK_MSG(n == 4 && (uint8_t)out[0] == 0xD6 && (uint8_t)out[1] == 0xD0 &&
+                  (uint8_t)out[2] == 0xCE && (uint8_t)out[3] == 0xC4,
+              "😀中文 应为 D6D0 CEC4，得到 out=%u", (unsigned)n);
+}
+
+/** 输入长度切在多字节中间：干净停止、不越界（本套件跑在 ASan 下） */
+static void case_cvt_truncated(void)
+{
+    TEST_BEGIN("cvt：长度切在多字节中间——不越界、只返回已转换部分");
+
+    char     out[64];
+    uint32_t n = 0;
+
+    /* "中重" 只喂 5 字节：中(3) 完整，重(3) 只到 2 → 只输出 D6D0 */
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_gbk("中重", 5, out, &n);
+    CHECK_MSG(n == 2 && (uint8_t)out[0] == 0xD6 && (uint8_t)out[1] == 0xD0,
+              "截在第二个汉字中间应只输出 D6D0，得到 out=%u", (unsigned)n);
+
+    /* "重" 只喂 2 字节：整字不足 → 一个字节都不输出 */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_gbk("重", 2, out, &n);
+    CHECK_MSG(n == 0, "不足一个完整 3 字节序列应输出 0，得到 out=%u", (unsigned)n);
+
+    /* 同类下溢：GBK→UTF8 喂半个 GBK 码；UTF8→UNICODE 喂半个序列 */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_gbk_to_utf8("\xD6", 1, out, &n);
+    CHECK_MSG(n == 0, "半个 GBK 码应干净停止，得到 out=%u", (unsigned)n);
+
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_unicode("\xE4\xB8", 2, out, &n);
+    CHECK_MSG(n == 0, "不足一个 UTF-8 序列应干净停止，得到 out=%u", (unsigned)n);
+
+    /* 2 字节序列正确解码（é = U+00E9，小端 E9 00） */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_utf8_to_unicode("é", 2, out, &n);
+    CHECK_MSG(n == 2 && (uint8_t)out[0] == 0xE9 && (uint8_t)out[1] == 0x00,
+              "é 应解出 U+00E9（小端 E9 00），得到 out=%u", (unsigned)n);
+}
+
+/** 长 UTF-8 输入经 app_render：输入夹到 text_buf，输出不越界且排版合理 */
+static void case_long_utf8_clamp(void)
+{
+    TEST_BEGIN("长 UTF-8 输入经 app_render：输入夹到 text_buf，不越界且排版合理");
+
+    static char src[3 * 110];
+    for (int i = 0; i < 110; i++) memcpy(src + 3 * i, "中", 3);
+    const uint32_t len = 3 * 110; /* 330B > sizeof(text_buf)=256 */
+
+    app_render_style_t st = {.h_align = APP_RENDER_ALIGN_LEFT_UP};
+
+    /* 目标足够宽：256B 输入里含 85 个完整 3 字节汉字（第 256 字节是半截，丢弃） */
+    cap_reset(1400, 64);
+    render_text_utf8(src, (uint16_t)len, 0, 0, 1400, 64, &st);
+    CHECK_MSG(count_bitmaps() == 85, "应画 85 个汉字（256B/3 向下取整），得到 %d",
+              count_bitmaps());
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -480,6 +589,9 @@ int main(void)
     case_out_of_bounds();
     case_clamp_partial();
     case_many_lines();
+    case_cvt_mixed();
+    case_cvt_truncated();
+    case_long_utf8_clamp();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

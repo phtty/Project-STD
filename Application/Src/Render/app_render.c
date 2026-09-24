@@ -370,8 +370,15 @@ static inline void _render_text(const app_render_cfg_t *cfg)
     uint16_t text_len;
 
     if (cfg->text_enc == APP_FONT_ENC_UTF8) {
+        /* 输入先夹到 text_buf 容量：切在多字节中间由 cvt_utf8_to_gbk 的"干净停止"兜住。
+         * 输出再复核后才赋给 text_len —— 依 cvt_utf8_to_gbk 的不变量①（输出 ≤ 输入）
+         * 与②（调用方保证目的缓冲 ≥ 输入字节数），两条互相咬合、缺一不可：
+         * 不先夹输入，②对不上；不复核输出，①一旦回归就直接越界写 text_buf。 */
+        uint32_t in_len = cfg->len;
+        if (in_len > sizeof(text_buf)) in_len = sizeof(text_buf);
         uint32_t out_len = sizeof(text_buf);
-        cvt_utf8_to_gbk(cfg->text, cfg->len, text_buf, &out_len);
+        cvt_utf8_to_gbk(cfg->text, in_len, text_buf, &out_len);
+        if (out_len > sizeof(text_buf)) out_len = sizeof(text_buf); /* 复核后才赋值 */
         text_len = (uint16_t)out_len;
     } else {
         uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);

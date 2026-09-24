@@ -53,6 +53,11 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     app_ahmq_cmd_display_t *para = (app_ahmq_cmd_display_t *)buff;
     char gbk_txt[128]   = {0};
 
+    /* ⚠️ 本调用点目前被排除出所有板的构建（Makefile 的 SRC_EXCLUDE / EIDE exclude），
+       且这里有两个未修的缺陷：未把输入长度夹到 sizeof(gbk_txt)（≤128），gbk_len 也未
+       初始化。cvt_utf8_to_gbk 不接收容量参数（toSize 是纯输出），**重新启用前必须**先把
+       输入夹到 ≤128、再初始化 gbk_len，否则协议文本超长会越界写 gbk_txt。
+       见 text_cvt.h 的 cvt_utf8_to_gbk 不变量。 */
     cvt_utf8_to_gbk(para->text, length - sizeof(app_ahmq_cmd_display_t), gbk_txt, &gbk_len);
     app_render(&(app_render_cfg_t){
         .type = APP_RENDER_TYPE_TEXT,

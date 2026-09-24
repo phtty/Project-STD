@@ -42,14 +42,19 @@ void cvt_str_to_hex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *
  *  @param from GBK 码
  *  @param fromSize GBK 码字节数
  *  @param[out] to 接收 UTF-8 码的缓冲
- *  @param[out] toSize 输出：写入的字节数 */
+ *  @param[out] toSize 输出：写入的字节数
+ *  @note 剩余字节不足一个 GBK 码时干净停止（保留已转换部分）；输出最大为输入的 1.5 倍
+ *        （每 2 字节 GBK 最多转 3 字节 UTF-8），调用方缓冲需相应足够。 */
 void cvt_gbk_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
 
 /** @brief UTF-8 码转 GBK 码
  *  @param from UTF-8 码
  *  @param fromSize UTF-8 码字节数
  *  @param[out] to 接收 GBK 码的缓冲
- *  @param[out] toSize 输出：写入的字节数 */
+ *  @param[out] toSize 输出：写入的字节数
+ *  @note 两条不变量：① 良构输入下**输出字节数 ≤ 输入字节数**（ASCII 1→1、2 字节→2、
+ *        3 字节→2、4 字节→0，4 字节码位跳过该字、不丢后续文字）；② 调用方必须保证
+ *        `to` 缓冲容量 ≥ fromSize（`toSize` 是纯输出，不带容量语义）。 */
 void cvt_utf8_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
 
 /** @brief GBK 码转双字节 UNICODE 码（小端存储）
@@ -70,7 +75,9 @@ void cvt_unicode_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t 
  *  @param from UTF-8 码
  *  @param fromSize UTF-8 码字节数
  *  @param[out] to 接收 UNICODE 码的缓冲
- *  @param[out] toSize 输出：写入的字节数 */
+ *  @param[out] toSize 输出：写入的字节数
+ *  @note 4 字节码位（> 0xFFFF）16 位放不下，跳过该字并继续后面的文字；
+ *        `fromSize` 剩余不足一个完整序列时干净停止。 */
 void cvt_utf8_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize);
 
 /** @brief 双字节 UNICODE 码（小端）转 UTF-8 码
