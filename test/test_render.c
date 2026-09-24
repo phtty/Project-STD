@@ -583,6 +583,60 @@ static void case_cvt_truncated(void)
               "é 应解出 U+00E9（小端 E9 00），得到 out=%u", (unsigned)n);
 }
 
+/** GBK↔UNICODE 与 UNICODE→UTF8（P4 同批残留）：
+ *  半个码位干净停止、字节序/输出语义保持不变 */
+static void case_cvt_unicode_bounds(void)
+{
+    TEST_BEGIN("cvt：GBK/UNICODE 互转与 UNICODE→UTF8 —— 半个码位干净停止、语义不变");
+
+    char     out[64];
+    uint32_t n = 0;
+
+    /* GBK "A中"(41 D6D0) → UNICODE 小端：ASCII 也占 2B（41 00），中=U+4E2D → 2D 4E */
+    memset(out, 0xEE, sizeof(out));
+    cvt_gbk_to_unicode("\x41\xD6\xD0", 3, out, &n);
+    const uint8_t exp_g2u[] = {0x41, 0x00, 0x2D, 0x4E};
+    bool          ok        = (n == sizeof(exp_g2u));
+    for (size_t i = 0; i < sizeof(exp_g2u) && ok; i++)
+        if ((uint8_t)out[i] != exp_g2u[i]) ok = false;
+    CHECK_MSG(ok, "A中 → 41 00 2D 4E，得到 %u 字节", (unsigned)n);
+
+    /* 半个 GBK 码：一个字节都不输出（此前 fromSize -= 2 会无符号下溢） */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_gbk_to_unicode("\xD6", 1, out, &n);
+    CHECK_MSG(n == 0, "半个 GBK 码应干净停止，得到 %u", (unsigned)n);
+
+    /* UNICODE 小端 "中A"(2D 4E 41 00) → GBK 大端 D6D0 + 'A'(1 字节) */
+    memset(out, 0xEE, sizeof(out));
+    cvt_unicode_to_gbk("\x2D\x4E\x41\x00", 4, out, &n);
+    const uint8_t exp_u2g[] = {0xD6, 0xD0, 0x41};
+    ok                      = (n == sizeof(exp_u2g));
+    for (size_t i = 0; i < sizeof(exp_u2g) && ok; i++)
+        if ((uint8_t)out[i] != exp_u2g[i]) ok = false;
+    CHECK_MSG(ok, "中A → D6 D0 41，得到 %u 字节", (unsigned)n);
+
+    /* 半个 UTF-16 码元：干净停止 */
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_unicode_to_gbk("\x2D", 1, out, &n);
+    CHECK_MSG(n == 0, "半个 UNICODE 码元应干净停止，得到 %u", (unsigned)n);
+
+    /* UNICODE 小端 "中é"(2D 4E E9 00) → UTF-8：E4B8AD + C3A9 */
+    memset(out, 0xEE, sizeof(out));
+    cvt_unicode_to_utf8("\x2D\x4E\xE9\x00", 4, out, &n);
+    const uint8_t exp_u2u8[] = {0xE4, 0xB8, 0xAD, 0xC3, 0xA9};
+    ok                       = (n == sizeof(exp_u2u8));
+    for (size_t i = 0; i < sizeof(exp_u2u8) && ok; i++)
+        if ((uint8_t)out[i] != exp_u2u8[i]) ok = false;
+    CHECK_MSG(ok, "中é → E4 B8 AD C3 A9，得到 %u 字节", (unsigned)n);
+
+    n = 0;
+    memset(out, 0xEE, sizeof(out));
+    cvt_unicode_to_utf8("\x2D", 1, out, &n);
+    CHECK_MSG(n == 0, "半个 UNICODE 码元转 UTF-8 应干净停止，得到 %u", (unsigned)n);
+}
+
 /** 长 UTF-8 输入经 app_render：输入夹到 text_buf，输出不越界且排版合理 */
 static void case_long_utf8_clamp(void)
 {
@@ -638,6 +692,7 @@ int main(void)
     case_many_lines();
     case_cvt_mixed();
     case_cvt_truncated();
+    case_cvt_unicode_bounds();
     case_long_utf8_clamp();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

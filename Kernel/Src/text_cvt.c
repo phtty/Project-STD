@@ -248,27 +248,38 @@ void cvt_utf8_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *to
 
 /**
  * @brief GBK码转双字节UNICODE码
+ *
+ * 逐字符转换：ASCII 占 1 字节、GBK 双字节先查表转 UNICODE；**输出一律 2 字节**
+ * （ASCII 也补成 16 位小端，高位 0）—— 语义与修复前逐字一致，**调用方须保证目的
+ * 缓冲 ≥ 2 × 输入字节数**。字节读取经 `uint8_t`，不依赖 `char` 的符号性
+ * （host 的 signed 与 ARM 的 unsigned 得到同一结果）；剩余不足一个 GBK 码
+ * （ASCII 需 1 字节、GBK 需 2 字节）时干净停止，保留已转换的部分，
+ * 不再发生 `fromSize -= 2` 的无符号下溢。
  */
 void cvt_gbk_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t size = 0;
-    uint16_t unicode;
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-    while (fromSize != 0) {
+    while (pos < fromSize) {
 
-        if (*from < 0X80) { // ASCII
-            unicode = *from++;
-            fromSize--;
+        uint32_t b0 = src[pos];
+        uint16_t unicode;
 
-        } else {                                         // GBK
-            unicode = (from[0] << 8) | from[1];          // GBK为大端模式
-            unicode = _cvt_convert_encoding(unicode, 1); // to unicode
-            from += 2;
-            fromSize -= 2;
+        if (b0 < 0X80U) { // ASCII
+            unicode = (uint16_t)b0;
+            pos += 1;
+
+        } else {                                             // GBK
+            if (fromSize - pos < 2U) break;                  // 半个 GBK 码：干净停止
+            unicode = (uint16_t)((b0 << 8) | src[pos + 1U]); // GBK为大端模式
+            unicode = _cvt_convert_encoding(unicode, 1);     // to unicode
+            pos += 2;
         }
 
-        to[0] = unicode & 0XFF;        // 小端模式存储UNICODE码
-        to[1] = (unicode >> 8) & 0XFF; // 小端模式存储UNICODE码
+        to[0] = (char)(unicode & 0XFF);        // 小端模式存储UNICODE码
+        to[1] = (char)((unicode >> 8) & 0XFF); // 小端模式存储UNICODE码
         to += 2;
         size += 2;
     }
@@ -277,28 +288,33 @@ void cvt_gbk_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t 
 
 /**
  * @brief 双字节UNICODE码转GBK码
+ *
+ * 输入按**小端 16 位**逐字读：先判余量、不足 2 字节即干净停止（UTF-16 码元不能是
+ * 半个），不再发生 `fromSize -= 2` 的无符号下溢。字节读取经 `uint8_t`，不依赖
+ * `char` 的符号性。ASCII 输出 1 字节、其余查表后输出 2 字节（大端）。
  */
 void cvt_unicode_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t size = 0;
-    uint16_t unicode;
-    while (fromSize != 0) {
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-        unicode = (from[1] << 8) | from[0]; // unicode码为小端模式
-        if (unicode < 0X80) {               // ASCII
-            *to++ = unicode;
+    while (fromSize - pos >= 2U) {
+
+        uint16_t unicode = (uint16_t)((src[pos + 1U] << 8) | src[pos]); // unicode码为小端模式
+        pos += 2;
+
+        if (unicode < 0X80U) { // ASCII
+            *to++ = (char)unicode;
             size++;
 
         } else {                                         // NOT ASCII
             unicode = _cvt_convert_encoding(unicode, 0); // TO GBK
-            to[0]   = (unicode >> 8) & 0XFF;             // 大端模式存储GBK码
-            to[1]   = unicode & 0XFF;                    // 大端模式存储GBK码
+            to[0]   = (char)((unicode >> 8) & 0XFF);     // 大端模式存储GBK码
+            to[1]   = (char)(unicode & 0XFF);            // 大端模式存储GBK码
             size += 2;
             to += 2;
         }
-
-        from += 2;
-        fromSize -= 2;
     }
     *toSize = size;
 }
@@ -335,46 +351,51 @@ void cvt_utf8_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t
 
 /**
  * @brief 双字节UNICODE码转三字节UTF8码
+ *
+ * 输入按**小端 16 位**逐字读：先判余量、不足 2 字节即干净停止（保留已转换的部分），
+ * 不再发生 `fromSize -= 2` 的无符号下溢。字节读取经 `uint8_t`，不依赖 `char` 的
+ * 符号性；输出 UTF-8 的编码写法与 `cvt_gbk_to_utf8` 一致。
  */
 void cvt_unicode_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t unicode;
-    uint32_t utfcode;
-    uint32_t size = 0;
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-    while (fromSize != 0) {
-        unicode = (from[1] << 8) | from[0]; // unicode码为小端模式
-        from += 2;
-        fromSize -= 2;
+    while (fromSize - pos >= 2U) {
+
+        uint32_t unicode = (uint32_t)((src[pos + 1U] << 8) | src[pos]); // unicode码为小端模式
+        uint32_t utfcode;
+        pos += 2;
 
         if (unicode < 0X80U) // ASCII
         {
-            *to = unicode;
+            *to = (char)unicode;
             to++;
             size++;
         } else // NOT ASCII
         {
             if (unicode >= 0X80U && unicode <= 0X7FFU) {
                 utfcode = 0XC080U | (unicode & 0X3FU) | (((unicode >> 6) & 0X1FU) << 8);
-                to[1]   = utfcode & 0XFF;
-                to[0]   = (utfcode >> 8) & 0XFF;
+                to[1]   = (char)(utfcode & 0XFF);
+                to[0]   = (char)((utfcode >> 8) & 0XFF);
                 to += 2;
                 size += 2;
 
             } else if (unicode >= 0X800U && unicode <= 0XFFFFU) {
                 utfcode = 0XE08080U | (unicode & 0X3FU) | (((unicode >> 6) & 0X3FU) << 8) | (((unicode >> 12) & 0XFU) << 16);
-                to[2]   = utfcode & 0XFF;
-                to[1]   = (utfcode >> 8) & 0XFF;
-                to[0]   = (utfcode >> 16) & 0XFF;
+                to[2]   = (char)(utfcode & 0XFF);
+                to[1]   = (char)((utfcode >> 8) & 0XFF);
+                to[0]   = (char)((utfcode >> 16) & 0XFF);
                 to += 3;
                 size += 3;
 
             } else if (unicode >= 0X10000U && unicode <= 0X10FFFFU) {
                 utfcode = 0XF0808080U | ((unicode & 0X3FU)) | (((unicode >> 6) & 0X3FU) << 8) | (((unicode >> 12) & 0X3FU) << 16) | (((unicode >> 18) & 0X7U) << 24);
-                to[3]   = utfcode & 0XFF;
-                to[2]   = (utfcode >> 8) & 0XFF;
-                to[1]   = (utfcode >> 16) & 0XFF;
-                to[0]   = (utfcode >> 24) & 0XFF;
+                to[3]   = (char)(utfcode & 0XFF);
+                to[2]   = (char)((utfcode >> 8) & 0XFF);
+                to[1]   = (char)((utfcode >> 16) & 0XFF);
+                to[0]   = (char)((utfcode >> 24) & 0XFF);
                 to += 4;
                 size += 4;
 
