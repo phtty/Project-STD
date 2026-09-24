@@ -610,6 +610,15 @@ TEST_RS485_SLOTS_SRCS = \
 	test/stubs/os_stub.c \
 	Kernel/Src/ring_buffer.c
 
+# 套件十六：文字渲染区域契约（白盒：TU-include app_render.c）
+# 用例直接 include 生产源码本体（s_line_widths / s_render_font 等是 file-static），
+# 渲染目标换成套件内的 capture 目标（记录每次 fill/bitmap 的几何）。
+# text_cvt.c 供 UTF8→GBK 转换；os_stub 供持久化路径引用的互斥量原语。
+TEST_RENDER_SRCS = \
+	test/test_render.c \
+	test/stubs/os_stub.c \
+	Kernel/Src/text_cvt.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
@@ -618,7 +627,7 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_casc_frame $(TEST_BUILD)/test_screen_layout \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
-      $(TEST_BUILD)/test_rs485_slots
+      $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -663,6 +672,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── RS485 收包槽位 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rs485_slots
+	@echo ""
+	@echo "──── 文字渲染区域契约 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_render
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -744,6 +756,15 @@ $(TEST_BUILD)/test_rs485_slots: $(TEST_RS485_SLOTS_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RS485_SLOTS_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_rs485_slots: Application/Src/Channel/app_rs485.c
+
+# 用例 TU-include 了 app_render.c，它不在 SRCS 里，必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RENDER_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_render: Application/Src/Render/app_render.c \
+	Application/Inc/Render/app_render.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

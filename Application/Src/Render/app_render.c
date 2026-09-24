@@ -278,6 +278,17 @@ static void _render_init(void)
 }
 sw_app_initcall(_render_init);
 
+/* ================================================================
+ *  文字渲染的几何辅助
+ *
+ *  **区域契约**：目标区域 = `[x, x+w) × [y, y+h)`。x/y 是左上角，w/h 是**尺寸**
+ *  （不是绝对右/下边界）；"够不够放"一律用 `x+w` / `y+h` 判。越界语义是**裁剪**：
+ *  `_render_text` 入口先把区域夹到目标几何（`_rt()->rows` 是宽、`cols` 是高），
+ *  之后所有布局与判断都用夹取后的局部 rx/ry/rw/rh。直写实屏与逻辑画布两路走的是
+ *  同一段代码，故同一 cfg + 同一目标几何 → 逐位相同。**两层各自防御**：入口自己
+ *  夹，不指望 `_rt()` 的绘制原语侧兜底。
+ * ================================================================ */
+
 /* ---- 行宽测量缓冲 ----
  *
  * 行数上限 = **源文本字节数 + 1**：每个源字节最多起一个新行（`\n` 占一个字节起一行；
@@ -299,28 +310,61 @@ static inline bool _line_push(uint16_t *line_count, uint16_t line_w)
     return true;
 }
 
-/** @brief 读一行宽度：下标越界（测量被上限截断时）取最后一个已测量值 */
-static inline uint16_t _line_width_at(uint16_t line_idx, uint16_t line_count)
+/** @brief 区域内逐行水平对齐的起点：line_w ≥ 区域宽时偏移取 0（防无符号下溢） */
+static inline uint16_t _line_origin_x(uint16_t rx, uint16_t rw, const app_render_style_t *style,
+                                      uint16_t line_w)
 {
-    if (line_count == 0) return 0;
-    if (line_idx >= line_count) line_idx = (uint16_t)(line_count - 1);
-    return s_line_widths[line_idx];
+    if (style && line_w < rw) {
+        if (style->h_align == APP_RENDER_ALIGN_CENTER) return (uint16_t)(rx + (rw - line_w) / 2);
+        if (style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN) return (uint16_t)(rx + (rw - line_w));
+    }
+    return rx;
+}
+
+/** @brief 进入下一行：回区域左、下移一行高，并做**高度门禁**
+ *
+ *  自动换行与显式 `\n` **共用本门禁**：下一行放不下就返回 false，调用方**停止绘制**
+ *  （已画的行保留）——即"放得下几行显示几行、不画半截字"。 */
+static inline bool _line_advance(uint16_t *cur_x, uint16_t *cur_y, uint16_t *line_idx,
+                                 const app_render_style_t *style, uint16_t line_h, uint16_t rx,
+                                 uint16_t rw, uint16_t region_bottom, uint16_t line_count)
+{
+    (*line_idx)++;
+    if (*line_idx >= line_count) return false; /* 没有已测量的行：越界读不得发生 */
+    *cur_y = (uint16_t)(*cur_y + line_h);
+    if ((uint32_t)*cur_y + line_h > region_bottom) return false; /* 下一行放不下 */
+    *cur_x = _line_origin_x(rx, rw, style, s_line_widths[*line_idx]);
+    return true;
 }
 
 /* ---- 渲染分支（各功能静态内联）---- */
 
 static inline void _render_text(const app_render_cfg_t *cfg)
 {
-    // 入口参数检查
+    /* 入口参数检查：w/h 是**尺寸**，0 尺寸不画 */
     if (!cfg->text || !cfg->len)
         return;
     if (!cfg->w || !cfg->h)
         return;
 
+    /* ---- 入口夹取：把请求区域 [x, x+w) × [y, y+h) 夹到目标几何 ----
+     * `_rt()->rows` 是目标宽、`cols` 是高。夹取后所有布局与判断一律用局部
+     * rx/ry/rw/rh，不再碰 cfg->x/w/h。`!s_render_display` 已在 app_render()
+     * 门口拦下，这里几何为 0 同样不画。 */
+    const app_render_target_t *rt = _rt();
+    if (!rt->rows || !rt->cols) return; /* 目标几何为 0：不画 */
+
+    uint16_t rx = cfg->x, ry = cfg->y, rw = cfg->w, rh = cfg->h;
+    if (rx >= rt->rows || ry >= rt->cols) return; /* 起点已在目标之外 */
+    if ((uint32_t)rx + rw > rt->rows) rw = (uint16_t)(rt->rows - rx);
+    if ((uint32_t)ry + rh > rt->cols) rh = (uint16_t)(rt->cols - ry);
+    if (!rw || !rh) return;
+
     app_font_key_t gbk_key = {.size = cfg->font_size, .type = cfg->font_type, .charset = APP_FONT_ENC_GBK};
     app_font_key_t asc_key = {.size = gbk_key.size, .type = gbk_key.type, .charset = APP_FONT_ENC_ASCII};
 
-    uint16_t cur_x = cfg->x, cur_y = cfg->y;
+    uint16_t cur_x;
+    uint16_t cur_y;
     static uint8_t font_buf[512];
     static char text_buf[256];
     uint16_t text_len;
@@ -345,8 +389,8 @@ static inline void _render_text(const app_render_cfg_t *cfg)
         gbk_key.size = flib->sizes[0];
         asc_key.size = flib->sizes[0];
         for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
-            uint16_t h_res = cfg->h / flib->sizes[i];
-            uint16_t w_res = cfg->w / (flib->sizes[i] / 2);
+            uint16_t h_res = rh / flib->sizes[i];
+            uint16_t w_res = rw / (flib->sizes[i] / 2);
             if (text_len <= h_res * w_res) {
                 gbk_key.size = flib->sizes[i];
                 asc_key.size = flib->sizes[i];
@@ -372,20 +416,20 @@ static inline void _render_text(const app_render_cfg_t *cfg)
 
     /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
     uint16_t line_count = 0;
-    uint16_t line_w    = 0;
-    uint16_t line_h    = gbk_key.size;
-    uint16_t char_pos  = 0;
+    uint16_t line_w     = 0;
+    uint16_t line_h     = gbk_key.size;
+    uint16_t char_pos   = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
             if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
-            line_w                    = 0;
+            line_w = 0;
             char_pos++;
             continue;
         }
 
         uint8_t glyph_w;
-        if (text_buf[char_pos] >= 0x20 && text_buf[char_pos] <= 0x7F) {
+        if ((uint8_t)text_buf[char_pos] >= 0x20 && (uint8_t)text_buf[char_pos] <= 0x7F) {
             glyph_w = _glyph_width_px(asc_key);
             char_pos += 1;
         } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
@@ -396,10 +440,10 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             continue;
         }
 
-        if (line_w + glyph_w > cfg->w) {
+        if ((uint32_t)line_w + glyph_w > rw) {
             if (cfg->style && cfg->style->word_wrap) {
                 if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
-                line_w                    = glyph_w;
+                line_w = glyph_w;
             }
             /* 不换行：超出部分截断，不计入宽度 */
         } else {
@@ -408,60 +452,48 @@ static inline void _render_text(const app_render_cfg_t *cfg)
     }
     (void)_line_push(&line_count, line_w); /* 最后一行 */
 
-    /* ---- 垂直对齐 ---- */
+    /* ---- 高度门禁（首行）----
+     * 首行都放不下（区域高 < 单行字高）→ 整段不画。自动换行与显式 `\n` 之后
+     * 的行由 _line_advance 用**同一门禁**逐行判断（放得下几行显示几行）。 */
+    if (rh < line_h) return;
+
+    /* ---- 垂直对齐：在区域内算 ---- */
     uint16_t text_h = line_count * line_h;
+    cur_y = ry;
     if (cfg->style) {
-        if (cfg->style->v_align == APP_RENDER_ALIGN_CENTER && cfg->h > text_h)
-            cur_y += (cfg->h - text_h) / 2;
-        else if (cfg->style->v_align == APP_RENDER_ALIGN_RIGHT_DOWN && cfg->h > text_h)
-            cur_y += (cfg->h - text_h);
+        if (cfg->style->v_align == APP_RENDER_ALIGN_CENTER && rh > text_h)
+            cur_y = (uint16_t)(ry + (rh - text_h) / 2);
+        else if (cfg->style->v_align == APP_RENDER_ALIGN_RIGHT_DOWN && rh > text_h)
+            cur_y = (uint16_t)(ry + (rh - text_h));
     }
+    const uint16_t region_bottom = (uint16_t)(ry + rh);
 
     /* ---- 渲染趟：逐行独立水平对齐 ---- */
-    uint8_t line_idx       = 0;
-    uint16_t line_origin_x = cfg->x;
-    if (cfg->style) {
-        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
-        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
-    }
-    cur_x    = line_origin_x;
+    uint16_t line_idx = 0;
+    cur_x    = _line_origin_x(rx, rw, cfg->style, s_line_widths[0]);
     char_pos = 0;
 
     while (char_pos < text_len) {
         if (text_buf[char_pos] == '\n') {
-            cur_y += line_h;
-            line_idx++;
-            line_origin_x = cfg->x;
-            if (cfg->style) {
-                if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                    line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
-                else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                    line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
-            }
-            cur_x = line_origin_x;
+            /* 显式 `\n` 与自动换行共用同一高度门禁：放不下就停止绘制（已画的保留） */
+            if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw, region_bottom,
+                               line_count))
+                return;
             char_pos++;
             continue;
         }
 
-        if (text_buf[char_pos] >= 0x20 && text_buf[char_pos] <= 0x7F) {
+        if ((uint8_t)text_buf[char_pos] >= 0x20 && (uint8_t)text_buf[char_pos] <= 0x7F) {
             uint8_t glyph_w = _glyph_width_px(asc_key);
 
-            if (cur_x + glyph_w > cfg->w) {
+            if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
                 if (cfg->style && cfg->style->word_wrap) {
-                    cur_y += line_h;
-                    line_idx++;
-                    line_origin_x = cfg->x;
-                    if (cfg->style) {
-                        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
-                        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
-                    }
-                    cur_x = line_origin_x;
-                    if (cur_y + line_h > cfg->h) return;
+                    /* 自动换行：续行回区域左；下一行放不下则停止 */
+                    if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
+                                       region_bottom, line_count))
+                        return;
                 } else {
+                    /* 不换行：逐字形整体截断，保留已放下的 */
                     char_pos++;
                     continue;
                 }
@@ -473,31 +505,22 @@ static inline void _render_text(const app_render_cfg_t *cfg)
                否则后面的字会挤到同一个位置叠着画 */
             if (_char_addr(&asc_key, &ch_byte, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
-                const app_render_target_t *rt = _rt();
                 rt->fill(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, DEV_DISPLAY_COLOR_BLACK);
                 rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
             }
 
-            cur_x += glyph_w;
+            cur_x = (uint16_t)(cur_x + glyph_w);
             char_pos++;
             continue;
 
         } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
             uint8_t glyph_w = _glyph_width_px(gbk_key);
 
-            if (cur_x + glyph_w > cfg->w) {
+            if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
                 if (cfg->style && cfg->style->word_wrap) {
-                    cur_y += line_h;
-                    line_idx++;
-                    line_origin_x = cfg->x;
-                    if (cfg->style) {
-                        if (cfg->style->h_align == APP_RENDER_ALIGN_CENTER)
-                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count)) / 2;
-                        else if (cfg->style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN)
-                            line_origin_x += (cfg->w - _line_width_at(line_idx, line_count));
-                    }
-                    cur_x = line_origin_x;
-                    if (cur_y + line_h > cfg->h) return;
+                    if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
+                                       region_bottom, line_count))
+                        return;
                 } else {
                     char_pos += 2;
                     continue;
@@ -508,12 +531,11 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             uint32_t addr;
             if (_char_addr(&gbk_key, gbk_ch, &addr)) {
                 dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
-                const app_render_target_t *rt = _rt();
                 rt->fill(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, DEV_DISPLAY_COLOR_BLACK);
                 rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
             }
 
-            cur_x += glyph_w;
+            cur_x = (uint16_t)(cur_x + glyph_w);
             char_pos += 2;
             continue;
 
