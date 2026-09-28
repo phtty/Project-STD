@@ -1006,16 +1006,34 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data, uint16_t data_len)
                 (void)ctrl; // TODO: dev_alarm_ctrl(ctrl)
                 break;
             }
-            case APP_LDI_DEVICE_VMS: { // E9H → VMS (01H)
-                /* VMS 定长 payload 6B（含 func_type）+ 变长 text：mod_len 不够定长部分
-                   就别读 ctx，直接判失败 —— 否则读帧外 / 文本长度下溢。 */
-                if (mod_len < sizeof(app_ldi_module_head_t) + sizeof(app_ldi_ctrl_vms_t)) {
+            case APP_LDI_DEVICE_VMS: { // E9H → VMS (01H 显示控制 / 02H 清屏)
+                app_ldi_ctrl_vms_t *ctrl = (app_ldi_ctrl_vms_t *)payload;
+                const uint8_t       func = ctrl->device_func_type;
+
+                /* **按 func 分级校验最小长度**（回归：02H 清屏的 module =
+                   head(2) + func(1) + clear_type(1) = **4**，曾用一刀切的
+                   `≥ head+sizeof(vms)=8` 把整条清屏拒掉 → 现场"02H 完全不响应"）。
+                   `_ldi_ctrl_payload_size` 与线上布局同源，优先复用它，保持一致：
+                     · 01H 显示控制：定长 payload 5B → 最小 2+1+5 = 8（含 text 变长）
+                     · 02H 清屏：    定长 payload 1B → 最小 2+1+1 = 4
+                   未知 func 返回 0 → 拒绝（下面 need 仍成立但 payload_size==0 单判）。 */
+                const uint8_t payload_size = _ldi_ctrl_payload_size(APP_LDI_DEVICE_VMS, func);
+                const uint8_t need =
+                    (uint8_t)(sizeof(app_ldi_module_head_t) + 1U + payload_size); /* head+func+定长 */
+                if (payload_size == 0 || mod_len < need) {
                     out->status = 0x01;
                     break;
                 }
-                app_ldi_ctrl_vms_t *ctrl = (app_ldi_ctrl_vms_t *)payload;
-                app_vms_ctrl(ctrl, (uint16_t)(mod_len - sizeof(app_ldi_ctrl_vms_t) -
-                                              sizeof(app_ldi_module_head_t)));
+
+                if (func == 0x02) {
+                    /* 清屏：**无文本**，第二参必须传 0 —— 别把 `mod_len-8` 的
+                       下溢值（mod_len 只有 4）传进去，那会让清屏按巨量文本去排版。 */
+                    app_vms_ctrl(ctrl, 0);
+                } else {
+                    /* 01H：文本长度 = mod_len - head - func - 定长 payload */
+                    app_vms_ctrl(ctrl, (uint16_t)(mod_len - sizeof(app_ldi_module_head_t) - 1U -
+                                                  payload_size));
+                }
                 break;
             }
             case APP_LDI_DEVICE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)

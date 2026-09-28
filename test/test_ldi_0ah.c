@@ -38,6 +38,9 @@
 #include "app_ldi.h"
 #include "app_ldi_cfg.h"
 #include "app_fold.h"
+#include "app_vms_ctrl.h"
+#include "app_render.h"
+#include "dev_display.h" /* app_vms_ctrl 的帧接口桩要用到类型（test/stubs 的影子头） */
 #include "dev_cfg_record.h"
 #include "dev_flash_int.h"
 
@@ -214,11 +217,86 @@ bool pl_rtc_set_timestamp(pl_rtc_handle_t h, uint32_t ts)
     return true;
 }
 void pl_system_reset(void) {}
-void app_vms_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+
+/* ---- app_vms_ctrl：**链接生产实现**（Makefile 的 TEST_LDI_0AH_SRCS）----
+ *
+ * 本套件要覆盖"1BH 帧 → _ldi_cmd_ctrl → 清屏渲染真的发生"这条分派链路，所以不再
+ * 用空的 app_vms_ctrl 替身：把渲染目标换成 capture、并给 app_vms_ctrl 依赖的最小桩
+ * （整屏几何 / 折叠矩形 / 光传感器 / dev_display 帧接口 / 板级字库）。这样断言的是
+ * **真实的** FILL 颜色与区域，而不是"替身被调用了"。 */
+typedef struct {
+    app_render_type_t   type;
+    uint16_t            x, y, w, h;
+    dev_display_color_t color;
+    uint16_t            len;
+} vms_render_rec_t;
+
+#define VMS_REC_MAX (8)
+static vms_render_rec_t s_vms_recs[VMS_REC_MAX];
+static int              s_vms_rec_cnt;
+
+void app_render(const app_render_cfg_t *cfg)
 {
-    (void)ctx;
-    (void)text_len;
+    if (s_vms_rec_cnt >= VMS_REC_MAX) return;
+    vms_render_rec_t *r = &s_vms_recs[s_vms_rec_cnt++];
+    r->type  = cfg->type;
+    r->x     = cfg->x;
+    r->y     = cfg->y;
+    r->w     = cfg->w;
+    r->h     = cfg->h;
+    r->color = cfg->color;
+    r->len   = (cfg->type == APP_RENDER_TYPE_TEXT) ? cfg->len : 0U;
 }
+
+/* 整屏几何 / 折叠上半矩形：02H 清屏的区域口径依赖它们 */
+static uint16_t s_scr_w    = 48;
+static uint16_t s_scr_h    = 32;
+static uint16_t s_fold0_y  = 0;
+static uint16_t s_fold0_h  = 16;
+
+uint16_t app_screen_rows(void) { return s_scr_w; }
+uint16_t app_screen_cols(void) { return s_scr_h; }
+
+bool app_fold_rect(uint8_t half, uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
+{
+    if (half != 0U) return false; /* 本套件只需要上半 */
+    if (x) *x = 0;
+    if (y) *y = s_fold0_y;
+    if (w) *w = s_scr_w;
+    if (h) *h = s_fold0_h;
+    return true;
+}
+
+uint8_t app_fold_split_lines(const char *text, uint16_t len, const char **line0, uint16_t *len0,
+                             const char **line1, uint16_t *len1)
+{
+    if (line0) *line0 = text;
+    if (len0) *len0 = len;
+    if (line1) *line1 = text + len;
+    if (len1) *len1 = 0;
+    return 1;
+}
+
+void app_light_sensor_resume(void) {}
+void app_light_sensor_set_fixed(uint8_t level) { (void)level; }
+
+/* dev_display 帧接口：app_vms_ctrl 只用它压制"清+画"中间态，本套件不校验帧 */
+dev_display_t *dev_display_get(void) { return nullptr; }
+void           dev_display_frame_begin(dev_display_t *d) { (void)d; }
+void           dev_display_frame_end(dev_display_t *d) { (void)d; }
+
+/* 板级字库：app_vms_ctrl 的 _map_font_size 按 sizes[] 升序落档；给最小合成 */
+static const app_font_size_t s_sizes[] = {APP_FONT_SIZE_16, APP_FONT_SIZE_32};
+
+const app_font_lib_desc_t g_board_font_lib = {
+    .lib            = nullptr,
+    .lib_count      = 0,
+    .sizes          = s_sizes,
+    .size_count     = sizeof(s_sizes) / sizeof(s_sizes[0]),
+    .asc_index_base = 0x20,
+    .gb_index       = APP_FONT_IDX_KIND_GB2312,
+    .total_bytes    = 0,
+};
 
 /* ---- 折叠模块替身（app_ldi_cmd.c 的 EA 分支会调）----
  *
@@ -889,6 +967,118 @@ static void case_init_device_num_overflow(void)
 }
 
 /* ================================================================
+ *  1BH E9（VMS）：分派层 → 渲染的完整链路
+ *
+ *  回归背景：`_ldi_cmd_ctrl` 曾用一刀切 `mod_len ≥ head+sizeof(vms)=8` 校验，
+ *  把 02H 清屏（module 只有 4B）整条拒掉 → 现场清屏完全不响应。这里构造**真正的
+ *  1BH 帧**走分派层，断言真实的 FILL 颜色/区域（不是替身参数）。
+ * ================================================================ */
+
+/** @brief 构造 1BH E9 02H 清屏 module：head(2)+func(1)+clear_type(1)=4 */
+static void make_ctrl_vms_clear(uint8_t clear_type)
+{
+    memset(s_ctrl_buf, 0, sizeof s_ctrl_buf);
+    uint8_t *p = s_ctrl_buf + sizeof(app_ldi_ctrl_head_t);
+    *p++       = 1; /* device_num */
+    *p++       = 0;
+    *p++       = 4; /* mod_len = head(2)+func(1)+clear_type(1) */
+    *p++       = APP_LDI_DEVICE_VMS;
+    *p++       = 1;    /* device_index */
+    *p++       = 0x02; /* func = 清屏 */
+    *p++       = clear_type;
+}
+#define CTRL_VMS_CLEAR_DATA_LEN (sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U)
+
+/** @brief 构造 1BH E9 01H 显示控制 module：head(2)+sizeof(vms)(6)+text；返回 DATA 长度 */
+static uint16_t make_ctrl_vms_display(const char *text, uint8_t textlen)
+{
+    memset(s_ctrl_buf, 0, sizeof s_ctrl_buf);
+    uint8_t *p       = s_ctrl_buf + sizeof(app_ldi_ctrl_head_t);
+    uint16_t mod_len = (uint16_t)(sizeof(app_ldi_module_head_t) + sizeof(app_ldi_ctrl_vms_t) + textlen);
+    *p++             = 1; /* device_num */
+    *p++             = (uint8_t)(mod_len >> 8);
+    *p++             = (uint8_t)mod_len;
+    *p++             = APP_LDI_DEVICE_VMS;
+    *p++             = 1;    /* device_index */
+    *p++             = 0x01; /* func = 显示控制 */
+    *p++             = 0x01; /* font_color 绿 */
+    *p++             = 0x00; /* font_size 自适应 */
+    *p++             = 0x00; /* font_line */
+    *p++             = 0x00; /* keep_time 永久 */
+    *p++             = 0x01; /* format 居中 */
+    memcpy(p, text, textlen);
+    return (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + mod_len);
+}
+
+/** 02H 清屏走分派层（FLAT）：FILL=映射色、整屏语义、status=00H */
+static void case_ctrl_vms_clear_flat_dispatch(void)
+{
+    TEST_BEGIN("1BH E9 02H 清屏走分派层（FLAT）：FILL=映射色、整屏、status=00H");
+    env_setup();
+    s_fold_mode_stub = APP_FOLD_MODE_FLAT;
+    s_vms_rec_cnt    = 0;
+    s_tx_count       = 0;
+
+    make_ctrl_vms_clear(0x02); /* 02H → s_clear_color_map[2] = GREEN */
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)CTRL_VMS_CLEAR_DATA_LEN);
+
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "02H 清屏 status 应 00H，得到 0x%02X", ctrl_rsp_status());
+    CHECK_MSG(s_vms_rec_cnt == 1, "应恰好一次渲染，得到 %d", s_vms_rec_cnt);
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].type == APP_RENDER_TYPE_FILL, "应为一次 FILL");
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].color == DEV_DISPLAY_COLOR_GREEN,
+              "clear_type=02H 应映射为绿，得到 %u",
+              s_vms_rec_cnt ? (unsigned)s_vms_recs[0].color : 99U);
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].w == 0 && s_vms_recs[0].h == 0,
+              "FLAT 清屏应为整屏（w=h=0 全屏语义）");
+}
+
+/** 02H 清屏走分派层（变体2）：只清上半，颜色=映射色 */
+static void case_ctrl_vms_clear_variant2_dispatch(void)
+{
+    TEST_BEGIN("1BH E9 02H 清屏走分派层（变体2）：只清上半、FILL=映射色");
+    env_setup();
+    s_fold_mode_stub = APP_FOLD_MODE_FOLD_E9_EA;
+    s_scr_w = 48;
+    s_scr_h = 32;
+    s_fold0_y = 0;
+    s_fold0_h = 16;
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+
+    make_ctrl_vms_clear(0x04); /* 04H → BLUE */
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)CTRL_VMS_CLEAR_DATA_LEN);
+
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "02H 清屏 status 应 00H，得到 0x%02X", ctrl_rsp_status());
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].type == APP_RENDER_TYPE_FILL,
+              "应为一次 FILL，得到 %d", s_vms_rec_cnt);
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].color == DEV_DISPLAY_COLOR_BLUE,
+              "clear_type=04H 应映射为蓝，得到 %u",
+              s_vms_rec_cnt ? (unsigned)s_vms_recs[0].color : 99U);
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].x == 0 && s_vms_recs[0].y == 0 &&
+                  s_vms_recs[0].w == 48 && s_vms_recs[0].h == 16,
+              "变体2 应只清上半 48x16@(0,0)");
+}
+
+/** 01H 显示控制走分派层（FLAT）：文本长度正确传出、渲染出 TEXT、status=00H */
+static void case_ctrl_vms_display_dispatch(void)
+{
+    TEST_BEGIN("1BH E9 01H 显示控制走分派层：TEXT 渲染、status=00H");
+    env_setup();
+    s_fold_mode_stub = APP_FOLD_MODE_FLAT;
+    s_vms_rec_cnt    = 0;
+    s_tx_count       = 0;
+
+    uint16_t data_len = make_ctrl_vms_display("AB", 2);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, data_len);
+
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "01H 显示控制 status 应 00H，得到 0x%02X", ctrl_rsp_status());
+    bool text_ok = false;
+    for (int i = 0; i < s_vms_rec_cnt; i++)
+        if (s_vms_recs[i].type == APP_RENDER_TYPE_TEXT && s_vms_recs[i].len == 2) text_ok = true;
+    CHECK_MSG(text_ok, "应渲染出一笔 len=2 的 TEXT（文本长度按 mod_len 正确传出）");
+}
+
+/* ================================================================
  *  0BH 设备参数配置：**增量 upsert**（与上位机软件方的既定约定：一条一个编码）
  * ================================================================ */
 
@@ -1008,6 +1198,9 @@ int main(void)
         {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
         {"EA 显示控制：拒绝路径 → CtlStatus=01H", case_ctrl_ea_reject},
         {"EA 显示控制：未声明 EA 不进处理", case_ctrl_ea_unconfigured},
+        {"E9 02H 清屏走分派层（FLAT）", case_ctrl_vms_clear_flat_dispatch},
+        {"E9 02H 清屏走分派层（变体2 只清上半）", case_ctrl_vms_clear_variant2_dispatch},
+        {"E9 01H 显示控制走分派层", case_ctrl_vms_display_dispatch},
         {"EA 显示控制：非折叠不动作（保持 TODO）", case_ctrl_ea_flat_untouched},
     };
 

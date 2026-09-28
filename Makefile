@@ -532,6 +532,7 @@ TEST_LDI_0AH_SRCS = \
 	Device/Storage/dev_cfg_record.c \
 	Application/Src/app_cfg_sched.c \
 	Application/Src/LDI/app_ldi.c \
+	Application/Src/LDI/app_vms_ctrl.c \
 	Kernel/Src/crc_utils.c \
 	Kernel/Src/ring_buffer.c
 
