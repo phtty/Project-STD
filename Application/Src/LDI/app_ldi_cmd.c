@@ -377,21 +377,51 @@ static void _ldi_send_response(app_ccb_t *ccb, uint8_t rsp_cmd, uint8_t seq, con
     _ldi_send_response(ccb, rsp_cmd, seq, nullptr, 0)
 
 // ============================================================================
+// 1AH/1BH 响应缓冲：**定长、不按帧内字段开 VLA**
+// ============================================================================
+//
+// 背景：1AH/1BH 的 A1H/B1H 响应要逐模块回 status，模块数来自请求帧的 device_num
+// （网络可控）。旧实现 `uint8_t buf[sizeof(rsp) + device_num * sizeof(module)]` 是
+// **按帧字段定长的 VLA** —— 一条 ~1440B 的 DATA 帧能让 device_num≈120，VLA ≈2.6KB，
+// 而 LDI 任务栈只有 1536B → 栈溢出。改为"编译期上界 + 静态缓冲"。
+//
+// 上界取 16：协议未规定模块数上限，正常工具发 7 个、本机配置容量 6，16 留 >2× 余量；
+// 夹取到它之后响应帧仍远小于 LDI_TX_BUF_SIZE(512)。缓冲**只给 LDI 任务用**：
+// handler 仅在 `app_ldi_task` 里串行调用（逐帧处理完才取下一帧），无并发。
+#define LDI_INIT_MAX_MODULES (16U) /**< A1H 响应的模块数上界 */
+#define LDI_CTRL_MAX_MODULES (16U) /**< B1H 响应的模块数上界 */
+
+/** 1AH 请求每个 module 的最小字节数：head(device_type+device_index, 2B) + version(1B)。
+    当前无 custom_init，解析按此步进（与 _ldi_cmd_init 的 ptr 推进一致）。 */
+#define LDI_INIT_REQ_MODULE_MIN (3U)
+
+/** 1BH 请求每个 module 子帧的最小字节数：head(2B) + DeviceFuncType(1B) */
+#define LDI_CTRL_MODULE_MIN (3U)
+
+/** E1H 单 module 的编译期最大字节数（head + 最大 payload；blocker/display 的 vendor 11B） */
+#define LDI_CFG_MODULE_MAX_BYTES (sizeof(app_ldi_module_head_t) + sizeof(app_ldi_cfg_barrier_t))
+
+static uint8_t s_init_rsp_buf[sizeof(ldi_init_rsp_t) + LDI_INIT_MAX_MODULES * sizeof(ldi_init_rsp_module_t)];
+static uint8_t s_ctrl_rsp_buf[sizeof(ldi_ctrl_rsp_t) + LDI_CTRL_MAX_MODULES * sizeof(ldi_ctrl_rsp_payload_t)];
+static uint8_t s_rep_config_rsp_buf[sizeof(ldi_rep_config_rsp_t) +
+                                    APP_FLASH_LDI_MAX_MODULES * LDI_CFG_MODULE_MAX_BYTES];
+
+// ============================================================================
 // 命令处理函数声明与分发表
 // ============================================================================
 
-static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_reboot(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_rep_ip(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_rep_config(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_rsp_report(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_update(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_init(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_rep_func(app_ccb_t *ccb, void *data);
-static void _ldi_cmd_search(app_ccb_t *ccb, void *data);
+static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_reboot(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_rep_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_rep_config(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_rsp_report(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_update(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_init(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_rep_func(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _ldi_cmd_search(app_ccb_t *ccb, void *data, uint16_t data_len);
 
 /**
  * LDI 命令处理函数分发表
@@ -424,8 +454,16 @@ const app_ldi_cmd_handler_fn_t g_ldi_cmd_table[] = {
  * 上位机→设备, 用于出厂配置模式下设置设备网络参数.
  * data 指向 cmd_set_ip_t 结构.
  */
-static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
+    /* 帧内字段先按长度校验：不够就是畸形/截断帧，回失败而不是读到帧外 */
+    if (data_len < sizeof(cmd_set_ip_t)) {
+        ldi_status_rsp_t rsp = {.status = 0x01};
+        app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_IP_RSP);
+        LDI_RESPOND(ccb, APP_LDI_CMD_TYPE_SET_IP_RSP, g_ldi_ctx.rsp_seq, rsp);
+        return;
+    }
+
     cmd_set_ip_t *info = data;
 
     memcpy(g_ldi_ctx.cfg.device_ip, info->net.device_ip, sizeof(g_ldi_ctx.cfg.device_ip));
@@ -460,11 +498,21 @@ static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data)
  * 运行期读的是 RAM 镜像，**改完立即生效、无需重启**（下次上电由
  * `app_ldi_ctx_init` 从 Flash 读回同一张表）。
  */
-static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
+    /* 头部 + device_num 都读不到就没有可解析的请求 */
+    if (data_len < sizeof(app_ldi_req_head_t) + 1U) {
+        ldi_status_rsp_t rsp = {.status = 0x01};
+        app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_PARA_RSP);
+        LDI_RESPOND(ccb, APP_LDI_CMD_TYPE_SET_PARA_RSP, g_ldi_ctx.rsp_seq, rsp);
+        return;
+    }
+
     app_ldi_req_head_t *head = (app_ldi_req_head_t *)data;
     uint8_t *ptr         = (uint8_t *)data + sizeof(app_ldi_req_head_t);
     uint8_t device_num   = *ptr++;
+    /* module 序列可用的字节数（逐模块推进时递减）—— 每个 module 的读取都必须落在其中 */
+    uint16_t remaining = (uint16_t)(data_len - sizeof(app_ldi_req_head_t) - 1U);
 
     /* 0BH 请求头部含车道编号和验证信息，与 module 数据一同持久化 */
     memcpy(g_ldi_ctx.cfg.lane_hex, head->lane_code, sizeof(g_ldi_ctx.cfg.lane_hex));
@@ -487,10 +535,18 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
     bool    result = true;
     uint8_t n      = 0;
     for (uint8_t i = 0; i < device_num; i++) {
+        if (remaining < sizeof(app_ldi_module_head_t)) { /* 连 module 头都不全 */
+            result = false;
+            break;
+        }
         app_ldi_module_head_t *mod = (app_ldi_module_head_t *)ptr;
         uint8_t mod_size = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
 
         if (mod_size == 0 || mod->device_type == 0) { /* 未知类型 / 空槽 */
+            result = false;
+            break;
+        }
+        if (mod_size > remaining) { /* 帧里没带够这个 module 的字节 */
             result = false;
             break;
         }
@@ -504,6 +560,7 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
         n++;
 
         ptr += mod_size;
+        remaining = (uint16_t)(remaining - mod_size);
     }
 
     if (result) {
@@ -527,9 +584,10 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
  * 上位机→设备, 可按模块指定重启范围.
  * 本 MCU 不支持部分重启，发送响应帧后执行整机软件复位.
  */
-static void _ldi_cmd_reboot(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_reboot(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)data;
+    (void)data_len;
 
     /* D0H 响应: head(20B) + ErrorCode(1B), 简单 ACK */
     ldi_status_rsp_t rsp = {.status = 0x00};
@@ -546,9 +604,10 @@ static void _ldi_cmd_reboot(app_ccb_t *ccb, void *data)
  * 上位机→设备, DATA 域仅含通用头部, 无额外字段.
  * 设备收到后应回复当前设备的网络配置 (D1H).
  */
-static void _ldi_cmd_rep_ip(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_rep_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)data; /* 本条无入参，报文内容全部由本机状态拼出 */
+    (void)data_len;
     uint8_t buf[sizeof(ldi_status_rsp_t) + sizeof(ldi_network_info_t)] = {0};
 
     ldi_status_rsp_t *rsp   = (ldi_status_rsp_t *)buf;
@@ -578,47 +637,38 @@ static void _ldi_cmd_rep_ip(app_ccb_t *ccb, void *data)
  * 各设备 module 结构与 0BH 设置时一致, vendor 长度为 2~10 字节不等,
  * 通过 _ldi_cfg_module_size() 查表确定.
  */
-static void _ldi_cmd_rep_config(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_rep_config(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)data;
+    (void)data_len;
 
-    // 计算所有 module 的总字节数，确定局部 buffer 大小
-    uint16_t modules_len = 0;
-    for (uint8_t i = 0; i < g_ldi_ctx.cfg.module_count; i++) {
-        uint8_t mod_size = _ldi_cfg_module_size((app_ldi_device_t)g_ldi_ctx.cfg.modules[i].device_type);
-        // Flash 最多存 10 字节 vendor，超出则按 Flash 实际容量截断
-        uint8_t vendor_len = mod_size - sizeof(app_ldi_module_head_t);
-        if (vendor_len > sizeof(g_ldi_ctx.cfg.modules[i].vendor))
-            vendor_len = sizeof(g_ldi_ctx.cfg.modules[i].vendor);
-        modules_len += sizeof(app_ldi_module_head_t) + vendor_len;
-    }
-
-    // 用局部 buffer 组装完整 DATA（含 head）
-    // 避免与 tx_buf 的 DATA 写入区重叠
-    uint8_t buf[sizeof(ldi_rep_config_rsp_t) + modules_len];
-    ldi_rep_config_rsp_t *rsp = (ldi_rep_config_rsp_t *)buf;
-
+    /* 用**定长静态缓冲**组装完整 DATA（含 head）：避免与 tx_buf 的 DATA 写入区重叠，
+       也不再按运行期长度开 VLA。上界 = 配置容量 × 单模块最大字节（见 s_rep_config_rsp_buf）。 */
+    ldi_rep_config_rsp_t *rsp = (ldi_rep_config_rsp_t *)s_rep_config_rsp_buf;
     app_ldi_build_rsp_head(&rsp->head, APP_LDI_CMD_TYPE_GET_PARA_RSP);
-    rsp->device_num = g_ldi_ctx.cfg.module_count;
 
     uint8_t *dst = rsp->modules;
+    uint8_t  n   = 0;
     for (uint8_t i = 0; i < g_ldi_ctx.cfg.module_count; i++) {
-        app_flash_ldi_module_cfg_t *mod = &g_ldi_ctx.cfg.modules[i];
+        const app_flash_ldi_module_cfg_t *mod = &g_ldi_ctx.cfg.modules[i];
 
-        // module 公共头
+        // 查表确定 vendor 实际长度；未知类型返回 0 —— 跳过，别用回绕的长度去读 vendor
+        uint8_t mod_size = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
+        if (mod_size < sizeof(app_ldi_module_head_t)) continue;
+        uint8_t vendor_len = (uint8_t)(mod_size - sizeof(app_ldi_module_head_t));
+        // Flash 最多存 10 字节 vendor，超出则按 Flash 实际容量截断
+        if (vendor_len > sizeof(mod->vendor)) vendor_len = sizeof(mod->vendor);
+
+        // module 公共头 + vendor
         *dst++ = mod->device_type;
         *dst++ = mod->device_index;
-
-        // 查表确定 vendor 实际长度
-        uint8_t mod_size   = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
-        uint8_t vendor_len = mod_size - sizeof(app_ldi_module_head_t);
-        if (vendor_len > sizeof(mod->vendor))
-            vendor_len = sizeof(mod->vendor);
-
         memcpy(dst, mod->vendor, vendor_len);
         dst += vendor_len;
+        n++;
     }
 
+    rsp->device_num      = n;
+    uint16_t modules_len = (uint16_t)(dst - rsp->modules);
     LDI_RESPOND_EX(ccb,APP_LDI_CMD_TYPE_GET_PARA_RSP, g_ldi_ctx.rsp_seq, *rsp, modules_len);
 }
 
@@ -627,9 +677,12 @@ static void _ldi_cmd_rep_config(app_ccb_t *ccb, void *data)
  *
  * 设备确认上位机收到的上报
  */
-static void _ldi_cmd_rsp_report(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_rsp_report(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;
+
+    /* 帧内字段先按长度校验：连头部都不全就别读时间戳 */
+    if (data_len < sizeof(app_ldi_req_head_t)) return;
 
     /* C0H 是服务器对设备上报的应答，每 5 秒一次，携带服务器 Unix 时间戳，用于定期对钟 */
     app_ldi_req_head_t *head = (app_ldi_req_head_t *)data;
@@ -657,18 +710,23 @@ static void _ldi_cmd_rsp_report(app_ccb_t *ccb, void *data)
  */
 void app_ldi_send_cert_req(app_ccb_t *ccb)
 {
-    uint8_t buf[sizeof(app_ldi_cert_req_t) + DEVICE_NUM * 2];
+    /* 缓冲按**模块配置容量**定长，不是编译期 DEVICE_NUM(2) —— module_count 现在由
+       Flash 配置决定、可到 APP_FLASH_LDI_MAX_MODULES(6)，按 2 开栈数组会溢出。 */
+    uint8_t buf[sizeof(app_ldi_cert_req_t) + APP_FLASH_LDI_MAX_MODULES * 2];
     app_ldi_cert_req_t *req = (app_ldi_cert_req_t *)buf;
 
-    app_ldi_build_rsp_head(&req->head, APP_LDI_CMD_TYPE_CERT_REQ);
-    req->device_num = g_ldi_ctx.cfg.module_count;
+    uint8_t n = g_ldi_ctx.cfg.module_count;
+    if (n > APP_FLASH_LDI_MAX_MODULES) n = APP_FLASH_LDI_MAX_MODULES;
 
-    for (uint8_t i = 0; i < g_ldi_ctx.cfg.module_count; i++) {
+    app_ldi_build_rsp_head(&req->head, APP_LDI_CMD_TYPE_CERT_REQ);
+    req->device_num = n;
+
+    for (uint8_t i = 0; i < n; i++) {
         req->devices[i].device_type  = g_ldi_ctx.cfg.modules[i].device_type;
         req->devices[i].device_index = g_ldi_ctx.cfg.modules[i].device_index;
     }
 
-    uint16_t payload_len = sizeof(app_ldi_cert_req_t) + g_ldi_ctx.cfg.module_count * 2;
+    uint16_t payload_len = (uint16_t)(sizeof(app_ldi_cert_req_t) + n * 2);
     uint8_t seq          = _ldi_next_rpt_seq();
     _ldi_send_response(ccb, APP_LDI_CMD_TYPE_CERT_REQ, seq, (const uint8_t *)req, payload_len);
 }
@@ -681,8 +739,12 @@ void app_ldi_send_cert_req(app_ccb_t *ccb)
  */
 void app_ldi_send_state_rpt(app_ccb_t *ccb)
 {
-    uint8_t buf[sizeof(app_ldi_state_rpt_t) + DEVICE_NUM * sizeof(app_ldi_device_info_t)];
+    /* 同 cert_req：按模块配置容量定长，防 module_count > DEVICE_NUM 时溢出 */
+    uint8_t buf[sizeof(app_ldi_state_rpt_t) + APP_FLASH_LDI_MAX_MODULES * sizeof(app_ldi_device_info_t)];
     app_ldi_state_rpt_t *rpt = (app_ldi_state_rpt_t *)buf;
+
+    uint8_t n = g_ldi_ctx.cfg.module_count;
+    if (n > APP_FLASH_LDI_MAX_MODULES) n = APP_FLASH_LDI_MAX_MODULES;
 
     app_ldi_build_rsp_head(&rpt->head, APP_LDI_CMD_TYPE_STA_RPT_REQ);
 
@@ -695,7 +757,7 @@ void app_ldi_send_state_rpt(app_ccb_t *ccb)
 
     rpt->running_status = 0x00; /* 暂填正常 */
     rpt->connect_status = 0x00; /* 暂填已连接 */
-    rpt->device_num     = g_ldi_ctx.cfg.module_count;
+    rpt->device_num     = n;
 
     /* 从 RTC 反推当前日期，转为 BCD 码（每字节 = 十位<<4 | 个位）
      * 例: 2026-05-13 → {0x20, 0x26, 0x05, 0x13} */
@@ -709,7 +771,7 @@ void app_ldi_send_state_rpt(app_ccb_t *ccb)
         (uint8_t)((tm->tm_mday / 10 << 4) | (tm->tm_mday % 10)),           // 日期 BCD
     };
 
-    for (uint8_t i = 0; i < g_ldi_ctx.cfg.module_count; i++) {
+    for (uint8_t i = 0; i < n; i++) {
         rpt->devices[i].device_type      = g_ldi_ctx.cfg.modules[i].device_type;
         rpt->devices[i].device_index     = g_ldi_ctx.cfg.modules[i].device_index;
         rpt->devices[i].available_status = 0x00; /* 暂填可用 */
@@ -724,7 +786,8 @@ void app_ldi_send_state_rpt(app_ccb_t *ccb)
         memset(rpt->devices[i].reserved, 0, sizeof(rpt->devices[i].reserved));
     }
 
-    uint16_t payload_len = sizeof(app_ldi_state_rpt_t) + g_ldi_ctx.cfg.module_count * sizeof(app_ldi_device_info_t);
+    uint16_t payload_len =
+        (uint16_t)(sizeof(app_ldi_state_rpt_t) + n * sizeof(app_ldi_device_info_t));
     uint8_t seq          = _ldi_next_rpt_seq();
     _ldi_send_response(ccb, APP_LDI_CMD_TYPE_STA_RPT_REQ, seq, (const uint8_t *)rpt, payload_len);
 }
@@ -734,9 +797,12 @@ void app_ldi_send_state_rpt(app_ccb_t *ccb)
  *
  * 设备收到上位机回复的验证结果
  */
-static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;
+
+    /* E0H 响应：head(20B) + error_code(1B) —— 短帧直接丢弃，不读时间戳/结果 */
+    if (data_len < sizeof(app_ldi_req_head_t) + 1U) return;
 
     /* E0H 响应：head(20B) + error_code(1B)，同步时间戳并检查认证结果 */
     app_ldi_req_head_t *head = (app_ldi_req_head_t *)data;
@@ -756,10 +822,11 @@ static void _ldi_cmd_rsp_cert(app_ccb_t *ccb, void *data)
  *
  * 升级不在本协议中实现，这里只定义桩函数
  */
-static void _ldi_cmd_update(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_update(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;
     (void)data;
+    (void)data_len;
 }
 
 /**
@@ -775,20 +842,38 @@ static void _ldi_cmd_update(app_ccb_t *ccb, void *data)
  *
  * 当前无个性化初始化内容, 每个响应 module 固定 5 字节.
  */
-static void _ldi_cmd_init(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_init(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
-    uint8_t *ptr       = (uint8_t *)data + sizeof(app_ldi_req_head_t);
-    uint8_t device_num = *ptr++;
+    /* 连 head + device_num 都读不到就无法构造有意义的 A1H */
+    if (data_len < sizeof(app_ldi_req_head_t) + 1U) return;
 
-    // 每个响应 module 定长 10 字节 (custom_init_len=0)
-    uint8_t buf[sizeof(ldi_init_rsp_t) + device_num * sizeof(ldi_init_rsp_module_t)];
-    ldi_init_rsp_t *rsp = (ldi_init_rsp_t *)buf;
+    uint8_t *ptr      = (uint8_t *)data + sizeof(app_ldi_req_head_t);
+    uint8_t requested = *ptr++;
+
+    /* 能解析的模块数 = min(请求值, 帧内实际能容纳, 编译期上界) ——
+       三者夹取后才可作为循环边界（device_num 是帧内值，网络可控，不能直接用）。
+       **超界语义 = 夹取**（不是拒帧）：A1H 逐个回 status，响应里的 `device_num`
+       回填夹取后的值，主机据此知道实际处理了几个、多出来的没被表态 —— 自洽。
+       夹取时置 all_ok=false：截断的请求不能算"初始化成功"。 */
+    const uint16_t frame_cap = (uint16_t)((data_len - sizeof(app_ldi_req_head_t) - 1U) /
+                                          LDI_INIT_REQ_MODULE_MIN);
+    uint8_t        n         = requested;
+    if (n > frame_cap) n = (uint8_t)frame_cap;
+    if (n > LDI_INIT_MAX_MODULES) n = LDI_INIT_MAX_MODULES;
+    if (n < requested) {
+        printf("[ldi/init] 1AH device_num=%u 超出可处理范围（帧容 %u、上界 %u），夹取为 %u\n",
+               (unsigned)requested, (unsigned)frame_cap, (unsigned)LDI_INIT_MAX_MODULES,
+               (unsigned)n);
+    }
+
+    // 每个响应 module 定长 10 字节 (custom_init_len=0)；缓冲定长（见 LDI_INIT_MAX_MODULES）
+    ldi_init_rsp_t *rsp = (ldi_init_rsp_t *)s_init_rsp_buf;
     app_ldi_build_rsp_head(&rsp->head, APP_LDI_CMD_TYPE_INIT_RSP);
-    rsp->device_num = device_num;
+    rsp->device_num = n;
 
-    bool all_ok                    = true;
+    bool all_ok                    = (n == requested); /* 夹取过就不算成功 */
     ldi_init_rsp_module_t *dst_mod = (ldi_init_rsp_module_t *)rsp->modules;
-    for (uint8_t i = 0; i < device_num; i++) {
+    for (uint8_t i = 0; i < n; i++) {
         app_ldi_module_head_t *req_mod = (app_ldi_module_head_t *)ptr;
 
         // 响应 module 头部
@@ -835,29 +920,46 @@ static void _ldi_cmd_init(app_ccb_t *ccb, void *data)
  * 每个 mod 子帧 = DeviceType | DeviceIndex | DeviceFuncType | 功能payload
  * 响应 B1H: ctrl_head(24B) | device_num(1B) | N × ldi_ctrl_rsp_payload_t(4B)
  */
-static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     // 1BH 使用 24 字节 ctrl_head (UnixTimestamp 8B)，不沿用 app_ldi_req_head_t
-    uint8_t *ptr       = (uint8_t *)data + sizeof(app_ldi_ctrl_head_t);
-    uint8_t device_num = *ptr++;
+    if (data_len < sizeof(app_ldi_ctrl_head_t) + 1U) return; /* 读不到 device_num */
 
-    uint8_t buf[sizeof(ldi_ctrl_rsp_t) + device_num * sizeof(ldi_ctrl_rsp_payload_t)];
-    ldi_ctrl_rsp_t *rsp = (ldi_ctrl_rsp_t *)buf;
+    uint8_t *ptr      = (uint8_t *)data + sizeof(app_ldi_ctrl_head_t);
+    uint8_t requested = *ptr++;
+    uint16_t remaining = (uint16_t)(data_len - sizeof(app_ldi_ctrl_head_t) - 1U);
+
+    ldi_ctrl_rsp_t *rsp = (ldi_ctrl_rsp_t *)s_ctrl_rsp_buf;
     app_ldi_build_ctrl_rsp_head(&rsp->head, APP_LDI_CMD_TYPE_CTRL_RSP);
-    rsp->device_num = device_num;
 
-    for (uint8_t i = 0; i < device_num; i++) {
+    /* 夹到编译期上界；循环内再逐个用 mod_len/remaining 校验（见下） */
+    uint8_t n = requested;
+    if (n > LDI_CTRL_MAX_MODULES) n = LDI_CTRL_MAX_MODULES;
+
+    uint8_t processed = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        if (remaining < 2U) break; // 连 mod_len 都读不到
         // mod_len: module 子帧总长 (含 DeviceType + DeviceIndex + payload)，大端序
         uint16_t mod_len = ((uint16_t)ptr[0] << 8) | ptr[1];
         ptr += 2;
+        remaining = (uint16_t)(remaining - 2U);
+
+        /* mod_len 必须容得下 head+func_type，且不超出剩余 DATA ——
+           否则下面按 mod_len 读子帧就会读到帧外。非法即停止解析。 */
+        if (mod_len < LDI_CTRL_MODULE_MIN || mod_len > remaining) {
+            printf("[ldi/ctrl] 1BH 第 %u 个 module 长度 %u 非法/超出帧（剩余 %u），停止解析\n",
+                   (unsigned)i, (unsigned)mod_len, (unsigned)remaining);
+            break;
+        }
 
         app_ldi_module_head_t *mod = (app_ldi_module_head_t *)ptr;
         uint8_t *payload       = ptr + sizeof(app_ldi_module_head_t);
+        ldi_ctrl_rsp_payload_t *out = &rsp->modules[processed];
 
         // 填充响应 module 公共字段
-        rsp->modules[i].device_type      = mod->device_type;
-        rsp->modules[i].device_index     = mod->device_index;
-        rsp->modules[i].device_func_type = *payload;
+        out->device_type      = mod->device_type;
+        out->device_index     = mod->device_index;
+        out->device_func_type = *payload;
 
         // 校验 device_type 是否在设备注册表中
         bool found = false;
@@ -867,7 +969,7 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
                 break;
             }
         }
-        rsp->modules[i].status = found ? 0x00 : 0x01;
+        out->status = found ? 0x00 : 0x01;
 
         // 解析设备特定 payload，当前仅做结构校验，硬件控制后续实现
         switch (mod->device_type) {
@@ -896,17 +998,29 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
                 break;
             }
             case APP_LDI_DEVICE_VMS: { // E9H → VMS (01H)
+                /* VMS 定长 payload 6B（含 func_type）+ 变长 text：mod_len 不够定长部分
+                   就别读 ctx，直接判失败 —— 否则读帧外 / 文本长度下溢。 */
+                if (mod_len < sizeof(app_ldi_module_head_t) + sizeof(app_ldi_ctrl_vms_t)) {
+                    out->status = 0x01;
+                    break;
+                }
                 app_ldi_ctrl_vms_t *ctrl = (app_ldi_ctrl_vms_t *)payload;
-                app_vms_ctrl(ctrl, mod_len - sizeof(app_ldi_ctrl_vms_t) - sizeof(app_ldi_module_head_t));
+                app_vms_ctrl(ctrl, (uint16_t)(mod_len - sizeof(app_ldi_ctrl_vms_t) -
+                                              sizeof(app_ldi_module_head_t)));
                 break;
             }
             case APP_LDI_DEVICE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)
+                /* payload 定长 2B（func_type + color）：mod_len 不够就别读 ctrl->color */
+                if (mod_len < sizeof(app_ldi_module_head_t) + sizeof(app_ldi_ctrl_canopy_light_t)) {
+                    out->status = 0x01;
+                    break;
+                }
                 app_ldi_ctrl_canopy_light_t *ctrl = (app_ldi_ctrl_canopy_light_t *)payload;
                 /* 分派层按"device_type 在不在注册表"填了 found，但**未配置的 EA 也会进
                    这个 switch**（分派层不看是否真声明）——这里必须再查一次，只有本机
                    真的声明了 EA 才处理；未声明则保持失败状态。 */
                 if (app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 0xFF) {
-                    rsp->modules[i].status = 0x01;
+                    out->status = 0x01;
                     break;
                 }
                 /* 只有变体2（几何折叠 ∧ 已声明 EA）才有"下半屏 = EA 预置图"这回事。
@@ -926,7 +1040,7 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
                            (unsigned)ctrl->color);
                     ok = false;
                 }
-                rsp->modules[i].status = ok ? 0x00 : 0x01;
+                out->status = ok ? 0x00 : 0x01;
                 break;
             }
             case APP_LDI_DEVICE_FOG_LIGHT: { // EBH 雾灯控制 (01H)
@@ -944,9 +1058,15 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
         }
 
         ptr += mod_len;
+        remaining = (uint16_t)(remaining - mod_len);
+        processed++;
     }
 
-    LDI_RESPOND_EX(ccb,APP_LDI_CMD_TYPE_CTRL_RSP, g_ldi_ctx.rsp_seq, *rsp, device_num * sizeof(ldi_ctrl_rsp_payload_t));
+    /* device_num 回填**实际处理的模块数**（夹取/中途停止时少于请求值），
+       与后面的 modules 数量自洽 */
+    rsp->device_num = processed;
+    LDI_RESPOND_EX(ccb,APP_LDI_CMD_TYPE_CTRL_RSP, g_ldi_ctx.rsp_seq, *rsp,
+                   processed * sizeof(ldi_ctrl_rsp_payload_t));
 }
 
 /**
@@ -955,10 +1075,11 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
  * 设备→上位机, 主动上报含 N 个功能模块信息的数据帧.
  * 上位机处理完成后回复 C1H (上报确认).
  */
-static void _ldi_cmd_rep_func(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_rep_func(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;
     (void)data;
+    (void)data_len;
 }
 
 /**
@@ -966,10 +1087,11 @@ static void _ldi_cmd_rep_func(app_ccb_t *ccb, void *data)
  *
  * 广播回复 0x12: CmdType(1) + IP(4大端) + Port(2大端) + Gateway(4大端) + Mask(4大端) + ErrCode(1)
  */
-static void _ldi_cmd_search(app_ccb_t *ccb, void *data)
+static void _ldi_cmd_search(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;
     (void)data;
+    (void)data_len;
 
     ldi_search_rsp_t rsp;
     rsp.cmd_type = APP_LDI_CMD_TYPE_SEARCH_RSP;

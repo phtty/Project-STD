@@ -330,8 +330,15 @@ void app_ldi_task(void *argument)
             if (cmd_index_table[i] == req_head->cmd_type)
                 idx = i;
 
+        /* DATA 域字节数（不含 8B 帧头与 2B CRC）。探针已校验 ≤ LDI_DATA_MAX，
+           这里传给处理器用于**校验帧内字段**：device_num 之类是帧内值，不能当
+           数组长度/循环边界直接用（见 app_ldi_cmd.c 各处理器的长度夹取）。 */
+        const uint16_t data_len =
+            (uint16_t)(((uint32_t)ldi_frame->len[0] << 24) | ((uint32_t)ldi_frame->len[1] << 16) |
+                       ((uint32_t)ldi_frame->len[2] << 8) | (uint32_t)ldi_frame->len[3]);
+
         if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_ldi_cmd_table[idx](msg->ccb, ldi_frame->data_crc);
+            g_ldi_cmd_table[idx](msg->ccb, ldi_frame->data_crc, data_len);
     }
 }
 

@@ -413,6 +413,45 @@ static int ctrl_rsp_status(void)
     return s_tx_buf[off];
 }
 
+/* ---- 1AH 初始化请求构造 / A1H 响应读取 ---- */
+
+static uint8_t s_init_buf[128];
+
+/** @brief 构造 1AH 请求：帧里声明 device_num 个模块，实际只写 n_in_buf 个（可制造"超出"） */
+static void make_init(uint8_t device_num, const uint8_t *types, uint8_t n_in_buf)
+{
+    memset(s_init_buf, 0, sizeof s_init_buf);
+    uint8_t *p = s_init_buf + sizeof(app_ldi_req_head_t);
+    *p++       = device_num;
+    for (uint8_t i = 0; i < n_in_buf; i++) {
+        *p++ = types[i];    /* device_type */
+        *p++ = (uint8_t)(i + 1); /* device_index */
+        *p++ = 0x00;        /* version */
+    }
+}
+
+/** @brief 请求 DATA 域的实际长度（head + device_num + n_in_buf×3B） */
+static uint16_t init_buf_len(uint8_t n_in_buf)
+{
+    return (uint16_t)(sizeof(app_ldi_req_head_t) + 1U + (uint16_t)n_in_buf * 3U);
+}
+
+/** @brief 从捕获到的 A1H 响应里取 device_num（夹取后应回填实际处理数） */
+static int init_rsp_device_num(void)
+{
+    if (s_tx_count == 0) return -1;
+    return s_tx_buf[8 + sizeof(app_ldi_req_head_t)];
+}
+
+/** @brief 从捕获到的 A1H 响应里取第 i 个 module 的 status */
+static int init_rsp_status(unsigned i)
+{
+    if (s_tx_count == 0) return -1;
+    const uint16_t off = (uint16_t)(8 + sizeof(app_ldi_req_head_t) + 1 +
+                                    i * sizeof(ldi_init_rsp_module_t) + offsetof(ldi_init_rsp_module_t, status));
+    return s_tx_buf[off];
+}
+
 /** 变体2：Color=00H → 清下半屏；Color=01H/02H → 取对应预置槽；CtlStatus=00H */
 static void case_ctrl_ea_ok_paths(void)
 {
@@ -427,7 +466,7 @@ static void case_ctrl_ea_ok_paths(void)
     s_lower_clear_calls = s_preset_show_calls = 0;
     s_tx_count = 0;
     make_ctrl_ea(0x00);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_lower_clear_calls == 1, "00H 应调 app_fold_lower_clear 一次（%d）", s_lower_clear_calls);
     CHECK_MSG(s_preset_show_calls == 0, "00H 不得调 app_fold_preset_show");
     CHECK_MSG(ctrl_rsp_status() == 0x00, "成功时 CtlStatus 应 00H，实际 0x%02X", ctrl_rsp_status());
@@ -436,7 +475,7 @@ static void case_ctrl_ea_ok_paths(void)
     s_lower_clear_calls = s_preset_show_calls = 0;
     s_tx_count = 0;
     make_ctrl_ea(0x02);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_preset_show_calls == 1, "02H 应调 app_fold_preset_show 一次（%d）",
               s_preset_show_calls);
     CHECK_MSG(s_preset_show_last_color == 0x02, "preset_show 应收到 Color=02H（得到 0x%02X）",
@@ -457,7 +496,7 @@ static void case_ctrl_ea_reject(void)
     s_lower_clear_calls = s_preset_show_calls = 0;
     s_tx_count = 0;
     make_ctrl_ea(0x04);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0, "非法颜色不得调 fold 控制");
     CHECK_MSG(ctrl_rsp_status() == 0x01, "非法颜色时 CtlStatus 应 01H，实际 0x%02X",
               ctrl_rsp_status());
@@ -467,7 +506,7 @@ static void case_ctrl_ea_reject(void)
     s_preset_show_ret = false;
     s_tx_count = 0;
     make_ctrl_ea(0x01);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_preset_show_calls == 1, "01H 应调 app_fold_preset_show（%d）", s_preset_show_calls);
     CHECK_MSG(ctrl_rsp_status() == 0x01, "操作失败时 CtlStatus 应 01H，实际 0x%02X",
               ctrl_rsp_status());
@@ -489,7 +528,7 @@ static void case_ctrl_ea_unconfigured(void)
     s_lower_clear_calls = s_preset_show_calls = 0;
     s_tx_count = 0;
     make_ctrl_ea(0x01);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0,
               "未声明 EA 不得进入处理（lower=%d, preset=%d）", s_lower_clear_calls,
               s_preset_show_calls);
@@ -508,7 +547,7 @@ static void case_ctrl_ea_flat_untouched(void)
     s_lower_clear_calls = s_preset_show_calls = 0;
     s_tx_count = 0;
     make_ctrl_ea(0x01);
-    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U));
     CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0, "非折叠不得调 fold 控制");
     CHECK_MSG(ctrl_rsp_status() == 0x00,
               "非折叠保持旧行为：声明了模块则状态按 found 给 00H，实际 0x%02X", ctrl_rsp_status());
@@ -544,7 +583,7 @@ static void case_0ah_leaves_internal_flash_alone(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
 
     CHECK_MSG(pl_flash_stub_erase_count() == 0, "0AH 擦了内部 Flash %d 次 —— 会擦掉固件自身",
               pl_flash_stub_erase_count());
@@ -610,7 +649,7 @@ static void case_both_records_written(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
 
     CHECK_MSG(iap_mirror_is(IP_A, PORT), "IAP 记录里的 net_cfg 镜像没跟上 0AH");
     CHECK_MSG(ldi_record_is(IP_A, PORT), "LDI 记录没写进去");
@@ -634,7 +673,7 @@ static void case_ldi_failure_does_not_block_mirror(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_B, MASK, GW, PORT);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
 
     CHECK_MSG(rsp_status() == 0x01, "LDI 那条没写成，回执 status 应为 0x01，实际 0x%02X",
               rsp_status());
@@ -654,7 +693,7 @@ static void case_mirror_failure_is_invisible_to_host(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_B, MASK, GW, PORT);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
 
     CHECK_MSG(rsp_status() == 0x00, "LDI 那条是成功的，回执应为 0x00，实际 0x%02X", rsp_status());
     CHECK_MSG(!iap_mirror_is(IP_B, PORT), "本用例的前提是镜像确实没写成 —— 它居然写成了？");
@@ -671,9 +710,9 @@ static void case_second_0ah_overwrites_both(void)
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_A, MASK, GW, PORT);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
     make_0ah(&req, IP_B, MASK, GW, PORT + 1);
-    _ldi_cmd_set_ip(NULL, &req);
+    _ldi_cmd_set_ip(NULL, &req, (uint16_t)sizeof(req));
 
     CHECK(iap_mirror_is(IP_B, PORT + 1));
     CHECK(ldi_record_is(IP_B, PORT + 1));
@@ -809,6 +848,51 @@ static void case_ctx_init_no_cfg_keeps_default(void)
 }
 
 /* ================================================================
+ *  1AH 设备初始化：device_num 是帧内值 —— 必须夹取后才能当循环边界
+ * ================================================================ */
+
+/** 正常路径：7 个模块逐个回 status，全注册 → state READY */
+static void case_init_seven_modules(void)
+{
+    TEST_BEGIN("1AH 正常路径：7 个模块逐个回 status，全注册 → READY");
+    env_setup();
+
+    const uint8_t types[7] = {
+        APP_LDI_DEVICE_VMS,          APP_LDI_DEVICE_CANOPY_LIGHT, APP_LDI_DEVICE_VMS,
+        APP_LDI_DEVICE_VMS,          APP_LDI_DEVICE_CANOPY_LIGHT, APP_LDI_DEVICE_VMS,
+        APP_LDI_DEVICE_CANOPY_LIGHT,
+    };
+    make_init(7, types, 7);
+    s_tx_count = 0;
+    _ldi_cmd_init(NULL, s_init_buf, init_buf_len(7));
+
+    CHECK_MSG(init_rsp_device_num() == 7, "响应 device_num 应为 7，得到 %d", init_rsp_device_num());
+    for (unsigned i = 0; i < 7; i++)
+        CHECK_MSG(init_rsp_status(i) == 0x00, "第 %u 个模块 status 应为 0x00，得到 %d", i,
+                  init_rsp_status(i));
+    CHECK_MSG(g_ldi_ctx.state == APP_LDI_STATE_READY, "全模块注册应置 READY");
+}
+
+/** 越界：device_num=200 但帧里只有 2 个模块 → 夹到 2，不越界、不崩、响应自洽 */
+static void case_init_device_num_overflow(void)
+{
+    TEST_BEGIN("1AH device_num 超出实际数据：夹到帧内容纳数（2），响应自洽");
+    env_setup();
+
+    const uint8_t types[2] = {APP_LDI_DEVICE_VMS, APP_LDI_DEVICE_CANOPY_LIGHT};
+    make_init(200, types, 2); /* 声称 200，实际只写 2 个 → DATA 长度按 2 个算 */
+    s_tx_count = 0;
+    _ldi_cmd_init(NULL, s_init_buf, init_buf_len(2));
+
+    CHECK_MSG(init_rsp_device_num() == 2,
+              "应夹取为帧内容纳的 2，得到 %d（旧实现按 200 循环、越界读请求）",
+              init_rsp_device_num());
+    CHECK_MSG(init_rsp_status(0) == 0x00 && init_rsp_status(1) == 0x00,
+              "被处理的两个模块应各有 status（0x00）");
+    CHECK_MSG(g_ldi_ctx.state != APP_LDI_STATE_READY, "被夹取的请求不得判初始化成功");
+}
+
+/* ================================================================
  *  0BH 设备参数配置：**从请求重建整张模块表**（RAM 与 Flash 一致）
  * ================================================================ */
 
@@ -838,7 +922,7 @@ static void case_set_config_rebuilds_table(void)
     env_setup();
 
     make_0bh_ea_only();
-    _ldi_cmd_set_config(NULL, s_cfg_buf);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, (uint16_t)(sizeof(app_ldi_req_head_t) + 1U + 4U));
 
     CHECK_MSG(rsp_status() == 0x00, "0BH 应成功，status=0x%02X", rsp_status());
     CHECK_MSG(g_ldi_ctx.cfg.module_count == 1, "module_count 应为请求的 1，得到 %u",
@@ -885,6 +969,8 @@ int main(void)
         {"Flash 仅 {E9}：EA 未声明", case_ctx_init_flash_e9_only},
         {"无有效配置：保持编译期默认表", case_ctx_init_no_cfg_keeps_default},
         {"0BH：从请求重建整张表，RAM 与 Flash 一致", case_set_config_rebuilds_table},
+        {"1AH：7 个模块逐个回 status", case_init_seven_modules},
+        {"1AH：device_num 超出实际数据 → 夹取", case_init_device_num_overflow},
         {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
         {"EA 显示控制：拒绝路径 → CtlStatus=01H", case_ctrl_ea_reject},
         {"EA 显示控制：未声明 EA 不进处理", case_ctrl_ea_unconfigured},

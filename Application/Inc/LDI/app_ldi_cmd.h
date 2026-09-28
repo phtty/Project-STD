@@ -14,10 +14,13 @@
 
 /**
  * @brief LDI 命令处理函数指针类型
- * @param ccb   通道元信息（来源通道类型、编号等）
- * @param data  指向帧 DATA 域首字节，布局视具体命令而定
+ * @param ccb      通道元信息（来源通道类型、编号等）
+ * @param data     指向帧 DATA 域首字节，布局视具体命令而定
+ * @param data_len DATA 域字节数（从 data 起）。**处理器必须用它校验帧内字段**
+ *                 —— device_num 之类是帧内值，不能当数组长度/循环边界直接用
+ *                 （见各处理器里的长度夹取）。取自帧长度域，探针已校验 ≤ DATA 上限。
  */
-typedef void (*app_ldi_cmd_handler_fn_t)(app_ccb_t *ccb, void *data);
+typedef void (*app_ldi_cmd_handler_fn_t)(app_ccb_t *ccb, void *data, uint16_t data_len);
 
 /** @brief LDI 命令处理函数表，按命令码索引 */
 extern const app_ldi_cmd_handler_fn_t g_ldi_cmd_table[];
