@@ -33,12 +33,36 @@ static void _vms_clear_screen(void)
        原来这里是"清屏立刻 app_render_save()"，存下去的是清屏**之前**的上一帧。 */
 }
 
+/** @brief 清 E9 的内容区（变体2 只清上半；其余整屏）
+ *
+ *  两个 E9 清屏调用点共用：显示控制先清一次、定时到点再清一次。变体2 的下半是
+ *  EA 预置图，**任何 E9 的清屏都不得覆盖它** —— 否则一条到点清屏会顺手把用户设的
+ *  雨棚预置图抹掉。非变体2 时与 _vms_clear_screen 逐字一致。 */
+static void _vms_clear_content(void)
+{
+    if (app_fold_mode() == APP_FOLD_MODE_FOLD_E9_EA) {
+        uint16_t x = 0, y = 0, w = 0, h = 0;
+        if (app_fold_rect(0, &x, &y, &w, &h)) {
+            app_render(&(app_render_cfg_t){
+                .type  = APP_RENDER_TYPE_FILL,
+                .x     = x,
+                .y     = y,
+                .w     = w,
+                .h     = h,
+                .color = DEV_DISPLAY_COLOR_BLACK,
+            });
+            return;
+        }
+    }
+    _vms_clear_screen();
+}
+
 void app_vms_timer_poll(void)
 {
     if (!s_vms_timer_active) return;
 
     if (osKernelGetTickCount() >= s_vms_clear_tick) {
-        _vms_clear_screen();
+        _vms_clear_content();
         s_vms_timer_active = false;
     }
 }
@@ -134,10 +158,11 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
         if (ctx->text[i] == '_')
             ctx->text[i] = '\n';
 
-    /* ---- 清屏（FLAT 与折叠都只清一次；折叠两半同属 E9）---- */
-    _vms_clear_screen();
+    /* ---- 清屏（只清一次；变体2 只清上半，下半留给 EA 预置图）---- */
+    const app_fold_mode_t fold_mode = app_fold_mode();
+    _vms_clear_content();
 
-    if (app_fold_mode() == APP_FOLD_MODE_FLAT) {
+    if (fold_mode == APP_FOLD_MODE_FLAT) {
         /* 非折叠：单次渲染，区域 = 整块逻辑屏 —— 与引入折叠前逐字一致（3833024 走这条）。 */
         app_render(&(app_render_cfg_t){
             .type      = APP_RENDER_TYPE_TEXT,
@@ -158,15 +183,20 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
             .persist   = (ctx->keep_time == 0),
         });
     } else {
-        /* 折叠屏变体：E9 的两行分别严格限在上/下半屏（区域契约保证不跨缝）。
-           变体2（FOLD_E9_EA）本片暂与变体1 同路径 —— **S4 将改为只写上半屏 + 只清
-           上半屏**（下半是 EA 预置图，不该被 E9 的清屏/文本覆盖）。 */
+        /* 折叠屏变体：E9 的行严格限在半屏内（区域契约保证不跨缝）。
+           变体1（FOLD_E9）：两行分别占上/下半屏。
+           变体2（FOLD_E9_EA）：**只写上半屏** —— 下半是 EA 预置图，E9 不得覆盖。 */
         const char *line0 = nullptr;
         const char *line1 = nullptr;
         uint16_t    len0  = 0;
         uint16_t    len1  = 0;
         const uint8_t line_cnt =
             app_fold_split_lines((const char *)ctx->text, text_len, &line0, &len0, &line1, &len1);
+
+        const bool is_v2 = (fold_mode == APP_FOLD_MODE_FOLD_E9_EA);
+
+        /* 折叠屏整体单色：记下最近一次颜色，EA 预置图取同一色 */
+        app_fold_note_color((uint8_t)color);
 
         /* 折叠模式**忽略 font_line**：它的原语义是"把内容放到屏幕第 N 行"，在上下半屏里
            会把内容放到跨缝的位置。样式开 word_wrap + prefer_one_line（优先单行最大字号，
@@ -181,7 +211,7 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 
         uint16_t fx = 0, fy = 0, fw = 0, fh = 0;
 
-        /* 上半屏：第 1 行（1 行时只画这里，下半保持清空） */
+        /* 上半屏：第 1 行（1 行时只画这里，下半保持清空 / 保持 EA 预置图） */
         if (app_fold_rect(0, &fx, &fy, &fw, &fh)) {
             app_render(&(app_render_cfg_t){
                 .type      = APP_RENDER_TYPE_TEXT,
@@ -200,8 +230,8 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
             });
         }
 
-        /* 下半屏：第 2 行 */
-        if (line_cnt >= 2 && app_fold_rect(1, &fx, &fy, &fw, &fh)) {
+        /* 下半屏：第 2 行 —— **变体2 不写**（那一半是 EA 预置图） */
+        if (!is_v2 && line_cnt >= 2 && app_fold_rect(1, &fx, &fy, &fw, &fh)) {
             app_render(&(app_render_cfg_t){
                 .type      = APP_RENDER_TYPE_TEXT,
                 .x         = fx,
@@ -219,10 +249,15 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
             });
         }
 
-        /* 折叠屏只有上下两半：多于 2 行的内容丢弃（只留日志，不静默）。 */
-        if (line_cnt > 2)
+        /* 放不下的行丢弃（只留日志，不静默）：变体1 只有上下两半，变体2 下半归 EA。 */
+        if (is_v2) {
+            if (line_cnt > 1)
+                printf("[ldi/vms] 变体2：下半为 EA 预置图，E9 只显示上半 1 行、丢弃 %u 行\n",
+                       (unsigned)(line_cnt - 1));
+        } else if (line_cnt > 2) {
             printf("[ldi/vms] 折叠屏只有上下两半：文本 %u 行，仅显示前 2 行、丢弃 %u 行\n",
                    (unsigned)line_cnt, (unsigned)(line_cnt - 2));
+        }
     }
 
     /* ---- 持久化策略 ---- */
@@ -246,14 +281,29 @@ static void _vms_clean_ctrl(app_ldi_ctrl_vms_t *ctx)
 
     dev_display_color_t color = MAP(s_clear_color_map, ctx->clear_type, DEV_DISPLAY_COLOR_BLACK);
 
-    app_render(&(app_render_cfg_t){
-        .type  = APP_RENDER_TYPE_FILL,
-        .x     = 0,
-        .y     = 0,
-        .w     = 0,
-        .h     = 0,
-        .color = color,
-    });
+    /* 变体2：下半是 EA 预置图，E9 的 02H 清屏只清上半（同显示控制的口径）。 */
+    if (app_fold_mode() == APP_FOLD_MODE_FOLD_E9_EA) {
+        uint16_t x = 0, y = 0, w = 0, h = 0;
+        if (app_fold_rect(0, &x, &y, &w, &h)) {
+            app_render(&(app_render_cfg_t){
+                .type  = APP_RENDER_TYPE_FILL,
+                .x     = x,
+                .y     = y,
+                .w     = w,
+                .h     = h,
+                .color = color,
+            });
+        }
+    } else {
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = 0,
+            .h     = 0,
+            .color = color,
+        });
+    }
 
     /* 主动清屏时取消定时器 */
     s_vms_timer_active = false;

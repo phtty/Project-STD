@@ -7,14 +7,15 @@
  * 只给指针、不改输入，越界/少切一个字节也不报错，只是显示成错的内容。
  *
  * **打桩方式**：`app_vms_ctrl.c` 是 TU-include（`_vms_display_ctrl` 是 static），
- * `app_render` 换成套件内的 capture 桩，把每次渲染的 `type/x/y/w/h/text/len/style`
+ * `app_render` 换成套件内的 capture 桩，把每次渲染的 `type/x/y/w/h/text/len/style/bitmap`
  * 原样记下；`app_screen_*` 用可调桩。`app_fold.c` 与 `app_ldi.c` 作为普通 TU 编译
  * （后者提供真实的 `g_ldi_ctx` 与 `app_ldi_get_device_idx`，故模式判定的三态走的是
  * 真实访问器，而不是复制的判定逻辑）。
  *
- * **本片的范围**：只覆盖变体1。变体2（FOLD_E9_EA）本片暂与变体1 同路径，
- * 测试按此**暂态**断言并注明 —— S4 改成"只写上半屏 + 只清上半屏"时这里会红，正是
- * 期望的提醒。
+ * **本片的范围**：变体1/变体2 的 E9 侧（变体2 只写/只清上半屏），以及变体2 的 EA
+ * 数据面（`app_fold_preset_show` / `app_fold_lower_clear`，含尺寸/空槽/非法颜色拒画）。
+ * EA 与 1BH 分派层的接线（CtlStatus 落值）在 test_ldi_0ah.c（那边 TU-include 了
+ * app_ldi_cmd.c，不引入符号冲突）。
  */
 
 #include <stdbool.h>
@@ -62,6 +63,23 @@ void app_light_sensor_resume(void) {}
 void app_light_sensor_set_fixed(uint8_t level) { (void)level; }
 
 /* ================================================================
+ *  板级折叠预置图：本套件自己提供 g_board_fold_presets 的定义
+ *
+ *  同 g_board_font_lib 在 test_render 的做法 —— 板级数据不参与 host 编译，
+ *  用例给一份合成的。绿/红两槽有效（不同缓冲，用来验证"取到对应槽"），
+ *  黄槽空槽 —— 与 5006048 交付时"数据待补"的现状一致，用来钉住空槽拒画。
+ *  尺寸 224×50 与用例里的下半屏一致；尺寸不符的用例通过**改布局**制造。
+ * ================================================================ */
+static uint8_t s_bm_green[224 * 50 / 8];
+static uint8_t s_bm_red[224 * 50 / 8];
+
+const app_fold_preset_t g_board_fold_presets[3] = {
+    {.w = 224, .h = 50, .bitmap = s_bm_green}, /* [0] 绿 */
+    {.w = 224, .h = 50, .bitmap = s_bm_red},   /* [1] 红 */
+    {.w = 0, .h = 0, .bitmap = nullptr},       /* [2] 黄：空槽（数据待补） */
+};
+
+/* ================================================================
  *  capture 渲染目标 —— 记录每次 app_render 的入参
  * ================================================================ */
 
@@ -75,6 +93,7 @@ typedef struct {
     app_render_style_t style;
     bool               has_style;
     bool               persist;
+    const uint8_t     *bitmap; /**< BITMAP 源指针（其余类型为 nullptr） */
 } render_rec_t;
 
 #define REC_MAX (16)
@@ -101,6 +120,8 @@ void app_render(const app_render_cfg_t *cfg)
             r->style     = *cfg->style;
             r->has_style = true;
         }
+    } else if (cfg->type == APP_RENDER_TYPE_BITMAP) {
+        r->bitmap = cfg->bitmap;
     }
 }
 
@@ -117,6 +138,14 @@ static const render_rec_t *nth_text(int n)
     int k = 0;
     for (int i = 0; i < s_rec_cnt; i++)
         if (s_recs[i].type == APP_RENDER_TYPE_TEXT && k++ == n) return &s_recs[i];
+    return nullptr;
+}
+
+static const render_rec_t *nth_type(app_render_type_t t, int n)
+{
+    int k = 0;
+    for (int i = 0; i < s_rec_cnt; i++)
+        if (s_recs[i].type == t && k++ == n) return &s_recs[i];
     return nullptr;
 }
 
@@ -421,10 +450,10 @@ static void case_flat(void)
               r2 ? (unsigned)r2->y : 0U);
 }
 
-/** 变体2（暂态）：本片与变体1 同路径 —— S4 改成"只写上半屏 + 只清上半屏"时本用例会红 */
-static void case_variant2_temporary(void)
+/** 变体2 · E9 侧：只写上半屏、只清上半屏（下半留给 EA 预置图） */
+static void case_variant2_e9_top_only(void)
 {
-    TEST_BEGIN("变体2（暂态）：E9+EA 折叠时暂与变体1 同路径，两半都写");
+    TEST_BEGIN("变体2：E9 只写上半、只清上半（下半留给 EA 预置图）");
 
     env_reset();
     s_fold_count = 2;
@@ -435,17 +464,117 @@ static void case_variant2_temporary(void)
     app_ldi_ctrl_vms_t *ctx = make_vms("AB_CD", 5, 1, 0, 0, 0);
     app_vms_ctrl(ctx, 5);
 
-    /* **暂态断言**：S4 将改为只写上半屏 + 只清上半屏，届时下条会红。 */
-    CHECK_MSG(count_type(APP_RENDER_TYPE_TEXT) == 2,
-              "变体2 暂态应与变体1 同路径（2 次文本）；S4 改成只写上半时本条变红");
-    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "变体2 暂态仍整屏清一次");
+    /* 1 次清屏（只清上半）+ 1 次上半文本；不得有下半文本 */
+    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "变体2 应恰好清屏一次，得到 %d",
+              count_type(APP_RENDER_TYPE_FILL));
+    CHECK_MSG(count_type(APP_RENDER_TYPE_TEXT) == 1, "变体2 只应写上半 1 行，得到 %d",
+              count_type(APP_RENDER_TYPE_TEXT));
+
+    const render_rec_t *fill = nth_type(APP_RENDER_TYPE_FILL, 0);
+    CHECK_MSG(fill && fill->x == 0 && fill->y == 0 && fill->w == 224 && fill->h == 50,
+              "清屏应只覆盖上半 224x50@(0,0)，得到 %ux%u@(%u,%u)", fill ? (unsigned)fill->w : 0U,
+              fill ? (unsigned)fill->h : 0U, fill ? (unsigned)fill->x : 0U, fill ? (unsigned)fill->y : 0U);
+
+    const render_rec_t *top = nth_text(0);
+    CHECK_MSG(top && top->x == 0 && top->y == 0 && top->w == 224 && top->h == 50,
+              "文本应落上半 224x50@(0,0)");
+    CHECK_MSG(top && top->len == 2 && top->text[0] == 'A' && top->text[1] == 'B',
+              "上半文本应为 'AB'（'_' 转 '\\n' 后取第 1 段）");
+    CHECK_MSG(top && top->has_style && top->style.word_wrap && top->style.prefer_one_line,
+              "折叠样式 word_wrap + prefer_one_line 照旧");
+
+    /* E9 渲染时记下颜色：EA 预置图取"最近一次颜色"（font_color=2 → 红） */
+    s_rec_cnt = 0;
+    CHECK_MSG(app_fold_preset_show(1), "上半 E9 后 EA 应能取到绿槽");
+    CHECK_MSG(nth_type(APP_RENDER_TYPE_BITMAP, 0) &&
+                  nth_type(APP_RENDER_TYPE_BITMAP, 0)->color == DEV_DISPLAY_COLOR_RED,
+              "EA 预置图应沿用 E9 最近一次颜色（红）");
+}
+
+/** 变体2 · EA 数据面：00H 只清下半（不调 BITMAP）；01H/02H 取对应槽；空槽拒画 */
+static void case_ea_show_and_clear(void)
+{
+    TEST_BEGIN("EA：00H 只清下半（不调 BITMAP）；01H/02H 映射对应槽；空槽（黄）拒画");
+
+    /* 00H → 只清下半屏：FILL(BLACK) 区域 = 下半，且不得有 BITMAP */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+
+    CHECK_MSG(app_fold_lower_clear(), "清下半屏应返回 true");
+    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "应恰好一次 FILL，得到 %d",
+              count_type(APP_RENDER_TYPE_FILL));
+    CHECK_MSG(count_type(APP_RENDER_TYPE_BITMAP) == 0, "清下半屏不得调 BITMAP");
+    const render_rec_t *fill = nth_type(APP_RENDER_TYPE_FILL, 0);
+    CHECK_MSG(fill && fill->x == 0 && fill->y == 50 && fill->w == 224 && fill->h == 50,
+              "清屏区域应为下半 224x50@(0,50)");
+    CHECK_MSG(fill && fill->color == DEV_DISPLAY_COLOR_BLACK, "清屏应为全黑");
+
+    /* 01H → 绿槽 */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+    app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_YELLOW);
+    CHECK_MSG(app_fold_preset_show(1), "绿预置图应显示成功");
+    CHECK_MSG(s_rec_cnt == 1 && s_recs[0].type == APP_RENDER_TYPE_BITMAP, "绿应为一次 BITMAP");
+    CHECK_MSG(s_recs[0].bitmap == s_bm_green, "01H 应取绿槽");
+    CHECK_MSG(s_recs[0].x == 0 && s_recs[0].y == 50 && s_recs[0].w == 224 && s_recs[0].h == 50,
+              "BITMAP 区域应为下半 224x50@(0,50)");
+    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_YELLOW, "颜色应取最近一次颜色（黄）");
+
+    /* 02H → 红槽 */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+    CHECK_MSG(app_fold_preset_show(2), "红预置图应显示成功");
+    CHECK_MSG(s_rec_cnt == 1 && s_recs[0].bitmap == s_bm_red, "02H 应取红槽");
+
+    /* 03H → 黄槽是空槽：拒画 + false + 无渲染 */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+    CHECK_MSG(!app_fold_preset_show(3), "空槽应拒画并返回 false");
+    CHECK_MSG(s_rec_cnt == 0, "空槽不得发起任何渲染，得到 %d 次", s_rec_cnt);
+}
+
+/** EA 拒画：尺寸不符 / 非法颜色 / 非折叠 —— 全部 false 且不渲染 */
+static void case_ea_reject(void)
+{
+    TEST_BEGIN("EA：尺寸不符 / 非法颜色 / 非折叠 → 拒画 + false");
+
+    /* 尺寸不符：下半屏 224x48 ≠ 预置图 224x50 */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 96;
+    CHECK_MSG(!app_fold_preset_show(1), "尺寸不符应拒画并返回 false");
+    CHECK_MSG(s_rec_cnt == 0, "尺寸不符不得渲染");
+
+    /* 非法颜色（>03H） */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+    CHECK_MSG(!app_fold_preset_show(0x04), "非法颜色应拒画并返回 false");
+    CHECK_MSG(s_rec_cnt == 0, "非法颜色不得渲染");
+
+    /* 非折叠：没有下半屏 */
+    env_reset();
+    s_fold_count = 1;
+    CHECK_MSG(!app_fold_lower_clear(), "非折叠时清下半屏应返回 false");
+    CHECK_MSG(!app_fold_preset_show(1), "非折叠时预置图应返回 false");
+    CHECK_MSG(s_rec_cnt == 0, "非折叠不得渲染");
 }
 
 /* ================================================================ */
 
 int main(void)
 {
-    printf("\n\033[36m折叠屏：模式判定与变体1（E9 两行各限半屏）\033[0m\n");
+    printf("\n\033[36m折叠屏：模式判定 / 变体1 / 变体2（E9 只写上半 + EA 预置图）\033[0m\n");
 
     case_mode();
     case_rect();
@@ -454,7 +583,9 @@ int main(void)
     case_variant1_one_line();
     case_variant1_three_lines();
     case_flat();
-    case_variant2_temporary();
+    case_variant2_e9_top_only();
+    case_ea_show_and_clear();
+    case_ea_reject();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

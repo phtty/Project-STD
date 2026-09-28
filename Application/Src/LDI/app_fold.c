@@ -1,12 +1,27 @@
 /**
  * @file    app_fold.c
- * @brief   折叠屏模式判定与上下半屏拆分（纯查询、无状态）
+ * @brief   折叠屏模式判定、上下半屏拆分与变体2 下半屏预置图
  */
 
 #include "app_fold.h"
 
+#include <stdio.h>
+
 #include "app_screen.h"
 #include "app_ldi.h"
+#include "app_render.h"
+
+/* ---- 折叠屏最近一次显示颜色 ----
+ *
+ *  "折叠屏整体单色 = 最近一条命令的颜色"这个口径的落点：E9 的折叠路径在渲染时
+ *  `app_fold_note_color()` 更新，EA 取图时按它渲染。从未有过则为 BOARD_SCREEN_COLOR
+ *  （与"单卡默认色"一致，见 board.h）。跨模块只经 API 更新，不导出可变全局。 */
+static uint8_t s_last_color = (uint8_t)BOARD_SCREEN_COLOR;
+
+void app_fold_note_color(uint8_t color)
+{
+    s_last_color = color;
+}
 
 app_fold_mode_t app_fold_mode(void)
 {
@@ -64,4 +79,58 @@ uint8_t app_fold_split_lines(const char *text, uint16_t len, const char **line0,
     if (len1) *len1 = (uint16_t)(end1 - end0 - 1);
 
     return lines;
+}
+
+/* ================================================================
+ *  变体2 · 下半屏预置图 / 清除
+ * ================================================================ */
+
+bool app_fold_preset_show(uint8_t color)
+{
+    if (color < 1U || color > 3U) {
+        printf("[fold] EA 颜色 0x%02X 无对应预置图（仅 01H~03H），拒画\n", (unsigned)color);
+        return false;
+    }
+
+    uint16_t x = 0, y = 0, w = 0, h = 0;
+    if (!app_fold_rect(1, &x, &y, &w, &h)) return false; /* 非折叠：没有下半屏 */
+
+    const app_fold_preset_t *p = &g_board_fold_presets[color - 1U];
+    if (p->bitmap == nullptr) {
+        printf("[fold] EA 颜色 %u 的预置图为空槽（点阵数据待补），拒画\n", (unsigned)color);
+        return false;
+    }
+    /* 尺寸必须等于下半屏：不符说明数据是按别的模组/别的部署切的，画上去会错位 —— 拒画。 */
+    if (p->w != w || p->h != h) {
+        printf("[fold] EA 预置图 %ux%u != 下半屏 %ux%u，拒画\n", (unsigned)p->w, (unsigned)p->h,
+               (unsigned)w, (unsigned)h);
+        return false;
+    }
+
+    app_render(&(app_render_cfg_t){
+        .type   = APP_RENDER_TYPE_BITMAP,
+        .x      = x,
+        .y      = y,
+        .w      = w,
+        .h      = h,
+        .color  = (dev_display_color_t)s_last_color,
+        .bitmap = p->bitmap,
+    });
+    return true;
+}
+
+bool app_fold_lower_clear(void)
+{
+    uint16_t x = 0, y = 0, w = 0, h = 0;
+    if (!app_fold_rect(1, &x, &y, &w, &h)) return false; /* 非折叠：没有下半屏 */
+
+    app_render(&(app_render_cfg_t){
+        .type  = APP_RENDER_TYPE_FILL,
+        .x     = x,
+        .y     = y,
+        .w     = w,
+        .h     = h,
+        .color = DEV_DISPLAY_COLOR_BLACK,
+    });
+    return true;
 }

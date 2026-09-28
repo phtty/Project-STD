@@ -817,7 +817,7 @@ $(TEST_BUILD)/test_ldi_0ah: $(TEST_LDI_0AH_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_LDI_0AH_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_ldi_0ah: Application/Src/LDI/app_ldi_cfg.c Application/Src/IAP/app_iap_cfg.c \
-                           Application/Src/LDI/app_ldi_cmd.c
+                           Application/Src/LDI/app_ldi_cmd.c Application/Inc/LDI/app_fold.h
 
 $(TEST_BUILD)/test_isr_preinit: $(TEST_ISR_PREINIT_SRCS)
 	@mkdir -p $(dir $@)

@@ -324,6 +324,7 @@ virtualFolder:
                 - path: boards/3833024/Application/Src/app_rs232.c
                 - path: boards/3833024/Application/Src/app_test_board.c
                 - path: boards/3833024/Application/Src/app_font_lib_board.c
+                - path: boards/3833024/Application/Src/app_fold_preset_board.c
               folders: []
             - name: Device
               files:
@@ -369,6 +370,7 @@ virtualFolder:
             - name: App
               files:
                 - path: boards/5006048/Application/Src/app_font_lib_board.c
+                - path: boards/5006048/Application/Src/app_fold_preset_board.c
               folders: []
             - name: Device
               files:

@@ -21,4 +21,5 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_p20_16x8_2200001667.c \
 	$(BOARD_DIR)/Application/Src/app_rs232.c \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
-	$(BOARD_DIR)/Application/Src/app_font_lib_board.c
+	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
+	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c

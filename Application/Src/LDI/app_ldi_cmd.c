@@ -14,6 +14,7 @@
 #include "pl_rtc.h"
 #include "pl_sys.h"
 #include "app_vms_ctrl.h"
+#include "app_fold.h"
 #include "app_udp.h"
 #include "app_tcp_server.h"
 
@@ -897,7 +898,31 @@ static void _ldi_cmd_ctrl(app_ccb_t *ccb, void *data)
             }
             case APP_LDI_DEVICE_CANOPY_LIGHT: { // EAH 雨棚灯控制 (01H)
                 app_ldi_ctrl_canopy_light_t *ctrl = (app_ldi_ctrl_canopy_light_t *)payload;
-                (void)ctrl; // TODO: dev_canopy_light_ctrl(ctrl->color)
+                /* 分派层按"device_type 在不在注册表"填了 found，但**未配置的 EA 也会进
+                   这个 switch**（分派层不看是否真声明）——这里必须再查一次，只有本机
+                   真的声明了 EA 才处理；未声明则保持失败状态。 */
+                if (app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 0xFF) {
+                    rsp->modules[i].status = 0x01;
+                    break;
+                }
+                /* 只有变体2（几何折叠 ∧ 已声明 EA）才有"下半屏 = EA 预置图"这回事。
+                   非折叠 / 变体1：保持引入折叠前的 TODO 行为（不控制硬件、状态仍按
+                   分派层的 found），**不为 3833024 引入新行为**。 */
+                if (app_fold_mode() != APP_FOLD_MODE_FOLD_E9_EA) break;
+
+                /* Color = 00H 清除下半屏（产品扩展值）；01H~03H 显示对应预置图；
+                   其余值拒绝。结果写进本 module 的 CtlStatus（00H 成功 / 01H 失败）。 */
+                bool ok;
+                if (ctrl->color == 0x00) {
+                    ok = app_fold_lower_clear();
+                } else if (ctrl->color <= 0x03) {
+                    ok = app_fold_preset_show(ctrl->color);
+                } else {
+                    printf("[ldi/ctrl] EAH 颜色 0x%02X 非法（仅 00H~03H），已拒绝\n",
+                           (unsigned)ctrl->color);
+                    ok = false;
+                }
+                rsp->modules[i].status = ok ? 0x00 : 0x01;
                 break;
             }
             case APP_LDI_DEVICE_FOG_LIGHT: { // EBH 雾灯控制 (01H)

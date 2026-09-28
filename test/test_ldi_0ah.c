@@ -37,6 +37,7 @@
 #include "app_cfg_sched.h"
 #include "app_ldi.h"
 #include "app_ldi_cfg.h"
+#include "app_fold.h"
 #include "dev_cfg_record.h"
 #include "dev_flash_int.h"
 
@@ -218,6 +219,31 @@ void app_vms_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
     (void)ctx;
     (void)text_len;
 }
+
+/* ---- 折叠模块替身（app_ldi_cmd.c 的 EA 分支会调）----
+ *
+ * app_fold.c 不参与本套件的链接：这里给 3 个可控替身，专门验证 1BH 分派层的**接线**
+ * （哪条 Color 走哪个函数、结果如何落 CtlStatus）。app_fold_preset_show/lower_clear
+ * 自身的绘制/校验逻辑由 test_fold.c 用生产实现覆盖 —— 两边各测一段，不重复。 */
+static app_fold_mode_t s_fold_mode_stub = APP_FOLD_MODE_FLAT;
+static int     s_lower_clear_calls;
+static int     s_preset_show_calls;
+static uint8_t s_preset_show_last_color;
+static bool    s_lower_clear_ret = true;
+static bool    s_preset_show_ret = true;
+
+app_fold_mode_t app_fold_mode(void) { return s_fold_mode_stub; }
+bool app_fold_lower_clear(void)
+{
+    s_lower_clear_calls++;
+    return s_lower_clear_ret;
+}
+bool app_fold_preset_show(uint8_t color)
+{
+    s_preset_show_calls++;
+    s_preset_show_last_color = color;
+    return s_preset_show_ret;
+}
 void app_udp_broadcast(const uint8_t *data, uint16_t len)
 {
     (void)data;
@@ -341,6 +367,150 @@ static bool run_case(void (*fn)(void))
 }
 
 /* ================================================================
+ *  1BH EA（雨棚信号灯）显示控制的接线用例
+ *
+ *  EA 是**折叠变体2 专属**：只有"几何折叠 ∧ 已声明 EA"才有"下半屏 = EA 预置图"。
+ *  这些用例只验证 app_ldi_cmd.c 的分派接线与 CtlStatus 落值；app_fold_* 的真实
+ *  行为在 test_fold.c。EA 不依赖 IAP 记录，故放在分板 #if 之外，两板都跑。
+ * ================================================================ */
+
+/** @brief 声明一块 EA（雨棚信号灯）模块 */
+static void declare_ea_module(void)
+{
+    g_ldi_ctx.cfg.module_count = 2;
+    memset(g_ldi_ctx.cfg.modules, 0, sizeof(g_ldi_ctx.cfg.modules));
+    g_ldi_ctx.cfg.modules[0].device_type  = APP_LDI_DEVICE_VMS;
+    g_ldi_ctx.cfg.modules[0].device_index = 1;
+    g_ldi_ctx.cfg.modules[1].device_type  = APP_LDI_DEVICE_CANOPY_LIGHT;
+    g_ldi_ctx.cfg.modules[1].device_index = 1;
+}
+
+/** @brief 构造一条 1BH 控制请求：单 module（EA）、显示控制 01H、颜色 color */
+static uint8_t s_ctrl_buf[128];
+
+static void make_ctrl_ea(uint8_t color)
+{
+    memset(s_ctrl_buf, 0, sizeof s_ctrl_buf);
+    uint8_t *p = s_ctrl_buf + sizeof(app_ldi_ctrl_head_t); /* 头部内容不被读，留零即可 */
+    *p++      = 1;                                         /* device_num */
+    *p++      = 0;
+    *p++      = 4; /* mod_len = type(1)+index(1)+func(1)+color(1) */
+    *p++      = (uint8_t)APP_LDI_DEVICE_CANOPY_LIGHT;
+    *p++      = 1;    /* device_index */
+    *p++      = 0x01; /* device_func_type = 显示控制 */
+    *p++      = color;
+}
+
+/** @brief 从捕获到的 B1H 响应里取该 module 的 CtlStatus
+ *
+ *  帧布局：stx(2) ver(1) seq(1) len(4) | ctrl_head(24) | device_num(1) | module[0](4)。
+ *  status 是 module 的末字节。 */
+static int ctrl_rsp_status(void)
+{
+    if (s_tx_count == 0) return -1;
+    const uint16_t off = (uint16_t)(8 + sizeof(app_ldi_ctrl_head_t) + 1 +
+                                    offsetof(ldi_ctrl_rsp_payload_t, status));
+    return s_tx_buf[off];
+}
+
+/** 变体2：Color=00H → 清下半屏；Color=01H/02H → 取对应预置槽；CtlStatus=00H */
+static void case_ctrl_ea_ok_paths(void)
+{
+    TEST_BEGIN("1BH EA：00H→lower_clear；01H/02H→preset_show，CtlStatus=00H");
+    env_setup();
+    declare_ea_module();
+    s_fold_mode_stub = APP_FOLD_MODE_FOLD_E9_EA;
+    s_lower_clear_ret = true;
+    s_preset_show_ret = true;
+
+    /* 00H → app_fold_lower_clear，不调 preset_show */
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_tx_count = 0;
+    make_ctrl_ea(0x00);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_lower_clear_calls == 1, "00H 应调 app_fold_lower_clear 一次（%d）", s_lower_clear_calls);
+    CHECK_MSG(s_preset_show_calls == 0, "00H 不得调 app_fold_preset_show");
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "成功时 CtlStatus 应 00H，实际 0x%02X", ctrl_rsp_status());
+
+    /* 02H → app_fold_preset_show(2) */
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_tx_count = 0;
+    make_ctrl_ea(0x02);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_preset_show_calls == 1, "02H 应调 app_fold_preset_show 一次（%d）",
+              s_preset_show_calls);
+    CHECK_MSG(s_preset_show_last_color == 0x02, "preset_show 应收到 Color=02H（得到 0x%02X）",
+              s_preset_show_last_color);
+    CHECK_MSG(s_lower_clear_calls == 0, "02H 不得调 app_fold_lower_clear");
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "成功时 CtlStatus 应 00H，实际 0x%02X", ctrl_rsp_status());
+}
+
+/** 变体2：非法颜色 / 预置图拒画 → CtlStatus=01H，且不误调别的函数 */
+static void case_ctrl_ea_reject(void)
+{
+    TEST_BEGIN("1BH EA：非法颜色 / 操作失败 → CtlStatus=01H");
+    env_setup();
+    declare_ea_module();
+    s_fold_mode_stub = APP_FOLD_MODE_FOLD_E9_EA;
+
+    /* 非法颜色（04H）→ 拒绝，两个 fold 函数都不调 */
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_tx_count = 0;
+    make_ctrl_ea(0x04);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0, "非法颜色不得调 fold 控制");
+    CHECK_MSG(ctrl_rsp_status() == 0x01, "非法颜色时 CtlStatus 应 01H，实际 0x%02X",
+              ctrl_rsp_status());
+
+    /* 操作失败（preset_show 返回 false，如空槽/尺寸不符）→ CtlStatus=01H */
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_preset_show_ret = false;
+    s_tx_count = 0;
+    make_ctrl_ea(0x01);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_preset_show_calls == 1, "01H 应调 app_fold_preset_show（%d）", s_preset_show_calls);
+    CHECK_MSG(ctrl_rsp_status() == 0x01, "操作失败时 CtlStatus 应 01H，实际 0x%02X",
+              ctrl_rsp_status());
+    s_preset_show_ret = true;
+}
+
+/** 未声明 EA：即使分派层进了 switch，也必须再查一次 device_idx 而拒绝 */
+static void case_ctrl_ea_unconfigured(void)
+{
+    TEST_BEGIN("1BH EA：未声明 EA → 不进处理，CtlStatus=01H");
+    env_setup(); /* 不声明 EA（module_count 为 0） */
+    /* 故意让 mode 替身谎报"变体2"：若实现只信 mode 而不查 device_idx，本用例会红 */
+    s_fold_mode_stub = APP_FOLD_MODE_FOLD_E9_EA;
+
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_tx_count = 0;
+    make_ctrl_ea(0x01);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0,
+              "未声明 EA 不得进入处理（lower=%d, preset=%d）", s_lower_clear_calls,
+              s_preset_show_calls);
+    CHECK_MSG(ctrl_rsp_status() == 0x01, "未声明 EA 时 CtlStatus 应 01H，实际 0x%02X",
+              ctrl_rsp_status());
+}
+
+/** 非折叠（FLAT）：保持引入折叠前的 TODO 行为 —— 不控制、状态按分派层 */
+static void case_ctrl_ea_flat_untouched(void)
+{
+    TEST_BEGIN("1BH EA：非折叠 → 不控制（保持 TODO），状态按分派层");
+    env_setup();
+    declare_ea_module(); /* 声明了 EA，但几何非折叠 */
+    s_fold_mode_stub = APP_FOLD_MODE_FLAT;
+
+    s_lower_clear_calls = s_preset_show_calls = 0;
+    s_tx_count = 0;
+    make_ctrl_ea(0x01);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf);
+    CHECK_MSG(s_lower_clear_calls == 0 && s_preset_show_calls == 0, "非折叠不得调 fold 控制");
+    CHECK_MSG(ctrl_rsp_status() == 0x00,
+              "非折叠保持旧行为：声明了模块则状态按 found 给 00H，实际 0x%02X", ctrl_rsp_status());
+}
+
+/* ================================================================
  *  分板：本板有没有 IAP 记录区
  *
  *  下面四个用例都建立在"0AH 会把新值同时写进两条记录"之上。直烧板
@@ -413,7 +583,13 @@ int main(void)
     if (!run_case(case_0ah_leaves_internal_flash_alone)) failed++;
     if (!run_case(case_ctx_init_else_notifies_runtime)) failed++;
 
-    printf("\n用例 2 个，失败 %d 个\n", failed);
+    /* EA 显示控制的接线用例与 IAP 记录无关，两板都跑（见用例区说明） */
+    if (!run_case(case_ctrl_ea_ok_paths)) failed++;
+    if (!run_case(case_ctrl_ea_reject)) failed++;
+    if (!run_case(case_ctrl_ea_unconfigured)) failed++;
+    if (!run_case(case_ctrl_ea_flat_untouched)) failed++;
+
+    printf("\n用例 6 个，失败 %d 个\n", failed);
     return failed ? 1 : 0;
 }
 
@@ -548,6 +724,10 @@ int main(void)
         {"IAP 镜像失败对上位机不可见", case_mirror_failure_is_invisible_to_host},
         {"连续两次 0AH 两条都跟着走", case_second_0ah_overwrites_both},
         {"W25Qxx 无配置：ctx_init 采纳 IAP 并通知运行态", case_ctx_init_else_adopts_iap_and_notifies},
+        {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
+        {"EA 显示控制：拒绝路径 → CtlStatus=01H", case_ctrl_ea_reject},
+        {"EA 显示控制：未声明 EA 不进处理", case_ctrl_ea_unconfigured},
+        {"EA 显示控制：非折叠不动作（保持 TODO）", case_ctrl_ea_flat_untouched},
     };
 
     int failed = 0;
