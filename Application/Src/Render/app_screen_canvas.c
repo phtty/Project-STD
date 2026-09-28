@@ -79,20 +79,22 @@ void app_screen_set_color_override(uint8_t color)
 static uint8_t s_content_color = SCREEN_COLOR_NO_OVERRIDE; /* 0xFF = 本帧还没定 */
 static bool    s_content_mixed;
 
-/** @brief 这一次填充是不是"新一帧的开始"（覆盖整屏 **或** 覆盖任一折叠半屏）
+/** @brief 这一次填充是否覆盖一个**完整帧单元**（整屏 **或** 任一折叠半屏）—— **不限颜色**
  *
- *  各个渲染调用点的清屏都是"黑填充"——它是唯一可靠的"上一帧结束"信号
- *  （画布本身被 memset 清只发生在重装门面时）。除整屏清屏外，折叠变体2 还会
- *  **只清上半屏**（下半是 EA 预置图），这类半屏全黑同样是新一帧 —— 不认它的话
- *  上一帧的颜色账（尤其 mixed）会残留到清屏之后。
+ *  一整屏（或折叠变体2的整半屏）**纯色**填充 = "这一帧就是这一个颜色"。所以无论黑
+ *  还是彩色，都当**新一帧**处理：先作废上一帧的颜色账，彩色再把本帧色定成它
+ *  （黑由 `_note_content_color` 自己忽略，仅复位）。
+ *
+ *  为什么彩色整单元填充也必须算新一帧（现场症状）：5006048 变体1 连续发两种颜色的
+ *  02H 清屏（如红→蓝），第二次若走"累积"会把本帧蓝与上一帧残留的红判成 mixed，
+ *  `app_screen_output_color` 于是退回落卡片色（5006048 是绿色）—— 发什么色都显绿；
+ *  中间插一次黑屏清屏能复位颜色账，才"正常"。一整单元纯色本就是单色帧，不该被判混色。
  *
  *  半屏几何**现算**（`app_screen_rows/cols` + `app_screen_fold_rect`），不缓存：
  *  切分表可由身份记录覆盖，缓存会与运行期几何漂移。非折叠时 `app_screen_fold_rect`
  *  恒返回 false，行为与只判整屏逐字一致。 */
-static bool _is_frame_start(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
+static bool _is_frame_unit(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-    if (c != DEV_DISPLAY_COLOR_BLACK) return false;
-
     /* 整屏 */
     if (x == 0 && y == 0 && w >= app_screen_rows() && h >= app_screen_cols()) return true;
 
@@ -304,9 +306,10 @@ static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h
     /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
        落屏时用它（见 app_screen_output_color） */
     bool on = (c != DEV_DISPLAY_COLOR_BLACK);
-    /* 清屏（整屏或折叠半屏）→ 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
-    if (_is_frame_start(x, y, w, h, c)) _reset_content_color();
-    else _note_content_color(c);
+    /* 整屏/折叠半屏的纯色填充 = 这一帧就是这一个颜色 → 颜色账作废再定色（黑由 note 忽略，仅复位）；
+       局部彩色填充保持"累积/混合"语义（真多色场景，落屏时退回落卡片色） */
+    if (_is_frame_unit(x, y, w, h)) _reset_content_color();
+    _note_content_color(c);
 
     const uint16_t stride = (uint16_t)((app_screen_rows() + 7U) / 8U);
     for (uint16_t r = 0; r < h; r++) {
