@@ -91,28 +91,37 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self)
         app_tcp_server_set_port(self->cfg.device_port);
         app_tcp_client_set_remote(self->cfg.host_ip, self->cfg.host_port);
 
-        /* module: **以 Flash 配置为准** —— device_type / device_index / vendor 整表从
-           记录来，module_count 也用它。编译期 `g_ldi_ctx` 的默认表只是"无有效配置"
-           时的回落（见下面的 else 分支）：这样同一版固件靠配置即可切 v1/v2 —— 记录里
-           声明了 EA（`APP_LDI_DEVICE_CANOPY_LIGHT`）就是折叠变体2（见 app_fold.c）。
+        /* module: **编译期默认表是"设备类型集合"的来源** —— 产品变体（v1/v2）由
+           `g_ldi_ctx` 初始化表里那行 `CANOPY_LIGHT` 的开关决定，出两版固件。
+           Flash 记录**只承载"这台设备被配过什么"**：对编译期表里**同类型**的条目，
+           用记录里的项覆盖 `device_index` + `vendor[10]`（比旧实现只同步 index 完整）；
+           **module_count / 类型集合始终是编译期的**。
 
-           防御：记录可能含空槽（device_type == 0）或脏项，**跳过空槽**并夹住容量 ——
-           空槽计进 module_count 会让 `app_ldi_get_device_idx` 之外"数 module_count"的
-           旧判据误判（历史坑，见 app_fold.h 的说明）。n 恒 <= 数组容量，不越界。 */
-        uint8_t n = 0;
-        for (uint8_t j = 0; j < flash_cfg.module_count && n < APP_FLASH_LDI_MAX_MODULES; j++) {
-            if (flash_cfg.modules[j].device_type == 0) continue; /* 空槽：不计入 */
-            self->cfg.modules[n].device_type  = flash_cfg.modules[j].device_type;
-            self->cfg.modules[n].device_index = flash_cfg.modules[j].device_index;
-            memcpy(self->cfg.modules[n].vendor, flash_cfg.modules[j].vendor,
-                   sizeof(self->cfg.modules[n].vendor));
-            n++;
+           记录里出现编译期表没有的类型 → **忽略**并记一条日志（诊断用）。这样即使
+           记录损坏、或来自别的产品形态，也不会把本机变成错误的设备组合；也**不允许**
+           通过配置新增/删除类型（那是编译期的事）。 */
+        for (uint8_t i = 0; i < self->cfg.module_count; i++) {
+            for (uint8_t j = 0; j < flash_cfg.module_count && j < APP_FLASH_LDI_MAX_MODULES; j++) {
+                if (flash_cfg.modules[j].device_type == self->cfg.modules[i].device_type) {
+                    self->cfg.modules[i].device_index = flash_cfg.modules[j].device_index;
+                    memcpy(self->cfg.modules[i].vendor, flash_cfg.modules[j].vendor,
+                           sizeof(self->cfg.modules[i].vendor));
+                    break;
+                }
+            }
         }
-        /* 尾槽清零：本表被 1EH 采集等按 module_count 遍历，清掉更确定（也防重入 init
-           时残留上一份表的尾项）。 */
-        for (uint8_t k = n; k < APP_FLASH_LDI_MAX_MODULES; k++)
-            self->cfg.modules[k] = (app_flash_ldi_module_cfg_t){0};
-        self->cfg.module_count = n;
+        for (uint8_t j = 0; j < flash_cfg.module_count && j < APP_FLASH_LDI_MAX_MODULES; j++) {
+            if (flash_cfg.modules[j].device_type == 0) continue; /* 空槽不算"额外类型" */
+            bool known = false;
+            for (uint8_t i = 0; i < self->cfg.module_count; i++)
+                if (self->cfg.modules[i].device_type == flash_cfg.modules[j].device_type) {
+                    known = true;
+                    break;
+                }
+            if (!known)
+                PL_NET_DIAG("LDI 记录里的 device_type 0x%02X 不在本机模块表（类型由编译期决定），已忽略",
+                            (unsigned)flash_cfg.modules[j].device_type);
+        }
         self->cfg_valid = true;
 
         /* 不再在这里显式同步 IAP 记录：上面第 81 行的 pl_net_set_ip 会触发 IP 变更

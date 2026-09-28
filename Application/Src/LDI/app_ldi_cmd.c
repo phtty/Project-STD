@@ -493,10 +493,20 @@ static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
 /**
  * 处理 0BH 设备参数配置请求
  *
- * 上位机→设备, 解析复合指令的 module 序列，**重建整张模块表**（device_type +
- * device_index + vendor[10] + module_count）并同时更新 RAM 镜像与 Flash。
- * 运行期读的是 RAM 镜像，**改完立即生效、无需重启**（下次上电由
- * `app_ldi_ctx_init` 从 Flash 读回同一张表）。
+ * 上位机→设备, **增量 upsert**：按 `device_type` 在**编译期模块表**里找同类型条目，
+ * 找到就更新它的 `device_index` + `vendor[10]`；找不到（本机编译期表没有该编码）
+ * 则**不采纳**。合并后的表同步 RAM 镜像与 Flash，改完**立即生效**（下次上电由
+ * `app_ldi_ctx_init` 从 Flash 读回同类型条目的序号/vendor）。
+ *
+ * ⚠️ 这是**与上位机软件方的既定约定**，不是规格的"整表"语义：上位机不知道单台设备
+ * 包含哪些编码，**一条命令只配一个编码**（增量）。因此本节**不重建整表**、不改
+ * `module_count`/类型集合 —— 代价是**无法通过命令移除模块**（记录只增不减）；产品
+ * 变体仍由编译期开关决定（见 app_ldi.c 的 app_ldi_ctx_init）。
+ *
+ * "某个模块未被采纳"如何表达：响应是既有的 `ldi_status_rsp_t`（head + 聚合 status），
+ * 不新增字段、不改上位机的解析。**增量流程下 device_num 恒为 1**，聚合 status 就等于
+ * 那个模块的结果（00H 采纳 / 01H 未采纳）；多模块请求时 01H 表示"至少一个未采纳"，
+ * 具体哪个由固件的诊断日志点名（`[ldi/cfg]`）。
  */
 static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
@@ -525,55 +535,54 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
         return;
     }
 
-    /* **从请求重建整张模块表**：type / index / vendor / count 全从请求来 ——
-       与 `app_ldi_ctx_init` 的"以 Flash 模块表为准"对称，0BH 是写这张表的唯一入口。
-       旧实现以编译期 cfg 的 type 做键匹配，**永远无法新增/删除类型**（v1↔v2 只能改
-       固件重编），与"配置驱动"不符。
-       先用局部缓冲整表解析，**全部合法才提交** —— 解析中途失败时不把 RAM 里的表改成
-       半张；未知类型（`_ldi_cfg_module_size` 返回 0）或空槽即拒。 */
-    app_flash_ldi_module_cfg_t new_modules[APP_FLASH_LDI_MAX_MODULES] = {0};
-    bool    result = true;
-    uint8_t n      = 0;
+    /* 逐个 module 按编译期表做 upsert；未知编码不采纳（记日志），其余继续处理。
+       逐个就地更新，不重建整表 —— 编译期表的条数/类型集合保持不变。 */
+    bool all_ok = true;
     for (uint8_t i = 0; i < device_num; i++) {
-        if (remaining < sizeof(app_ldi_module_head_t)) { /* 连 module 头都不全 */
-            result = false;
+        if (remaining < sizeof(app_ldi_module_head_t)) { /* 连 module 头都不全（帧截断） */
+            all_ok = false;
             break;
         }
         app_ldi_module_head_t *mod = (app_ldi_module_head_t *)ptr;
         uint8_t mod_size = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
-
-        if (mod_size == 0 || mod->device_type == 0) { /* 未知类型 / 空槽 */
-            result = false;
-            break;
-        }
-        if (mod_size > remaining) { /* 帧里没带够这个 module 的字节 */
-            result = false;
+        if (mod_size == 0 || mod->device_type == 0 || mod_size > remaining) { /* 畸形/截断 */
+            all_ok = false;
             break;
         }
 
-        uint8_t vendor_len = (uint8_t)(mod_size - sizeof(app_ldi_module_head_t));
-        if (vendor_len > sizeof(new_modules[n].vendor))
-            vendor_len = sizeof(new_modules[n].vendor);
-        new_modules[n].device_type  = mod->device_type;
-        new_modules[n].device_index = mod->device_index;
-        memcpy(new_modules[n].vendor, ptr + sizeof(app_ldi_module_head_t), vendor_len);
-        n++;
+        /* 按 device_type 在（编译期）表里找同类型条目 */
+        int8_t cfg_idx = -1;
+        for (uint8_t j = 0; j < g_ldi_ctx.cfg.module_count; j++)
+            if (g_ldi_ctx.cfg.modules[j].device_type == mod->device_type) {
+                cfg_idx = (int8_t)j;
+                break;
+            }
+
+        if (cfg_idx < 0) {
+            /* 编译期表里没有这个编码：不采纳（记录只增不减，不允许配置引入新类型） */
+            printf("[ldi/cfg] 0BH device_type 0x%02X 不在本机模块表（类型由编译期决定），未采纳\n",
+                   (unsigned)mod->device_type);
+            all_ok = false; /* 继续处理后续模块，但整体回失败 */
+        } else {
+            g_ldi_ctx.cfg.modules[cfg_idx].device_index = mod->device_index;
+            uint8_t vendor_len = (uint8_t)(mod_size - sizeof(app_ldi_module_head_t));
+            if (vendor_len > sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor))
+                vendor_len = sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor);
+            memcpy(g_ldi_ctx.cfg.modules[cfg_idx].vendor, ptr + sizeof(app_ldi_module_head_t),
+                   vendor_len);
+        }
 
         ptr += mod_size;
         remaining = (uint16_t)(remaining - mod_size);
     }
 
-    if (result) {
-        memcpy(g_ldi_ctx.cfg.modules, new_modules, sizeof(new_modules));
-        g_ldi_ctx.cfg.module_count = n;
-    }
-
-    /* 解析成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效 */
+    /* 解析/采纳成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效。
+       全部采纳才落盘：帧截断/含未采纳编码时不动 Flash（避免半张表落盘）。 */
     int32_t save_status = 0;
-    if (result)
+    if (all_ok)
         save_status = app_flash_ldi_save_config(&g_ldi_ctx.cfg);
 
-    ldi_status_rsp_t rsp = {.status = (result && save_status == 0) ? 0x00 : 0x01};
+    ldi_status_rsp_t rsp = {.status = (all_ok && save_status == 0) ? 0x00 : 0x01};
     app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_PARA_RSP);
     LDI_RESPOND(ccb, APP_LDI_CMD_TYPE_SET_PARA_RSP, g_ldi_ctx.rsp_seq, rsp);
 }
