@@ -22,9 +22,9 @@
 #include "pl_mem.h"
 
 /* ---- proto_ldi_queue 静态分配 ---- */
-#define LDI_DATA_MAX  (512U)                                     /**< DATA 域最大长度 */
-#define LDI_FRAME_MAX (sizeof(app_ldi_frame_t) + LDI_DATA_MAX + 2U)  /**< 8 + 512 + 2 = 522 */
-#define LDI_MSG_SIZE (sizeof(app_dispatch_msg_t) + LDI_FRAME_MAX)
+#define LDI_DATA_MAX  (512U)                                        /**< DATA 域最大长度 */
+#define LDI_FRAME_MAX (sizeof(app_ldi_frame_t) + LDI_DATA_MAX + 2U) /**< 8 + 512 + 2 = 522 */
+#define LDI_MSG_SIZE  (sizeof(app_dispatch_msg_t) + LDI_FRAME_MAX)
 
 static StaticQueue_t s_ldi_queue_cb;
 static uint8_t s_ldi_queue_buf[2 * LDI_MSG_SIZE] PL_CCMRAM;
@@ -61,7 +61,7 @@ app_ldi_ctx_t g_ldi_ctx = {
         .module_count = 2,
         .modules      = {
             {.device_type = APP_LDI_DEVICE_VMS, .device_index = 1},
-            // {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 1},
+            {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 1},
         },
     },
 };
@@ -91,15 +91,28 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self)
         app_tcp_server_set_port(self->cfg.device_port);
         app_tcp_client_set_remote(self->cfg.host_ip, self->cfg.host_port);
 
-        /* module: 以编译期 type 做键匹配，同步 index */
-        for (uint8_t i = 0; i < self->cfg.module_count; i++) {
-            for (uint8_t j = 0; j < flash_cfg.module_count; j++) {
-                if (flash_cfg.modules[j].device_type == self->cfg.modules[i].device_type) {
-                    self->cfg.modules[i].device_index = flash_cfg.modules[j].device_index;
-                    break;
-                }
-            }
+        /* module: **以 Flash 配置为准** —— device_type / device_index / vendor 整表从
+           记录来，module_count 也用它。编译期 `g_ldi_ctx` 的默认表只是"无有效配置"
+           时的回落（见下面的 else 分支）：这样同一版固件靠配置即可切 v1/v2 —— 记录里
+           声明了 EA（`APP_LDI_DEVICE_CANOPY_LIGHT`）就是折叠变体2（见 app_fold.c）。
+
+           防御：记录可能含空槽（device_type == 0）或脏项，**跳过空槽**并夹住容量 ——
+           空槽计进 module_count 会让 `app_ldi_get_device_idx` 之外"数 module_count"的
+           旧判据误判（历史坑，见 app_fold.h 的说明）。n 恒 <= 数组容量，不越界。 */
+        uint8_t n = 0;
+        for (uint8_t j = 0; j < flash_cfg.module_count && n < APP_FLASH_LDI_MAX_MODULES; j++) {
+            if (flash_cfg.modules[j].device_type == 0) continue; /* 空槽：不计入 */
+            self->cfg.modules[n].device_type  = flash_cfg.modules[j].device_type;
+            self->cfg.modules[n].device_index = flash_cfg.modules[j].device_index;
+            memcpy(self->cfg.modules[n].vendor, flash_cfg.modules[j].vendor,
+                   sizeof(self->cfg.modules[n].vendor));
+            n++;
         }
+        /* 尾槽清零：本表被 1EH 采集等按 module_count 遍历，清掉更确定（也防重入 init
+           时残留上一份表的尾项）。 */
+        for (uint8_t k = n; k < APP_FLASH_LDI_MAX_MODULES; k++)
+            self->cfg.modules[k] = (app_flash_ldi_module_cfg_t){0};
+        self->cfg.module_count = n;
         self->cfg_valid = true;
 
         /* 不再在这里显式同步 IAP 记录：上面第 81 行的 pl_net_set_ip 会触发 IP 变更
@@ -180,7 +193,7 @@ static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂
 
     /* 保护 tx_buf，app_ldi_task 和 app_ldi_timer_task 共享 */
     const osMutexAttr_t tx_lock_attr = {.name = "ldi_tx_lock", .attr_bits = osMutexPrioInherit};
-    g_ldi_ctx.tx_lock                    = osMutexNew(&tx_lock_attr);
+    g_ldi_ctx.tx_lock                = osMutexNew(&tx_lock_attr);
 
     // 创建协议相关处理任务
     g_ldi_task_handle       = pl_task_new(app_ldi_task, nullptr, &g_ldi_task_attr);
@@ -340,8 +353,8 @@ static const uint8_t ldi_stx[2] = {0xFF, 0xFF};
  * 就会写穿栈数组（TCP 合并分段时是常态）。
  */
 app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
-                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
-                                uint8_t *aux)
+                                          uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                          uint8_t *aux)
 {
     (void)src; /* 本协议不区分来源 */
     (void)ccb;

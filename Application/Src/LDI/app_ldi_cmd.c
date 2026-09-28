@@ -455,8 +455,10 @@ static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data)
 /**
  * 处理 0BH 设备参数配置请求
  *
- * 上位机→设备, 解析复合指令的 module 序列，
- * 将每个模块的 device_type + device_index + vendor[10] 写入 Flash.
+ * 上位机→设备, 解析复合指令的 module 序列，**重建整张模块表**（device_type +
+ * device_index + vendor[10] + module_count）并同时更新 RAM 镜像与 Flash。
+ * 运行期读的是 RAM 镜像，**改完立即生效、无需重启**（下次上电由
+ * `app_ldi_ctx_init` 从 Flash 读回同一张表）。
  */
 static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
 {
@@ -468,43 +470,45 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data)
     memcpy(g_ldi_ctx.cfg.lane_hex, head->lane_code, sizeof(g_ldi_ctx.cfg.lane_hex));
     memcpy(g_ldi_ctx.cfg.cert, head->cert_info, sizeof(g_ldi_ctx.cfg.cert));
 
-    if (device_num == 0 || device_num > g_ldi_ctx.cfg.module_count) {
+    if (device_num == 0 || device_num > APP_FLASH_LDI_MAX_MODULES) {
         ldi_status_rsp_t rsp = {.status = 0x01};
         app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_PARA_RSP);
         LDI_RESPOND(ccb, APP_LDI_CMD_TYPE_SET_PARA_RSP, g_ldi_ctx.rsp_seq, rsp);
         return;
     }
 
-    /* 以编译期 cfg 中的 device_type 做键，匹配请求帧中的 module，同步 index 和 vendor */
-    bool result = true;
+    /* **从请求重建整张模块表**：type / index / vendor / count 全从请求来 ——
+       与 `app_ldi_ctx_init` 的"以 Flash 模块表为准"对称，0BH 是写这张表的唯一入口。
+       旧实现以编译期 cfg 的 type 做键匹配，**永远无法新增/删除类型**（v1↔v2 只能改
+       固件重编），与"配置驱动"不符。
+       先用局部缓冲整表解析，**全部合法才提交** —— 解析中途失败时不把 RAM 里的表改成
+       半张；未知类型（`_ldi_cfg_module_size` 返回 0）或空槽即拒。 */
+    app_flash_ldi_module_cfg_t new_modules[APP_FLASH_LDI_MAX_MODULES] = {0};
+    bool    result = true;
+    uint8_t n      = 0;
     for (uint8_t i = 0; i < device_num; i++) {
         app_ldi_module_head_t *mod = (app_ldi_module_head_t *)ptr;
-        uint8_t mod_size       = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
+        uint8_t mod_size = _ldi_cfg_module_size((app_ldi_device_t)mod->device_type);
 
-        if (mod_size == 0) {
+        if (mod_size == 0 || mod->device_type == 0) { /* 未知类型 / 空槽 */
             result = false;
             break;
         }
 
-        int8_t cfg_idx = -1;
-        for (uint8_t j = 0; j < g_ldi_ctx.cfg.module_count; j++) {
-            if (g_ldi_ctx.cfg.modules[j].device_type == mod->device_type) {
-                cfg_idx = (int8_t)j;
-                break;
-            }
-        }
-        if (cfg_idx < 0) {
-            result = false;
-            break;
-        }
-
-        g_ldi_ctx.cfg.modules[cfg_idx].device_index = mod->device_index;
-        uint8_t vendor_len                      = mod_size - sizeof(app_ldi_module_head_t);
-        if (vendor_len > sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor))
-            vendor_len = sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor);
-        memcpy(g_ldi_ctx.cfg.modules[cfg_idx].vendor, ptr + sizeof(app_ldi_module_head_t), vendor_len);
+        uint8_t vendor_len = (uint8_t)(mod_size - sizeof(app_ldi_module_head_t));
+        if (vendor_len > sizeof(new_modules[n].vendor))
+            vendor_len = sizeof(new_modules[n].vendor);
+        new_modules[n].device_type  = mod->device_type;
+        new_modules[n].device_index = mod->device_index;
+        memcpy(new_modules[n].vendor, ptr + sizeof(app_ldi_module_head_t), vendor_len);
+        n++;
 
         ptr += mod_size;
+    }
+
+    if (result) {
+        memcpy(g_ldi_ctx.cfg.modules, new_modules, sizeof(new_modules));
+        g_ldi_ctx.cfg.module_count = n;
     }
 
     /* 解析成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效 */

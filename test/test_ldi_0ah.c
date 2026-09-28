@@ -478,7 +478,11 @@ static void case_ctrl_ea_reject(void)
 static void case_ctrl_ea_unconfigured(void)
 {
     TEST_BEGIN("1BH EA：未声明 EA → 不进处理，CtlStatus=01H");
-    env_setup(); /* 不声明 EA（module_count 为 0） */
+    env_setup();
+    /* **显式清空模块表**构造"未声明"场景，不依赖编译期默认表 —— 默认里 EA 开或关
+       本用例都应绿（此前写死"默认不声明"的假设，默认一改就红）。 */
+    memset(g_ldi_ctx.cfg.modules, 0, sizeof(g_ldi_ctx.cfg.modules));
+    g_ldi_ctx.cfg.module_count = 0;
     /* 故意让 mode 替身谎报"变体2"：若实现只信 mode 而不查 device_idx，本用例会红 */
     s_fold_mode_stub = APP_FOLD_MODE_FOLD_E9_EA;
 
@@ -702,6 +706,158 @@ static void case_ctx_init_else_adopts_iap_and_notifies(void)
     CHECK_MSG(memcmp(s_set_ip_last, IP_A, 4) == 0, "pl_net_set_ip 收到的不是采纳的地址");
 }
 
+/* ================================================================
+ *  app_ldi_ctx_init 的 cfg_ok 分支：**以 Flash 模块表为准**
+ *
+ *  用户已定：Flash 有有效配置时，模块表（type/index/vendor/count）整表从记录来；
+ *  编译期 g_ldi_ctx 的默认表只是"无有效配置"时的回落。于是同一版固件靠配置即可
+ *  切 v1/v2（记录里声明 EA → 折叠变体2）。这些用例在 fork 出的独立进程里跑，
+ *  每个用例的 s_load_done 缓存是干净的（save 在前、首次 load 在后）。
+ * ================================================================ */
+
+/** @brief 往 W25Qxx 写一份有效 LDI 配置（模块表由调用方给），供 ctx_init 的 cfg_ok 用 */
+static void seed_ldi_cfg(const app_flash_ldi_module_cfg_t *mods, uint8_t count)
+{
+    app_flash_ldi_cfg_info_t cfg = {0};
+    memcpy(cfg.device_ip, IP_A, 4);
+    cfg.device_port = PORT;
+    memcpy(cfg.netmask, MASK, 4);
+    memcpy(cfg.gateway, GW, 4);
+    cfg.module_count = count;
+    for (uint8_t i = 0; i < count && i < APP_FLASH_LDI_MAX_MODULES; i++) cfg.modules[i] = mods[i];
+
+    int32_t st = app_flash_ldi_save_config(&cfg);
+    CHECK_MSG(st == 0, "seed：保存配置应成功，返回 %d", (int)st);
+}
+
+/** Flash 有效配置 {EA}：整表以记录为准 —— index 从记录来，默认表里的 VMS 被替换掉 */
+static void case_ctx_init_modules_from_flash(void)
+{
+    TEST_BEGIN("Flash 有效配置：模块类型以记录为准（EA 从记录来、默认表被替换）");
+    env_setup();
+
+    app_flash_ldi_module_cfg_t mods[1] = {
+        {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 2},
+    };
+    seed_ldi_cfg(mods, 1);
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK_MSG(g_ldi_ctx.cfg_valid, "cfg_valid 应为 true");
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == 1, "module_count 应用记录的 1，得到 %u",
+              (unsigned)g_ldi_ctx.cfg.module_count);
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 2,
+              "EA 应来自记录且 index=2，得到 %u",
+              (unsigned)app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT));
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == 0xFF,
+              "默认表里的 VMS 不该保留（记录里没有它）");
+}
+
+/** Flash 有效配置 {E9, EA}：两模块都在（变体2 的声明前提：EA != 0xFF） */
+static void case_ctx_init_flash_e9_ea(void)
+{
+    TEST_BEGIN("Flash 有效配置 {E9,EA}：两模块都在（折叠几何 → 变体2 的声明前提）");
+    env_setup();
+
+    app_flash_ldi_module_cfg_t mods[2] = {
+        {.device_type = APP_LDI_DEVICE_VMS, .device_index = 1},
+        {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 3},
+    };
+    seed_ldi_cfg(mods, 2);
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK(g_ldi_ctx.cfg.module_count == 2);
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == 1, "E9 的 index 应来自记录");
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 3,
+              "EA 应声明且 index 来自记录（折叠几何下 app_fold_mode() 即为 v2；真实判定见 test_fold.c）");
+}
+
+/** Flash 有效配置仅 {E9}：EA 未声明 */
+static void case_ctx_init_flash_e9_only(void)
+{
+    TEST_BEGIN("Flash 有效配置仅 {E9}：EA 未声明");
+    env_setup();
+
+    app_flash_ldi_module_cfg_t mods[1] = {
+        {.device_type = APP_LDI_DEVICE_VMS, .device_index = 1},
+    };
+    seed_ldi_cfg(mods, 1);
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == 1);
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 0xFF,
+              "记录里没有 EA，就不该被声明");
+}
+
+/** 无有效配置：保持编译期默认模块表（默认含 EA —— 用户已定的默认配置） */
+static void case_ctx_init_no_cfg_keeps_default(void)
+{
+    TEST_BEGIN("无有效配置：保持编译期默认模块表（默认含 EA）");
+    env_setup(); /* W25Qxx 为空 → cfg_ok=false，走 else 分支 */
+
+    const uint8_t before = app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT);
+
+    app_ldi_ctx_init(&g_ldi_ctx);
+
+    CHECK_MSG(g_ldi_ctx.cfg_valid, "cfg_valid 应为 true");
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == before,
+              "无有效配置时应保持编译期默认表（EA index %u → %u）", (unsigned)before,
+              (unsigned)app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT));
+    CHECK_MSG(before != 0xFF, "当前编译期默认应声明 EA（用户默认配置调整）");
+}
+
+/* ================================================================
+ *  0BH 设备参数配置：**从请求重建整张模块表**（RAM 与 Flash 一致）
+ * ================================================================ */
+
+static uint8_t s_cfg_buf[128];
+
+/** @brief 构造一条 0BH 请求：device_num=1、只给 EA（index=4、vendor=2 字节） */
+static void make_0bh_ea_only(void)
+{
+    memset(s_cfg_buf, 0, sizeof s_cfg_buf);
+    app_ldi_req_head_t *head = (app_ldi_req_head_t *)s_cfg_buf;
+    head->lane_code[0]        = 0x12; /* 顺带验证 head 被持久化 */
+    head->cert_info[0]        = 0x34;
+
+    uint8_t *p = s_cfg_buf + sizeof(app_ldi_req_head_t);
+    *p++       = 1;                                     /* device_num */
+    *p++       = (uint8_t)APP_LDI_DEVICE_CANOPY_LIGHT;  /* device_type */
+    *p++       = 4;                                     /* device_index */
+    /* 信号类 module 长度 = head(2) + app_ldi_cfg_signal_t(2)，vendor 剩 2 字节 */
+    *p++ = 0xAA;
+    *p++ = 0xBB;
+}
+
+/** 0BH 用请求的表替换 RAM + 落盘：type/index/vendor/count 全部一致 */
+static void case_set_config_rebuilds_table(void)
+{
+    TEST_BEGIN("0BH：从请求重建整张表（type/index/count），RAM 与 Flash 一致");
+    env_setup();
+
+    make_0bh_ea_only();
+    _ldi_cmd_set_config(NULL, s_cfg_buf);
+
+    CHECK_MSG(rsp_status() == 0x00, "0BH 应成功，status=0x%02X", rsp_status());
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == 1, "module_count 应为请求的 1，得到 %u",
+              (unsigned)g_ldi_ctx.cfg.module_count);
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 4,
+              "EA index 应来自请求（4），得到 %u",
+              (unsigned)app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT));
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == 0xFF,
+              "请求没给 VMS，就不该留在表里（旧实现只做键匹配、替换不掉默认表）");
+
+    /* 落盘一致：读回记录应与刚提交的 RAM 镜像逐字段一致 */
+    app_flash_ldi_cfg_info_t got = {0};
+    CHECK_MSG(app_flash_ldi_load_config(&got), "应能读回刚写的记录");
+    CHECK_MSG(got.module_count == 1 && got.modules[0].device_type == APP_LDI_DEVICE_CANOPY_LIGHT &&
+                  got.modules[0].device_index == 4,
+              "Flash 记录的 count/type/index 应与 RAM 一致");
+    CHECK_MSG(got.lane_hex[0] == 0x12 && got.cert[0] == 0x34, "0BH 的 lane/cert 也应落盘");
+}
+
 /* ================================================================ */
 
 /** @brief 在子进程里跑一个用例
@@ -724,6 +880,11 @@ int main(void)
         {"IAP 镜像失败对上位机不可见", case_mirror_failure_is_invisible_to_host},
         {"连续两次 0AH 两条都跟着走", case_second_0ah_overwrites_both},
         {"W25Qxx 无配置：ctx_init 采纳 IAP 并通知运行态", case_ctx_init_else_adopts_iap_and_notifies},
+        {"Flash 有效配置：模块类型以记录为准", case_ctx_init_modules_from_flash},
+        {"Flash {E9,EA}：两模块都在", case_ctx_init_flash_e9_ea},
+        {"Flash 仅 {E9}：EA 未声明", case_ctx_init_flash_e9_only},
+        {"无有效配置：保持编译期默认表", case_ctx_init_no_cfg_keeps_default},
+        {"0BH：从请求重建整张表，RAM 与 Flash 一致", case_set_config_rebuilds_table},
         {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
         {"EA 显示控制：拒绝路径 → CtlStatus=01H", case_ctrl_ea_reject},
         {"EA 显示控制：未声明 EA 不进处理", case_ctrl_ea_unconfigured},
