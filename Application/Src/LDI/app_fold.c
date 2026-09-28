@@ -107,14 +107,17 @@ bool app_fold_preset_show(uint8_t color)
         return false;
     }
 
+    /* 落盘（掉电恢复）：雨棚状态是产品状态，掉电重来要恢复它。
+       粒度仍是"半屏（本卡矩形）"，记录格式未变（见 docs/架构说明.md §7.4）。 */
     app_render(&(app_render_cfg_t){
-        .type   = APP_RENDER_TYPE_BITMAP,
-        .x      = x,
-        .y      = y,
-        .w      = w,
-        .h      = h,
-        .color  = (dev_display_color_t)s_last_color,
-        .bitmap = p->bitmap,
+        .type    = APP_RENDER_TYPE_BITMAP,
+        .x       = x,
+        .y       = y,
+        .w       = w,
+        .h       = h,
+        .color   = (dev_display_color_t)s_last_color,
+        .bitmap  = p->bitmap,
+        .persist = true,
     });
     return true;
 }
@@ -124,13 +127,16 @@ bool app_fold_lower_clear(void)
     uint16_t x = 0, y = 0, w = 0, h = 0;
     if (!app_fold_rect(1, &x, &y, &w, &h)) return false; /* 非折叠：没有下半屏 */
 
+    /* 清除也必须落盘：否则"先显图、后清除"时盘上仍是旧图，掉电后旧图会复活，
+       状态与最后一条命令不一致。粒度仍是"半屏（本卡矩形）"，记录格式未变。 */
     app_render(&(app_render_cfg_t){
-        .type  = APP_RENDER_TYPE_FILL,
-        .x     = x,
-        .y     = y,
-        .w     = w,
-        .h     = h,
-        .color = DEV_DISPLAY_COLOR_BLACK,
+        .type    = APP_RENDER_TYPE_FILL,
+        .x       = x,
+        .y       = y,
+        .w       = w,
+        .h       = h,
+        .color   = DEV_DISPLAY_COLOR_BLACK,
+        .persist = true,
     });
     return true;
 }

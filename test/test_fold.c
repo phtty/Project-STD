@@ -510,6 +510,7 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(fill && fill->x == 0 && fill->y == 50 && fill->w == 224 && fill->h == 50,
               "清屏区域应为下半 224x50@(0,50)");
     CHECK_MSG(fill && fill->color == DEV_DISPLAY_COLOR_BLACK, "清屏应为全黑");
+    CHECK_MSG(fill && fill->persist, "清下半屏应请求落盘（掉电恢复，状态与最后命令一致）");
 
     /* 01H → 绿槽 */
     env_reset();
@@ -523,6 +524,7 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[0].x == 0 && s_recs[0].y == 50 && s_recs[0].w == 224 && s_recs[0].h == 50,
               "BITMAP 区域应为下半 224x50@(0,50)");
     CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_YELLOW, "颜色应取最近一次颜色（黄）");
+    CHECK_MSG(s_recs[0].persist, "EA 预置图应请求落盘（掉电恢复）");
 
     /* 02H → 红槽 */
     env_reset();
@@ -531,6 +533,7 @@ static void case_ea_show_and_clear(void)
     s_scr_h      = 100;
     CHECK_MSG(app_fold_preset_show(2), "红预置图应显示成功");
     CHECK_MSG(s_rec_cnt == 1 && s_recs[0].bitmap == s_bm_red, "02H 应取红槽");
+    CHECK_MSG(s_recs[0].persist, "EA 预置图（红）也应请求落盘");
 
     /* 03H → 黄槽是空槽：拒画 + false + 无渲染 */
     env_reset();
