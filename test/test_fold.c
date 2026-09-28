@@ -592,7 +592,7 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(fill && fill->x == 0 && fill->y == 50 && fill->w == 224 && fill->h == 50,
               "清屏区域应为下半 224x50@(0,50)");
     CHECK_MSG(fill && fill->color == DEV_DISPLAY_COLOR_BLACK, "清屏应为全黑");
-    CHECK_MSG(fill && fill->persist, "清下半屏应请求落盘（掉电恢复，状态与最后命令一致）");
+    CHECK_MSG(fill && !fill->persist, "清下半屏不得落盘（清屏不落盘，上电有内容可判屏）");
     CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0,
               "清下半屏是单笔，不得 begin/end（包了无意义），得到 begin=%d end=%d", s_frame_begins,
               s_frame_ends);
@@ -616,7 +616,7 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[0].x == 0 && s_recs[0].y == 50 && s_recs[0].w == 224 && s_recs[0].h == 50,
               "清屏区域应为下半 224x50@(0,50)");
     CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK, "清屏必须全黑");
-    CHECK_MSG(s_recs[0].persist, "清屏也要落盘（与显示同口径，掉电不复活旧图）");
+    CHECK_MSG(!s_recs[0].persist, "预置图前的清屏不落盘（最终状态是图，由 BITMAP 落盘）");
     CHECK_MSG(s_recs[1].bitmap == s_bm_green, "01H 应取绿槽");
     CHECK_MSG(s_recs[1].x == 0 && s_recs[1].y == 50 && s_recs[1].w == 224 && s_recs[1].h == 50,
               "BITMAP 区域应为下半 224x50@(0,50)");
@@ -636,8 +636,8 @@ static void case_ea_show_and_clear(void)
                   s_ev[2] == EV_RENDER && s_ev[3] == EV_FRAME_END,
               "02H 也应为 begin → FILL → BITMAP → end（begin/end 在两次渲染外侧）");
     CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1, "02H 应恰好 begin/end 各一次（成对）");
-    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK && s_recs[0].persist,
-              "红前的清屏应为全黑且落盘");
+    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK && !s_recs[0].persist,
+              "红前的清屏应为全黑且不落盘（只 BITMAP 落盘）");
     CHECK_MSG(s_recs[1].bitmap == s_bm_red, "02H 应取红槽");
     CHECK_MSG(s_recs[1].persist, "EA 预置图（红）也应请求落盘");
 

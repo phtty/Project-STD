@@ -121,20 +121,24 @@ bool app_fold_preset_show(uint8_t color)
        bit=0 不动（见 app_screen_canvas.c 的 _sink_bitmap 与 dev_display_draw_bitmap），
        两张预置图切换时新图 bit=0 的像素会保留旧图 —— 残影。E9 折叠路径同样是
        "先清半屏再画"。半屏全黑填充正是画布颜色账里的"新一帧"（见
-       docs/架构说明.md §7.4），清屏也得落盘：与显示同口径，掉电后不复活旧图。 */
+       docs/架构说明.md §7.4）。
+
+       **清屏这一笔不落盘**（.persist 默认 false，见 app_render.h 的 persist 说明）：
+       整帧的最终状态是图 —— 由下面 BITMAP 那一笔请求落盘。此处清屏只是"画图前的
+       过渡笔"，本身不是要留存的内容帧；清屏落盘会让掉电后复活一张黑屏。 */
     dev_display_frame_begin(dev_display_get());
 
     app_render(&(app_render_cfg_t){
-        .type    = APP_RENDER_TYPE_FILL,
-        .x       = x,
-        .y       = y,
-        .w       = w,
-        .h       = h,
-        .color   = DEV_DISPLAY_COLOR_BLACK,
-        .persist = true,
+        .type  = APP_RENDER_TYPE_FILL,
+        .x     = x,
+        .y     = y,
+        .w     = w,
+        .h     = h,
+        .color = DEV_DISPLAY_COLOR_BLACK,
     });
 
-    /* 落盘（掉电恢复）：雨棚状态是产品状态，掉电重来要恢复它。
+    /* 画图这一笔才落盘（掉电恢复）：雨棚状态是产品状态，掉电重来要恢复它 ——
+       **清屏不落盘、画图落盘**，整帧最终状态是图。
        粒度仍是"半屏（本卡矩形）"，记录格式未变（见 docs/架构说明.md §7.4）。 */
     app_render(&(app_render_cfg_t){
         .type    = APP_RENDER_TYPE_BITMAP,
@@ -156,21 +160,24 @@ bool app_fold_lower_clear(void)
     uint16_t x = 0, y = 0, w = 0, h = 0;
     if (!app_fold_rect(1, &x, &y, &w, &h)) return false; /* 非折叠：没有下半屏 */
 
-    /* 清除也必须落盘：否则"先显图、后清除"时盘上仍是旧图，掉电后旧图会复活，
-       状态与最后一条命令不一致。粒度仍是"半屏（本卡矩形）"，记录格式未变。
+    /* **清屏不落盘**（.persist 默认 false，不给默认、见 app_render.h 的 persist 说明）：
+       清屏是**当场生效的瞬时状态**，靠上位机后续命令重设，不是要留存的内容帧。
+       持久化策略排除清屏，是为了保住"上电有内容可判屏"这一现场手段 —— 交通屏掉电
+       重启后必须是**画面**（哪怕是旧的/错的），现场才能一眼判断"屏体本身是否正常"；
+       若把清屏存下去，重启即黑屏，就失去这个判屏依据。旧图在掉电后被"复活"是可接受
+       且预期的，内容由上位机重新下发纠正。粒度仍是"半屏（本卡矩形）"，记录格式未变。
 
        **单笔填充不包 frame_begin/end**：只有一笔，没有"两笔之间的中间态"可压；包了
        只是把置脏推迟到 `_end`，上屏结果与直接画没有任何区别（见 dev_display.h 的
        dev_display_frame_begin 说明）—— 无收益，还多一处必须成对的约束。预置图的
        "清 + 画"两笔才需要。 */
     app_render(&(app_render_cfg_t){
-        .type    = APP_RENDER_TYPE_FILL,
-        .x       = x,
-        .y       = y,
-        .w       = w,
-        .h       = h,
-        .color   = DEV_DISPLAY_COLOR_BLACK,
-        .persist = true,
+        .type  = APP_RENDER_TYPE_FILL,
+        .x     = x,
+        .y     = y,
+        .w     = w,
+        .h     = h,
+        .color = DEV_DISPLAY_COLOR_BLACK,
     });
     return true;
 }
