@@ -321,30 +321,98 @@ static void case_commit_length_guard(void)
     CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_GREEN, "长度正确却没落屏");
 }
 
-/** 折叠下半屏全黑清屏也算"新一帧"：颜色账复位，不残留上一帧的颜色主张/mixed */
-static void case_halfscreen_clear_is_new_frame(void)
+/** 折叠半屏全黑填充 = 该单元"新一帧"：只复位**本单元**，另一单元不受影响 */
+static void case_halfscreen_clear_resets_own_unit(void)
 {
-    TEST_BEGIN("折叠半屏全黑填充 = 新一帧：颜色账复位（不残留 mixed）");
+    TEST_BEGIN("折叠半屏全黑填充 = 该单元新一帧（只复位本单元，不动另一单元）");
 
-    canvas_reset_fold();
+    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
+
+    canvas_reset_fold(); /* 单元0=上半 48x16，单元1=下半 48x16；卡0=上、卡1=下 */
     CHECK_MSG(app_screen_fold_count() == 2, "折叠布局下门面应判 2 块（得到 %u）",
               (unsigned)app_screen_fold_count());
 
-    /* 上半屏红 → 本帧内容色 = 红（唯一非黑颜色） */
-    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);
-    CHECK_MSG(app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW) == DEV_DISPLAY_COLOR_RED,
-              "清屏前内容色应为红，得到 %u",
-              (unsigned)app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW));
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);   /* 上半红 */
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_GREEN); /* 下半绿 */
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED, "上半单元应为红");
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN, "下半单元应为绿");
 
-    /* 只清下半屏（全黑）—— 变体2 的 EA 清除走这条。
-       若"半屏清屏"不算新一帧，红的颜色主张会残留，输出仍是红。 */
-    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_BLACK);
-    CHECK_MSG(app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW) == DEV_DISPLAY_COLOR_YELLOW,
-              "下半屏全黑清屏应复位颜色账（回落卡片色），得到 %u",
-              (unsigned)app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW));
+    /* 只清上半屏（全黑）—— 变体2 的 EA 清除走另一条，这里验证半屏清屏只复位自己 */
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
+    CHECK_MSG(app_screen_output_color(0, card) == card,
+              "上半屏全黑清屏应复位**上半**颜色账（回落卡片色），得到 %u",
+              (unsigned)app_screen_output_color(0, card));
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "上半清屏不得动下半的颜色（得到 %u，应为绿）",
+              (unsigned)app_screen_output_color(1, card));
 }
 
-/** 整屏纯色填充定本帧色：红→绿、蓝→青不退回卡片色；黑仍只复位 */
+/** 逐单元独立：上半红 + 下半绿 → 上卡红、下卡绿；上半文本不改下半单元 */
+static void case_per_unit_colors_independent(void)
+{
+    TEST_BEGIN("逐单元独立：上半红/下半绿 → 上卡红、下卡绿，互不干扰");
+
+    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
+
+    canvas_reset_fold();
+
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED); /* 上半红（整单元填充） */
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED, "上半应为红，得到 %u",
+              (unsigned)app_screen_output_color(0, card));
+    CHECK_MSG(app_screen_output_color(1, card) == card,
+              "下半此时无内容，应回落卡片色，得到 %u", (unsigned)app_screen_output_color(1, card));
+
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_GREEN); /* 下半绿（整单元填充） */
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN, "下半应为绿，得到 %u",
+              (unsigned)app_screen_output_color(1, card));
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED,
+              "下半填充不得改上半的颜色，得到 %u（应为红）", (unsigned)app_screen_output_color(0, card));
+
+    /* E9 上半文本（位图，仍是红）只记到上半单元，不动下半 —— 形状/叠色不改单元归属 */
+    const uint8_t bm8 = 0xFFU;
+    _sink_bitmap(nullptr, 0, 0, 8, 1, &bm8, DEV_DISPLAY_COLOR_RED);
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED,
+              "上半文本（红）不应把上半单元带成 mixed，得到 %u", (unsigned)app_screen_output_color(0, card));
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "上半文本不得动下半单元，得到 %u（应为绿）", (unsigned)app_screen_output_color(1, card));
+}
+
+/** 整屏纯色填充在折叠布局下 = 两个单元同时复位并定色 */
+static void case_fullscreen_fill_sets_both_units(void)
+{
+    TEST_BEGIN("整屏纯色填充 = 两个单元同色（折叠）");
+
+    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
+
+    canvas_reset_fold();
+    _sink_fill(nullptr, 0, 0, W, (uint16_t)(2U * H), DEV_DISPLAY_COLOR_BLUE); /* 整屏 48x32 */
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_BLUE, "上单元应为蓝，得到 %u",
+              (unsigned)app_screen_output_color(0, card));
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_BLUE, "下单元应为蓝，得到 %u",
+              (unsigned)app_screen_output_color(1, card));
+}
+
+/** 某单元混色只影响它自己：上半异色混用 → 上卡回落；下半单色仍定色 */
+static void case_unit_mixed_isolated(void)
+{
+    TEST_BEGIN("混色只影响本单元：上半混色回落，下半单色仍定色");
+
+    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
+
+    canvas_reset_fold();
+    _sink_fill(nullptr, 0, 0, W, (uint16_t)(2U * H), DEV_DISPLAY_COLOR_BLACK); /* 整屏黑复位两单元 */
+    _sink_fill(nullptr, 0, 0, 8, 8, DEV_DISPLAY_COLOR_RED);                     /* 上半红 */
+    _sink_fill(nullptr, 8, 0, 8, 8, DEV_DISPLAY_COLOR_BLUE);                    /* 上半蓝 → 上单元 mixed */
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_GREEN);                   /* 下半绿（整单元） */
+
+    CHECK_MSG(app_screen_output_color(0, card) == card,
+              "上半混色应回落卡片色，得到 %u", (unsigned)app_screen_output_color(0, card));
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "下半单色不应被上半的混合带偏，得到 %u（应为绿）",
+              (unsigned)app_screen_output_color(1, card));
+}
+
+/** 非折叠（单单元）：整屏纯色填充定帧色，红→绿、蓝→青不退回卡片色；黑仍只复位 */
 static void case_full_color_fill_sets_frame_color(void)
 {
     TEST_BEGIN("整屏纯色填充定本帧色：红→绿 / 蓝→青 不退回卡片色；黑仍复位");
@@ -355,31 +423,32 @@ static void case_full_color_fill_sets_frame_color(void)
 
     canvas_reset();
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_RED,
-              "红整屏填充后输出色应为红，得到 %u", (unsigned)app_screen_output_color(card));
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED,
+              "红整屏填充后输出色应为红，得到 %u", (unsigned)app_screen_output_color(0, card));
 
     /* 现场症状：紧接着另一种非黑颜色整屏填充，旧实现把蓝与残留红判成 mixed → 回落卡片色 */
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_GREEN);
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_GREEN,
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_GREEN,
               "红→绿连续整屏清屏后输出色应为绿（不是卡片色黄），得到 %u",
-              (unsigned)app_screen_output_color(card));
+              (unsigned)app_screen_output_color(0, card));
 
     /* 1+7 色的新值：蓝 → 青 */
     canvas_reset();
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_BLUE);
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_BLUE,
-              "蓝整屏填充后输出色应为蓝，得到 %u", (unsigned)app_screen_output_color(card));
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_BLUE,
+              "蓝整屏填充后输出色应为蓝，得到 %u", (unsigned)app_screen_output_color(0, card));
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_CYAN);
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_CYAN,
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_CYAN,
               "蓝→青连续整屏清屏后输出色应为青（不是卡片色黄），得到 %u",
-              (unsigned)app_screen_output_color(card));
+              (unsigned)app_screen_output_color(0, card));
 
     /* 黑整屏填充仍只复位、不定色（回落卡片色） */
     canvas_reset();
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_BLACK);
-    CHECK_MSG(app_screen_output_color(card) == card, "黑整屏填充应复位颜色账（回落卡片色），得到 %u",
-              (unsigned)app_screen_output_color(card));
+    CHECK_MSG(app_screen_output_color(0, card) == card,
+              "黑整屏填充应复位颜色账（回落卡片色），得到 %u",
+              (unsigned)app_screen_output_color(0, card));
 }
 
 /** 局部彩色填充仍走累积/混合：异色 → mixed → 退回落卡片色（旧语义不变） */
@@ -392,29 +461,9 @@ static void case_local_color_fill_still_mixed(void)
     canvas_reset();
     _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);   /* 整屏红 → 定帧色红 */
     _sink_fill(nullptr, 0, 0, 8, 8, DEV_DISPLAY_COLOR_GREEN); /* 局部绿 → 异色，mixed */
-    CHECK_MSG(app_screen_output_color(card) == card, "整屏红 + 局部绿应判 mixed 回落卡片色，得到 %u",
-              (unsigned)app_screen_output_color(card));
-}
-
-/** 折叠布局下彩色整半屏填充同样是"新一帧"：上半红 → 下半绿各自定色 */
-static void case_fold_color_half_is_new_frame(void)
-{
-    TEST_BEGIN("折叠彩色整半屏填充 = 新一帧：上半红 → 下半绿各自定色");
-
-    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
-
-    canvas_reset_fold();
-    CHECK_MSG(app_screen_fold_count() == 2, "折叠布局下门面应判 2 块（得到 %u）",
-              (unsigned)app_screen_fold_count());
-
-    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED); /* 上半屏红 */
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_RED,
-              "彩色上半屏填充后输出色应为红，得到 %u", (unsigned)app_screen_output_color(card));
-
-    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_GREEN); /* 下半屏绿 → 新一帧 */
-    CHECK_MSG(app_screen_output_color(card) == DEV_DISPLAY_COLOR_GREEN,
-              "红上半 → 绿下半后输出色应为绿（不是卡片色黄），得到 %u",
-              (unsigned)app_screen_output_color(card));
+    CHECK_MSG(app_screen_output_color(0, card) == card,
+              "整屏红 + 局部绿应判 mixed 回落卡片色，得到 %u",
+              (unsigned)app_screen_output_color(0, card));
 }
 
 /* ================================================================ */
@@ -429,10 +478,12 @@ int main(void)
     case_bitmap_clip_stride();
     case_fullscreen_fill();
     case_commit_length_guard();
-    case_halfscreen_clear_is_new_frame();
+    case_halfscreen_clear_resets_own_unit();
+    case_per_unit_colors_independent();
+    case_fullscreen_fill_sets_both_units();
+    case_unit_mixed_isolated();
     case_full_color_fill_sets_frame_color();
     case_local_color_fill_still_mixed();
-    case_fold_color_half_is_new_frame();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

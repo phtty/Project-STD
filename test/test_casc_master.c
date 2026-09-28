@@ -223,7 +223,7 @@ dev_key_t *dev_key_get(dev_key_id_t id)
 /* 从卡落盘与开轮时 peek 的持久化请求位：本套件桩成"从不请求持久化" */
 void app_render_save(void) {}
 bool app_render_peek_persist_req(void) { return false; }
-uint8_t app_screen_output_color(uint8_t c) { return c; } /* 无颜色覆盖 */
+uint8_t app_screen_output_color(uint8_t idx, uint8_t c) { (void)idx; return c; } /* 无颜色覆盖 */
 
 /* ---- 开轮三闸的输入：用例逐个摆（`_round_ready` 就是靠这三个判的） ---- */
 static bool s_canvas_touched_flag, s_settled, s_render_busy;

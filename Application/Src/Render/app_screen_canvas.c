@@ -64,73 +64,155 @@ void app_screen_set_color_override(uint8_t color)
     s_color_override = color;
 }
 
-/* ---- 这一帧内容用的颜色（画布只记亮/灭，颜色另行记着）----
+/* ---- 各**帧单元**这一帧内容用的颜色（画布只记亮/灭，颜色另行记着）----
  *
  * 画布是 **1bpp**，原来的规矩是"颜色由像素属于哪张卡决定" —— 于是 `app_render`
  * 传下来的颜色**被整个丢掉**：LDI 发红字显示成绿、RLS 的位图颜色同样中招、
  * 工厂老化逐色全绿。开画布之前（渲染直写实屏）颜色是逐像素的真彩，所以这是
  * 开画布之后新出现的回归。
  *
- * 现在的规矩：记下这一帧用了哪个**非黑**颜色，落屏时用它。
- *   · 只有一种非黑颜色（文字、位图、填充 —— 绝大多数用法）→ 就是它 ✓
- *   · 混用多种 → 退回"本卡颜色"，并置混色标志（1bpp 画布本来就表达不了多色，
- *     与其静默挑一个，不如退回那张卡的部署色）
- *   · 一次非黑都没写过（比如整屏全黑）→ 同样退回落卡片色 ✓ */
-static uint8_t s_content_color = SCREEN_COLOR_NO_OVERRIDE; /* 0xFF = 本帧还没定 */
-static bool    s_content_mixed;
+ * 现在按**帧单元**记账：整屏算 1 个单元（单卡/非折叠）；折叠 1×2 时上/下半屏
+ * 各 1 个单元 —— 变体2 的上半是 E9 文本、下半是 EA 预置图，两半各自定色、互不干扰。
+ * 每个单元记下它用了哪个**非黑**颜色，落屏/下发时按该单元取用：
+ *   · 该单元只有一种非黑颜色（文字、位图、填充 —— 绝大多数用法）→ 就是它 ✓
+ *   · 该单元混用多种 → 退回"本卡颜色"并置**该单元**的混色标志（1bpp 本就表达不了多色）
+ *   · 该单元一次非黑都没写过（比如全黑）→ 同样退回落卡片色 ✓ */
+#define SCREEN_UNIT_MAX 2U /**< 折叠上下两半；非折叠只用单元 0（整屏） */
 
-/** @brief 这一次填充是否覆盖一个**完整帧单元**（整屏 **或** 任一折叠半屏）—— **不限颜色**
- *
- *  一整屏（或折叠变体2的整半屏）**纯色**填充 = "这一帧就是这一个颜色"。所以无论黑
- *  还是彩色，都当**新一帧**处理：先作废上一帧的颜色账，彩色再把本帧色定成它
- *  （黑由 `_note_content_color` 自己忽略，仅复位）。
- *
- *  为什么彩色整单元填充也必须算新一帧（现场症状）：5006048 变体1 连续发两种颜色的
- *  02H 清屏（如红→蓝），第二次若走"累积"会把本帧蓝与上一帧残留的红判成 mixed，
- *  `app_screen_output_color` 于是退回落卡片色（5006048 是绿色）—— 发什么色都显绿；
- *  中间插一次黑屏清屏能复位颜色账，才"正常"。一整单元纯色本就是单色帧，不该被判混色。
- *
- *  半屏几何**现算**（`app_screen_rows/cols` + `app_screen_fold_rect`），不缓存：
- *  切分表可由身份记录覆盖，缓存会与运行期几何漂移。非折叠时 `app_screen_fold_rect`
- *  恒返回 false，行为与只判整屏逐字一致。 */
-static bool _is_frame_unit(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+static uint8_t s_unit_color[SCREEN_UNIT_MAX] = {SCREEN_COLOR_NO_OVERRIDE,
+                                                SCREEN_COLOR_NO_OVERRIDE}; /* 0xFF = 该单元还没定 */
+static bool    s_unit_mixed[SCREEN_UNIT_MAX];
+
+/** @brief 本布局的帧单元数：折叠 1×2 = 2（上/下半屏各一）；其余 = 1（整屏） */
+static uint8_t _unit_count(void)
 {
-    /* 整屏 */
-    if (x == 0 && y == 0 && w >= app_screen_rows() && h >= app_screen_cols()) return true;
-
-    /* 任一折叠半屏（非折叠时恒 false） */
-    for (uint8_t half = 0; half < 2U; half++) {
-        uint16_t fx = 0, fy = 0, fw = 0, fh = 0;
-        if (app_screen_fold_rect(half, &fx, &fy, &fw, &fh) && x == fx && y == fy && w >= fw &&
-            h >= fh)
-            return true;
-    }
-    return false;
+    return (app_screen_fold_count() == 2U) ? 2U : 1U;
 }
 
-/** @brief 记下"这一帧用了哪个颜色"；只在写**亮**像素时调 */
-static void _note_content_color(dev_display_color_t c)
+/** @brief 取第 u 个帧单元的矩形；u 越界返回 false
+ *
+ *  几何与旧 `_is_frame_unit` 同源：非折叠单元 0 = 整屏；折叠单元 0/1 = 上/下半屏。
+ *  半屏矩形**现算**（`app_screen_fold_rect`），不缓存 —— 切分表可由身份记录覆盖，
+ *  缓存会与运行期几何漂移。 */
+static bool _unit_rect(uint8_t u, uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
+{
+    if (_unit_count() == 2U) return app_screen_fold_rect(u, x, y, w, h);
+
+    if (u != 0U) return false;
+    if (x) *x = 0;
+    if (y) *y = 0;
+    if (w) *w = app_screen_rows();
+    if (h) *h = app_screen_cols();
+    return true;
+}
+
+/** @brief 矩形 a 是否**完整覆盖**矩形 b（"整单元纯色填充 = 新一帧"的判据） */
+static bool _rect_covers(uint16_t ax, uint16_t ay, uint16_t aw, uint16_t ah, uint16_t bx, uint16_t by,
+                         uint16_t bw, uint16_t bh)
+{
+    return ax <= bx && ay <= by && (uint32_t)ax + aw >= (uint32_t)bx + bw &&
+           (uint32_t)ay + ah >= (uint32_t)by + bh;
+}
+
+/** @brief 两矩形是否**有交叠**（半开区间：[x,x+w)） */
+static bool _rect_overlaps(uint16_t ax, uint16_t ay, uint16_t aw, uint16_t ah, uint16_t bx,
+                           uint16_t by, uint16_t bw, uint16_t bh)
+{
+    return ax < (uint32_t)bx + bw && bx < (uint32_t)ax + aw && ay < (uint32_t)by + bh &&
+           by < (uint32_t)ay + ah;
+}
+
+/** @brief 记下第 u 个单元用了哪个颜色；只在写**亮**像素时调 */
+static void _note_unit_color(uint8_t u, dev_display_color_t c)
 {
     if (c == DEV_DISPLAY_COLOR_BLACK) return; /* 黑 = 灭，不算颜色 */
-    if (s_content_color == SCREEN_COLOR_NO_OVERRIDE) {
-        s_content_color = (uint8_t)c;
+    if (s_unit_color[u] == SCREEN_COLOR_NO_OVERRIDE) {
+        s_unit_color[u] = (uint8_t)c;
         return;
     }
-    if (s_content_color != (uint8_t)c) s_content_mixed = true;
+    if (s_unit_color[u] != (uint8_t)c) s_unit_mixed[u] = true;
 }
 
-/** @brief 新一帧开始（画布被清）—— 上一帧的颜色主张作废 */
-static void _reset_content_color(void)
+/** @brief 第 u 个单元另起一帧 —— 该单元上一帧的颜色主张作废 */
+static void _reset_unit_color(uint8_t u)
 {
-    s_content_color = SCREEN_COLOR_NO_OVERRIDE;
-    s_content_mixed = false;
+    s_unit_color[u] = SCREEN_COLOR_NO_OVERRIDE;
+    s_unit_mixed[u] = false;
 }
 
-uint8_t app_screen_output_color(uint8_t card_color)
+/** @brief 所有单元的颜色账作废（重装画布 / 换身份 / 整幅恢复） */
+static void _reset_all_units(void)
 {
-    /* 优先级：工厂测试的强制覆盖 > 这一帧内容的颜色 > 切分表给这张卡的颜色 */
+    for (uint8_t u = 0; u < SCREEN_UNIT_MAX; u++) _reset_unit_color(u);
+}
+
+/** @brief 整单元**填充**记账：完整覆盖的单元另起一帧（复位再定色），只交叠的单元累积
+ *
+ *  一整屏 / 一整个折叠半屏**纯色**填充 = "这一帧（这个单元）就是这一个颜色"。覆盖
+ *  整屏的填充在折叠布局下会**同时**完整覆盖上下两个单元，故两个一起复位 + 定色。
+ *  局部彩色填充不完整覆盖任何单元 → 保持"累积/混合"语义（真多色场景）。
+ *
+ *  为什么彩色整单元填充也要算新一帧（现场症状）：5006048 变体1 连续发两种颜色的
+ *  02H 清屏（如红→蓝），第二次若走"累积"会把本帧蓝与上一帧残留的红判成 mixed，
+ *  `app_screen_output_color` 于是退回落卡片色（5006048 是绿色）—— 发什么色都显绿；
+ *  中间插一次黑屏清屏能复位颜色账，才"正常"。一整单元纯色本就是单色帧，不该被判混色。 */
+static void _account_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
+{
+    const uint8_t units = _unit_count();
+    for (uint8_t u = 0; u < units; u++) {
+        uint16_t ux = 0, uy = 0, uw = 0, uh = 0;
+        if (!_unit_rect(u, &ux, &uy, &uw, &uh)) continue;
+
+        if (_rect_covers(x, y, w, h, ux, uy, uw, uh)) {
+            _reset_unit_color(u);
+            _note_unit_color(u, c);
+        } else if (_rect_overlaps(x, y, w, h, ux, uy, uw, uh)) {
+            _note_unit_color(u, c);
+        }
+    }
+}
+
+/** @brief 位图记账：位图不是"整帧清屏"，只按交叠累积（不清账） */
+static void _account_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
+{
+    const uint8_t units = _unit_count();
+    for (uint8_t u = 0; u < units; u++) {
+        uint16_t ux = 0, uy = 0, uw = 0, uh = 0;
+        if (_unit_rect(u, &ux, &uy, &uw, &uh) && _rect_overlaps(x, y, w, h, ux, uy, uw, uh))
+            _note_unit_color(u, c);
+    }
+}
+
+/** @brief 第 card 张卡（切分表下标）落在哪个帧单元；无法归属返回 -1
+ *
+ *  非折叠只有 1 个单元（整屏），**任何**卡都归它 —— 2×1 / 2×2 等非折叠布局保持
+ *  改动前的"整屏单色"行为；折叠时按矩形**恰好等于**某个半屏来归属。 */
+static int8_t _unit_of_card(uint8_t card_idx)
+{
+    if (_unit_count() == 1U) return 0;
+
+    const app_screen_card_t *c = app_screen_card(card_idx);
+    if (!c) return -1;
+    for (uint8_t u = 0; u < SCREEN_UNIT_MAX; u++) {
+        uint16_t ux = 0, uy = 0, uw = 0, uh = 0;
+        if (_unit_rect(u, &ux, &uy, &uw, &uh) && c->x == ux && c->y == uy && c->w == uw && c->h == uh)
+            return (int8_t)u;
+    }
+    return -1;
+}
+
+/** @brief 第 card 张卡最终输出用的颜色
+ *  @param card_idx   切分表下标（用于定位该卡所属的帧单元）
+ *  @param card_color 切分表给这张卡的颜色（该单元无内容色 / 混色时回落）
+ *  @return 输出颜色（dev_display_color_t） */
+uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color)
+{
+    /* 优先级：工厂测试的强制覆盖 > **本单元**内容色 > 切分表给这张卡的颜色 */
     if (s_color_override <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_color_override;
-    if (!s_content_mixed && s_content_color <= (uint8_t)DEV_DISPLAY_COLOR_WHITE) return s_content_color;
+
+    const int8_t u = _unit_of_card(card_idx);
+    if (u >= 0 && !s_unit_mixed[u] && s_unit_color[u] <= (uint8_t)DEV_DISPLAY_COLOR_WHITE)
+        return s_unit_color[u];
     return card_color;
 }
 
@@ -181,7 +263,7 @@ bool app_screen_canvas_attach(uint16_t rows, uint16_t cols)
        恢复来的），把它当整幅推下去，别的卡当场被刷黑。而"按一下键屏上内容消失"
        只在**角色真的变了**的时候发生（没变的那条路在 apply_identity 就返回了）。 */
     memset(s_canvas_buf, 0, s_bm_len);
-    _reset_content_color(); /* 上一帧的颜色主张作废 */
+    _reset_all_units(); /* 上一帧各单元的颜色主张作废 */
     return true;
 }
 
@@ -248,7 +330,7 @@ bool app_screen_commit_self(void)
 
     /* 走的是与从卡落屏完全相同的那个函数 —— 主从两侧的落屏行为逐字一致。
        颜色过一道"输出颜色"：正常就是本卡那个颜色，工厂逐色老化时被临时覆盖。 */
-    app_screen_commit_bitmap(s_band_buf, len, app_screen_output_color(c->color));
+    app_screen_commit_bitmap(s_band_buf, len, app_screen_output_color(idx, c->color));
 
     /* ---- 持久化请求**只能在这里**消费 ----
      * 上面那一行刚把内容写进实屏，此刻存下去才是这一帧。渲染时（app_render）存的话
@@ -303,13 +385,10 @@ static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h
     (void)ctx;
     if (!_clip(&x, &y, &w, &h)) return;
 
-    /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
-       落屏时用它（见 app_screen_output_color） */
+    /* 画布只记亮/灭；具体是哪个非黑颜色由**逐单元**的 `_note_unit_color` 记着，
+       落屏时按该卡所属单元取用（见 app_screen_output_color）。 */
     bool on = (c != DEV_DISPLAY_COLOR_BLACK);
-    /* 整屏/折叠半屏的纯色填充 = 这一帧就是这一个颜色 → 颜色账作废再定色（黑由 note 忽略，仅复位）；
-       局部彩色填充保持"累积/混合"语义（真多色场景，落屏时退回落卡片色） */
-    if (_is_frame_unit(x, y, w, h)) _reset_content_color();
-    _note_content_color(c);
+    _account_fill(x, y, w, h, c);
 
     const uint16_t stride = (uint16_t)((app_screen_rows() + 7U) / 8U);
     for (uint16_t r = 0; r < h; r++) {
@@ -341,7 +420,7 @@ static void _sink_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t
     /* 与 dev_display_draw_bitmap 同语义：bit=1 才写（写 on 或 off），bit=0 不动。
        位序同为 MSB-first、(宽+7)/8 行字节。 */
     bool on = (c != DEV_DISPLAY_COLOR_BLACK);
-    _note_content_color(c);
+    _account_bitmap(x, y, w, h, c);
 
     /* 逐像素经内联的 `_set_bit`（它用的 s_stride 是本 TU 的静态量，无跨 TU 调用） */
     for (uint16_t r = 0; r < h; r++) {
@@ -431,7 +510,8 @@ static bool _persist_restore(void)
      * 多卡时画布比实屏大，直接按画布尺寸索引 pixel_map 会读到屏外。
      * 索引一律用**实屏几何** dw/dh，与画布几何 app_screen_rows()/cols() 是两回事。 */
     const dev_display_t      *d   = dev_display_get();
-    const app_screen_card_t  *c   = app_screen_card(app_screen_self_index());
+    const uint8_t             idx = app_screen_self_index();
+    const app_screen_card_t  *c   = app_screen_card(idx);
     if (ok && d && c) {
         const uint16_t dw = d->screen_rows;
         const uint16_t dh = d->screen_cols;
@@ -440,14 +520,16 @@ static bool _persist_restore(void)
         /* 恢复的内容**直写画布**、不经过 sink —— 内容色在这里补记：
            实屏上那份是 `app_render_restore` 用**记录里的颜色**画出来的
            （存的时候也是取"第一个非黑像素的颜色"，见 app_render_save），
-           所以照着像素记一遍即可，落屏时才不会退回卡片色。 */
-        _reset_content_color();
+           所以照着像素记一遍即可，落屏时才不会退回卡片色。
+           按**本卡所属单元**补记：折叠时本卡只占半屏，记到别人的单元会把那半的色带偏。 */
+        _reset_all_units();
+        const int8_t u = _unit_of_card(idx);
         for (uint16_t y = 0; y < dh && y < c->h; y++)
             for (uint16_t x = 0; x < dw && x < c->w; x++) {
                 const uint8_t px = d->pixel_map[(uint32_t)y * dw + x];
                 if (px == DEV_DISPLAY_COLOR_BLACK) continue;
 
-                _note_content_color((dev_display_color_t)px);
+                if (u >= 0) _note_unit_color((uint8_t)u, (dev_display_color_t)px);
                 const uint16_t cx = (uint16_t)(c->x + x);
                 const uint16_t cy = (uint16_t)(c->y + y);
                 s_canvas_buf[(uint32_t)cy * s_stride + (cx >> 3)] |= (uint8_t)(0x80U >> (cx & 7U));
@@ -486,8 +568,9 @@ void app_screen_set_color_override(uint8_t c)
     (void)c;
 }
 
-uint8_t app_screen_output_color(uint8_t card_color)
+uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color)
 {
+    (void)card_idx; /* 无画布：没有逐单元颜色账，退化就是切分表给的颜色 */
     return card_color;
 }
 

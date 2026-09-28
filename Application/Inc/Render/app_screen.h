@@ -23,10 +23,11 @@
  * 与 `dev_display_draw_bitmap` 和 `app_render_persist_t` 的位序约定**逐位一致** ——
  * 三处同一约定，所以"画布抽取出的位图"从卡可以直接吃，零转码。
  *
- * 颜色：画布只记亮/灭，颜色另行记着 —— `app_screen` 记下"这一帧用了哪个**非黑**
- * 颜色"（`_note_content_color`），落屏时用它，于是 LDI/RLS/VMS 传下来的颜色能生效。
- * 只有两种情况退回**切分表给这张卡的颜色**：一帧里混用了多种非黑颜色（1bpp 画布
- * 本来就表达不了多色），或这一帧一次非黑都没写过。工厂测试的强制覆盖最优先。
+ * 颜色：画布只记亮/灭，颜色另行记着 —— `app_screen` 按**帧单元**记下各自用了哪个
+ * **非黑**颜色（整屏算一个单元；折叠 1×2 时上/下半屏各一个），落屏/下发时按该卡所属
+ * 单元取用，于是 LDI/RLS/VMS 传下来的颜色能生效、折叠两侧互不干扰。只有两种情况退回
+ * **切分表给这张卡的颜色**：该单元混用了多种非黑颜色（1bpp 画布本来就表达不了多色），
+ * 或该单元一次非黑都没写过。工厂测试的强制覆盖最优先（对所有单元统一）。
  */
 
 #pragma once
@@ -319,9 +320,16 @@ void app_screen_commit_bitmap(const uint8_t *bm, uint16_t len, uint8_t color);
  *  正常运行时不要调用它。 */
 void app_screen_set_color_override(uint8_t color);
 
-/** @brief 本卡最终输出用的颜色：有覆盖用覆盖，否则用切分表给的这一个
- *  @return 本卡输出颜色（dev_display_color_t）*/
-uint8_t app_screen_output_color(uint8_t card_color);
+/** @brief 第 card_idx 张卡最终输出用的颜色：有覆盖用覆盖，否则用**该卡所属帧单元**的内容色
+ *
+ *  画布按帧单元（整屏算一个；折叠 1×2 时上/下半屏各一个）分别记内容色，这里按该卡
+ *  落在哪个单元取色；该单元没定色或混色 → 回落 `card_color`（切分表给这张卡的色）。
+ *  非折叠只有 1 个单元，任何卡都归它 —— 行为与按整屏单色记账时一致。
+ *
+ *  @param card_idx   切分表下标（**不是**总线地址），用于定位所属帧单元
+ *  @param card_color 切分表给这张卡的颜色（该单元无内容色/混色时回落）
+ *  @return 输出颜色（dev_display_color_t）*/
+uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color);
 
 /** @brief 设置屏亮度等级（0~7）
  *

@@ -792,7 +792,7 @@ static bool _round_one_card(uint8_t idx, uint16_t seq, uint8_t bright, bool pers
     _casc_put_u16(p->h, c->h);
     _casc_put_u16(p->bmp_len, bmp_len);
     p->bright  = bright;
-    p->color   = app_screen_output_color(c->color); /* 工厂逐色老化时会临时统一 */
+    p->color   = app_screen_output_color(idx, c->color); /* 按该卡所属帧单元取色；工厂逐色老化临时统一 */
     /* 上位机"这次内容要长期保留"的意图原样传到从卡：各卡各存自己那一块 */
     p->persist = persist ? 1U : 0U;
 
