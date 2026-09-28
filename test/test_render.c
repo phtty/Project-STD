@@ -201,6 +201,21 @@ static int count_bitmaps_at_y(uint16_t y)
     return n;
 }
 
+/** 绘制序列快照：用于"开关关掉 = 旧行为"的逐条对拍（顺序、坐标、尺寸、颜色全比） */
+static draw_rec_t s_snap[REC_MAX];
+static int        s_snap_cnt;
+
+static void snapshot_take(void)
+{
+    s_snap_cnt = s_rec_cnt;
+    if (s_rec_cnt > 0) memcpy(s_snap, s_recs, (size_t)s_rec_cnt * sizeof(draw_rec_t));
+}
+static bool snapshot_equal(void)
+{
+    if (s_snap_cnt != s_rec_cnt) return false;
+    return memcmp(s_snap, s_recs, (size_t)s_rec_cnt * sizeof(draw_rec_t)) == 0;
+}
+
 /* ================================================================
  *  带夹具的渲染包装
  * ================================================================ */
@@ -245,6 +260,27 @@ static void render_text_utf8(const char *text, uint16_t len, uint16_t x, uint16_
         .font_size = APP_FONT_SIZE_16,
         .font_type = APP_FONT_TYPE_HT,
         .text_enc  = APP_FONT_ENC_UTF8,
+        .style     = style,
+    });
+}
+
+/** @brief 走 APP_RENDER_TYPE_TEXT + **自适应字号**（16/32 由其按区域与样式选）——
+ *         prefer_one_line 的用例必须走这条，否则字号被固定成 16 看不到选择效果。 */
+static void render_text_auto(const char *text, uint16_t len, uint16_t x, uint16_t y, uint16_t w,
+                             uint16_t h, app_render_style_t *style)
+{
+    app_render(&(app_render_cfg_t){
+        .type      = APP_RENDER_TYPE_TEXT,
+        .x         = x,
+        .y         = y,
+        .w         = w,
+        .h         = h,
+        .color     = DEV_DISPLAY_COLOR_RED,
+        .text      = text,
+        .len       = len,
+        .font_size = APP_FONT_SIZE_SELF_ADAPT,
+        .font_type = APP_FONT_TYPE_HT,
+        .text_enc  = APP_FONT_ENC_GBK,
         .style     = style,
     });
 }
@@ -527,6 +563,93 @@ static void case_many_lines(void)
 }
 
 /* ================================================================
+ *  用例：prefer_one_line（S2）
+ * ================================================================ */
+
+/** 自适应优先单行：单行放得下就选能放下的**最大**字号且不换行；
+ *  连最小字号一行都放不下才退回最小字号并强制换行。
+ *
+ *  合成字库 sizes={16,32}，故"更大字号"= 32、"最小字号"= 16。GBK 字形宽 = size，
+ *  16 号宽 16 / 32 号宽 32。 */
+static void case_prefer_one_line(void)
+{
+    TEST_BEGIN("prefer_one_line：单行放得下→大字号且不换行；最小字号都放不下→换行");
+
+    /* ① 单行放得下：区域 64x32，"中中"(2 汉字) 在 32 号下宽 2×32=64 ≤ 64 且字号 32 ≤ 32
+          → 选 32 号（比最小 16 号大），且只有一行 */
+    const char *two_gbk = "\xD6\xD0\xD6\xD0"; /* "中中" */
+    app_render_style_t st = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .prefer_one_line = true};
+    cap_reset(64, 32);
+    render_text_auto(two_gbk, 4, 0, 0, 64, 32, &st);
+    CHECK_MSG(count_bitmaps() == 2, "两个汉字应各画一次，得到 %d", count_bitmaps());
+    CHECK_MSG(count_bitmaps_at_y(0) == 2, "两个汉字都应落在 y=0（单行），得到 %d",
+              count_bitmaps_at_y(0));
+    CHECK_MSG(count_bitmaps_at_y(32) == 0, "不该出现第二行（y=32）");
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 32 && s_recs[0].h == 32,
+              "应选到更大字号 32（字形 32x32），得到 %ux%u", s_rec_cnt ? (unsigned)s_recs[0].w : 0U,
+              s_rec_cnt ? (unsigned)s_recs[0].h : 0U);
+
+    /* ② 连最小字号一行都放不下：区域 48x64，"中中中中"(4 汉字) 在 16 号下宽 64 > 48
+          → 取最小字号 16 且强制换行（3 个在 y=0、1 个在 y=16），不越区域 */
+    const char *four_gbk = "\xD6\xD0\xD6\xD0\xD6\xD0\xD6\xD0"; /* "中中中中" */
+    app_render_style_t st2 = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .prefer_one_line = true};
+    cap_reset(48, 64);
+    render_text_auto(four_gbk, 8, 0, 0, 48, 64, &st2);
+    CHECK_MSG(count_bitmaps() == 4, "4 个汉字应全部放下，得到 %d", count_bitmaps());
+    CHECK_MSG(count_bitmaps_at_y(0) == 3 && count_bitmaps_at_y(LINE_H) == 1,
+              "应换行：y=0 放 3 个、y=%u 放 1 个，得到 %d / %d", (unsigned)LINE_H,
+              count_bitmaps_at_y(0), count_bitmaps_at_y(LINE_H));
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 16, "应退回最小字号 16，得到 %u",
+              s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
+    bool in_bounds = true;
+    for (int i = 0; i < s_rec_cnt; i++)
+        if ((uint32_t)s_recs[i].x + s_recs[i].w > 48 || (uint32_t)s_recs[i].y + s_recs[i].h > 64)
+            in_bounds = false;
+    CHECK_MSG(in_bounds, "换行后不得越出区域 48x64");
+
+    /* ③ 开关是真在起作用：同一输入(64x64、word_wrap)下，prefer 选**放得下单行**的字号
+          且不换行；关掉开关走旧的按面积自适应会选更大字号并换行。 */
+    const char *three_gbk = "\xD6\xD0\xD6\xD0\xD6\xD0"; /* "中中中" */
+    app_render_style_t on  = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .word_wrap = true,
+                              .prefer_one_line = true};
+    app_render_style_t off = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .word_wrap = true};
+
+    cap_reset(64, 64);
+    render_text_auto(three_gbk, 6, 0, 0, 64, 64, &on);
+    CHECK_MSG(count_bitmaps() == 3 && count_bitmaps_at_y(32) == 0, "打开开关应单行不换行（第二行 y=32 不出现）");
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 16, "打开开关应选放得下单行的 16 号，得到 %u",
+              s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
+
+    cap_reset(64, 64);
+    render_text_auto(three_gbk, 6, 0, 0, 64, 64, &off);
+    CHECK_MSG(count_bitmaps_at_y(32) == 1, "关掉开关走旧自适应会换行（32 号一行放不下，第二行 y=32）");
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 32, "关掉开关旧逻辑选 32 号，得到 %u",
+              s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
+
+    /* ④ prefer_one_line=false → 与不含该字段的旧构造**逐条相同**（同一输入对拍） */
+    app_render_style_t a = {.h_align = APP_RENDER_ALIGN_CENTER, .word_wrap = true,
+                            .prefer_one_line = false};
+    app_render_style_t b = {.h_align = APP_RENDER_ALIGN_CENTER, .word_wrap = true};
+    cap_reset(64, 64);
+    render_text_auto(three_gbk, 6, 0, 0, 64, 64, &a);
+    snapshot_take();
+    cap_reset(64, 64);
+    render_text_auto(three_gbk, 6, 0, 0, 64, 64, &b);
+    CHECK_MSG(snapshot_equal(), "prefer_one_line=false 的绘制序列必须与旧构造逐条相同");
+
+    /* ⑤ 文本含显式 `\\n` → 开关不生效（逐字走旧行为） */
+    const char *with_nl = "A\nB";
+    app_render_style_t nl_on  = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .prefer_one_line = true};
+    app_render_style_t nl_off = {.h_align = APP_RENDER_ALIGN_LEFT_UP};
+    cap_reset(64, 64);
+    render_text_auto(with_nl, 3, 0, 0, 64, 64, &nl_on);
+    snapshot_take();
+    cap_reset(64, 64);
+    render_text_auto(with_nl, 3, 0, 0, 64, 64, &nl_off);
+    CHECK_MSG(snapshot_equal(), "文本含 \\n 时 prefer_one_line 不该生效（应与旧行为一致）");
+}
+
+/* ================================================================
  *  用例：cvt 边界安全（P4）
  * ================================================================ */
 
@@ -767,6 +890,7 @@ int main(void)
     case_out_of_bounds();
     case_clamp_partial();
     case_many_lines();
+    case_prefer_one_line();
     case_cvt_mixed();
     case_cvt_truncated();
     case_cvt_unicode_bounds();

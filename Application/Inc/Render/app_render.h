@@ -124,6 +124,10 @@ typedef struct {
     app_render_align_t h_align; /**< 水平对齐 */
     app_render_align_t v_align; /**< 垂直对齐 */
     bool word_wrap; /**< 超宽时自动换行；false = 逐字形截断（见 app_render_cfg_t 上方契约） */
+    bool prefer_one_line; /**< 自适应优先整段单行：默认 false（逐字保持旧的按面积自适应）。
+                           *   仅 `font_size == APP_FONT_SIZE_SELF_ADAPT` 且文本不含 `\n` 时生效：
+                           *   从大到小选"整段一行放得下且字号 ≤ 区域高"的字号，选定则**不换行**；
+                           *   都不满足则取最小字号并**强制换行**。 */
 } app_render_style_t;
 
 /* ---- 渲染类型：告诉 app_render 如何解析 union ---- */

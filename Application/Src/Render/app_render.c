@@ -348,6 +348,51 @@ static inline bool _line_advance(uint16_t *cur_x, uint16_t *cur_y, uint16_t *lin
     return true;
 }
 
+/** @brief 取文本 `pos` 处一个字形：写出其像素宽与消耗字节数；不可渲染时宽为 0、步进 1
+ *
+ *  ASCII（0x20..0x7F）= size/2、GBK 双字节 = size —— 与 `_glyph_width_px` 同源。
+ *  测量趟与 prefer_one_line 的单行宽度都用它，避免两处分类各自漂移。 */
+static inline uint8_t _glyph_width_at(const char *text, uint16_t len, uint16_t pos,
+                                      const app_font_key_t *asc_key, const app_font_key_t *gbk_key,
+                                      uint16_t *step)
+{
+    if ((uint8_t)text[pos] >= 0x20 && (uint8_t)text[pos] <= 0x7F) {
+        *step = 1;
+        return _glyph_width_px(*asc_key);
+    }
+    if (pos + 1 < len && _is_gbk((uint8_t)text[pos], (uint8_t)text[pos + 1])) {
+        *step = 2;
+        return _glyph_width_px(*gbk_key);
+    }
+    *step = 1; /* 换行 / 半截码 / 不可渲染：跳过 1 字节 */
+    return 0;
+}
+
+/** @brief 文本在给定字号下的**单行总宽**（逐字形累加，不读字库、无 SPI）
+ *
+ *  只累加、不换行 —— 供 prefer_one_line 从大到小试字号。调用方须先排除含 `\n` 的文本。 */
+static uint32_t _text_line_width(const char *text, uint16_t len, app_font_size_t size,
+                                 app_font_type_t type)
+{
+    const app_font_key_t asc_key = {.size = size, .type = type, .charset = APP_FONT_ENC_ASCII};
+    const app_font_key_t gbk_key = {.size = size, .type = type, .charset = APP_FONT_ENC_GBK};
+    uint32_t             total   = 0;
+    for (uint16_t pos = 0; pos < len;) {
+        uint16_t step;
+        total += _glyph_width_at(text, len, pos, &asc_key, &gbk_key, &step);
+        pos = (uint16_t)(pos + step);
+    }
+    return total;
+}
+
+/** @brief 文本是否含显式换行 `\n`（prefer_one_line 的适用前提之一） */
+static bool _text_has_newline(const char *text, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+        if (text[i] == '\n') return true;
+    return false;
+}
+
 /* ---- 渲染分支（各功能静态内联）---- */
 
 static inline void _render_text(const app_render_cfg_t *cfg)
@@ -397,6 +442,12 @@ static inline void _render_text(const app_render_cfg_t *cfg)
         text_len = n;
     }
 
+    /* ---- 换行策略 ----
+     * 默认就是 style->word_wrap（style 为空 = 不换行，逐字与旧行为一致）。
+     * prefer_one_line 命中时会局部改写它：选到单行字号 → 强制不换行；
+     * 都没选到 → 最小字号 + 强制换行。改写只影响本次调用，不动调用方的 style。 */
+    bool wrap = cfg->style && cfg->style->word_wrap;
+
     /* ---- 字号落定 ---- */
     const app_font_lib_desc_t *flib = &g_board_font_lib;
     if (flib->size_count == 0) return; /* 板级字库表为空：本板根本没有字库 */
@@ -414,6 +465,27 @@ static inline void _render_text(const app_render_cfg_t *cfg)
                 asc_key.size = flib->sizes[i];
                 break;
             }
+        }
+
+        /* prefer_one_line：样式开关打开、且文本不含 `\n` 时，改用"整段一行"的口径
+           覆盖上面按面积选出的字号。从大到小选**第一个**"一行放得下且字号 ≤ 区域高"
+           的字号 —— 一行宽只逐字形累加，**不读字库、无 SPI**。都没选中就取最小字号，
+           并强制换行（由下面的 word_wrap 语义收尾，仍受高度门禁约束：放不下的行不画）。 */
+        if (cfg->style && cfg->style->prefer_one_line && !_text_has_newline(text_buf, text_len)) {
+            bool            found = false;
+            app_font_size_t pick  = flib->sizes[0];
+            for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                app_font_size_t s = flib->sizes[i];
+                if ((uint16_t)s > rh) continue; /* 字号 ≤ 区域高：一行才放得下 */
+                if (_text_line_width(text_buf, text_len, s, cfg->font_type) <= rw) {
+                    pick  = s;
+                    found = true;
+                    break;
+                }
+            }
+            gbk_key.size = pick;
+            asc_key.size = pick;
+            wrap         = !found; /* 选中 → 不换行；都没选中 → 最小字号 + 强制换行 */
         }
     } else {
         /* 请求字号不在本板上时回落到最近邻 —— 否则 _find_unit 找不到，会一路
@@ -446,20 +518,13 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             continue;
         }
 
-        uint8_t glyph_w;
-        if ((uint8_t)text_buf[char_pos] >= 0x20 && (uint8_t)text_buf[char_pos] <= 0x7F) {
-            glyph_w = _glyph_width_px(asc_key);
-            char_pos += 1;
-        } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
-            glyph_w = _glyph_width_px(gbk_key);
-            char_pos += 2;
-        } else {
-            char_pos++;
-            continue;
-        }
+        uint16_t step;
+        uint8_t  glyph_w = _glyph_width_at(text_buf, text_len, char_pos, &asc_key, &gbk_key, &step);
+        char_pos         = (uint16_t)(char_pos + step);
+        if (!glyph_w) continue; /* 不可渲染：跳过（与旧路径一致，不参与换行判断） */
 
         if ((uint32_t)line_w + glyph_w > rw) {
-            if (cfg->style && cfg->style->word_wrap) {
+            if (wrap) {
                 if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
                 line_w = glyph_w;
             }
@@ -505,7 +570,7 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             uint8_t glyph_w = _glyph_width_px(asc_key);
 
             if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
-                if (cfg->style && cfg->style->word_wrap) {
+                if (wrap) {
                     /* 自动换行：续行回区域左；下一行放不下则停止 */
                     if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
                                        region_bottom, line_count))
@@ -535,7 +600,7 @@ static inline void _render_text(const app_render_cfg_t *cfg)
             uint8_t glyph_w = _glyph_width_px(gbk_key);
 
             if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
-                if (cfg->style && cfg->style->word_wrap) {
+                if (wrap) {
                     if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
                                        region_bottom, line_count))
                         return;
