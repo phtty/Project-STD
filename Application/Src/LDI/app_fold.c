@@ -10,6 +10,7 @@
 #include "app_screen.h"
 #include "app_ldi.h"
 #include "app_render.h"
+#include "dev_display.h" /* dev_display_frame_begin/end：把"清+画"两笔当成一帧 */
 
 /* ---- 折叠屏最近一次显示颜色 ----
  *
@@ -107,11 +108,22 @@ bool app_fold_preset_show(uint8_t color)
         return false;
     }
 
-    /* 必须先清下半屏、再画位图：位图语义是 bit=1 才写（上色）、bit=0 不动
-       （见 app_screen_canvas.c 的 _sink_bitmap 与 dev_display_draw_bitmap），
+    /* "清 + 画"两笔**当成一帧**输出（与 app_screen_commit_bitmap / app_factory_test.c
+       同款，见 dev_display.h 的 dev_display_frame_begin 说明）：
+       · 两笔之间不让 `_scan_task` 跑 prepare —— 直写实屏路径否则可能在 FILL 之后、
+         BITMAP 之前抢跑一次 prepare，屏上闪一帧"半清空"中间态（下半屏只剩底色、
+         位图还没画上）。
+       · 画布路径（多卡主卡）整段都不碰实屏缓冲，frame 标记不参与：`frame_end`
+         不会白跑一次 prepare（`frame_touched` 记着），画布由 settle/轮次那一侧提交上屏。
+       · **校验全部通过之后才 begin**：上面任何一条校验失败都已直接 return，一个渲染
+         都不发、也不 begin —— 不留未配对的 begin 把脏标记永久压住。
+       两笔的顺序与语义：必须先清下半屏、再画位图。位图语义是 bit=1 才写（上色）、
+       bit=0 不动（见 app_screen_canvas.c 的 _sink_bitmap 与 dev_display_draw_bitmap），
        两张预置图切换时新图 bit=0 的像素会保留旧图 —— 残影。E9 折叠路径同样是
        "先清半屏再画"。半屏全黑填充正是画布颜色账里的"新一帧"（见
        docs/架构说明.md §7.4），清屏也得落盘：与显示同口径，掉电后不复活旧图。 */
+    dev_display_frame_begin(dev_display_get());
+
     app_render(&(app_render_cfg_t){
         .type    = APP_RENDER_TYPE_FILL,
         .x       = x,
@@ -134,6 +146,8 @@ bool app_fold_preset_show(uint8_t color)
         .bitmap  = p->bitmap,
         .persist = true,
     });
+
+    dev_display_frame_end(dev_display_get());
     return true;
 }
 
@@ -143,7 +157,12 @@ bool app_fold_lower_clear(void)
     if (!app_fold_rect(1, &x, &y, &w, &h)) return false; /* 非折叠：没有下半屏 */
 
     /* 清除也必须落盘：否则"先显图、后清除"时盘上仍是旧图，掉电后旧图会复活，
-       状态与最后一条命令不一致。粒度仍是"半屏（本卡矩形）"，记录格式未变。 */
+       状态与最后一条命令不一致。粒度仍是"半屏（本卡矩形）"，记录格式未变。
+
+       **单笔填充不包 frame_begin/end**：只有一笔，没有"两笔之间的中间态"可压；包了
+       只是把置脏推迟到 `_end`，上屏结果与直接画没有任何区别（见 dev_display.h 的
+       dev_display_frame_begin 说明）—— 无收益，还多一处必须成对的约束。预置图的
+       "清 + 画"两笔才需要。 */
     app_render(&(app_render_cfg_t){
         .type    = APP_RENDER_TYPE_FILL,
         .x       = x,

@@ -28,6 +28,7 @@
 #include "app_fold.h"
 #include "app_render.h"
 #include "app_screen.h"
+#include "dev_display.h" /* dev_display_t / dev_display_frame_begin/end 的桩要用到类型 */
 
 /* ================================================================
  *  可调桩：整屏门面 + 光传感器
@@ -100,9 +101,32 @@ typedef struct {
 static render_rec_t s_recs[REC_MAX];
 static int          s_rec_cnt;
 
+/* ---- 帧压制事件序列 ----
+ *
+ * "清 + 画包成一帧"不能只数渲染条数：还要确认 begin 在两次渲染之前、end 在两次渲染
+ * 之后，且恰好各一次。捕获桩把 begin/end 也记进按调用先后排列的事件序列，断言
+ * begin → FILL → BITMAP → end。 */
+typedef enum {
+    EV_FRAME_BEGIN,
+    EV_FRAME_END,
+    EV_RENDER,
+} ev_kind_t;
+
+#define EV_MAX (32)
+static ev_kind_t s_ev[EV_MAX];
+static int       s_ev_cnt;
+static int       s_frame_begins; /**< dev_display_frame_begin 调用次数 */
+static int       s_frame_ends;   /**< dev_display_frame_end 调用次数 */
+
+static void ev_push(ev_kind_t k)
+{
+    if (s_ev_cnt < EV_MAX) s_ev[s_ev_cnt++] = k;
+}
+
 void app_render(const app_render_cfg_t *cfg)
 {
     if (s_rec_cnt >= REC_MAX) return;
+    ev_push(EV_RENDER);
     render_rec_t *r = &s_recs[s_rec_cnt++];
     memset(r, 0, sizeof(*r));
     r->type    = cfg->type;
@@ -123,6 +147,30 @@ void app_render(const app_render_cfg_t *cfg)
     } else if (cfg->type == APP_RENDER_TYPE_BITMAP) {
         r->bitmap = cfg->bitmap;
     }
+}
+
+/* ---- dev_display 帧接口的捕获桩 ----
+ *
+ * app_fold.c 是普通 TU，它对 dev_display_frame_begin/end 的调用要由本套件解析。
+ * `dev_display_get()` 只被透传给 begin/end，本套件不测落屏，返回 nullptr 即可
+ * （stub 里 begin/end 不 deref dev）。 */
+dev_display_t *dev_display_get(void)
+{
+    return nullptr;
+}
+
+void dev_display_frame_begin(dev_display_t *dev)
+{
+    (void)dev;
+    s_frame_begins++;
+    ev_push(EV_FRAME_BEGIN);
+}
+
+void dev_display_frame_end(dev_display_t *dev)
+{
+    (void)dev;
+    s_frame_ends++;
+    ev_push(EV_FRAME_END);
 }
 
 static int count_type(app_render_type_t t)
@@ -182,10 +230,13 @@ static int g_fail;
 /** @brief 复位夹具：默认 = 非折叠 + 逻辑屏 128×32 + 仅声明 E9 */
 static void env_reset(void)
 {
-    s_rec_cnt    = 0;
-    s_fold_count = 1;
-    s_scr_w      = 128;
-    s_scr_h      = 32;
+    s_rec_cnt      = 0;
+    s_ev_cnt       = 0;
+    s_frame_begins = 0;
+    s_frame_ends   = 0;
+    s_fold_count   = 1;
+    s_scr_w        = 128;
+    s_scr_h        = 32;
 
     /* 真实 g_ldi_ctx（app_ldi.c）的默认形态：module_count==2 但 modules[1] 是空槽 */
     g_ldi_ctx.cfg.module_count = 2;
@@ -511,8 +562,11 @@ static void case_ea_show_and_clear(void)
               "清屏区域应为下半 224x50@(0,50)");
     CHECK_MSG(fill && fill->color == DEV_DISPLAY_COLOR_BLACK, "清屏应为全黑");
     CHECK_MSG(fill && fill->persist, "清下半屏应请求落盘（掉电恢复，状态与最后命令一致）");
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0,
+              "清下半屏是单笔，不得 begin/end（包了无意义），得到 begin=%d end=%d", s_frame_begins,
+              s_frame_ends);
 
-    /* 01H → 绿槽：必须"先清下半屏再画"（bit=0 不动，不清会留残影） */
+    /* 01H → 绿槽：必须"先清下半屏再画"（bit=0 不动，不清会留残影），且两笔包成一帧 */
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -520,6 +574,12 @@ static void case_ea_show_and_clear(void)
     app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_YELLOW);
     CHECK_MSG(app_fold_preset_show(1), "绿预置图应显示成功");
     CHECK_MSG(s_rec_cnt == 2, "绿应为 清(1) + 画(1) 两次渲染，得到 %d", s_rec_cnt);
+    CHECK_MSG(s_ev_cnt == 4 && s_ev[0] == EV_FRAME_BEGIN && s_ev[1] == EV_RENDER &&
+                  s_ev[2] == EV_RENDER && s_ev[3] == EV_FRAME_END,
+              "01H 事件序列应为 begin → FILL → BITMAP → end（begin/end 在两次渲染外侧）");
+    CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1,
+              "01H 应恰好 begin/end 各一次（成对），得到 begin=%d end=%d", s_frame_begins,
+              s_frame_ends);
     CHECK_MSG(s_recs[0].type == APP_RENDER_TYPE_FILL && s_recs[1].type == APP_RENDER_TYPE_BITMAP,
               "顺序必须是 FILL → BITMAP（先清完再画）");
     CHECK_MSG(s_recs[0].x == 0 && s_recs[0].y == 50 && s_recs[0].w == 224 && s_recs[0].h == 50,
@@ -541,6 +601,10 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_rec_cnt == 2 && s_recs[0].type == APP_RENDER_TYPE_FILL &&
                   s_recs[1].type == APP_RENDER_TYPE_BITMAP,
               "红也应为 FILL → BITMAP（清完再画），得到 %d 次渲染", s_rec_cnt);
+    CHECK_MSG(s_ev_cnt == 4 && s_ev[0] == EV_FRAME_BEGIN && s_ev[1] == EV_RENDER &&
+                  s_ev[2] == EV_RENDER && s_ev[3] == EV_FRAME_END,
+              "02H 也应为 begin → FILL → BITMAP → end（begin/end 在两次渲染外侧）");
+    CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1, "02H 应恰好 begin/end 各一次（成对）");
     CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK && s_recs[0].persist,
               "红前的清屏应为全黑且落盘");
     CHECK_MSG(s_recs[1].bitmap == s_bm_red, "02H 应取红槽");
@@ -553,21 +617,29 @@ static void case_ea_show_and_clear(void)
     s_scr_h      = 100;
     app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_GREEN);
     CHECK_MSG(app_fold_preset_show(1), "同色连发第一次（绿）应成功");
+    CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1, "第一次也应各自 begin/end 一次");
     render_rec_t first_pair[2];
     memcpy(first_pair, s_recs, sizeof(first_pair));
-    s_rec_cnt = 0;
+    s_rec_cnt      = 0;
+    s_ev_cnt       = 0;
+    s_frame_begins = 0;
+    s_frame_ends   = 0;
     CHECK_MSG(app_fold_preset_show(1), "同色连发第二次（仍为绿）也应成功");
     CHECK_MSG(s_rec_cnt == 2, "第二次同样要清 + 画（2 次），得到 %d", s_rec_cnt);
+    CHECK_MSG(s_ev_cnt == 4 && s_ev[0] == EV_FRAME_BEGIN && s_ev[3] == EV_FRAME_END &&
+                  s_frame_begins == 1 && s_frame_ends == 1,
+              "同色重发第二次同样要有自己的 begin → 两笔 → end");
     CHECK_MSG(memcmp(first_pair, s_recs, sizeof(first_pair)) == 0,
               "同色重发的两次渲染序列必须逐字段一致（每次都重新清+画）");
 
-    /* 03H → 黄槽是空槽：拒画 + false + 无渲染 */
+    /* 03H → 黄槽是空槽：拒画 + false + 无渲染 + 不 begin（不留未配对 begin） */
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
     s_scr_h      = 100;
     CHECK_MSG(!app_fold_preset_show(3), "空槽应拒画并返回 false");
     CHECK_MSG(s_rec_cnt == 0, "空槽不得发起任何渲染，得到 %d 次", s_rec_cnt);
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "空槽拒画不得 begin（否则脏标记被永久压住）");
 }
 
 /** EA 拒画：尺寸不符 / 非法颜色 / 非折叠 —— 全部 false 且不渲染 */
@@ -582,6 +654,7 @@ static void case_ea_reject(void)
     s_scr_h      = 96;
     CHECK_MSG(!app_fold_preset_show(1), "尺寸不符应拒画并返回 false");
     CHECK_MSG(s_rec_cnt == 0, "尺寸不符不得渲染");
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "尺寸不符不得 begin（拒画路径零 begin）");
 
     /* 非法颜色（>03H） */
     env_reset();
@@ -590,6 +663,7 @@ static void case_ea_reject(void)
     s_scr_h      = 100;
     CHECK_MSG(!app_fold_preset_show(0x04), "非法颜色应拒画并返回 false");
     CHECK_MSG(s_rec_cnt == 0, "非法颜色不得渲染");
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "非法颜色不得 begin（拒画路径零 begin）");
 
     /* 非折叠：没有下半屏 */
     env_reset();
@@ -597,6 +671,7 @@ static void case_ea_reject(void)
     CHECK_MSG(!app_fold_lower_clear(), "非折叠时清下半屏应返回 false");
     CHECK_MSG(!app_fold_preset_show(1), "非折叠时预置图应返回 false");
     CHECK_MSG(s_rec_cnt == 0, "非折叠不得渲染");
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "非折叠清屏/预置图都不得 begin");
 }
 
 /* ================================================================ */
