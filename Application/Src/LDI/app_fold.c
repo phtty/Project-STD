@@ -12,17 +12,17 @@
 #include "app_render.h"
 #include "dev_display.h" /* dev_display_frame_begin/end：把"清+画"两笔当成一帧 */
 
-/* ---- 折叠屏最近一次显示颜色 ----
+/* ---- EA 预置图颜色 ----
  *
- *  "折叠屏整体单色 = 最近一条命令的颜色"这个口径的落点：E9 的折叠路径在渲染时
- *  `app_fold_note_color()` 更新，EA 取图时按它渲染。从未有过则为 BOARD_SCREEN_COLOR
- *  （与"单卡默认色"一致，见 board.h）。跨模块只经 API 更新，不导出可变全局。 */
-static uint8_t s_last_color = (uint8_t)BOARD_SCREEN_COLOR;
-
-void app_fold_note_color(uint8_t color)
-{
-    s_last_color = color;
-}
+ *  EA 的 `Color` 直接决定预置图颜色（86 号文：01H=绿 02H=红 03H=黄），**与 E9 文本
+ *  颜色无关** —— 旧口径"折叠屏整体单色 = 最近一条命令的颜色"会让雨棚图跟着上一条
+ *  E9 文字的颜色跑，已废除（`app_fold_note_color` 一并删除）。
+ *  画布侧按帧单元记账（上/下半屏各一个单元，见 app_screen_canvas.c），与这里正交。 */
+static const dev_display_color_t s_preset_color_map[] = {
+    [1] = DEV_DISPLAY_COLOR_GREEN,
+    [2] = DEV_DISPLAY_COLOR_RED,
+    [3] = DEV_DISPLAY_COLOR_YELLOW,
+};
 
 app_fold_mode_t app_fold_mode(void)
 {
@@ -139,6 +139,7 @@ bool app_fold_preset_show(uint8_t color)
 
     /* 画图这一笔才落盘（掉电恢复）：雨棚状态是产品状态，掉电重来要恢复它 ——
        **清屏不落盘、画图落盘**，整帧最终状态是图。
+       颜色用 **Color 自己映射的信号色**（01H=绿/02H=红/03H=黄），不跟上一条 E9 命令跑。
        粒度仍是"半屏（本卡矩形）"，记录格式未变（见 docs/架构说明.md §7.4）。 */
     app_render(&(app_render_cfg_t){
         .type    = APP_RENDER_TYPE_BITMAP,
@@ -146,7 +147,7 @@ bool app_fold_preset_show(uint8_t color)
         .y       = y,
         .w       = w,
         .h       = h,
-        .color   = (dev_display_color_t)s_last_color,
+        .color   = s_preset_color_map[color],
         .bitmap  = p->bitmap,
         .persist = true,
     });

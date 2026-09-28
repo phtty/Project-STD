@@ -217,9 +217,6 @@ static void _vms_render_text(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 
         const bool is_v2 = (fold_mode == APP_FOLD_MODE_FOLD_E9_EA);
 
-        /* 折叠屏整体单色：记下最近一次颜色，EA 预置图取同一色 */
-        app_fold_note_color((uint8_t)color);
-
         /* 折叠模式**忽略 font_line**：它的原语义是"把内容放到屏幕第 N 行"，在上下半屏里
            会把内容放到跨缝的位置。样式开 word_wrap + prefer_one_line（优先单行最大字号，
            最小字号才换行）。keep_time/persist 语义不变（持久化粒度 = 半屏 = 本卡矩形）。 */

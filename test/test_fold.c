@@ -585,12 +585,12 @@ static void case_variant2_e9_top_only(void)
     /* 变体2 E9：begin → 上半清屏 → 上半文字 → end */
     check_one_frame(2);
 
-    /* E9 渲染时记下颜色：EA 预置图取"最近一次颜色"（font_color=2 → 红） */
+    /* E9 文本的颜色**不**影响 EA：EA 01H 用自身信号色（绿），与上面 font_color=2(红) 无关 */
     s_rec_cnt = 0;
     CHECK_MSG(app_fold_preset_show(1), "上半 E9 后 EA 应能取到绿槽");
     CHECK_MSG(nth_type(APP_RENDER_TYPE_BITMAP, 0) &&
-                  nth_type(APP_RENDER_TYPE_BITMAP, 0)->color == DEV_DISPLAY_COLOR_RED,
-              "EA 预置图应沿用 E9 最近一次颜色（红）");
+                  nth_type(APP_RENDER_TYPE_BITMAP, 0)->color == DEV_DISPLAY_COLOR_GREEN,
+              "EA 01H 应用自己的信号色绿，不跟上一条 E9 的红（解除耦合）");
 }
 
 /** 变体2 · EA 数据面：00H 只清下半（不调 BITMAP）；01H/02H 取对应槽；空槽拒画 */
@@ -622,7 +622,6 @@ static void case_ea_show_and_clear(void)
     s_fold_count = 2;
     s_scr_w      = 224;
     s_scr_h      = 100;
-    app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_YELLOW);
     CHECK_MSG(app_fold_preset_show(1), "绿预置图应显示成功");
     CHECK_MSG(s_rec_cnt == 2, "绿应为 清(1) + 画(1) 两次渲染，得到 %d", s_rec_cnt);
     CHECK_MSG(s_ev_cnt == 4 && s_ev[0] == EV_FRAME_BEGIN && s_ev[1] == EV_RENDER &&
@@ -640,7 +639,8 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[1].bitmap == s_bm_green, "01H 应取绿槽");
     CHECK_MSG(s_recs[1].x == 0 && s_recs[1].y == 50 && s_recs[1].w == 224 && s_recs[1].h == 50,
               "BITMAP 区域应为下半 224x50@(0,50)");
-    CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_YELLOW, "颜色应取最近一次颜色（黄）");
+    CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_GREEN,
+              "01H 的颜色应取 Color 自己的信号色（绿），得到 %u", (unsigned)s_recs[1].color);
     CHECK_MSG(s_recs[1].persist, "EA 预置图应请求落盘（掉电恢复）");
 
     /* 02H → 红槽：同样"先清再画" */
@@ -659,6 +659,8 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK && !s_recs[0].persist,
               "红前的清屏应为全黑且不落盘（只 BITMAP 落盘）");
     CHECK_MSG(s_recs[1].bitmap == s_bm_red, "02H 应取红槽");
+    CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_RED,
+              "02H 的颜色应取 Color 自己的信号色（红），得到 %u", (unsigned)s_recs[1].color);
     CHECK_MSG(s_recs[1].persist, "EA 预置图（红）也应请求落盘");
 
     /* 同一色连发两次：每次都要重新清 + 画，不得因"与上次同色"跳过（缓存会吃残影） */
@@ -666,7 +668,6 @@ static void case_ea_show_and_clear(void)
     s_fold_count = 2;
     s_scr_w      = 224;
     s_scr_h      = 100;
-    app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_GREEN);
     CHECK_MSG(app_fold_preset_show(1), "同色连发第一次（绿）应成功");
     CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1, "第一次也应各自 begin/end 一次");
     render_rec_t first_pair[2];

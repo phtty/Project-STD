@@ -81,19 +81,11 @@ typedef struct {
  *  5006048 的三个槽当前是空槽（真实点阵待用户提供），空槽与尺寸不符都在绘制前拒画。 */
 extern const app_fold_preset_t g_board_fold_presets[3];
 
-/** @brief 记下"折叠屏最近一次显示的颜色"（E9 的折叠路径在渲染时调用）
- *
- *  折叠屏整体单色 —— 变体2 的 E9 文本与 EA 预置图应当是**同一条命令给的同一个颜色**，
- *  所以把"最近一次颜色"收成折叠模块的状态，EA 取图时按它渲染。跨模块更新走本 API，
- *  不导出可变全局（见 `docs/命名约定.md` §4.7）。
- *  @param color 本次显示用的颜色（`dev_display_color_t`） */
-void app_fold_note_color(uint8_t color);
-
 /** @brief 在下半屏显示 `color` 对应的预置图（01H=绿 / 02H=红 / 03H=黄）
  *
- *  颜色取"折叠屏最近一次用过的颜色"（`app_fold_note_color` 记的），从未有过则为
- *  `BOARD_SCREEN_COLOR`。绘制前**校验预置图尺寸必须等于下半屏矩形**，不符（含空槽）
- *  即拒画 + 日志并返回 false —— 空槽自然走这条路，不会画出错位的图。
+ *  绘制颜色 = **Color 自己映射的信号色**（01H→绿 / 02H→红 / 03H→黄），与 E9 文本
+ *  颜色无关 —— 旧口径"跟着最近一条命令的颜色跑"已废除（`app_fold_note_color` 删除）。
+ *  绘制前**校验预置图尺寸必须等于下半屏矩形**，不符（含空槽）即拒画 + 日志并返回 false。
  *  @param color 预置图索引 + 1（01H~03H）
  *  @return true = 已发起绘制；false = 颜色非法 / 非折叠 / 空槽 / 尺寸不符（均不画） */
 bool app_fold_preset_show(uint8_t color);
