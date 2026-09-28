@@ -101,6 +101,20 @@ static void canvas_reset(void)
     s_pending_flag = false; /* 手动比对，不要后台任务来插一脚 */
 }
 
+/** @brief 把布局覆盖成折叠 1×2（上/下两块 48×16，整屏 48×32）并清画布
+ *
+ *  走 _layout_build_grid + _apply_layout（生产里合成切分表、算几何、清画布的同一条路）：
+ *  本用例板级宏被钉成 1×1，要覆盖"半屏清屏"这条折叠专属路径只能这样换布局。
+ *  s_display_dev 由前面的 _screen_init 就位，网格尺寸取自它（48×16）。 */
+static void canvas_reset_fold(void)
+{
+    display_reset();
+    _screen_init();
+    _layout_build_grid(1, 2, 0); /* nx=1 列, ny=2 行 → 上下两块 */
+    _apply_layout();             /* 重算几何（48×32）并清画布 */
+    s_pending_flag = false;
+}
+
 /** @brief 独立参考：逐像素把 pixel_map 打包成 1bpp（(宽+7)/8 行字节、MSB-first、黑=0） */
 static void pack_reference(const uint8_t *fb, uint16_t rows, uint16_t cols, uint8_t *out)
 {
@@ -307,6 +321,29 @@ static void case_commit_length_guard(void)
     CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_GREEN, "长度正确却没落屏");
 }
 
+/** 折叠下半屏全黑清屏也算"新一帧"：颜色账复位，不残留上一帧的颜色主张/mixed */
+static void case_halfscreen_clear_is_new_frame(void)
+{
+    TEST_BEGIN("折叠半屏全黑填充 = 新一帧：颜色账复位（不残留 mixed）");
+
+    canvas_reset_fold();
+    CHECK_MSG(app_screen_fold_count() == 2, "折叠布局下门面应判 2 块（得到 %u）",
+              (unsigned)app_screen_fold_count());
+
+    /* 上半屏红 → 本帧内容色 = 红（唯一非黑颜色） */
+    _sink_fill(nullptr, 0, 0, W, H, DEV_DISPLAY_COLOR_RED);
+    CHECK_MSG(app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW) == DEV_DISPLAY_COLOR_RED,
+              "清屏前内容色应为红，得到 %u",
+              (unsigned)app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW));
+
+    /* 只清下半屏（全黑）—— 变体2 的 EA 清除走这条。
+       若"半屏清屏"不算新一帧，红的颜色主张会残留，输出仍是红。 */
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_BLACK);
+    CHECK_MSG(app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW) == DEV_DISPLAY_COLOR_YELLOW,
+              "下半屏全黑清屏应复位颜色账（回落卡片色），得到 %u",
+              (unsigned)app_screen_output_color(DEV_DISPLAY_COLOR_YELLOW));
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -319,6 +356,7 @@ int main(void)
     case_bitmap_clip_stride();
     case_fullscreen_fill();
     case_commit_length_guard();
+    case_halfscreen_clear_is_new_frame();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

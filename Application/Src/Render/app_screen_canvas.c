@@ -79,14 +79,31 @@ void app_screen_set_color_override(uint8_t color)
 static uint8_t s_content_color = SCREEN_COLOR_NO_OVERRIDE; /* 0xFF = 本帧还没定 */
 static bool    s_content_mixed;
 
-/** @brief 这一次填充是不是"整屏清屏"（= 新一帧的开始）
+/** @brief 这一次填充是不是"新一帧的开始"（覆盖整屏 **或** 覆盖任一折叠半屏）
  *
- *  各个渲染调用点的清屏都是"整屏黑填充"（`APP_RENDER_TYPE_FILL` 的 w=h=0）——
- *  它是唯一可靠的"上一帧结束"信号（画布本身被 memset 清只发生在重装门面时）。 */
-static bool _is_full_clear(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
+ *  各个渲染调用点的清屏都是"黑填充"——它是唯一可靠的"上一帧结束"信号
+ *  （画布本身被 memset 清只发生在重装门面时）。除整屏清屏外，折叠变体2 还会
+ *  **只清上半屏**（下半是 EA 预置图），这类半屏全黑同样是新一帧 —— 不认它的话
+ *  上一帧的颜色账（尤其 mixed）会残留到清屏之后。
+ *
+ *  半屏几何**现算**（`app_screen_rows/cols` + `app_screen_fold_rect`），不缓存：
+ *  切分表可由身份记录覆盖，缓存会与运行期几何漂移。非折叠时 `app_screen_fold_rect`
+ *  恒返回 false，行为与只判整屏逐字一致。 */
+static bool _is_frame_start(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
 {
-    return c == DEV_DISPLAY_COLOR_BLACK && x == 0 && y == 0 && w >= app_screen_rows() &&
-           h >= app_screen_cols();
+    if (c != DEV_DISPLAY_COLOR_BLACK) return false;
+
+    /* 整屏 */
+    if (x == 0 && y == 0 && w >= app_screen_rows() && h >= app_screen_cols()) return true;
+
+    /* 任一折叠半屏（非折叠时恒 false） */
+    for (uint8_t half = 0; half < 2U; half++) {
+        uint16_t fx = 0, fy = 0, fw = 0, fh = 0;
+        if (app_screen_fold_rect(half, &fx, &fy, &fw, &fh) && x == fx && y == fy && w >= fw &&
+            h >= fh)
+            return true;
+    }
+    return false;
 }
 
 /** @brief 记下"这一帧用了哪个颜色"；只在写**亮**像素时调 */
@@ -287,8 +304,8 @@ static void _sink_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h
     /* 画布只记亮/灭；具体是哪个非黑颜色由 `_note_content_color` 记着，
        落屏时用它（见 app_screen_output_color） */
     bool on = (c != DEV_DISPLAY_COLOR_BLACK);
-    /* 整屏清屏 → 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
-    if (_is_full_clear(x, y, w, h, c)) _reset_content_color();
+    /* 清屏（整屏或折叠半屏）→ 新一帧开始，上一帧的颜色主张作废；否则按颜色记账 */
+    if (_is_frame_start(x, y, w, h, c)) _reset_content_color();
     else _note_content_color(c);
 
     const uint16_t stride = (uint16_t)((app_screen_rows() + 7U) / 8U);
