@@ -43,17 +43,23 @@ extern uint32_t g_os_mutex_release_count;
  *  合成字库（只需"能查到一个单元"；字形内容不参与断言）
  * ================================================================ */
 
+/* 字号集合取与 3833024 一致的一组 {14,16,20,24,32}（**必须升序**）：自适应"按实际行
+   选字号"的现场案例（128×32、9 字节两行）只有在含 24 的集合里才会暴露旧 blob 估算的
+   缺陷，故这里不能只留 16/32。每个字号都给 ASCII/GBK 两个单元，`_find_unit` 才找得到。 */
+#define SZ(n) APP_FONT_SIZE_##n
 static const app_font_unit_t s_units[] = {
-    {.key = {.size = APP_FONT_SIZE_16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT},
-     .unit_size = 256},
-    {.key = {.size = APP_FONT_SIZE_16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT},
-     .unit_size = 8192},
-    {.key = {.size = APP_FONT_SIZE_32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT},
-     .unit_size = 512},
-    {.key = {.size = APP_FONT_SIZE_32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT},
-     .unit_size = 16384},
+    {.key = {.size = SZ(14), .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, .unit_size = 256},
+    {.key = {.size = SZ(14), .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, .unit_size = 8192},
+    {.key = {.size = SZ(16), .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, .unit_size = 256},
+    {.key = {.size = SZ(16), .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, .unit_size = 8192},
+    {.key = {.size = SZ(20), .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, .unit_size = 320},
+    {.key = {.size = SZ(20), .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, .unit_size = 10240},
+    {.key = {.size = SZ(24), .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, .unit_size = 384},
+    {.key = {.size = SZ(24), .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, .unit_size = 12288},
+    {.key = {.size = SZ(32), .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, .unit_size = 512},
+    {.key = {.size = SZ(32), .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, .unit_size = 16384},
 };
-static const app_font_size_t s_sizes[] = {APP_FONT_SIZE_16, APP_FONT_SIZE_32};
+static const app_font_size_t s_sizes[] = {SZ(14), SZ(16), SZ(20), SZ(24), SZ(32)};
 
 const app_font_lib_desc_t g_board_font_lib = {
     .lib            = s_units,
@@ -62,7 +68,7 @@ const app_font_lib_desc_t g_board_font_lib = {
     .size_count     = sizeof(s_sizes) / sizeof(s_sizes[0]),
     .asc_index_base = 0x20,
     .gb_index       = APP_FONT_IDX_KIND_GB2312,
-    .total_bytes    = 256 + 8192 + 512 + 16384,
+    .total_bytes    = 2 * 256 + 2 * 8192 + 320 + 10240 + 384 + 12288 + 512 + 16384,
 };
 
 /* ================================================================
@@ -569,8 +575,7 @@ static void case_many_lines(void)
 /** 自适应优先单行：单行放得下就选能放下的**最大**字号且不换行；
  *  连最小字号一行都放不下才退回最小字号并强制换行。
  *
- *  合成字库 sizes={16,32}，故"更大字号"= 32、"最小字号"= 16。GBK 字形宽 = size，
- *  16 号宽 16 / 32 号宽 32。 */
+ *  合成字库 sizes={14,16,20,24,32}（与 3833024 一致）。GBK 字形宽 = size，ASCII = size/2。 */
 static void case_prefer_one_line(void)
 {
     TEST_BEGIN("prefer_one_line：单行放得下→大字号且不换行；最小字号都放不下→换行");
@@ -589,17 +594,17 @@ static void case_prefer_one_line(void)
               "应选到更大字号 32（字形 32x32），得到 %ux%u", s_rec_cnt ? (unsigned)s_recs[0].w : 0U,
               s_rec_cnt ? (unsigned)s_recs[0].h : 0U);
 
-    /* ② 连最小字号一行都放不下：区域 48x64，"中中中中"(4 汉字) 在 16 号下宽 64 > 48
-          → 取最小字号 16 且强制换行（3 个在 y=0、1 个在 y=16），不越区域 */
+    /* ② 连最小字号一行都放不下：区域 48x64，"中中中中"(4 汉字) 在最小字号 14 下宽 56 > 48
+          → 取最小字号 14 且强制换行（3 个在 y=0、1 个在 y=14），不越区域 */
     const char *four_gbk = "\xD6\xD0\xD6\xD0\xD6\xD0\xD6\xD0"; /* "中中中中" */
     app_render_style_t st2 = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .prefer_one_line = true};
     cap_reset(48, 64);
     render_text_auto(four_gbk, 8, 0, 0, 48, 64, &st2);
     CHECK_MSG(count_bitmaps() == 4, "4 个汉字应全部放下，得到 %d", count_bitmaps());
-    CHECK_MSG(count_bitmaps_at_y(0) == 3 && count_bitmaps_at_y(LINE_H) == 1,
-              "应换行：y=0 放 3 个、y=%u 放 1 个，得到 %d / %d", (unsigned)LINE_H,
-              count_bitmaps_at_y(0), count_bitmaps_at_y(LINE_H));
-    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 16, "应退回最小字号 16，得到 %u",
+    CHECK_MSG(count_bitmaps_at_y(0) == 3 && count_bitmaps_at_y(14) == 1,
+              "应换行：y=0 放 3 个、y=14 放 1 个，得到 %d / %d", count_bitmaps_at_y(0),
+              count_bitmaps_at_y(14));
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 14, "应退回最小字号 14，得到 %u",
               s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
     bool in_bounds = true;
     for (int i = 0; i < s_rec_cnt; i++)
@@ -617,7 +622,7 @@ static void case_prefer_one_line(void)
     cap_reset(64, 64);
     render_text_auto(three_gbk, 6, 0, 0, 64, 64, &on);
     CHECK_MSG(count_bitmaps() == 3 && count_bitmaps_at_y(32) == 0, "打开开关应单行不换行（第二行 y=32 不出现）");
-    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 16, "打开开关应选放得下单行的 16 号，得到 %u",
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 20, "打开开关应选放得下单行的最大字号 20（3×20=60≤64），得到 %u",
               s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
 
     cap_reset(64, 64);
@@ -647,6 +652,63 @@ static void case_prefer_one_line(void)
     cap_reset(64, 64);
     render_text_auto(with_nl, 3, 0, 0, 64, 64, &nl_off);
     CHECK_MSG(snapshot_equal(), "文本含 \\n 时 prefer_one_line 不该生效（应与旧行为一致）");
+}
+
+/* ================================================================
+ *  用例：自适应字号 · 含 `\n`（现场回归 R）
+ * ================================================================ */
+
+/** 含 `\n` 的多行文本：旧 blob 估算看不到行数 —— 128×32、9 字节"回归\n测试"在 24 号
+ *  命中（h_res=1、w_res=10 → 10≥9），但 24 号两行=48>32 → 只画第一行、居中也失效。
+ *  新口径按"行数 × 字号 ≤ rh 且最宽行 ≤ rw"选，应选 16。 */
+static void case_adaptive_multiline(void)
+{
+    TEST_BEGIN("自适应·含\\n：128x32 的\"回归\\n测试\"应选 16 号、两行各 16（总高 32）");
+
+    const char *two_line = "\xBB\xD8\xB9\xE9\n\xB2\xE2\xCA\xD4"; /* "回归\n测试" = 9B */
+    app_render_style_t st = {.h_align = APP_RENDER_ALIGN_LEFT_UP,
+                             .v_align = APP_RENDER_ALIGN_CENTER}; /* 与 LDI FLAT 同款：不换行 */
+
+    cap_reset(128, 32);
+    render_text_auto(two_line, 9, 0, 0, 128, 32, &st);
+
+    CHECK_MSG(count_bitmaps() == 4, "4 个汉字应各画一次，得到 %d", count_bitmaps());
+    CHECK_MSG(count_bitmaps_at_y(0) == 2 && count_bitmaps_at_y(16) == 2,
+              "应两行各 2 个：y=0 / y=16，得到 %d / %d", count_bitmaps_at_y(0),
+              count_bitmaps_at_y(16));
+    bool     all16      = (s_rec_cnt > 0);
+    uint16_t max_bottom = 0;
+    for (int i = 0; i < s_rec_cnt; i++) {
+        if (s_recs[i].w != 16 || s_recs[i].h != 16) all16 = false;
+        if ((uint32_t)s_recs[i].y + s_recs[i].h > max_bottom)
+            max_bottom = (uint16_t)(s_recs[i].y + s_recs[i].h);
+    }
+    CHECK_MSG(all16, "应选 16 号（字形 16x16），而不是 24 号");
+    CHECK_MSG(max_bottom == 32, "两行总高应 = 32（占满区域，居中成立），得到 %u", (unsigned)max_bottom);
+
+    /* 极端：3 行在 32 高里放不下 → 取最小字号 14，只画放得下的行、不越区域、不画半截 */
+    const char *three_line = "\xD2\xBB\n\xB6\xFE\n\xC8\xFD"; /* "一\n二\n三" = 8B */
+    app_render_style_t st2 = {.h_align = APP_RENDER_ALIGN_LEFT_UP};
+    cap_reset(128, 32);
+    render_text_auto(three_line, 8, 0, 0, 128, 32, &st2);
+    bool in_bounds = true;
+    for (int i = 0; i < s_rec_cnt; i++)
+        if ((uint32_t)s_recs[i].x + s_recs[i].w > 128 || (uint32_t)s_recs[i].y + s_recs[i].h > 32)
+            in_bounds = false;
+    CHECK_MSG(in_bounds, "3 行放不下时不得越出区域 128x32");
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 14, "应取最小字号 14，得到 %u",
+              s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
+    CHECK_MSG(count_bitmaps() == 2, "32 高只放得下 2 行（14×2=28），第 3 行不画，得到 %d",
+              count_bitmaps());
+
+    /* 无 `\n` 的单行：仍是旧 blob 口径（64x64、"中中中" → 32 号并换行） */
+    const char *one_line = "\xD6\xD0\xD6\xD0\xD6\xD0"; /* "中中中" */
+    app_render_style_t st3 = {.h_align = APP_RENDER_ALIGN_LEFT_UP, .word_wrap = true};
+    cap_reset(64, 64);
+    render_text_auto(one_line, 6, 0, 0, 64, 64, &st3);
+    CHECK_MSG(s_rec_cnt >= 1 && s_recs[0].w == 32, "无 \\n 单行仍按旧 blob 口径选 32，得到 %u",
+              s_rec_cnt ? (unsigned)s_recs[0].w : 0U);
+    CHECK_MSG(count_bitmaps_at_y(32) == 1, "无 \\n 单行仍是旧换行结果（第二行 y=32 放 1 个）");
 }
 
 /* ================================================================
@@ -891,6 +953,7 @@ int main(void)
     case_clamp_partial();
     case_many_lines();
     case_prefer_one_line();
+    case_adaptive_multiline();
     case_cvt_mixed();
     case_cvt_truncated();
     case_cvt_unicode_bounds();

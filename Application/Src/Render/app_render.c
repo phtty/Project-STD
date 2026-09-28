@@ -393,6 +393,34 @@ static bool _text_has_newline(const char *text, uint16_t len)
     return false;
 }
 
+/** @brief 按 `\n` 切出的行数（空段也算一行；无 `\n` 时为 1） */
+static uint16_t _text_line_count(const char *text, uint16_t len)
+{
+    uint16_t n = 1;
+    for (uint16_t i = 0; i < len; i++)
+        if (text[i] == '\n') n++;
+    return n;
+}
+
+/** @brief 含 `\n` 文本在给定字号下的**最宽一行**宽度（逐字形累加，不读字库、无 SPI）
+ *
+ *  逐段调用 `_text_line_width`（段内不换行）取最大值 —— 供含 `\n` 的文本"按实际行
+ *  选字号"用。段边界是 `\n`，不改动文本本身。 */
+static uint32_t _text_max_line_width(const char *text, uint16_t len, app_font_size_t size,
+                                     app_font_type_t type)
+{
+    uint32_t max_w = 0;
+    uint16_t start = 0;
+    for (uint16_t i = 0; i <= len; i++) {
+        if (i == len || text[i] == '\n') {
+            uint32_t w = _text_line_width(text + start, (uint16_t)(i - start), size, type);
+            if (w > max_w) max_w = w;
+            start = (uint16_t)(i + 1);
+        }
+    }
+    return max_w;
+}
+
 /* ---- 渲染分支（各功能静态内联）---- */
 
 static inline void _render_text(const app_render_cfg_t *cfg)
@@ -453,39 +481,62 @@ static inline void _render_text(const app_render_cfg_t *cfg)
     if (flib->size_count == 0) return; /* 板级字库表为空：本板根本没有字库 */
 
     if (cfg->font_size == APP_FONT_SIZE_SELF_ADAPT) {
-        /* 自适应：按文本长度与渲染区域容量，从最大字号开始选能容纳的最大字号。
-           都不放得下时用最小字号（下面的初值），由换行/截断逻辑收尾。 */
+        /* 自适应字号。**含显式 `\n` 与不含分开处理**：
+           旧实现把文本当一个**整体 blob** 估容量（`text_len ≤ (rh/size)×(rw/(size/2))`），
+           看不到行数 —— 现场 128×32、`"回归\n测试"`（GBK 9 字节）在 24 号命中
+           （h_res=1、w_res=10 → 10 ≥ 9），但 24 号下两行=48 > 32，高度门禁只画出第一行、
+           居中也失效。含 `\n` 时按**实际行数/最宽行**选字号即可消除这个缺陷；
+           不含 `\n` 时维持原 blob 口径，单行行为逐字不变。 */
         gbk_key.size = flib->sizes[0];
         asc_key.size = flib->sizes[0];
-        for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
-            uint16_t h_res = rh / flib->sizes[i];
-            uint16_t w_res = rw / (flib->sizes[i] / 2);
-            if (text_len <= h_res * w_res) {
-                gbk_key.size = flib->sizes[i];
-                asc_key.size = flib->sizes[i];
-                break;
-            }
-        }
 
-        /* prefer_one_line：样式开关打开、且文本不含 `\n` 时，改用"整段一行"的口径
-           覆盖上面按面积选出的字号。从大到小选**第一个**"一行放得下且字号 ≤ 区域高"
-           的字号 —— 一行宽只逐字形累加，**不读字库、无 SPI**。都没选中就取最小字号，
-           并强制换行（由下面的 word_wrap 语义收尾，仍受高度门禁约束：放不下的行不画）。 */
-        if (cfg->style && cfg->style->prefer_one_line && !_text_has_newline(text_buf, text_len)) {
-            bool            found = false;
-            app_font_size_t pick  = flib->sizes[0];
+        if (_text_has_newline(text_buf, text_len)) {
+            /* 按 `\n` 切段，逐候选字号算最宽行，选**最大**的满足
+               "行数 × 字号 ≤ rh **且** 最宽行 ≤ rw" 的字号。
+               （现场：32 高、2 行 → 16 号：2×16=32 ≤ 32，最宽行 2 汉字=32 ≤ 128 ✓）
+               都不满足 → 保持最小字号，由下面的换行/高度门禁收尾（放不下的行不画）。 */
+            const uint16_t lines = _text_line_count(text_buf, text_len);
             for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
                 app_font_size_t s = flib->sizes[i];
-                if ((uint16_t)s > rh) continue; /* 字号 ≤ 区域高：一行才放得下 */
-                if (_text_line_width(text_buf, text_len, s, cfg->font_type) <= rw) {
-                    pick  = s;
-                    found = true;
+                if ((uint32_t)lines * s > rh) continue; /* 行数×字号要放得下 */
+                if (_text_max_line_width(text_buf, text_len, s, cfg->font_type) > rw) continue;
+                gbk_key.size = s;
+                asc_key.size = s;
+                break;
+            }
+        } else {
+            /* 无 `\n`：保持原"按面积估算"口径（不改单行行为）。 */
+            for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                uint16_t h_res = rh / flib->sizes[i];
+                uint16_t w_res = rw / (flib->sizes[i] / 2);
+                if (text_len <= h_res * w_res) {
+                    gbk_key.size = flib->sizes[i];
+                    asc_key.size = flib->sizes[i];
                     break;
                 }
             }
-            gbk_key.size = pick;
-            asc_key.size = pick;
-            wrap         = !found; /* 选中 → 不换行；都没选中 → 最小字号 + 强制换行 */
+
+            /* prefer_one_line：样式开关打开时，改用"整段一行"的口径覆盖上面按面积选出的
+               字号。从大到小选**第一个**"一行放得下且字号 ≤ 区域高"的字号 —— 一行宽只
+               逐字形累加，**不读字库、无 SPI**。都没选中就取最小字号，并强制换行（由下面的
+               word_wrap 语义收尾，仍受高度门禁约束：放不下的行不画）。
+               （本分支已保证文本不含 `\n`，故不再重复判。） */
+            if (cfg->style && cfg->style->prefer_one_line) {
+                bool            found = false;
+                app_font_size_t pick  = flib->sizes[0];
+                for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                    app_font_size_t s = flib->sizes[i];
+                    if ((uint16_t)s > rh) continue; /* 字号 ≤ 区域高：一行才放得下 */
+                    if (_text_line_width(text_buf, text_len, s, cfg->font_type) <= rw) {
+                        pick  = s;
+                        found = true;
+                        break;
+                    }
+                }
+                gbk_key.size = pick;
+                asc_key.size = pick;
+                wrap         = !found; /* 选中 → 不换行；都没选中 → 最小字号 + 强制换行 */
+            }
         }
     } else {
         /* 请求字号不在本板上时回落到最近邻 —— 否则 _find_unit 找不到，会一路
