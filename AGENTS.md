@@ -103,6 +103,8 @@ docs/                              命名约定.md（评审契约）、架构说
 5. **`Platform/Inc/pl_net_adapt.h` 严禁出现在任何 `.h` 文件里**——它会泄漏 LwIP 类型到 Application 层。只有 `.c` 可引用。
 6. **`#if BOARD_*` 整块消除时，"那个符号必须仍然存在"**：若别的 TU（尤其不分板编译的）还引用它，就会链接失败。
    有外部调用者就必须给 `#else` 桩（例：`app_screen_canvas.c` 里 `set_color_override`/`output_color` 的桩）。
+   另一形态：共享的 `app_fold.c` **无条件**引用板级 `g_board_fold_presets`，所以 `app_fold_preset_board.c` **两块板都要有**
+   （3833024 是空槽）——缺了链接不过。
 7. **持久化记录与线上格式是契约**：W25Qxx/内部 Flash 记录的 `name[16]` 字符串、记录头布局、协议帧字段与命令码、
    链接脚本符号——**改名即变砖/丢身份**（`docs/命名约定.md` §13）。
 8. **`test/` 里有白盒套件直接 `#include` 生产 `.c`**（为了测 `static` 内部结构）：改动对应的生产文件会影响它们，
