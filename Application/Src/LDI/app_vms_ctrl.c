@@ -5,7 +5,9 @@
 
 #include "app_vms_ctrl.h"
 #include "app_screen.h"
+#include "app_fold.h"
 
+#include <stdio.h>
 #include "string.h"
 
 #include "app_render.h"
@@ -132,28 +134,96 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
         if (ctx->text[i] == '_')
             ctx->text[i] = '\n';
 
-    /* ---- 清屏 ---- */
+    /* ---- 清屏（FLAT 与折叠都只清一次；折叠两半同属 E9）---- */
     _vms_clear_screen();
 
-    /* ---- 渲染文字 ---- */
-    app_render(&(app_render_cfg_t){
-        .type      = APP_RENDER_TYPE_TEXT,
-        .x         = 0,
-        .y         = render_y,
-        .w         = screen_w,
-        .h         = render_h,
-        .color     = color,
-        .text      = (char *)ctx->text,
-        .len       = text_len,
-        .style     = &style,
-        .font_size = font_size,
-        .font_type = APP_FONT_TYPE_HT,
-        .text_enc  = APP_FONT_ENC_GBK,
-        /* 永久显示（keep_time==0）才落盘；定时显示是临时内容，不该占 flash。
-           落盘由 app_screen 在**落屏之后**做 —— 原来这里紧跟的 app_render_save()
-           在画布还没落屏时就存，存下去是上一帧。 */
-        .persist   = (ctx->keep_time == 0),
-    });
+    if (app_fold_mode() == APP_FOLD_MODE_FLAT) {
+        /* 非折叠：单次渲染，区域 = 整块逻辑屏 —— 与引入折叠前逐字一致（3833024 走这条）。 */
+        app_render(&(app_render_cfg_t){
+            .type      = APP_RENDER_TYPE_TEXT,
+            .x         = 0,
+            .y         = render_y,
+            .w         = screen_w,
+            .h         = render_h,
+            .color     = color,
+            .text      = (char *)ctx->text,
+            .len       = text_len,
+            .style     = &style,
+            .font_size = font_size,
+            .font_type = APP_FONT_TYPE_HT,
+            .text_enc  = APP_FONT_ENC_GBK,
+            /* 永久显示（keep_time==0）才落盘；定时显示是临时内容，不该占 flash。
+               落盘由 app_screen 在**落屏之后**做 —— 原来这里紧跟的 app_render_save()
+               在画布还没落屏时就存，存下去是上一帧。 */
+            .persist   = (ctx->keep_time == 0),
+        });
+    } else {
+        /* 折叠屏变体：E9 的两行分别严格限在上/下半屏（区域契约保证不跨缝）。
+           变体2（FOLD_E9_EA）本片暂与变体1 同路径 —— **S4 将改为只写上半屏 + 只清
+           上半屏**（下半是 EA 预置图，不该被 E9 的清屏/文本覆盖）。 */
+        const char *line0 = nullptr;
+        const char *line1 = nullptr;
+        uint16_t    len0  = 0;
+        uint16_t    len1  = 0;
+        const uint8_t line_cnt =
+            app_fold_split_lines((const char *)ctx->text, text_len, &line0, &len0, &line1, &len1);
+
+        /* 折叠模式**忽略 font_line**：它的原语义是"把内容放到屏幕第 N 行"，在上下半屏里
+           会把内容放到跨缝的位置。样式开 word_wrap + prefer_one_line（优先单行最大字号，
+           最小字号才换行）。keep_time/persist 语义不变（持久化粒度 = 半屏 = 本卡矩形）。 */
+        app_render_style_t fold_style = {
+            .h_align         = h_align,
+            .v_align         = APP_RENDER_ALIGN_CENTER,
+            .word_wrap       = true,
+            .prefer_one_line = true,
+        };
+        const bool fold_persist = (ctx->keep_time == 0);
+
+        uint16_t fx = 0, fy = 0, fw = 0, fh = 0;
+
+        /* 上半屏：第 1 行（1 行时只画这里，下半保持清空） */
+        if (app_fold_rect(0, &fx, &fy, &fw, &fh)) {
+            app_render(&(app_render_cfg_t){
+                .type      = APP_RENDER_TYPE_TEXT,
+                .x         = fx,
+                .y         = fy,
+                .w         = fw,
+                .h         = fh,
+                .color     = color,
+                .text      = (char *)line0,
+                .len       = len0,
+                .style     = &fold_style,
+                .font_size = font_size,
+                .font_type = APP_FONT_TYPE_HT,
+                .text_enc  = APP_FONT_ENC_GBK,
+                .persist   = fold_persist,
+            });
+        }
+
+        /* 下半屏：第 2 行 */
+        if (line_cnt >= 2 && app_fold_rect(1, &fx, &fy, &fw, &fh)) {
+            app_render(&(app_render_cfg_t){
+                .type      = APP_RENDER_TYPE_TEXT,
+                .x         = fx,
+                .y         = fy,
+                .w         = fw,
+                .h         = fh,
+                .color     = color,
+                .text      = (char *)line1,
+                .len       = len1,
+                .style     = &fold_style,
+                .font_size = font_size,
+                .font_type = APP_FONT_TYPE_HT,
+                .text_enc  = APP_FONT_ENC_GBK,
+                .persist   = fold_persist,
+            });
+        }
+
+        /* 折叠屏只有上下两半：多于 2 行的内容丢弃（只留日志，不静默）。 */
+        if (line_cnt > 2)
+            printf("[ldi/vms] 折叠屏只有上下两半：文本 %u 行，仅显示前 2 行、丢弃 %u 行\n",
+                   (unsigned)line_cnt, (unsigned)(line_cnt - 2));
+    }
 
     /* ---- 持久化策略 ---- */
     if (ctx->keep_time == 0) {

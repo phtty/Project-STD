@@ -122,7 +122,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-16 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+17 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -142,6 +142,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_casc_round` / `test_casc_master` | 级联从卡/主卡的图传与轮次 |
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
+| `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
 
 **host 测试覆盖不到真实硬件时序**（TIM3/TIM4 扫描、BSRR、真实 SPI/DMA）——涉及显示路径或外设时序的改动，
 除 `make test` 外还应上机冒烟（两板、含级联显示与工厂逐色老化）。

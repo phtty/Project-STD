@@ -43,6 +43,7 @@ virtualFolder:
                 - path: Application/Src/LDI/app_ldi.c
                 - path: Application/Src/LDI/app_ldi_cmd.c
                 - path: Application/Src/LDI/app_vms_ctrl.c
+                - path: Application/Src/LDI/app_fold.c
                 - path: Application/Src/LDI/app_ldi_cfg.c
               folders: []
             - name: rls

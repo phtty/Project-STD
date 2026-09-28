@@ -333,6 +333,7 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_ldi_cmd.c \
 	Application/Src/LDI/app_ldi_cfg.c \
 	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/LDI/app_fold.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c \
 	Application/Src/AHMQ/app_ahmq.c \
@@ -619,6 +620,20 @@ TEST_RENDER_SRCS = \
 	test/stubs/os_stub.c \
 	Kernel/Src/text_cvt.c
 
+# 套件十七：折叠屏（模式判定 / 变体1 E9 两行各限半屏）
+# 用例 TU-include app_vms_ctrl.c（_vms_display_ctrl 是 static），app_render 换成
+# 套件内的 capture 桩；app_fold.c 与 app_ldi.c 作为普通 TU 编译 —— 后者提供**真实的**
+# g_ldi_ctx 与 app_ldi_get_device_idx，故三态判定走真实访问器而非复制的逻辑。
+# app_vms_ctrl.c / app_render.c 都不列进 SRCS（前者被 include，后者是桩）。
+TEST_FOLD_SRCS = \
+	test/test_fold.c \
+	test/stubs/os_stub.c \
+	test/stubs/pl_crc_stub.c \
+	Application/Src/LDI/app_fold.c \
+	Application/Src/LDI/app_ldi.c \
+	Kernel/Src/ring_buffer.c \
+	Kernel/Src/crc_utils.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
@@ -627,7 +642,7 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_casc_frame $(TEST_BUILD)/test_screen_layout \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
-      $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render
+      $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -675,6 +690,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 文字渲染区域契约 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_render
+	@echo ""
+	@echo "──── 折叠屏 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_fold
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -767,6 +785,16 @@ $(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render
 $(TEST_BUILD)/test_render: Application/Src/Render/app_render.c \
 	Application/Inc/Render/app_render.h Application/Src/RLS/app_rls_cmd.c \
 	Application/Inc/RLS/app_rls_cmd.h
+
+# 用例 TU-include 了 app_vms_ctrl.c（它不在 SRCS 里），必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。app_fold.c 在 SRCS 里，无需再挂。
+$(TEST_BUILD)/test_fold: $(TEST_FOLD_SRCS) Application/Src/LDI/app_vms_ctrl.c \
+	Application/Inc/LDI/app_fold.h Application/Inc/LDI/app_vms_ctrl.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_FOLD_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_fold: Application/Src/LDI/app_fold.c Application/Src/LDI/app_ldi.c \
+	Application/Inc/LDI/app_fold.h Application/Inc/LDI/app_ldi.h $(BOARD_DIR)/board.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a
