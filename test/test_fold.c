@@ -512,28 +512,54 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(fill && fill->color == DEV_DISPLAY_COLOR_BLACK, "清屏应为全黑");
     CHECK_MSG(fill && fill->persist, "清下半屏应请求落盘（掉电恢复，状态与最后命令一致）");
 
-    /* 01H → 绿槽 */
+    /* 01H → 绿槽：必须"先清下半屏再画"（bit=0 不动，不清会留残影） */
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
     s_scr_h      = 100;
     app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_YELLOW);
     CHECK_MSG(app_fold_preset_show(1), "绿预置图应显示成功");
-    CHECK_MSG(s_rec_cnt == 1 && s_recs[0].type == APP_RENDER_TYPE_BITMAP, "绿应为一次 BITMAP");
-    CHECK_MSG(s_recs[0].bitmap == s_bm_green, "01H 应取绿槽");
+    CHECK_MSG(s_rec_cnt == 2, "绿应为 清(1) + 画(1) 两次渲染，得到 %d", s_rec_cnt);
+    CHECK_MSG(s_recs[0].type == APP_RENDER_TYPE_FILL && s_recs[1].type == APP_RENDER_TYPE_BITMAP,
+              "顺序必须是 FILL → BITMAP（先清完再画）");
     CHECK_MSG(s_recs[0].x == 0 && s_recs[0].y == 50 && s_recs[0].w == 224 && s_recs[0].h == 50,
+              "清屏区域应为下半 224x50@(0,50)");
+    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK, "清屏必须全黑");
+    CHECK_MSG(s_recs[0].persist, "清屏也要落盘（与显示同口径，掉电不复活旧图）");
+    CHECK_MSG(s_recs[1].bitmap == s_bm_green, "01H 应取绿槽");
+    CHECK_MSG(s_recs[1].x == 0 && s_recs[1].y == 50 && s_recs[1].w == 224 && s_recs[1].h == 50,
               "BITMAP 区域应为下半 224x50@(0,50)");
-    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_YELLOW, "颜色应取最近一次颜色（黄）");
-    CHECK_MSG(s_recs[0].persist, "EA 预置图应请求落盘（掉电恢复）");
+    CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_YELLOW, "颜色应取最近一次颜色（黄）");
+    CHECK_MSG(s_recs[1].persist, "EA 预置图应请求落盘（掉电恢复）");
 
-    /* 02H → 红槽 */
+    /* 02H → 红槽：同样"先清再画" */
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
     s_scr_h      = 100;
     CHECK_MSG(app_fold_preset_show(2), "红预置图应显示成功");
-    CHECK_MSG(s_rec_cnt == 1 && s_recs[0].bitmap == s_bm_red, "02H 应取红槽");
-    CHECK_MSG(s_recs[0].persist, "EA 预置图（红）也应请求落盘");
+    CHECK_MSG(s_rec_cnt == 2 && s_recs[0].type == APP_RENDER_TYPE_FILL &&
+                  s_recs[1].type == APP_RENDER_TYPE_BITMAP,
+              "红也应为 FILL → BITMAP（清完再画），得到 %d 次渲染", s_rec_cnt);
+    CHECK_MSG(s_recs[0].color == DEV_DISPLAY_COLOR_BLACK && s_recs[0].persist,
+              "红前的清屏应为全黑且落盘");
+    CHECK_MSG(s_recs[1].bitmap == s_bm_red, "02H 应取红槽");
+    CHECK_MSG(s_recs[1].persist, "EA 预置图（红）也应请求落盘");
+
+    /* 同一色连发两次：每次都要重新清 + 画，不得因"与上次同色"跳过（缓存会吃残影） */
+    env_reset();
+    s_fold_count = 2;
+    s_scr_w      = 224;
+    s_scr_h      = 100;
+    app_fold_note_color((uint8_t)DEV_DISPLAY_COLOR_GREEN);
+    CHECK_MSG(app_fold_preset_show(1), "同色连发第一次（绿）应成功");
+    render_rec_t first_pair[2];
+    memcpy(first_pair, s_recs, sizeof(first_pair));
+    s_rec_cnt = 0;
+    CHECK_MSG(app_fold_preset_show(1), "同色连发第二次（仍为绿）也应成功");
+    CHECK_MSG(s_rec_cnt == 2, "第二次同样要清 + 画（2 次），得到 %d", s_rec_cnt);
+    CHECK_MSG(memcmp(first_pair, s_recs, sizeof(first_pair)) == 0,
+              "同色重发的两次渲染序列必须逐字段一致（每次都重新清+画）");
 
     /* 03H → 黄槽是空槽：拒画 + false + 无渲染 */
     env_reset();

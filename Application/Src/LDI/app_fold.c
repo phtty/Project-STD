@@ -107,6 +107,21 @@ bool app_fold_preset_show(uint8_t color)
         return false;
     }
 
+    /* 必须先清下半屏、再画位图：位图语义是 bit=1 才写（上色）、bit=0 不动
+       （见 app_screen_canvas.c 的 _sink_bitmap 与 dev_display_draw_bitmap），
+       两张预置图切换时新图 bit=0 的像素会保留旧图 —— 残影。E9 折叠路径同样是
+       "先清半屏再画"。半屏全黑填充正是画布颜色账里的"新一帧"（见
+       docs/架构说明.md §7.4），清屏也得落盘：与显示同口径，掉电后不复活旧图。 */
+    app_render(&(app_render_cfg_t){
+        .type    = APP_RENDER_TYPE_FILL,
+        .x       = x,
+        .y       = y,
+        .w       = w,
+        .h       = h,
+        .color   = DEV_DISPLAY_COLOR_BLACK,
+        .persist = true,
+    });
+
     /* 落盘（掉电恢复）：雨棚状态是产品状态，掉电重来要恢复它。
        粒度仍是"半屏（本卡矩形）"，记录格式未变（见 docs/架构说明.md §7.4）。 */
     app_render(&(app_render_cfg_t){
