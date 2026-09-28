@@ -401,6 +401,27 @@ static void case_fold_geometry(void)
     CHECK_MSG(x == 0 && y == 16 && w == 48 && h == 16, "下半应为 48x16@(0,16)，得到 %ux%u@(%u,%u)",
               (unsigned)w, (unsigned)h, (unsigned)x, (unsigned)y);
 
+    /* ①b 倒序表：两格几何不变，但**下半放在下标 0、上半放在下标 1** ——
+       契约写的是"按 y 定上下，不按下标"，而网格合成器恒按几何行优先存表
+       （index 0 = 上格），所以"按 y"与"按下标"在正常表上恰好一致，只有这张
+       倒序表能区分两者。现场主卡可以在下半（master_cell=1），届时下标与上下
+       正好相反 —— 错按下标会让上下半屏内容对调，且 CRC/长度校验全过、不报错。
+       反向验证：去掉 app_screen_fold_rect() 里的按 y 交换（直接用 cards[0]/[1]），
+       下面两条立刻红。 */
+    canvas_reset(48, 16, 1, 2);
+    {
+        app_screen_card_t tmp = s_card_table[0];
+        s_card_table[0]       = s_card_table[1];
+        s_card_table[1]       = tmp;
+    }
+    CHECK_MSG(app_screen_fold_count() == 2, "倒序两格仍是折叠（几何未变），得到 %u",
+              (unsigned)app_screen_fold_count());
+    CHECK_MSG(app_screen_fold_rect(0, &x, &y, &w, &h), "倒序表上半矩形应取到");
+    CHECK_MSG(y == 0, "fold_rect(0) 必须按 y 返回上半（y=0），得到 y=%u（按了下标就会是 16）",
+              (unsigned)y);
+    CHECK_MSG(app_screen_fold_rect(1, &x, &y, &w, &h), "倒序表下半矩形应取到");
+    CHECK_MSG(y == 16, "fold_rect(1) 必须按 y 返回下半（y=16），得到 y=%u", (unsigned)y);
+
     /* ② 2×1 横排：卡数、等高同宽都成立，但**不是**折叠，且不得写输出 */
     canvas_reset(48, 16, 2, 1);
     CHECK_MSG(app_screen_fold_count() == 1, "2×1 横排不该判为折叠，得到 %u",
