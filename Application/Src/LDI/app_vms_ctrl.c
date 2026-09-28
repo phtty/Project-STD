@@ -12,6 +12,7 @@
 
 #include "app_render.h"
 #include "app_light_sensor.h"
+#include "dev_display.h" /* dev_display_frame_begin/end：把"清+画"当成一帧 */
 
 /* ---- VMS 定时清屏 ---- */
 static uint32_t s_vms_clear_tick; /* 清屏时刻 (RTOS tick) */
@@ -62,6 +63,7 @@ void app_vms_timer_poll(void)
     if (!s_vms_timer_active) return;
 
     if (osKernelGetTickCount() >= s_vms_clear_tick) {
+        /* 单笔清屏：不包 frame_begin/end（无中间态可压），见 _vms_display_ctrl 的说明。 */
         _vms_clear_content();
         s_vms_timer_active = false;
     }
@@ -109,11 +111,13 @@ static const dev_display_color_t s_clear_color_map[] = {
  *  显示控制 (func_type = 0x01)
  * ================================================================ */
 
-static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+/** @brief 显示控制的渲染段：清内容 + 按折叠模式画文字（**不含**定时/落盘策略）
+ *
+ *  单独成函数是为了让 `_vms_display_ctrl` 能用**单一出口**把它整段包进
+ *  `dev_display_frame_begin/end`：本函数内部无论走 FLAT / FOLD_E9 / FOLD_E9_EA
+ *  哪一支、也不论 1 行还是 >2 行，都只有一条落到末尾的出口，天然不会漏配 frame_end。 */
+static void _vms_render_text(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
-    /* 文字显示: 恢复自动亮度跟随 */
-    app_light_sensor_resume();
-
     dev_display_color_t color     = MAP(s_color_map, ctx->font_color, DEV_DISPLAY_COLOR_BLACK);
     app_render_align_t         h_align   = MAP(s_align_map, ctx->format, APP_RENDER_ALIGN_CENTER);
     app_font_size_t     font_size = MAP(s_font_size_map, ctx->font_size, APP_FONT_SIZE_16);
@@ -259,10 +263,31 @@ static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
                    (unsigned)line_cnt, (unsigned)(line_cnt - 2));
         }
     }
+}
+
+static void _vms_display_ctrl(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
+{
+    /* 文字显示: 恢复自动亮度跟随 */
+    app_light_sensor_resume();
+
+    /* 清屏 → 文字**当成一帧**输出（与 app_factory_test.c / app_screen.c / app_fold.c 同款，
+       见 dev_display.h 的 dev_display_frame_begin 说明）：直写实屏路径（3833024）上，
+       清屏那一笔置脏后 `_scan_task` 可能先 prepare 出一帧"清完还没画"的中间态 —— 包住后
+       **最终画面不变，只是不再经过中间态**。
+       渲染段收进 _vms_render_text：它内部只有一条落到末尾的出口，无论 FLAT / FOLD_E9 /
+       FOLD_E9_EA、1 行 / >2 行都必然走到下面这句 frame_end —— 不会留下未配对的 begin
+       （漏配对的后果是 dirty_hold 卡死、屏永远不更新，比闪一帧严重得多）。
+       画布路径整段不碰实屏缓冲，frame 标记不参与（见 dev_display.h）。
+       **单笔清屏不包**：_vms_clean_ctrl（02H）与 app_vms_timer_poll 到点清屏都只有一笔
+       填充，没有中间态可压，包了只是把置脏推迟到 _end、上屏结果与直接画无异，徒增
+       一处必须成对的约束。 */
+    dev_display_frame_begin(dev_display_get());
+    _vms_render_text(ctx, text_len);
+    dev_display_frame_end(dev_display_get());
 
     /* ---- 持久化策略 ---- */
     if (ctx->keep_time == 0) {
-        s_vms_timer_active = false; /* 落盘请求已随渲染提交，见上一段 */
+        s_vms_timer_active = false; /* 落盘请求已随渲染提交，见渲染段 */
     } else {
         /* 定时显示：keep_time 秒后自动清屏 */
         s_vms_clear_tick   = osKernelGetTickCount() + (uint32_t)ctx->keep_time * 1000U;
@@ -279,6 +304,7 @@ static void _vms_clean_ctrl(app_ldi_ctrl_vms_t *ctx)
     /* 全屏点亮/清屏: 停止自动亮度跟随, 固定最大亮度 (非黑屏) */
     app_light_sensor_set_fixed(7);
 
+    /* 单笔清屏：不包 frame_begin/end（无中间态可压），见 _vms_display_ctrl 的说明。 */
     dev_display_color_t color = MAP(s_clear_color_map, ctx->clear_type, DEV_DISPLAY_COLOR_BLACK);
 
     /* 变体2：下半是 EA 预置图，E9 的 02H 清屏只清上半（同显示控制的口径）。 */

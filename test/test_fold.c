@@ -223,6 +223,20 @@ static int g_fail;
 
 #define TEST_BEGIN(name) printf("\n\033[36m▶ %s\033[0m\n", name)
 
+/** @brief 断言"这段被恰好一帧包住"：begin → renders 笔渲染 → end，且 begin/end 各一次 */
+static void check_one_frame(int renders)
+{
+    CHECK_MSG(s_frame_begins == 1 && s_frame_ends == 1,
+              "应为恰好一帧（begin/end 各一次），得到 begin=%d end=%d", s_frame_begins,
+              s_frame_ends);
+    CHECK_MSG(s_ev_cnt == renders + 2, "事件数应为 2 + %d 笔渲染 = %d，得到 %d", renders, renders + 2,
+              s_ev_cnt);
+    CHECK_MSG(s_ev_cnt >= 1 && s_ev[0] == EV_FRAME_BEGIN, "首事件必须是 begin");
+    CHECK_MSG(s_ev_cnt >= 2 && s_ev[s_ev_cnt - 1] == EV_FRAME_END, "末事件必须是 end");
+    for (int i = 1; i + 1 < s_ev_cnt; i++)
+        CHECK_MSG(s_ev[i] == EV_RENDER, "中间第 %d 个事件必须是一笔渲染", i);
+}
+
 /* ================================================================
  *  夹具
  * ================================================================ */
@@ -384,6 +398,9 @@ static void case_variant1_two_lines(void)
                                        /*font_size=*/0);
     app_vms_ctrl(ctx, 5);
 
+    /* 清屏 + 上/下两笔文字**被同一帧包住**：begin → FILL → TEXT → TEXT → end */
+    check_one_frame(3);
+
     /* 整屏清一次 + 上/下半屏各一次 = 3 次 */
     CHECK_MSG(s_rec_cnt == 3, "应为 1 清屏 + 2 文本（3 次），得到 %d", s_rec_cnt);
     CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "应恰好清屏一次，得到 %d",
@@ -433,6 +450,9 @@ static void case_variant1_one_line(void)
     app_ldi_ctrl_vms_t *ctx = make_vms("AB", 2, 1, 0, 5, 0);
     app_vms_ctrl(ctx, 2);
 
+    /* 1 行只画上半：仍是 begin → 清 → 上半文字 → end（不是"提前 return 漏 end"） */
+    check_one_frame(2);
+
     CHECK_MSG(s_rec_cnt == 2, "应为 1 清屏 + 1 文本（2 次），得到 %d", s_rec_cnt);
     CHECK_MSG(count_type(APP_RENDER_TYPE_TEXT) == 1, "只应渲染上半：文本恰好 1 次，得到 %d",
               count_type(APP_RENDER_TYPE_TEXT));
@@ -457,6 +477,10 @@ static void case_variant1_three_lines(void)
     app_ldi_ctrl_vms_t *ctx = make_vms("A_B_C", 5, 1, 0, 0, 0);
     app_vms_ctrl(ctx, 5);
 
+    /* >2 行只取前 2 行（第 3 行丢弃）—— 丢弃是中间的一条日志，不是提前 return，
+       整段仍在同一帧内：begin → FILL → TEXT → TEXT → end */
+    check_one_frame(3);
+
     CHECK_MSG(s_rec_cnt == 3, "应为 1 清屏 + 前 2 行（3 次），得到 %d", s_rec_cnt);
     CHECK_MSG(count_type(APP_RENDER_TYPE_TEXT) == 2, "必须恰好 2 次文本（第 3 行被丢弃），得到 %d",
               count_type(APP_RENDER_TYPE_TEXT));
@@ -478,6 +502,9 @@ static void case_flat(void)
     app_ldi_ctrl_vms_t *ctx = make_vms("AB_CD", 5, 1, 0, 0, 0);
     app_vms_ctrl(ctx, 5);
 
+    /* FLAT 也包帧：begin → FILL → TEXT → end */
+    check_one_frame(2);
+
     CHECK_MSG(s_rec_cnt == 2, "FLAT 应为 1 清屏 + 1 文本（2 次），得到 %d", s_rec_cnt);
     CHECK_MSG(count_type(APP_RENDER_TYPE_TEXT) == 1, "FLAT 只应渲染一次，得到 %d",
               count_type(APP_RENDER_TYPE_TEXT));
@@ -494,6 +521,7 @@ static void case_flat(void)
     env_reset();
     ctx = make_vms("AB", 2, 1, /*font_line=*/1, /*keep=*/0, /*font_size=*/0);
     app_vms_ctrl(ctx, 2);
+    check_one_frame(2);
     const render_rec_t *r2 = nth_text(0);
     CHECK_MSG(r2 && r2->x == 0 && r2->y == 0 && r2->w == 128 && r2->h == 16,
               "FLAT font_line=1 应落在第 1 条带 128x16@(0,0)，得到 %ux%u@(%u,%u)",
@@ -533,6 +561,9 @@ static void case_variant2_e9_top_only(void)
               "上半文本应为 'AB'（'_' 转 '\\n' 后取第 1 段）");
     CHECK_MSG(top && top->has_style && top->style.word_wrap && top->style.prefer_one_line,
               "折叠样式 word_wrap + prefer_one_line 照旧");
+
+    /* 变体2 E9：begin → 上半清屏 → 上半文字 → end */
+    check_one_frame(2);
 
     /* E9 渲染时记下颜色：EA 预置图取"最近一次颜色"（font_color=2 → 红） */
     s_rec_cnt = 0;
@@ -674,6 +705,59 @@ static void case_ea_reject(void)
     CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "非折叠清屏/预置图都不得 begin");
 }
 
+/** 单笔清屏路径（02H / 定时到点）**不包帧**：只有一笔填充，没有中间态可压 */
+static void case_clean_and_timer_no_frame(void)
+{
+    TEST_BEGIN("02H 清屏 / 定时到点：单笔路径不包帧（零 begin/end）");
+
+    /* 02H（非折叠）：单次 FILL，不 begin */
+    env_reset();
+    memset(s_vms_buf, 0, sizeof(s_vms_buf));
+    app_ldi_ctrl_vms_t *cc = (app_ldi_ctrl_vms_t *)s_vms_buf;
+    cc->device_func_type   = 0x02;
+    cc->clear_type         = 1; /* 红 */
+    app_vms_ctrl(cc, 0);
+    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "02H 应恰好一次 FILL，得到 %d",
+              count_type(APP_RENDER_TYPE_FILL));
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0,
+              "02H 单笔清屏不得 begin/end，得到 begin=%d end=%d", s_frame_begins, s_frame_ends);
+
+    /* 02H（变体2）：只清上半，仍不 begin */
+    env_reset();
+    s_fold_count = 2;
+    declare_ea();
+    s_scr_w = 224;
+    s_scr_h = 100;
+    memset(s_vms_buf, 0, sizeof(s_vms_buf));
+    cc                   = (app_ldi_ctrl_vms_t *)s_vms_buf;
+    cc->device_func_type = 0x02;
+    cc->clear_type       = 1;
+    app_vms_ctrl(cc, 0);
+    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "变体2 02H 应恰好一次 FILL（只清上半），得到 %d",
+              count_type(APP_RENDER_TYPE_FILL));
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "变体2 02H 单笔清屏不得 begin/end");
+
+    /* 定时到点（变体1）：单次清屏，不 begin。白盒：本套件 TU-include 了 app_vms_ctrl.c，
+       直接把定时器设成"已到点"，免得真等 keep_time 秒。 */
+    env_reset();
+    s_fold_count       = 2;
+    s_scr_w            = 224;
+    s_scr_h            = 100;
+    s_vms_clear_tick   = 0; /* 0 ≤ 当前 tick → 立即到点 */
+    s_vms_timer_active = true;
+    app_vms_timer_poll();
+    CHECK_MSG(count_type(APP_RENDER_TYPE_FILL) == 1, "到点应清屏一次，得到 %d",
+              count_type(APP_RENDER_TYPE_FILL));
+    CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "定时到点单笔清屏不得 begin/end");
+
+    /* 定时器未激活：不渲染、不 begin */
+    env_reset();
+    s_vms_timer_active = false;
+    app_vms_timer_poll();
+    CHECK_MSG(s_rec_cnt == 0 && s_frame_begins == 0 && s_frame_ends == 0,
+              "未激活定时器不得渲染/begin");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -690,6 +774,7 @@ int main(void)
     case_variant2_e9_top_only();
     case_ea_show_and_clear();
     case_ea_reject();
+    case_clean_and_timer_no_frame();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
