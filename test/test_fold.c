@@ -81,6 +81,26 @@ const app_fold_preset_t g_board_fold_presets[3] = {
 };
 
 /* ================================================================
+ *  板级字库：本套件自己提供 g_board_font_lib 的定义
+ *
+ *  同 test_render 的做法 —— 板级数据不参与 host 编译。app_vms_ctrl.c 的
+ *  `_map_font_size` 按 g_board_font_lib.sizes[] 升序落档，故这里给一份最小合成
+ *  （升序 16/32，无单元；本套件 TU-include app_vms_ctrl.c，不编 app_render.c，
+ *  单元只是"找得到三元组"用的，此处用不到）。
+ * ================================================================ */
+static const app_font_size_t s_sizes[] = {APP_FONT_SIZE_16, APP_FONT_SIZE_32};
+
+const app_font_lib_desc_t g_board_font_lib = {
+    .lib            = nullptr,
+    .lib_count      = 0,
+    .sizes          = s_sizes,
+    .size_count     = sizeof(s_sizes) / sizeof(s_sizes[0]),
+    .asc_index_base = 0x20,
+    .gb_index       = APP_FONT_IDX_KIND_GB2312,
+    .total_bytes    = 0,
+};
+
+/* ================================================================
  *  capture 渲染目标 —— 记录每次 app_render 的入参
  * ================================================================ */
 
@@ -758,6 +778,59 @@ static void case_clean_and_timer_no_frame(void)
               "未激活定时器不得渲染/begin");
 }
 
+/** VMS 清屏颜色（02H clear_type）：86号文 1+7 色，未知值回落黑（清屏的安全默认） */
+static void case_vms_clear_color(void)
+{
+    TEST_BEGIN("VMS 清屏：00H~07H = 黑/红/绿/黄/蓝/紫/青/白，08H 越界回落黑");
+
+    /* 顺序与 dev_display_color_t 枚举一致；[8] 是越界回落 */
+    static const dev_display_color_t want[] = {
+        DEV_DISPLAY_COLOR_BLACK,  DEV_DISPLAY_COLOR_RED,   DEV_DISPLAY_COLOR_GREEN,
+        DEV_DISPLAY_COLOR_YELLOW, DEV_DISPLAY_COLOR_BLUE,  DEV_DISPLAY_COLOR_PURPLE,
+        DEV_DISPLAY_COLOR_CYAN,   DEV_DISPLAY_COLOR_WHITE, DEV_DISPLAY_COLOR_BLACK,
+    };
+    for (uint8_t code = 0U; code <= 8U; code++) {
+        env_reset();
+        memset(s_vms_buf, 0, sizeof(s_vms_buf));
+        app_ldi_ctrl_vms_t *cc = (app_ldi_ctrl_vms_t *)s_vms_buf;
+        cc->device_func_type   = 0x02;
+        cc->clear_type         = code;
+        app_vms_ctrl(cc, 0);
+
+        const render_rec_t *fill = nth_type(APP_RENDER_TYPE_FILL, 0);
+        CHECK_MSG(fill && fill->color == want[code], "clear_type=%02XH 应为颜色 %d，得到 %d", code,
+                  (int)want[code], fill ? (int)fill->color : -1);
+    }
+}
+
+/** VMS 字号（01H font_size）：按本板可用字号升序落档，超档取最大；00H=自适应 */
+static void case_vms_font_size(void)
+{
+    TEST_BEGIN("VMS 字号：按本板升序落档（合成字库 16/32）、超档取最大、00H=自适应");
+
+    /* 合成 g_board_font_lib.sizes = {16, 32}：0→自适应, 1→16, 2→32, 3+/08H→32（最大档） */
+    static const struct {
+        uint8_t         code;
+        app_font_size_t want;
+    } cases[] = {
+        {0x00, APP_FONT_SIZE_SELF_ADAPT},
+        {0x01, APP_FONT_SIZE_16},
+        {0x02, APP_FONT_SIZE_32},
+        {0x03, APP_FONT_SIZE_32}, /* 超档取最大 */
+        {0x08, APP_FONT_SIZE_32},
+    };
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        env_reset(); /* FLAT 128×32，font_line=0 → 单笔文本 */
+        app_ldi_ctrl_vms_t *ctx = make_vms("AB", 2, /*format=*/1, /*font_line=*/0, /*keep=*/0,
+                                           cases[i].code);
+        app_vms_ctrl(ctx, 2);
+
+        const render_rec_t *r = nth_text(0);
+        CHECK_MSG(r && r->font_size == cases[i].want, "font_size=%02XH 应映射为 %d，得到 %d",
+                  cases[i].code, (int)cases[i].want, r ? (int)r->font_size : -1);
+    }
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -775,6 +848,8 @@ int main(void)
     case_ea_show_and_clear();
     case_ea_reject();
     case_clean_and_timer_no_frame();
+    case_vms_clear_color();
+    case_vms_font_size();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

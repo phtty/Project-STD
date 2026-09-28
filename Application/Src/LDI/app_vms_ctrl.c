@@ -87,20 +87,38 @@ static const app_render_align_t s_align_map[] = {
     [3] = APP_RENDER_ALIGN_RIGHT_DOWN,
 };
 
-/** LDI 字号 font_size → app_font_size_t (00H=自适应, 01H=16, 02H=24, 03H=32) */
-static const app_font_size_t s_font_size_map[] = {
-    [0] = APP_FONT_SIZE_SELF_ADAPT,
-    [1] = APP_FONT_SIZE_16,
-    [2] = APP_FONT_SIZE_24,
-    [3] = APP_FONT_SIZE_32,
-};
+/** LDI 字号 font_size → app_font_size_t：**档位 → 点阵按本板可用字号升序**
+ *
+ *  协议字号 01H~08H 有 8 档，但每块板实际可用的字号集合不同（见 g_board_font_lib.sizes[]，
+ *  契约要求升序）：第 n 档 = sizes[n-1]，超出本板档数时取**最大档**；00H = 自适应。
+ *  例：5006048（16/24/32/48）1→16、2→24、3→32、4→48，5~08H→48；
+ *      3833024（14/16/20/24/32）1→14、2→16、3→20、4→24、5→32，6~08H→32。 */
+static app_font_size_t _map_font_size(uint8_t code)
+{
+    if (code == 0) return APP_FONT_SIZE_SELF_ADAPT;
 
-/** LDI 清屏颜色 clear_type → dev_display_color_t (00H=黑, 01H=红, 02H=绿, 03H=黄) */
+    /* 字库为空时渲染侧本就会拒绝，这里只保证不越界读 sizes[]。 */
+    if (g_board_font_lib.size_count == 0) return APP_FONT_SIZE_16;
+
+    uint8_t idx = (uint8_t)(code - 1);
+    if (idx >= g_board_font_lib.size_count) idx = (uint8_t)(g_board_font_lib.size_count - 1);
+    return g_board_font_lib.sizes[idx];
+}
+
+/** LDI 清屏颜色 clear_type → dev_display_color_t（交路网函〔2024〕86号 附件2：1+7 色）
+ *
+ *  00H=文字清屏(黑), 01H=全红, 02H=全绿, 03H=全黄, 04H=全蓝, 05H=全紫, 06H=全青, 07H=全白。
+ *  顺序恰与 dev_display_color_t 的枚举一致；本板不支持的通道不做特判，
+ *  按位与物理呈现（蓝→灭、紫→红、青→绿、白→黄，见 §7.2 的颜色能力）。 */
 static const dev_display_color_t s_clear_color_map[] = {
     [0] = DEV_DISPLAY_COLOR_BLACK,
     [1] = DEV_DISPLAY_COLOR_RED,
     [2] = DEV_DISPLAY_COLOR_GREEN,
     [3] = DEV_DISPLAY_COLOR_YELLOW,
+    [4] = DEV_DISPLAY_COLOR_BLUE,
+    [5] = DEV_DISPLAY_COLOR_PURPLE,
+    [6] = DEV_DISPLAY_COLOR_CYAN,
+    [7] = DEV_DISPLAY_COLOR_WHITE,
 };
 
 /* ---- 带边界检查的查表辅助宏 ---- */
@@ -120,7 +138,7 @@ static void _vms_render_text(app_ldi_ctrl_vms_t *ctx, const uint16_t text_len)
 {
     dev_display_color_t color     = MAP(s_color_map, ctx->font_color, DEV_DISPLAY_COLOR_BLACK);
     app_render_align_t         h_align   = MAP(s_align_map, ctx->format, APP_RENDER_ALIGN_CENTER);
-    app_font_size_t     font_size = MAP(s_font_size_map, ctx->font_size, APP_FONT_SIZE_16);
+    app_font_size_t     font_size = _map_font_size(ctx->font_size);
 
     /* **逻辑屏**尺寸，不是本卡那块屏 —— 级联时整屏比本卡屏大，用本卡的
        screen_rows/cols 算布局会让内容整块落到别的卡那半边去。 */

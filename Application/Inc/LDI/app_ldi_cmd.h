@@ -204,12 +204,14 @@ typedef struct [[gnu::packed]] {
     union {
         struct {
             uint8_t font_color; /**< 字体颜色: 01H=绿色, 02H=红色, 03H=黄色 */
-            uint8_t font_size; /**< 字体大小: 01H~08H, 00H=自适应 */
+            uint8_t font_size; /**< 字体大小: 01H~08H 按本板可用字号升序落档（第 n 档=本板第 n 小
+                                    字号，超档取最大档）, 00H=自适应 */
             uint8_t font_line; /**< 显示行数: 01H~FFH, 00H=自适应 */
             uint8_t keep_time; /**< 显示停留时间: 00H=永久停留, 01H~FFH=秒 */
             uint8_t format; /**< 对齐方式: 01H=居中, 02H=左对齐, 03H=右对齐 */
         };
-        uint8_t clear_type; /**< 清屏类型: 00H=文字清屏, 01H=全红, 02H=全绿 */
+        uint8_t clear_type; /**< 清屏类型（86号文）: 00H=文字清屏/黑, 01H=全红, 02H=全绿,
+                                 03H=全黄, 04H=全蓝, 05H=全紫, 06H=全青, 07H=全白 */
     };
     uint8_t text[]; /**< 显示内容 (柔性数组), GBK 编码, 行间 '_' 分隔 */
 } app_ldi_ctrl_vms_t;
