@@ -466,24 +466,32 @@ static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
 
     cmd_set_ip_t *info = data;
 
-    memcpy(g_ldi_ctx.cfg.device_ip, info->net.device_ip, sizeof(g_ldi_ctx.cfg.device_ip));
-    g_ldi_ctx.cfg.device_port = ((uint16_t)info->net.device_port[0] << 8) | info->net.device_port[1];
-    memcpy(g_ldi_ctx.cfg.host_ip, info->net.host_ip, sizeof(g_ldi_ctx.cfg.host_ip));
-    g_ldi_ctx.cfg.host_port = ((uint16_t)info->net.host_port[0] << 8) | info->net.host_port[1];
-    memcpy(g_ldi_ctx.cfg.netmask, info->net.netmask, sizeof(g_ldi_ctx.cfg.netmask));
-    memcpy(g_ldi_ctx.cfg.gateway, info->net.gateway, sizeof(g_ldi_ctx.cfg.gateway));
-    g_ldi_ctx.cfg_valid = true;
+    /* **原子提交**：新网络参数先并入局部拷贝，**落盘成功才提交 RAM** ——
+       否则 LDI 那条写失败时 RAM 已改、Flash 没改，运行期读 RAM 看着改了、重启又变回
+       旧值（与 0BH 同型的"部分生效"）。 */
+    app_flash_ldi_cfg_info_t staged = g_ldi_ctx.cfg;
+    memcpy(staged.device_ip, info->net.device_ip, sizeof(staged.device_ip));
+    staged.device_port = ((uint16_t)info->net.device_port[0] << 8) | info->net.device_port[1];
+    memcpy(staged.host_ip, info->net.host_ip, sizeof(staged.host_ip));
+    staged.host_port = ((uint16_t)info->net.host_port[0] << 8) | info->net.host_port[1];
+    memcpy(staged.netmask, info->net.netmask, sizeof(staged.netmask));
+    memcpy(staged.gateway, info->net.gateway, sizeof(staged.gateway));
 
     /* 落盘结果要回报给上位机：此前保存接口是 void、状态字节恒为成功，
        现场表现是"设置返回成功、重启却变回旧值"，且无从查起。 */
-    int32_t save_status = app_flash_ldi_save_config(&g_ldi_ctx.cfg);
+    int32_t save_status = app_flash_ldi_save_config(&staged);
+    if (save_status == 0) {
+        g_ldi_ctx.cfg       = staged;
+        g_ldi_ctx.cfg_valid = true;
+    }
 
-    /* 同步 IAP 记录里的 net_cfg 镜像。
-       本命令只落盘、不在运行态应用新 IP（新值下次上电生效），所以这里传的是
-       **刚存下的** g_ldi_ctx.cfg 而不是运行态 —— 端口同此。
+    /* 同步 IAP 记录里的 net_cfg 镜像。**即使 LDI 那条写失败也要更新镜像**（既有语义，
+       见 test_ldi_0ah 的 case_ldi_failure_does_not_block_mirror）；故传本次请求的
+       staged 值，不依赖 RAM 是否已提交。
+       本命令只落盘、不在运行态应用新 IP（新值下次上电生效）。
        注意这条路径**没有** pl_net_set_ip，因此不会经 IP 变更监听触发，必须显式调。 */
-    app_flash_iap_update_net_cfg(g_ldi_ctx.cfg.device_ip, g_ldi_ctx.cfg.netmask, g_ldi_ctx.cfg.gateway,
-                                 g_ldi_ctx.cfg.device_port);
+    app_flash_iap_update_net_cfg(staged.device_ip, staged.netmask, staged.gateway,
+                                 staged.device_port);
 
     ldi_status_rsp_t rsp = {.status = (save_status == 0) ? 0x00 : 0x01};
     app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_IP_RSP);
@@ -507,6 +515,10 @@ static void _ldi_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
  * 不新增字段、不改上位机的解析。**增量流程下 device_num 恒为 1**，聚合 status 就等于
  * 那个模块的结果（00H 采纳 / 01H 未采纳）；多模块请求时 01H 表示"至少一个未采纳"，
  * 具体哪个由固件的诊断日志点名（`[ldi/cfg]`）。
+ *
+ * **RAM 更新是原子的**：lane/cert 与所有 module 的改动先并入局部 `staged` 拷贝，
+ * 全部成立且**落盘成功**后才一次性写回 `g_ldi_ctx.cfg`；任何被拒路径（短帧 /
+ * device_num 非法 / 未知编码 / 截断）退出时 `g_ldi_ctx.cfg` 与进入时逐字节相同。
  */
 static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
@@ -524,10 +536,6 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
     /* module 序列可用的字节数（逐模块推进时递减）—— 每个 module 的读取都必须落在其中 */
     uint16_t remaining = (uint16_t)(data_len - sizeof(app_ldi_req_head_t) - 1U);
 
-    /* 0BH 请求头部含车道编号和验证信息，与 module 数据一同持久化 */
-    memcpy(g_ldi_ctx.cfg.lane_hex, head->lane_code, sizeof(g_ldi_ctx.cfg.lane_hex));
-    memcpy(g_ldi_ctx.cfg.cert, head->cert_info, sizeof(g_ldi_ctx.cfg.cert));
-
     if (device_num == 0 || device_num > APP_FLASH_LDI_MAX_MODULES) {
         ldi_status_rsp_t rsp = {.status = 0x01};
         app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_PARA_RSP);
@@ -535,8 +543,18 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
         return;
     }
 
+    /* **原子提交**：lane/cert 与所有 module 的改动先并入局部拷贝 `staged`，
+       全部解析/校验/采纳成立后才一次性写回 `g_ldi_ctx.cfg`。
+       被拒路径（短帧 / device_num 非法 / 未知编码 / 截断）**一个字节都不动 RAM** ——
+       否则被拒请求会"部分生效"：运行期读 RAM（响应头 lane_code/cert、1EH 模块查询都
+       走它）看着生效，重启回读 Flash 又变回去。
+       106B 局部拷贝，LDI 任务栈（1536B）足够；不引入动态分配。 */
+    app_flash_ldi_cfg_info_t staged = g_ldi_ctx.cfg;
+    memcpy(staged.lane_hex, head->lane_code, sizeof(staged.lane_hex));
+    memcpy(staged.cert, head->cert_info, sizeof(staged.cert));
+
     /* 逐个 module 按编译期表做 upsert；未知编码不采纳（记日志），其余继续处理。
-       逐个就地更新，不重建整表 —— 编译期表的条数/类型集合保持不变。 */
+       只改 staged，不重建整表 —— 编译期表的条数/类型集合保持不变。 */
     bool all_ok = true;
     for (uint8_t i = 0; i < device_num; i++) {
         if (remaining < sizeof(app_ldi_module_head_t)) { /* 连 module 头都不全（帧截断） */
@@ -552,8 +570,8 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
 
         /* 按 device_type 在（编译期）表里找同类型条目 */
         int8_t cfg_idx = -1;
-        for (uint8_t j = 0; j < g_ldi_ctx.cfg.module_count; j++)
-            if (g_ldi_ctx.cfg.modules[j].device_type == mod->device_type) {
+        for (uint8_t j = 0; j < staged.module_count; j++)
+            if (staged.modules[j].device_type == mod->device_type) {
                 cfg_idx = (int8_t)j;
                 break;
             }
@@ -564,12 +582,11 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
                    (unsigned)mod->device_type);
             all_ok = false; /* 继续处理后续模块，但整体回失败 */
         } else {
-            g_ldi_ctx.cfg.modules[cfg_idx].device_index = mod->device_index;
+            staged.modules[cfg_idx].device_index = mod->device_index;
             uint8_t vendor_len = (uint8_t)(mod_size - sizeof(app_ldi_module_head_t));
-            if (vendor_len > sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor))
-                vendor_len = sizeof(g_ldi_ctx.cfg.modules[cfg_idx].vendor);
-            memcpy(g_ldi_ctx.cfg.modules[cfg_idx].vendor, ptr + sizeof(app_ldi_module_head_t),
-                   vendor_len);
+            if (vendor_len > sizeof(staged.modules[cfg_idx].vendor))
+                vendor_len = sizeof(staged.modules[cfg_idx].vendor);
+            memcpy(staged.modules[cfg_idx].vendor, ptr + sizeof(app_ldi_module_head_t), vendor_len);
         }
 
         ptr += mod_size;
@@ -577,10 +594,13 @@ static void _ldi_cmd_set_config(app_ccb_t *ccb, void *data, uint16_t data_len)
     }
 
     /* 解析/采纳成功还不够 —— 落盘也成功才算真的设置成功，否则重启即失效。
-       全部采纳才落盘：帧截断/含未采纳编码时不动 Flash（避免半张表落盘）。 */
+       全部采纳才落盘，且**落盘成功才提交 RAM**：被拒或落盘失败都保持 RAM 原样，
+       避免"看着生效、重启变回去"。 */
     int32_t save_status = 0;
-    if (all_ok)
-        save_status = app_flash_ldi_save_config(&g_ldi_ctx.cfg);
+    if (all_ok) {
+        save_status = app_flash_ldi_save_config(&staged);
+        if (save_status == 0) g_ldi_ctx.cfg = staged;
+    }
 
     ldi_status_rsp_t rsp = {.status = (all_ok && save_status == 0) ? 0x00 : 0x01};
     app_ldi_build_rsp_head(&rsp.head, APP_LDI_CMD_TYPE_SET_PARA_RSP);

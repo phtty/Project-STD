@@ -741,13 +741,15 @@ static void case_both_records_written(void)
 
 static void case_ldi_failure_does_not_block_mirror(void)
 {
-    TEST_BEGIN("LDI 记录写失败 → 回执报失败，但 IAP 镜像仍被更新");
+    TEST_BEGIN("LDI 记录写失败 → 回执报失败，IAP 镜像仍更新，RAM 原子不动");
     env_setup();
 
     /* 让 W25Qxx 侧写失败。
        不能改容量来制造失败 —— app_cfg_sched 绑定后会缓存结论（s_storage_bound），
        改 capacity 对它无效（第一版就是这么写错的，白跑一遍才发现）。 */
     s_w25_fail_write = true;
+
+    app_flash_ldi_cfg_info_t snap = g_ldi_ctx.cfg; /* LDI 写失败 → RAM 不应被改 */
 
     cmd_set_ip_t req;
     make_0ah(&req, IP_B, MASK, GW, PORT);
@@ -757,6 +759,9 @@ static void case_ldi_failure_does_not_block_mirror(void)
               rsp_status());
     /* 这条是核心：镜像那一步不被前一步的失败短路 */
     CHECK_MSG(iap_mirror_is(IP_B, PORT), "LDI 记录写失败把 IAP 镜像也一起挡掉了");
+    /* 同型原子性：落盘失败不得留下"RAM 改了、Flash 没改"的部分生效 */
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0,
+              "LDI 写失败时 RAM 不应被改（0AH 应原子提交）");
 
     s_w25_fail_write = false;
 }
@@ -1166,6 +1171,93 @@ static void case_set_config_unknown_type_rejected(void)
     CHECK_MSG(g_ldi_ctx.cfg.module_count == 2, "条数不变");
 }
 
+/** @brief 覆盖 0BH 请求头里的 lane/cert 首字节（用于检测"被拒还改了 RAM"） */
+static void set_0bh_head_ids(uint8_t lane0, uint8_t cert0)
+{
+    app_ldi_req_head_t *h = (app_ldi_req_head_t *)s_cfg_buf;
+    h->lane_code[0]       = lane0;
+    h->cert_info[0]       = cert0;
+}
+
+/** @brief 构造只有 head+device_num、没有 module 字节的 0BH 请求（造截断/非法 device_num） */
+static uint16_t make_0bh_raw(uint8_t device_num)
+{
+    memset(s_cfg_buf, 0, sizeof s_cfg_buf);
+    uint8_t *p = s_cfg_buf + sizeof(app_ldi_req_head_t);
+    *p++       = device_num;
+    return (uint16_t)(sizeof(app_ldi_req_head_t) + 1U);
+}
+
+/** 0BH 被拒路径必须**原子**：短帧 / device_num 非法 / 未知编码 / 截断都不得改 RAM */
+static void case_set_config_reject_is_atomic(void)
+{
+    TEST_BEGIN("0BH 被拒（未知编码/截断/device_num 非法）→ RAM 逐字节不变");
+    env_setup();
+
+    /* 基线：先成功配一次 E9 index=3，让 RAM 有非默认内容 */
+    uint8_t  t[1]  = {APP_LDI_DEVICE_VMS};
+    uint8_t  ix[1] = {3};
+    s_tx_count     = 0;
+    uint16_t len   = make_0bh(t, ix, 1);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, len);
+    CHECK_MSG(rsp_status() == 0x00, "基线配置应成功，status=0x%02X", rsp_status());
+    app_flash_ldi_cfg_info_t snap = g_ldi_ctx.cfg;
+
+    /* ① 未知编码：lane/cert 用不同值（0xAA/0xBB）—— 若被拒还改了 RAM 就能抓到 */
+    uint8_t dt[1] = {APP_LDI_DEVICE_DISPLAY}; /* 本机编译期表里没有 */
+    uint8_t di[1] = {1};
+    s_tx_count    = 0;
+    len           = make_0bh(dt, di, 1);
+    set_0bh_head_ids(0xAA, 0xBB);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, len);
+    CHECK_MSG(rsp_status() == 0x01, "未知编码应 01H，得到 0x%02X", rsp_status());
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0,
+              "未知编码被拒后 RAM 应逐字节不变（含 lane/cert）");
+
+    /* ② 截断：device_num=1 但 DATA 只有 head+device_num（无 module 字节） */
+    s_tx_count = 0;
+    len        = make_0bh_raw(1);
+    set_0bh_head_ids(0xAA, 0xBB);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, len);
+    CHECK_MSG(rsp_status() == 0x01, "截断帧应 01H，得到 0x%02X", rsp_status());
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0, "截断被拒后 RAM 应逐字节不变");
+
+    /* ③ device_num 非法（7 > 上限 6） */
+    s_tx_count = 0;
+    len        = make_0bh_raw(7);
+    set_0bh_head_ids(0xAA, 0xBB);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, len);
+    CHECK_MSG(rsp_status() == 0x01, "device_num 非法应 01H，得到 0x%02X", rsp_status());
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0,
+              "device_num 非法被拒后 RAM 应逐字节不变");
+}
+
+/** ① 写后读：save 成功必须失效加载缓存，否则 load 返回保存前的旧值 */
+static void case_save_then_load_returns_new(void)
+{
+    TEST_BEGIN("app_flash_ldi_*：save 后 load 必须返回刚存的值（缓存失效）");
+    env_setup();
+
+    /* 先触发一次加载把缓存填上（W25Qxx 为空 → false，缓存记为"无有效配置"）——
+       修复前 save 不失效缓存，第二次 load 会直接返回这份空缓存。 */
+    app_flash_ldi_cfg_info_t before = {0};
+    (void)app_flash_ldi_load_config(&before);
+
+    app_flash_ldi_cfg_info_t cfg = {0};
+    memcpy(cfg.device_ip, IP_A, 4);
+    cfg.device_port             = PORT;
+    cfg.module_count            = 1;
+    cfg.modules[0].device_type  = APP_LDI_DEVICE_VMS;
+    cfg.modules[0].device_index = 9;
+    CHECK_MSG(app_flash_ldi_save_config(&cfg) == 0, "保存应成功");
+
+    app_flash_ldi_cfg_info_t got = {0};
+    CHECK_MSG(app_flash_ldi_load_config(&got), "save 后 load 应成功（缓存已失效、重读 Flash）");
+    CHECK_MSG(got.modules[0].device_index == 9, "save→load 应返回刚存的值，得到 %u",
+              (unsigned)got.modules[0].device_index);
+    CHECK_MSG(memcmp(got.device_ip, IP_A, 4) == 0, "IP 也应为刚存的值");
+}
+
 /* ================================================================ */
 
 /** @brief 在子进程里跑一个用例
@@ -1187,12 +1279,14 @@ int main(void)
         {"LDI 写失败不阻塞 IAP 镜像", case_ldi_failure_does_not_block_mirror},
         {"IAP 镜像失败对上位机不可见", case_mirror_failure_is_invisible_to_host},
         {"连续两次 0AH 两条都跟着走", case_second_0ah_overwrites_both},
+        {"app_flash_ldi：save→load 返回新值", case_save_then_load_returns_new},
         {"W25Qxx 无配置：ctx_init 采纳 IAP 并通知运行态", case_ctx_init_else_adopts_iap_and_notifies},
         {"Flash 同类型：同步 index+vendor", case_ctx_init_syncs_same_type},
         {"Flash 额外类型：忽略（类型由编译期决定）", case_ctx_init_ignores_extra_type},
         {"无有效配置：保持编译期默认表", case_ctx_init_no_cfg_keeps_default},
         {"0BH 增量 upsert：先配 E9 再配 EA 两者都在", case_set_config_incremental_upsert},
         {"0BH 未知编码：不采纳、status=01H", case_set_config_unknown_type_rejected},
+        {"0BH 被拒：RAM 逐字节不变（原子）", case_set_config_reject_is_atomic},
         {"1AH：7 个模块逐个回 status", case_init_seven_modules},
         {"1AH：device_num 超出实际数据 → 夹取", case_init_device_num_overflow},
         {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
