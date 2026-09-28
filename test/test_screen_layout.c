@@ -378,6 +378,50 @@ static void case_grid_shape(void)
               (unsigned)BOARD_CASC_BAND_MAX);
 }
 
+/** 折叠几何门禁：只有"上下两块等高同宽、竖排拼满"才算折叠
+ *
+ *  判据必须靠几何而不是卡数：2×1 也是两张等高同宽的卡，却是**左右并排**，
+ *  误判成折叠会让"下半"取到右边那张卡 —— 现象是内容整块跑到隔壁去。
+ *  反向验证：把 `app_screen_fold_count` 里的同 x / y 不同两条去掉其一，
+ *  下面 2×1 那条立刻红。 */
+static void case_fold_geometry(void)
+{
+    TEST_BEGIN("折叠几何：1×2 竖排 → 2（上/下按 y）；2×1 横排 / 1×1 → 1");
+
+    /* ① 1×2 竖排：两块等高同宽、上下拼满 → 折叠，矩形按 y 定上下 */
+    canvas_reset(48, 16, 1, 2);
+    CHECK_MSG(app_screen_fold_count() == 2, "1×2 竖排应判为折叠（2），得到 %u",
+              (unsigned)app_screen_fold_count());
+
+    uint16_t x = 0, y = 0, w = 0, h = 0;
+    CHECK_MSG(app_screen_fold_rect(0, &x, &y, &w, &h), "上半矩形应取到");
+    CHECK_MSG(x == 0 && y == 0 && w == 48 && h == 16, "上半应为 48x16@(0,0)，得到 %ux%u@(%u,%u)",
+              (unsigned)w, (unsigned)h, (unsigned)x, (unsigned)y);
+    CHECK_MSG(app_screen_fold_rect(1, &x, &y, &w, &h), "下半矩形应取到");
+    CHECK_MSG(x == 0 && y == 16 && w == 48 && h == 16, "下半应为 48x16@(0,16)，得到 %ux%u@(%u,%u)",
+              (unsigned)w, (unsigned)h, (unsigned)x, (unsigned)y);
+
+    /* ② 2×1 横排：卡数、等高同宽都成立，但**不是**折叠，且不得写输出 */
+    canvas_reset(48, 16, 2, 1);
+    CHECK_MSG(app_screen_fold_count() == 1, "2×1 横排不该判为折叠，得到 %u",
+              (unsigned)app_screen_fold_count());
+    x = 0xDEAD, y = 0xBEEF, w = 0xCAFE, h = 0xF00D;
+    CHECK_MSG(!app_screen_fold_rect(0, &x, &y, &w, &h), "非折叠时 fold_rect 应返回 false");
+    CHECK_MSG(x == 0xDEAD && y == 0xBEEF && w == 0xCAFE && h == 0xF00D,
+              "非折叠时不得写输出参数（得到 %04X %04X %04X %04X）", (unsigned)x, (unsigned)y,
+              (unsigned)w, (unsigned)h);
+
+    /* ③ 1×1 单卡 → 恒 1（本卡 addr=1 不在单卡表里，故直接合成表、不走 _apply_layout） */
+    display_reset(48, 16);
+    s_display_dev = &s_dev;
+    CHECK_MSG(_layout_build_grid(1, 1, 0), "1×1 切分表应合成出来");
+    CHECK_MSG(app_screen_fold_count() == 1, "1×1 单卡不该判为折叠，得到 %u",
+              (unsigned)app_screen_fold_count());
+    CHECK_MSG(!app_screen_fold_rect(1, &x, &y, &w, &h), "1×1 时 fold_rect 应返回 false");
+
+    /* 本用例把表改成了 1×1，后续用例各自 canvas_reset，无需还原 */
+}
+
 /** 三种网格下逐卡抽带都等于参考（含跨缝图案） */
 static void case_extract_grids(void)
 {
@@ -887,6 +931,7 @@ int main(void)
     printf("\n\033[36m切分表与抽带（本卡 addr=%u）\033[0m\n", (unsigned)BOARD_CASC_ADDR);
 
     case_grid_shape();
+    case_fold_geometry();
     case_extract_grids();
     case_extract_unaligned();
     case_extract_bounds();

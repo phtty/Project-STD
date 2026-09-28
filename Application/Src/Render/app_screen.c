@@ -98,6 +98,54 @@ const app_screen_card_t *app_screen_card(uint8_t card_idx)
     return (card_idx < s_screen_layout.count) ? &s_screen_layout.cards[card_idx] : nullptr;
 }
 
+/* ================================================================
+ *  折叠几何 —— 上下半屏的几何门禁与矩形（见 app_screen.h）
+ *
+ *  判据只认切分表本身：两块等高、同 x 同宽、竖排且 y 恰好拼满 [0, 逻辑屏高)。
+ *  不依赖本卡身份/地址，也不做"逻辑屏对半"的推算 —— 卡缝在哪由切分表说了算。
+ * ================================================================ */
+
+uint8_t app_screen_fold_count(void)
+{
+    if (s_screen_layout.count != 2U) return 1U;
+
+    const app_screen_card_t *a = &s_screen_layout.cards[0];
+    const app_screen_card_t *b = &s_screen_layout.cards[1];
+
+    /* 两块等高、同 x 同宽 —— 横排（x 不同）在这里就被排除 */
+    if (a->w != b->w || a->h != b->h || a->x != b->x) return 1U;
+    /* 竖排：y 必须不同 */
+    if (a->y == b->y) return 1U;
+
+    const uint16_t top = (a->y < b->y) ? a->y : b->y;
+    const uint16_t bot = (a->y < b->y) ? b->y : a->y;
+    /* 两格 y 恰好拼满 [0, 逻辑屏高) */
+    if (top != 0U) return 1U;
+    if ((uint32_t)bot + a->h != app_screen_cols()) return 1U;
+
+    return 2U;
+}
+
+bool app_screen_fold_rect(uint8_t half, uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
+{
+    if (app_screen_fold_count() != 2U) return false; /* 非折叠：一个输出参数都不写 */
+
+    const app_screen_card_t *up = &s_screen_layout.cards[0];
+    const app_screen_card_t *dn = &s_screen_layout.cards[1];
+    if (up->y > dn->y) { /* 按 y 定上下，不按下标（主卡可在下半） */
+        const app_screen_card_t *t = up;
+        up                         = dn;
+        dn                         = t;
+    }
+    const app_screen_card_t *c = (half == 0U) ? up : dn;
+
+    if (x) *x = c->x;
+    if (y) *y = c->y;
+    if (w) *w = c->w;
+    if (h) *h = c->h;
+    return true;
+}
+
 /* ---- 内部接缝 ----
  *
  * 卡表（s_card_table）是本文件私有的（§4.1）：卡片状态那一簇拆到
