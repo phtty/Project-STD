@@ -80,6 +80,50 @@ static void _drain_test_tokens(void)
     while (dev_key_wait_press(DEV_KEY_TST, 0)) {}
 }
 
+/* ---- "等键稳定释放"的静默窗与步进 ----
+ *
+ * **为什么需要"稳定"而不只是"排空"**：`_drain_test_tokens` 是**时点**排空 —— 只丢弃
+ * 调用那一刻已累积的令牌，挡不住**调用之后**才到达的尾随边沿。而慢按（边沿间隔 > 去抖
+ * 窗口 50ms）的尾随下降沿，恰好会落进"渲染第一帧（读字库 SPI，几十 ms）→ 带超时等待"
+ * 这个窗口：等待立刻返回 true → 退出轮播；若还有第二个尾随沿，IDLE 的等待再消费一个 →
+ * 又回程序码。所以要在**进新阶段前**等键真正松开并安静一小段。
+ *
+ * `TEST_SETTLE_MS` 是"慢按尾随边沿"的静默窗：键必须连续这么久**未被读到按下**才认稳定。
+ * 取值 150ms（> 去抖窗 50ms 的 3 倍），留出释放回弹的余量；据现场表现可调。 */
+#define TEST_SETTLE_MS      (150U)
+#define TEST_SETTLE_STEP_MS (10U)   /* 轮询步进：比静默窗小一个量级，不误判 */
+#define TEST_SETTLE_MAX_MS  (1000U) /* 硬上界：键卡住/长按也不能把流程等死 */
+
+/** @brief 进新阶段前，等 TEST 键**已释放且稳定**，再排空一次令牌
+ *
+ *  语义：**排空 → 轮询等键"已释放"并连续静默 `TEST_SETTLE_MS` → 再排空一次**。
+ *  两次排空把"静默窗外累积的"和"静默窗内到达的"尾随令牌都清掉；中间那段稳定等待
+ *  则是主动把慢按的尾随边沿**等过去**，而不是被它打断下一个等待。
+ *
+ *  **有界**：整段最多等 `TEST_SETTLE_MAX_MS`；超界就（再排空后）继续往下走，不在这里
+ *  死等 —— 键卡住或用户长按都只是多一次排空，绝不会让工厂流程停住。超界不打日志：
+ *  它是"键被按住"的常态，每进一个阶段都刷一行只会淹没现场输出。 */
+static void _settle_test_key(void)
+{
+    _drain_test_tokens(); /* ① 先丢弃调用点之前已累积的令牌 */
+
+    const uint32_t t0          = osKernelGetTickCount();
+    uint32_t       quiet_since = t0; /* "最近一次读到按下"的时刻；未按下则一直是 t0 */
+
+    while (osKernelGetTickCount() - t0 < TEST_SETTLE_MAX_MS) {
+        if (dev_key_get_state(DEV_KEY_TST)) {
+            /* 仍按下（或释放回弹被读到）：静默窗重新起算 */
+            quiet_since = osKernelGetTickCount();
+        } else if (osKernelGetTickCount() - quiet_since >= TEST_SETTLE_MS) {
+            break; /* 已释放且连续静默满窗 → 稳定 */
+        }
+        osDelay(TEST_SETTLE_STEP_MS);
+    }
+
+    /* ② 再排空一次：把静默窗内到达的尾随令牌一并丢弃 */
+    _drain_test_tokens();
+}
+
 /** @brief 在**每张卡**的矩形内各居中渲染一份程序码
  *
  *  **为什么不沿用"整屏逻辑坐标垂直居中"**：5006048 是 1×2 双卡、逻辑屏
@@ -221,7 +265,7 @@ static void _factory_monitor_task(void *argument)
 
         /* ===== SHOW_CODE ===== */
         /* 进入本阶段先排空残留令牌（见 _drain_test_tokens 的说明）。
-           真正关键的一道在**渲染之后、等第二下之前**（下面的 _drain_test_tokens）——
+           真正关键的一道在**渲染之后、等第二下之前**（下面的 _settle_test_key）——
            因为残留多半是这次按压的抖动/回弹在渲染期间凑出来的第二、三个下降沿。 */
         _drain_test_tokens();
 
@@ -235,11 +279,12 @@ static void _factory_monitor_task(void *argument)
         _show_program_code();
         dev_display_frame_end(dev_display_get());
 
-        /* **关键的一道排空**：渲染 SHOW_CODE 要读字库（SPI）、多卡时还要走级联，
-           耗时足以让"释放回弹/长抖动"再凑出一个下降沿令牌（EXTI 只有下降沿、
-           dev_key 去抖窗口 50ms，都可能漏）。这个令牌若留到紧随其后的"等第二下"，
-           就会被立刻消费、红色当场盖掉程序码 —— 见 _drain_test_tokens。 */
-        _drain_test_tokens();
+        /* **关键的一道"等键稳定释放"**：单单排空是**时点**操作，挡不住"调用之后才到"的
+           尾随边沿。渲染 SHOW_CODE 要读字库（SPI）、多卡时还要走级联，慢按（边沿间隔 >
+           去抖窗 50ms）的尾随沿正好落进"渲染 → 等第二下"这段窗口；它若被紧随的等待
+           消费，红色 DEAD_PIXEL 就当场盖掉程序码（症状 A）。所以这里不排空、而是等键
+           松开安静一小段 —— 见 _settle_test_key 的语义与上界。 */
+        _settle_test_key();
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         /* ===== DEAD_PIXEL ===== */
@@ -275,12 +320,12 @@ static void _factory_monitor_task(void *argument)
         /* ===== AGING ===== */
         osThreadResume(g_light_sensor_task_handle);
 
-        /* 进衰老轮播前排空残留的信号量令牌（沿用原有的这道防护，不删）。
-           上面 DEAD_PIXEL 段用的是 osWaitForever，若那几次按键有抖动多释放了一次
-           （信号量上限 1，去抖在 dev_key 的 EXTI 回调里，但历史遗留的窗口仍在），
-           余下的令牌会被下面第一次 wait_press(…, 3000) 立刻消费 —— 表现为
-           "只显示第一个字就退出轮播并清屏"。这里做最后一道保险。 */
-        _drain_test_tokens();
+        /* 进衰老轮播前等键稳定释放（原为一次时点排空，慢按挡不住，改成主动等）：
+           上面 DEAD_PIXEL 段用的是 osWaitForever，慢按的尾随沿会在"渲染第一个字 →
+           下面第一次 wait_press(…, 3000)"之间到达并被立刻消费 —— 表现为"只显示第一个
+           字就退出轮播并清屏"。等键松开安静一小段，让尾随沿先到、再被排空清掉。
+           见 _settle_test_key 的语义与上界。 */
+        _settle_test_key();
 
         bool aging_exit = false;
         for (uint8_t type_idx = 0; !aging_exit; type_idx = (type_idx + 1) % AGING_TYPE_COUNT) {
