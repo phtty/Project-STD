@@ -75,8 +75,17 @@ bool app_flash_ldi_load_config(app_flash_ldi_cfg_info_t *info)
 int32_t app_flash_ldi_save_config(const app_flash_ldi_cfg_info_t *info)
 {
     int32_t sta = app_cfg_sched_save(s_cfg_id, (const uint8_t *)info, sizeof(*info));
-    if (sta != 0)
+    if (sta != 0) {
         printf("[ldi_cfg] 保存失败（%u 字节）\n", (unsigned)sizeof(*info));
+        /* 失败不失效缓存：Flash 没变，缓存仍是最新有效内容，重读也只会读到旧值。 */
+        return sta;
+    }
+
+    /* **写成功 → 失效加载缓存**：否则同一上电周期内"save → load"会返回缓存里
+       **保存之前**的旧值（`_ldi_cfg_load` 只在首次读一次 Flash）—— 今天没有活路径
+       能观察到（init 只在上电读一次），但这是个 API 陷阱：任何"写后读回校验"的
+       调用方都会被它骗。置 false 让下次 load 重读 Flash。 */
+    s_load_done = false;
     return sta;
 }
 
