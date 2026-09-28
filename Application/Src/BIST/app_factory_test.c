@@ -247,7 +247,12 @@ static void _factory_monitor_task(void *argument)
     (void)argument;
 
     for (;;) {
-        /* IDLE: 等待 TEST 激活 */
+        /* IDLE: 等待 TEST 激活。
+           **先等键稳定释放再挂起等待**：上一轮可能留下"按下"的尾随令牌 —— 尤其是被
+           `app_factory_mode_interrupt` 从半途终止、回到本函数重进 IDLE 时，裸的
+           `osWaitForever` 会立刻消费该令牌、跳过 IDLE 直接又进 SHOW_CODE。现场表现为
+           "上位机一来帧就随机重置成程序码"（见 _settle_test_key 的语义与上界）。 */
+        _settle_test_key();
         dev_key_wait_press(DEV_KEY_TST, osWaitForever);
 
         s_factory_active = true;
@@ -396,11 +401,27 @@ void app_factory_mode_interrupt(void)
 {
     if (!s_factory_active) return; /* 已在 IDLE：无可中断 */
 
-    s_factory_active = false;
+    /* **中断路径也要复位屏幕状态**：本函数在"收到任意有效非 internal_bus 帧"时被调用，
+       把工厂任务从**半途**终止 —— 正常收尾路径（DEAD_PIXEL 后取消颜色覆盖、退出时
+       清屏）整段被跳过，局部状态就留在屏上：
+         · **颜色覆盖必须取消**。DEAD_PIXEL 里 `app_screen_set_color_override(c)` 是逐色
+           设的、正常收尾才 `0xFF` 复位；不复位 → 残留覆盖 = 那一轮的颜色，下次渲染的
+           程序码整块被染成那个色（现场症状：重置回程序码、且用的是那一轮的颜色）。
+         · **不主动清屏**：收到帧本身就说明上位机在通信，它随后的显示命令会重画；这里
+           再清一次只是让屏多闪一帧黑，而且清出来的也不是上位机要的最终画面。
+         · **亮度不在此显式恢复**：DEAD_PIXEL 期间光感任务被挂起、工厂把亮度钉在 7，
+           但光感任务**每轮循环都重跑 `dev_light_sensor_auto_adjust`**（app_light_sensor.c
+           的任务体），且该函数在 `light_level` 与上次应用值不一致时会短路稳定门槛、
+           立刻生效 —— 所以下面的 `osThreadResume` 之后亮度自动跟随即被接管。 */
+    s_factory_active = false; /* 先置位：防止下一帧重入本函数（守住原有语义） */
     osThreadTerminate(s_factory_test_task_handle);
 
+    /* 任务已终止，此时再复位不留竞态（本函数只改模块全局，不改工厂任务的局部状态）。 */
+    app_screen_set_color_override(0xFF);
+
     /* 终止点可能正好落在"挂起光传感器任务"与"恢复"之间（见 DEAD_PIXEL 段），
-       那样光传感器就永久挂起了。补一次恢复 —— 对未挂起的线程是空操作。 */
+       那样光传感器就永久挂起了。补一次恢复 —— 对未挂起的线程是空操作。
+       恢复后亮度自动跟随由该任务接管（见上面的说明）。 */
     osThreadResume(g_light_sensor_task_handle);
 
     _factory_test_init();
