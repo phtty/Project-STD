@@ -28,7 +28,7 @@ make -j8 CONFIG=Release        # 另一套输出目录（注意：CFLAGS 恒为 
 make -j8 TOOLCHAIN=clang       # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 15 个测试套件（见 §7）
+make test                      # host 侧 17 个测试套件（见 §7）
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
 
 # 编译数据库（clangd 用）
