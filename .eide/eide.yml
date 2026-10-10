@@ -62,10 +62,7 @@ virtualFolder:
             - path: Application/Src/Render/app_screen_canvas.c
             - path: Application/Src/Render/app_screen_status.c
             - path: Application/Src/Render/app_screen.c
-          folders:
-            - name: self_test
-              files: []
-              folders: []
+          folders: []
         - name: self_test
           files:
             - path: Application/Src/BIST/app_diag.c
