@@ -77,7 +77,7 @@ void MX_TIM4_Init(void)
     /* USER CODE BEGIN TIM4_Init 1 */
 
     /* USER CODE END TIM4_Init 1 */
-    /* B 工程参数: 84MHz/84/20 ≈ 94kHz OE 亮度 PWM */
+    /* B 工程参数: 84MHz/84/20 = 50kHz OE 亮度 PWM */
     htim4.Instance               = TIM4;
     htim4.Init.Prescaler         = 84 - 1;
     htim4.Init.CounterMode       = TIM_COUNTERMODE_UP;
