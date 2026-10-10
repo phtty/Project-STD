@@ -37,7 +37,7 @@ static dev_dp83848_io_ctx_t s_dp83848_io_ctx = {
 /**
  * @brief  DP83848 链路状态 → Platform 层抽象枚举的转换
  */
-static pl_eth_link_state_t dev_phy_get_link_state(void)
+static pl_eth_link_state_t _dev_eth_phy_link_state(void)
 {
     int32_t state = dev_dp83848_link_state_get(&s_dp83848_dev);
 
@@ -80,7 +80,7 @@ void dev_eth_init(void)
         Error_Handler();
 
     /* 注册 PHY 链路状态查询回调，供 Platform 层 _eth_low_level_init / pl_eth_link_task 使用 */
-    pl_eth_set_phy_link_fn(dev_phy_get_link_state);
+    pl_eth_set_phy_link_fn(_dev_eth_phy_link_state);
 }
 hw_dev_initcall(dev_eth_init);
 

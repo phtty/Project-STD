@@ -236,7 +236,7 @@ const osThreadAttr_t g_ldi_timer_task_attr = {
  *  状态门禁
  * ================================================================ */
 
-static bool ldi_cmd_allowed(app_ldi_state_t state, uint8_t cmd)
+static bool _ldi_cmd_allowed(app_ldi_state_t state, uint8_t cmd)
 {
     /* 配置接口命令不受状态限制，任何时候都可执行 */
     if (cmd == APP_LDI_CMD_TYPE_SET_IP_REQ || cmd == APP_LDI_CMD_TYPE_SET_PARA_REQ ||
@@ -330,7 +330,7 @@ void app_ldi_task(void *argument)
         g_ldi_ctx.rsp_seq = ldi_frame->seq;
 
         /* 状态门禁 */
-        if (!ldi_cmd_allowed(g_ldi_ctx.state, req_head->cmd_type))
+        if (!_ldi_cmd_allowed(g_ldi_ctx.state, req_head->cmd_type))
             continue;
 
         /* 查表分派 */

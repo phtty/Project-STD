@@ -177,7 +177,7 @@ typedef struct {
      * （如 app_iap_frame_t）访问，未对齐的字访问在 Cortex-M4 上要么变慢要么触发异常。
      * 加该属性后 offsetof(data) == 8 == sizeof(app_dispatch_msg_t)；
      * aux 落在 data_len 之后的填充字节里，不增加 sizeof。 */
-    uint8_t data[] __attribute__((aligned(4))); /**< 帧数据（4 字节对齐）*/
+    __attribute__((aligned(4))) uint8_t data[]; /**< 帧数据（4 字节对齐）*/
 } app_dispatch_msg_t;
 
 /* ---- 接收事件监听：框架以注册方式通知，不直接依赖任何业务模块 ---- */

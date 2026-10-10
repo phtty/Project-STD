@@ -92,7 +92,7 @@ static ETH_TxPacketConfig s_tx_config;      /**< 发送包配置 */
 
 
 /* ---- HAL 回调函数 ---- */
-static void _pbuf_free_custom(struct pbuf *p);
+static void _eth_pbuf_free_custom(struct pbuf *p);
 
 /** @brief ETH RX 完成回调：释放信号量通知 pl_eth_netif_input 线程取包 */
 void HAL_ETH_RxCpltCallback(ETH_HandleTypeDef *handlerEth)
@@ -459,7 +459,7 @@ err_t pl_eth_netif_init(struct netif *netif)
  * 若此前因 Rx 池耗尽触发错误，归还缓冲区后释放 RX 信号量
  * 通知 pl_eth_netif_input 线程调用 HAL_ETH_GetRxDataBuffer 重建描述符。
  */
-static void _pbuf_free_custom(struct pbuf *p)
+static void _eth_pbuf_free_custom(struct pbuf *p)
 {
     struct pbuf_custom *custom_pbuf = (struct pbuf_custom *)p;
     LWIP_MEMPOOL_FREE(RX_POOL, custom_pbuf);
@@ -666,7 +666,7 @@ void pl_eth_link_task(void *argument)
  * @brief   ETH HAL Rx 缓冲区分配回调（零拷贝模式）
  *
  * 从 RX_POOL 内存池分配一个含 pbuf 的 rx_buff_t，
- * 设置自定义释放函数 _pbuf_free_custom。
+ * 设置自定义释放函数 _eth_pbuf_free_custom。
  * 若池耗尽，标记 s_rx_alloc_status 为 ERROR，HAL_ETH_RxCpltCallback 会触发恢复。
  */
 void HAL_ETH_RxAllocateCallback(uint8_t **buff)
@@ -674,7 +674,7 @@ void HAL_ETH_RxAllocateCallback(uint8_t **buff)
     struct pbuf_custom *p = LWIP_MEMPOOL_ALLOC(RX_POOL);
     if (p) {
         *buff                   = (uint8_t *)p + offsetof(rx_buff_t, buff);
-        p->custom_free_function = _pbuf_free_custom;
+        p->custom_free_function = _eth_pbuf_free_custom;
         /* pbuf_alloced_custom 必须在每次分配后调用，因为 LwIP/app 可能修改 ref 等字段 */
         pbuf_alloced_custom(PBUF_RAW, 0, PBUF_REF, p, *buff, ETH_RX_BUF_SIZE);
     } else {

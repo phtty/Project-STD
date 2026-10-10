@@ -15,14 +15,14 @@
 
 /* 命令处理一律回传协议对象：自身状态（设备标识、通知号、回复主题）经 base 取回，
    不再依赖文件级全局，也不必认识具体通道类型（发送走 app_ccb_send_to 虚表）。 */
-static app_ahmq_proto_t *proto_of(app_pcb_t *self)
+static app_ahmq_proto_t *_ahmq_proto_of(app_pcb_t *self)
 {
     return container_of(self, app_ahmq_proto_t, base);
 }
 
-static void reply_send(app_pcb_t *self, const char *suffix);
+static void _ahmq_reply_send(app_pcb_t *self, const char *suffix);
 
-static void cmd_SendData(app_pcb_t *self, app_ccb_t *ccb, uint32_t ReturnLen, char *ReturnData);
+static void _ahmq_send_data(app_pcb_t *self, app_ccb_t *ccb, uint32_t ReturnLen, char *ReturnData);
 
 static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff);
 static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff);
@@ -71,10 +71,10 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     });
 
     // 更新本地的notify id
-    memcpy(&proto_of(self)->notify_id, &(para->nid), sizeof(app_ahmq_notify_id_t));
+    memcpy(&_ahmq_proto_of(self)->notify_id, &(para->nid), sizeof(app_ahmq_notify_id_t));
 
-    reply_send(self, "Reply/board/NULL");
-    cmd_SendData(self, ccb, sizeof("0"), "0");
+    _ahmq_reply_send(self, "Reply/board/NULL");
+    _ahmq_send_data(self, ccb, sizeof("0"), "0");
 }
 
 /**
@@ -90,8 +90,8 @@ static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 
     app_render(&(app_render_cfg_t){.type = APP_RENDER_TYPE_FILL, .color = disp_color[(uint8_t)(para->color) - 0x30]});
 
-    reply_send(self, "Reply/display/clean");
-    cmd_SendData(self, ccb, sizeof("0"), "0");
+    _ahmq_reply_send(self, "Reply/display/clean");
+    _ahmq_send_data(self, ccb, sizeof("0"), "0");
 }
 
 /**
@@ -105,8 +105,8 @@ static void _cmd_restart(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 {
     (void)buff;
 
-    reply_send(self, "Reply/op/restart");
-    cmd_SendData(self, ccb, sizeof("0"), "0");
+    _ahmq_reply_send(self, "Reply/op/restart");
+    _ahmq_send_data(self, ccb, sizeof("0"), "0");
 
     NVIC_SystemReset();
 }
@@ -124,10 +124,10 @@ static void _cmd_checktime(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     app_ahmq_notify_date_t *date   = (app_ahmq_notify_date_t *)(para->time);
 
     if (para->type == '1')
-        memcpy(&(proto_of(self)->notify_id.date_time), date, sizeof(app_ahmq_notify_date_t));
+        memcpy(&(_ahmq_proto_of(self)->notify_id.date_time), date, sizeof(app_ahmq_notify_date_t));
 
-    reply_send(self, "Reply/op/checktime");
-    cmd_SendData(self, ccb, sizeof("0"), "0");
+    _ahmq_reply_send(self, "Reply/op/checktime");
+    _ahmq_send_data(self, ccb, sizeof("0"), "0");
 }
 
 /**
@@ -136,9 +136,9 @@ static void _cmd_checktime(app_pcb_t *self, app_ccb_t *ccb, char *buff)
  * @param self   协议对象（提供设备标识与回复缓冲）
  * @param suffix 命令对应的回复后缀
  */
-static void reply_send(app_pcb_t *self, const char *suffix)
+static void _ahmq_reply_send(app_pcb_t *self, const char *suffix)
 {
-    app_ahmq_proto_t    *p = proto_of(self);
+    app_ahmq_proto_t    *p = _ahmq_proto_of(self);
     const app_ahmq_topic_info_t *t = &p->topic_info;
 
     /* 写进协议自有缓冲，随后随消息交给通道 —— 不再借用通道对象的主题缓冲区
@@ -158,11 +158,11 @@ static void reply_send(app_pcb_t *self, const char *suffix)
  * @param ReturnLen 消息长度
  * @param ReturnData 发布的消息
  */
-static void cmd_SendData(app_pcb_t *self, app_ccb_t *ccb, uint32_t ReturnLen, char *ReturnData)
+static void _ahmq_send_data(app_pcb_t *self, app_ccb_t *ccb, uint32_t ReturnLen, char *ReturnData)
 {
     char ReturnBuff[128] = {0};
 
-    app_ahmq_proto_t *p = proto_of(self);
+    app_ahmq_proto_t *p = _ahmq_proto_of(self);
 
     memcpy(ReturnBuff, &p->notify_id, sizeof(app_ahmq_notify_id_t));
     memcpy(&ReturnBuff[sizeof(app_ahmq_notify_id_t)], ReturnData, ReturnLen);

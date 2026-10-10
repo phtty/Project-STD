@@ -22,14 +22,14 @@ uint8_t *dev_rs485_get_buf(void)
 }
 
 /* ---- RS485 方向控制（板级引脚：PA8） ---- */
-static void rs485_dir_cb(bool tx)
+static void _rs485_dir_fn(bool tx)
 {
     pl_gpio_write(PL_PORT_A, 8, tx);
 }
 
 void dev_rs485_init(void)
 {
-    pl_uart_set_dir_fn(pl_uart_get_handle(PL_UART1), rs485_dir_cb);
-    rs485_dir_cb(false);
+    pl_uart_set_dir_fn(pl_uart_get_handle(PL_UART1), _rs485_dir_fn);
+    _rs485_dir_fn(false);
 }
 hw_dev_initcall(dev_rs485_init);
