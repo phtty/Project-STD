@@ -95,7 +95,7 @@ docs/                              命名约定.md（评审契约）、架构说
 1. **`.eide/eide.yml` 会被 EIDE 重写**：它由 IDE 维护，改了 `Makefile` 忘了它、或反过来，都会让另一套构建编不过。
    改它尽量在 EIDE 关闭时；提交前 `git diff .eide/eide.yml` 看一眼有没有被回退。
 2. **新增/搬动源文件要同步两套构建清单**：`Makefile`（固件 **和测试** 两处 `INC_DIRS`/源清单）+ `.eide/eide.yml`（**两个目标**）。
-3. **Doxygen 与 `__attribute__` 的两个错位**（见 `docs/命名约定.md` §12「Doxygen 行为实测」）：
+3. **Doxygen 与 `__attribute__` 的两个错位**（见 `docs/命名约定.md` §12「Doxygen 已知行为」）：
    - **尾置**属性（`uint8_t x[] __attribute__((aligned(4)));`）会让 Doxygen 把**后续声明吞进前一条**、误报符号未声明 → 属性写**前置**
    - `typedef` 类型的文档要点必须放**尾部** `/**< */`
 4. **initcall 同层次序不可依赖**：宏生成的段名同层完全相同，`SORT()` 是空操作，实际次序是链接顺序。
