@@ -105,10 +105,10 @@ int32_t pl_uart_send(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_
 int32_t pl_uart_send_dma(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_t timeout_ms);
 
 /** @brief 注册 DMA 空闲中断接收回调 */
-void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx);
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t fn, void *ctx);
 
 /** @brief 注册收发方向控制回调（仅 RS485 需要，RS232 传 NULL） */
-void pl_uart_set_dir_cb(pl_uart_handle_t h, pl_uart_dir_fn_t cb);
+void pl_uart_set_dir_fn(pl_uart_handle_t h, pl_uart_dir_fn_t fn);
 
 /** @brief 启动 DMA 空闲中断接收，成功返回 0 */
 int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len);

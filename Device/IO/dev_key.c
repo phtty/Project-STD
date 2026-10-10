@@ -112,7 +112,7 @@ void dev_key_init(void)
         k->active_low   = d->active_low;
         k->ops          = d->has_exti ? &s_exti_key_ops : &s_dip_key_ops;
 
-        if (d->exti_pin) pl_exti_register_cb(d->exti_pin, _exti_cb, NULL);
+        if (d->exti_pin) pl_exti_register_fn(d->exti_pin, _exti_cb, NULL);
     }
 }
 hw_dev_initcall(dev_key_init);

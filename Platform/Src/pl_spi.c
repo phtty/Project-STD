@@ -43,11 +43,11 @@ int32_t pl_spi_transmit_receive_dma(pl_spi_handle_t h, const uint8_t *tx_data, u
     return (HAL_SPI_TransmitReceive_DMA(ctx->hspi, (uint8_t *)tx_data, (uint8_t *)rx_data, size) == HAL_OK) ? 0 : -1;
 }
 
-void pl_spi_set_rx_done_fn(pl_spi_handle_t h, pl_spi_rx_done_fn_t cb, void *ctx_arg)
+void pl_spi_set_rx_done_fn(pl_spi_handle_t h, pl_spi_rx_done_fn_t fn, void *ctx_arg)
 {
     spi_ctx_t *ctx = (spi_ctx_t *)h;
     if (ctx) {
-        ctx->rx_done_fn   = cb;
+        ctx->rx_done_fn   = fn;
         ctx->rx_done_ctx  = ctx_arg;
     }
 }

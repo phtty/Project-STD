@@ -21,7 +21,7 @@ typedef struct {
     UART_HandleTypeDef *huart;
     pl_uart_rx_fn_t rx_fn;
     void *rx_fn_ctx;
-    pl_uart_dir_fn_t dir_cb;   /* Device 层注入的 RS485 方向控制，无则为 NULL */
+    pl_uart_dir_fn_t dir_fn;   /* Device 层注入的 RS485 方向控制，无则为 NULL */
     uint8_t *rx_buf;
     uint16_t rx_buf_size;
     uint16_t rx_pos; /* 循环 DMA 里"已经交出去到哪了"（相对缓冲起点） */
@@ -184,7 +184,7 @@ int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint
 
     int32_t ret = -1;
 
-    if (ctx->dir_cb) ctx->dir_cb(true);
+    if (ctx->dir_fn) ctx->dir_fn(true);
 
     if (mode == PL_UART_TX_DMA) {
         /* 清掉可能残留的完成计数：上一次若超时被中止，TC 仍可能随后触发一次 release，
@@ -220,7 +220,7 @@ int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint
 
     /* 无论成败都把总线切回接收，不把它留在发送态。DMA 模式走到这里时 TC 已发生
        （信号量就是 TC 中断给的），所以此刻切方向是正确时刻。 */
-    if (ctx->dir_cb) ctx->dir_cb(false);
+    if (ctx->dir_fn) ctx->dir_fn(false);
 
     if (locked) osMutexRelease(ctx->tx_lock);
     return ret;
@@ -249,19 +249,19 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
-void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx_arg)
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t fn, void *ctx_arg)
 {
     uart_ctx_t *ctx = (uart_ctx_t *)h;
     if (ctx) {
-        ctx->rx_fn     = cb;
+        ctx->rx_fn     = fn;
         ctx->rx_fn_ctx = ctx_arg;
     }
 }
 
-void pl_uart_set_dir_cb(pl_uart_handle_t h, pl_uart_dir_fn_t cb)
+void pl_uart_set_dir_fn(pl_uart_handle_t h, pl_uart_dir_fn_t fn)
 {
     uart_ctx_t *ctx = (uart_ctx_t *)h;
-    if (ctx) ctx->dir_cb = cb;
+    if (ctx) ctx->dir_fn = fn;
 }
 
 int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)

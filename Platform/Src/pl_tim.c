@@ -21,12 +21,12 @@
  * （症状："卡死在 TIM7 中断里"。已上机复现。）
  *
  * 结论：ISR 与任何可能在初始化完成前被调用的路径，一律只读编译期常量。 */
-static pl_tim_period_fn_t s_period_cb[PL_TIM_MAX];
+static pl_tim_period_fn_t s_period_fn[PL_TIM_MAX];
 
 /* ---- 回调注册 ---- */
-void pl_tim_register_period_cb(uint8_t tim_id, pl_tim_period_fn_t cb)
+void pl_tim_register_period_fn(uint8_t tim_id, pl_tim_period_fn_t fn)
 {
-    if (tim_id < PL_TIM_MAX) s_period_cb[tim_id] = cb;
+    if (tim_id < PL_TIM_MAX) s_period_fn[tim_id] = fn;
 }
 
 /* ---- 初始化 ---- */
@@ -89,8 +89,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         return;
     }
     for (uint8_t i = 0; i < PL_TIM_MAX; i++)
-        if (g_pl_tim_board[i].handle == (pl_tim_handle_t)htim && s_period_cb[i]) {
-            s_period_cb[i]();
+        if (g_pl_tim_board[i].handle == (pl_tim_handle_t)htim && s_period_fn[i]) {
+            s_period_fn[i]();
             return;
         }
 }

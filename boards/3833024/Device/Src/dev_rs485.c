@@ -29,7 +29,7 @@ static void rs485_dir_cb(bool tx)
 
 void dev_rs485_init(void)
 {
-    pl_uart_set_dir_cb(pl_uart_get_handle(PL_UART1), rs485_dir_cb);
+    pl_uart_set_dir_fn(pl_uart_get_handle(PL_UART1), rs485_dir_cb);
     rs485_dir_cb(false);
 }
 hw_dev_initcall(dev_rs485_init);

@@ -39,6 +39,6 @@ int32_t  pl_spi_receive_dma(pl_spi_handle_t h, uint8_t *data, uint16_t size);
 
 /** @brief 注册 DMA 接收完成回调（替换式注册）
  *  @param h   SPI 句柄
- *  @param cb  完成回调；传 NULL 表示注销
+ *  @param fn  完成回调；传 NULL 表示注销
  *  @param ctx 回调透传的用户上下文 */
-void     pl_spi_set_rx_done_fn(pl_spi_handle_t h, pl_spi_rx_done_fn_t cb, void *ctx);
+void     pl_spi_set_rx_done_fn(pl_spi_handle_t h, pl_spi_rx_done_fn_t fn, void *ctx);

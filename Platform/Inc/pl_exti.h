@@ -15,6 +15,6 @@ void pl_exti_init(void);
 
 /** @brief 注册某引脚的外部中断回调
  *  @param pin 触发引脚（EXTI 线号）
- *  @param cb  中断回调；传 NULL 表示注销
+ *  @param fn  中断回调；传 NULL 表示注销
  *  @param ctx 回调透传的用户上下文 */
-void pl_exti_register_cb(uint16_t pin, pl_exti_fn_t cb, void *ctx);
+void pl_exti_register_fn(uint16_t pin, pl_exti_fn_t fn, void *ctx);

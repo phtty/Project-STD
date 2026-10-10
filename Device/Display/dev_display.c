@@ -65,8 +65,8 @@ void dev_display_init(void)
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM_DISPLAY_SCAN));
     pl_tim_dbg_freeze(pl_tim_get_handle(PL_TIM_DISPLAY_PWM));
     pl_hub75_init();
-    pl_tim_register_period_cb(PL_TIM_DISPLAY_SCAN, _on_scan_period);
-    pl_tim_register_period_cb(PL_TIM_DISPLAY_PWM, _on_pwm_period);
+    pl_tim_register_period_fn(PL_TIM_DISPLAY_SCAN, _on_scan_period);
+    pl_tim_register_period_fn(PL_TIM_DISPLAY_PWM, _on_pwm_period);
 }
 hw_dev_initcall(dev_display_init);
 
@@ -222,7 +222,7 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
     else dev->frame_touched = true;
 }
 
-/* ---- TIM 周期回调（通过 pl_tim_register_period_cb 注册到 Platform 层）---- */
+/* ---- TIM 周期回调（通过 pl_tim_register_period_fn 注册到 Platform 层）---- */
 
 static void _on_scan_period(void)
 {

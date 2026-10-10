@@ -56,10 +56,10 @@ pl_uart_handle_t pl_uart_get_handle(uint8_t id)
     (void)id;
     return nullptr;
 }
-void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t cb, void *ctx)
+void pl_uart_set_rx_fn(pl_uart_handle_t h, pl_uart_rx_fn_t fn, void *ctx)
 {
     (void)h;
-    (void)cb;
+    (void)fn;
     (void)ctx;
 }
 int32_t pl_uart_start_rx(pl_uart_handle_t h, uint8_t *buf, uint16_t len)

@@ -81,4 +81,4 @@ void pl_tim_dbg_freeze(pl_tim_handle_t h);
 typedef void (*pl_tim_period_fn_t)(void);
 
 /** @brief 注册 TIM 周期回调（在 hw_dev_initcall 阶段调用） */
-void pl_tim_register_period_cb(uint8_t tim_id, pl_tim_period_fn_t cb);
+void pl_tim_register_period_fn(uint8_t tim_id, pl_tim_period_fn_t fn);
