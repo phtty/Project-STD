@@ -5,7 +5,7 @@
 
 #include "bit_utils.h"
 
-static const uint8_t ctz_table[32] = {
+static const uint8_t s_ctz_table[32] = {
     0, 1, 28, 2, 29, 14, 24, 3,
     30, 22, 20, 15, 25, 17, 4, 8,
     31, 27, 13, 23, 21, 19, 16, 7,
@@ -14,5 +14,5 @@ static const uint8_t ctz_table[32] = {
 
 uint8_t bit_ctz(uint32_t x)
 {
-    return ctz_table[((x & -x) * 0x077CB531U) >> 27];
+    return s_ctz_table[((x & -x) * 0x077CB531U) >> 27];
 }

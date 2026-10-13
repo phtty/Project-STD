@@ -34,8 +34,23 @@ typedef enum {
     PL_FLASH_VOLTAGE_4,      /* 2.7V ~ 3.6V + External Vpp */
 } pl_flash_voltage_t;
 
+/** @brief 解锁 Flash 控制寄存器以便擦写 */
 void     pl_flash_unlock(void);
+
+/** @brief 重新锁定 Flash 控制寄存器 */
 void     pl_flash_lock(void);
+
+/** @brief 清除 Flash 错误标志 */
 void     pl_flash_clear_errors(void);
+
+/** @brief 擦除一个扇区
+ *  @param sector 要擦除的扇区
+ *  @param range  操作电压范围（由供电电压决定）
+ *  @return 0 成功，-1 硬件返回错误 */
 int32_t  pl_flash_erase_sector(pl_flash_sector_t sector, pl_flash_voltage_t range);
+
+/** @brief 编程一个 32 位字
+ *  @param addr 目标地址（须已擦除且按字对齐）
+ *  @param data 要写入的字
+ *  @return 0 成功，-1 硬件返回错误 */
 int32_t  pl_flash_program_word(uint32_t addr, uint32_t data);

@@ -1,0 +1,10 @@
+# 行尾统一为 LF，文本文件自动判定
+* text=auto eol=lf
+
+# 二进制与构建产物：禁止 Git 做行尾/内容转换
+*.hex   -text
+*.bin   -text
+*.elf   -text
+*.o     -text
+*.a     -text
+*.su    -text

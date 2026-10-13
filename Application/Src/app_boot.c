@@ -15,20 +15,20 @@
 #include "pl_gpio.h"
 #include "pl_dwt.h"
 #include "dev_eth.h"
+#include "app_screen.h"
 #include "app_udp.h"
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
 #include "app_rs485.h"
-#include "app_rs232.h"
 #include "app_test.h"
 #include "app_key.h"
 #include "app_render.h"
 #include "pl_task.h"
 
-static void init_task(void *argument);
+static void _init_task(void *argument);
 
 /* ---- HalfSecTask: 500ms 喂狗 / 60s RTC 备份 / LED 翻转 ---- */
-static void half_sec_task(void *argument)
+static void _half_sec_task(void *argument)
 {
     (void)argument;
     uint32_t run_time = 0;
@@ -53,65 +53,71 @@ static void half_sec_task(void *argument)
 void app_boot(void)
 {
     const osThreadAttr_t attr = {
-        .name       = "init_task",
+        .name       = "_init_task",
         .stack_size = 512 * 4,
         .priority   = osPriorityHigh,
     };
 
     osKernelInitialize();
-    pl_task_new(init_task, NULL, &attr);
+    pl_task_new(_init_task, NULL, &attr);
     osKernelStart();
 }
 
 [[maybe_unused]] static void app_default_display(void)
 {
+    /* **多卡的从卡**：它要照常恢复自己那一块（各卡各存各的），但**不能画兜底文案** ——
+       "车道关闭"会正好盖掉刚从记录恢复出来的内容，而它的内容本该由主卡下发。 */
+    const bool slave_of_many = app_screen_layout()->count > 1 && !app_screen_is_master();
+
     if (!app_render_restore()) {
-        app_render(&(render_cfg_t){
-            .type  = RENDER_TEXT,
+        if (slave_of_many) return;
+
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_TEXT,
             .x     = 0,
             .y     = 0,
-            .w     = dev_display_get()->screen_rows,
-            .h     = dev_display_get()->screen_cols,
-            .style = &(render_style_t){
-                .h_align = ALIGN_CENTER,
-                .v_align = ALIGN_CENTER,
+            .w     = app_screen_rows(),
+            .h     = app_screen_cols(),
+            .style = &(app_render_style_t){
+                .h_align = APP_RENDER_ALIGN_CENTER,
+                .v_align = APP_RENDER_ALIGN_CENTER,
             },
-            .color     = COLOR_RED,
+            .color     = DEV_DISPLAY_COLOR_RED,
             .text      = "车道关闭",
             .len       = strlen("车道关闭"),
-            .font_size = FONT_32,
-            .font_type = FONT_HT,
-            .text_enc  = FONT_ENC_UTF8,
+            .font_size = APP_FONT_SIZE_32,
+            .font_type = APP_FONT_TYPE_HT,
+            .text_enc  = APP_FONT_ENC_UTF8,
         });
     }
 }
 
-static void init_task(void *argument)
+static void _init_task(void *argument)
 {
     (void)argument;
 
     dev_eth_start();
-    sw_board_init(); /* sw_initcall 自注册：协议 + 通道任务 */
+    initcall_run_sw(); /* sw_initcall 自注册：协议 + 通道任务 */
 
     /* 半秒周期任务 */
     const osThreadAttr_t hst_attr = {
-        .name       = "half_sec_task",
+        .name       = "_half_sec_task",
         .stack_size = 128 * 4,
         .priority   = osPriorityLow,
     };
-    pl_task_new(half_sec_task, NULL, &hst_attr);
+    pl_task_new(_half_sec_task, NULL, &hst_attr);
 
     app_tcp_server_start();
     app_tcp_client_start();
     app_udp_start();
     app_rs485_start();
-    app_rs232_start();   /* USART3 端点 */
-    app_rs232_1_start(); /* USART6 端点 */
+    /* 板级特有的通道由各板自己用 initcall 启动（如 3833024 的两路 RS232），
+       不在这里点名——否则共享文件要认识每块板的外设。 */
 
     // app_test_run();
     app_default_display();
 
-    printf("\nInit Task Done\n");
+    printf("\n[init] Init Task Done\n");
 
     osThreadExit();
 }

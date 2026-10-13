@@ -30,15 +30,55 @@
 
 /* 与 Device/Inc/dev_display.h 保持一致 */
 typedef enum {
-    COLOR_BLACK  = 0,
-    COLOR_RED    = 1,
-    COLOR_GREEN  = 2,
-    COLOR_YELLOW = 3,
-    COLOR_BLUE   = 4,
-    COLOR_PURPLE = 5,
-    COLOR_CYAN   = 6,
-    COLOR_WHITE  = 7,
-} display_color_t;
+    DEV_DISPLAY_COLOR_BLACK  = 0,
+    DEV_DISPLAY_COLOR_RED    = 1,
+    DEV_DISPLAY_COLOR_GREEN  = 2,
+    DEV_DISPLAY_COLOR_YELLOW = 3,
+    DEV_DISPLAY_COLOR_BLUE   = 4,
+    DEV_DISPLAY_COLOR_PURPLE = 5,
+    DEV_DISPLAY_COLOR_CYAN   = 6,
+    DEV_DISPLAY_COLOR_WHITE  = 7,
+} dev_display_color_t;
+
+/* 与真头一致的能力掩码宏（本轮无消费方，仅为影子结构体保持同步）*/
+#define DEV_DISPLAY_COLOR_ALL (0xFEU)
+#define DEV_DISPLAY_COLOR_BIT(c) ((uint8_t)(1U << (c)))
 
 #define DEV_DISPLAY_SCREEN_ROWS (128U)
 #define DEV_DISPLAY_SCREEN_COLS (32U)
+
+/* ---- 结构体与像素原语 ----
+ *
+ * 真 dev_display.h 里这个结构体有 ops 虚表、模组参数等一堆字段，且会拉进
+ * pl_hub75.h → main.h → HAL，host 编不了。这里只留**画布用例真正用到的**那几个：
+ * 几何、帧缓冲、亮度、脏标记。ops 用 void* 占位，免得为它再定义一套虚表类型。
+ *
+ * 原语的**实现不在这里**，由各测试自己给 —— 画布用例要拿"直写实屏"当独立参考，
+ * 自己的实现才好控制；链接真的 dev_display.c 反而要拖进 pl_tim/pl_task 一整串。 */
+typedef struct dev_display {
+    const void *ops;
+    /* 与真头同步：模组物理色彩能力（bit N = 支持 DEV_DISPLAY_COLOR_<N>，bit0 黑不表示）。
+     * 与真头同位次（模组参数组），本影子结构体只留测试用到的字段，故仅此一项。 */
+    uint8_t     supported_color_mask;
+    uint16_t    screen_rows; /* 宽（注意：本工程 screen_rows 是宽、screen_cols 是高） */
+    uint16_t    screen_cols; /* 高 */
+    uint8_t    *pixel_map;
+    uint8_t     light_level;
+    bool        dirty;
+    bool        dirty_hold;    /* 与真头一致：见 dev_display_frame_begin */
+    bool        frame_touched;
+} dev_display_t;
+
+void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_display_color_t color);
+void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                      dev_display_color_t color);
+void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint8_t *bitmap, dev_display_color_t color);
+void dev_display_set_brightness(dev_display_t *dev, uint8_t level);
+void dev_display_frame_begin(dev_display_t *dev);
+void dev_display_frame_end(dev_display_t *dev);
+dev_display_t *dev_display_get(void);
+
+/* 与真头同步的能力查询声明（本轮无消费方；测试若调用需自备桩实现）*/
+bool dev_display_supports_color(const dev_display_t *dev, dev_display_color_t c);
+uint8_t dev_display_color_mask(const dev_display_t *dev);

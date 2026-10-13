@@ -13,23 +13,23 @@
 #include <string.h>
 
 /* ---- MQTT 通道 ops ---- */
-static int32_t mqtt_send(ccb_t *ccb, const ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+static int32_t _mqtt_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
 {
-    mqtt_ccb_t *mqtt = container_of(ccb, mqtt_ccb_t, base);
-    if (mqtt->base.state != CCB_STATE_UP) return -1;
+    app_mqtt_ccb_t *mqtt = container_of(ccb, app_mqtt_ccb_t, base);
+    if (mqtt->base.state != APP_CCB_STATE_UP) return -1;
 
     /* 目的地：协议显式给的 topic 优先，否则回落到本帧来源主题 */
     const char *topic = (dst != nullptr && dst->topic != nullptr) ? dst->topic : mqtt->topic;
 
-    mqtt_send_data(topic, data, len); /* len 透传，不再内部 strlen */
+    app_mqtt_send(topic, data, len); /* len 透传，不再内部 strlen */
     return (int32_t)len;
 }
 
-const ccb_ops_t mqtt_ccb_ops = { .send = mqtt_send };
+const app_ccb_ops_t g_mqtt_ccb_ops = { .send = _mqtt_send };
 
 /* ---- 通道控制块（静态，协议绑定期间即可用） ---- */
-mqtt_ccb_t g_mqtt = {
-    .base = { .name = "mqtt", .ops = &mqtt_ccb_ops },
+app_mqtt_ccb_t g_mqtt_ccb = {
+    .base = { .name = "mqtt", .ops = &g_mqtt_ccb_ops },
     .ctx.broker_ip     = {120, 46, 136, 199},
     .ctx.broker_port   = 6000,
     .ctx.client_id     = "CD_ZTP",
@@ -37,14 +37,14 @@ mqtt_ccb_t g_mqtt = {
     .ctx.client_pass   = "",
 };
 
-ccb_t *app_mqtt_ccb(void)
+app_ccb_t *app_mqtt_ccb(void)
 {
-    return &g_mqtt.base;
+    return &g_mqtt_ccb.base;
 }
 
-osThreadId_t mqtt_task_handle;
-const osThreadAttr_t mqtt_task_attr = {
-    .name       = "mqtt_task",
+osThreadId_t g_mqtt_task_handle;
+const osThreadAttr_t g_mqtt_task_attr = {
+    .name       = "app_mqtt_task",
     .stack_size = 512 * 4,
     .priority   = osPriorityNormal,
 };
@@ -70,49 +70,49 @@ int32_t app_mqtt_subscribe(const char *const *topics, uint8_t count)
 
 /* ---- 通道生命周期 ---- */
 
-static void mqtt_channel_init(void)
+static void _mqtt_channel_init(void)
 {
-    g_mqtt.base.state = CCB_STATE_UP;
+    g_mqtt_ccb.base.state = APP_CCB_STATE_UP;
 }
 
-static void mqtt_channel_deinit(void)
+static void _mqtt_channel_deinit(void)
 {
-    g_mqtt.base.state = CCB_STATE_DOWN;
+    g_mqtt_ccb.base.state = APP_CCB_STATE_DOWN;
 }
 
 /* ---- LwIP MQTT 回调 ---- */
 
-static void mqtt_incoming_publish_cb(void *arg, const char *topic, uint32_t tot_len)
+static void _mqtt_incoming_publish_fn(void *arg, const char *topic, uint32_t tot_len)
 {
     (void)arg;
     (void)tot_len;
-    g_mqtt.ctx.payload_offset = 0;
+    g_mqtt_ccb.ctx.payload_offset = 0;
 
     /* 有界拷贝：topic 长度由 broker 控制，直接 strcpy 会写穿 topic[] */
-    strncpy(g_mqtt.topic, topic, sizeof(g_mqtt.topic) - 1);
-    g_mqtt.topic[sizeof(g_mqtt.topic) - 1] = '\0';
+    strncpy(g_mqtt_ccb.topic, topic, sizeof(g_mqtt_ccb.topic) - 1);
+    g_mqtt_ccb.topic[sizeof(g_mqtt_ccb.topic) - 1] = '\0';
 }
 
-static void mqtt_sub_request_cb(void *arg, err_t result)
+static void _mqtt_sub_request_fn(void *arg, err_t result)
 {
     (void)arg;
     (void)result;
 }
 
-static void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
+static void _mqtt_connection_fn(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
 {
     (void)client;
     (void)arg;
     if (status == MQTT_CONNECT_ACCEPTED)
-        g_mqtt.state = MQTT_ST_CONNECTED;
+        g_mqtt_ccb.state = APP_MQTT_STATE_CONNECTED;
     else
-        g_mqtt.state = MQTT_ST_DISCONNECTED;
-    osSemaphoreRelease(g_mqtt.ctx.connect_sem);
+        g_mqtt_ccb.state = APP_MQTT_STATE_DISCONNECTED;
+    osSemaphoreRelease(g_mqtt_ccb.ctx.connect_sem);
 }
 
-static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, uint8_t flags)
+static void _mqtt_incoming_data_fn(void *arg, const uint8_t *data, uint16_t len, uint8_t flags)
 {
-    mqtt_ctx_t *ctx = &g_mqtt.ctx;
+    app_mqtt_ctx_t *ctx = &g_mqtt_ccb.ctx;
 
     if (ctx->payload_offset + len < sizeof(ctx->rcv_buf)) {
         memcpy(&ctx->rcv_buf[ctx->payload_offset], data, len);
@@ -131,17 +131,17 @@ static void mqtt_incoming_data_cb(void *arg, const uint8_t *data, uint16_t len, 
            帧长不必由通道给出 —— 探针按结尾 NUL 自行定界，连续两条消息
            同处缓冲区时也能各自成帧。
            src 只需在本次调用期间有效：框架把主题内容拷进自己的通知元素。 */
-        const ccb_src_t src = {.topic = g_mqtt.topic};
-        ccb_t *ccb      = (ccb_t *)arg;
+        const app_ccb_src_t src = {.topic = g_mqtt_ccb.topic};
+        app_ccb_t *ccb      = (app_ccb_t *)arg;
         app_ccb_dispatch(ccb, &src, ctx->rcv_buf, (uint16_t)(total + 1));
     }
 }
 
 /* ---- 连接 ---- */
 
-void mqtt_connection(void)
+void app_mqtt_connect(void)
 {
-    mqtt_ctx_t           *ctx = &g_mqtt.ctx;
+    app_mqtt_ctx_t           *ctx = &g_mqtt_ccb.ctx;
     struct mqtt_connect_client_info_t mqtt_client_info;
     memset(&mqtt_client_info, 0, sizeof(mqtt_client_info));
 
@@ -154,16 +154,16 @@ void mqtt_connection(void)
 
     LOCK_TCPIP_CORE();
     err_t err = mqtt_client_connect((mqtt_client_t *)ctx->client, &broker_ip, ctx->broker_port,
-                                    mqtt_connection_cb, NULL, &mqtt_client_info);
+                                    _mqtt_connection_fn, NULL, &mqtt_client_info);
     UNLOCK_TCPIP_CORE();
 
     /* 回调上下文取基类指针：接收回调据此直接派发，不必再回查全局 */
-    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, (void *)&g_mqtt.base);
+    mqtt_set_inpub_callback((mqtt_client_t *)ctx->client, _mqtt_incoming_publish_fn, _mqtt_incoming_data_fn, (void *)&g_mqtt_ccb.base);
 
     if (err == ERR_OK) {
-        g_mqtt.state = MQTT_ST_CONNECTING;
+        g_mqtt_ccb.state = APP_MQTT_STATE_CONNECTING;
     } else {
-        g_mqtt.state = MQTT_ST_DISCONNECTED;
+        g_mqtt_ccb.state = APP_MQTT_STATE_DISCONNECTED;
         mqtt_client_free((mqtt_client_t *)ctx->client);
         ctx->client = NULL;
     }
@@ -171,57 +171,57 @@ void mqtt_connection(void)
 
 /* ---- 任务主循环 ---- */
 
-void mqtt_task(void *argument)
+void app_mqtt_task(void *argument)
 {
     (void)argument; /* 单例通道：上下文取自静态控制块，不用任务参数 */
-    mqtt_ctx_t *ctx = &g_mqtt.ctx;
+    app_mqtt_ctx_t *ctx = &g_mqtt_ccb.ctx;
 
     ctx->client = mqtt_client_new();
     if (ctx->client == NULL) { osThreadExit(); return; }
 
     ctx->connect_sem = osSemaphoreNew(1, 0, NULL);
-    mqtt_connection();
+    app_mqtt_connect();
 
     for (;;) {
         osSemaphoreAcquire(ctx->connect_sem, osWaitForever);
 
-        switch (g_mqtt.state) {
-        case MQTT_ST_DISCONNECTED:
-            mqtt_channel_deinit();
+        switch (g_mqtt_ccb.state) {
+        case APP_MQTT_STATE_DISCONNECTED:
+            _mqtt_channel_deinit();
             osDelay(1000);
             ctx->client = mqtt_client_new();
-            if (ctx->client) mqtt_connection();
+            if (ctx->client) app_mqtt_connect();
             break;
 
-        case MQTT_ST_CONNECTING:
+        case APP_MQTT_STATE_CONNECTING:
             /* 连接失败：清理后重试 */
-            mqtt_channel_deinit();
+            _mqtt_channel_deinit();
             osDelay(1000);
             mqtt_client_free((mqtt_client_t *)ctx->client);
             ctx->client = mqtt_client_new();
-            if (ctx->client) mqtt_connection();
+            if (ctx->client) app_mqtt_connect();
             break;
 
-        case MQTT_ST_CONNECTED:
-            mqtt_channel_init();
+        case APP_MQTT_STATE_CONNECTED:
+            _mqtt_channel_init();
             /* 协议登记、通道施加：每次连接（含重连）统一重订，主题表在协议侧 */
             for (uint8_t i = 0; i < s_sub_cnt; i++)
-                mqtt_subscribe((mqtt_client_t *)ctx->client, s_subs[i], 0, mqtt_sub_request_cb, NULL);
-            g_mqtt.state = MQTT_ST_READY;
+                mqtt_subscribe((mqtt_client_t *)ctx->client, s_subs[i], 0, _mqtt_sub_request_fn, NULL);
+            g_mqtt_ccb.state = APP_MQTT_STATE_READY;
             break;
 
-        case MQTT_ST_READY:
+        case APP_MQTT_STATE_READY:
             /* 断连时回调设 DISCONNECTED + release sem，回到 DISCONNECTED 分支 */
             break;
         }
     }
 }
 
-void mqtt_send_data(const char *topic, const void *data, uint16_t len)
+void app_mqtt_send(const char *topic, const void *data, uint16_t len)
 {
-    mqtt_ctx_t *ctx = &g_mqtt.ctx;
+    app_mqtt_ctx_t *ctx = &g_mqtt_ccb.ctx;
 
-    if (ctx->client != NULL && g_mqtt.state == MQTT_ST_READY) {
+    if (ctx->client != NULL && g_mqtt_ccb.state == APP_MQTT_STATE_READY) {
         LOCK_TCPIP_CORE();
         mqtt_publish((mqtt_client_t *)ctx->client, topic, data, len, 0, 0, NULL, NULL);
         UNLOCK_TCPIP_CORE();
@@ -230,13 +230,13 @@ void mqtt_send_data(const char *topic, const void *data, uint16_t len)
 
 void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port)
 {
-    memcpy(g_mqtt.ctx.broker_ip, ip, 4);
-    g_mqtt.ctx.broker_port = port;
+    memcpy(g_mqtt_ccb.ctx.broker_ip, ip, 4);
+    g_mqtt_ccb.ctx.broker_port = port;
 }
 
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass)
 {
-    strncpy(g_mqtt.ctx.client_id, client_id, sizeof(g_mqtt.ctx.client_id) - 1);
-    strncpy(g_mqtt.ctx.client_user, user, sizeof(g_mqtt.ctx.client_user) - 1);
-    strncpy(g_mqtt.ctx.client_pass, pass, sizeof(g_mqtt.ctx.client_pass) - 1);
+    strncpy(g_mqtt_ccb.ctx.client_id, client_id, sizeof(g_mqtt_ccb.ctx.client_id) - 1);
+    strncpy(g_mqtt_ccb.ctx.client_user, user, sizeof(g_mqtt_ccb.ctx.client_user) - 1);
+    strncpy(g_mqtt_ccb.ctx.client_pass, pass, sizeof(g_mqtt_ccb.ctx.client_pass) - 1);
 }

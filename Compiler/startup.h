@@ -1,5 +1,4 @@
-#ifndef COMPILER_STARTUP_H
-#define COMPILER_STARTUP_H
+#pragma once
 
 #include <stdint.h>
 
@@ -119,5 +118,3 @@ void OTG_HS_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 void DCMI_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 void HASH_RNG_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 void FPU_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
-
-#endif // !COMPILER_STARTUP_H

@@ -1,0 +1,176 @@
+/**
+ * @file    stm32f4xx_hal.h
+ * @brief   HAL 的 host 替身 —— 只够编 pl_tim.c / pl_uart.c
+ *
+ * 存在的理由只有一个：**验证 ISR 在 initcall 跑之前也是安全的**。
+ *
+ * 真 HAL 头会拉进 CMSIS 内核寄存器定义与整套外设结构体，host 编不了；而这里需要的
+ * 只是"让 ISR 里的那次 HAL_xxx_IRQHandler 调用可观测"。所有 HAL_* 实现在测试文件里
+ * （记调用次数），本头只给类型与宏的形状。
+ *
+ * 放在 test/stubs/ 下是安全的：实测没有任何被测 TU 直接或间接 include 真 HAL 头，
+ * 不会遮蔽掉谁。（-I test/stubs 排在最前，一旦有 TU 需要真头就会当场编译失败，
+ * 属可接受的失败方式。）
+ */
+
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h> /* NULL —— pl_tim.c 用它 */
+#include <stdint.h>
+
+/* ---- 类型形状 ---- */
+
+typedef struct {
+    uint32_t dummy;
+} TIM_TypeDef;
+
+typedef struct {
+    uint32_t dummy;
+    /* pl_uart 的 ISR 靠 CR3 的 DMAR 位判断"接收 DMA 还在不在"（自愈用） */
+    uint32_t CR3;
+    uint32_t SR;  /* ISR 入口的寄存器快照（诊断） */
+    uint32_t CR1;
+} USART_TypeDef;
+
+#define USART_CR3_DMAR (1U << 6)
+
+/* DMA 流寄存器：只需要 CR 里的 CIRC 位。
+ *
+ * **为什么必须有这一位**：`Init` 只是软件影子，真正的模式在 `DMA_SxCR` 里，只有
+ * `HAL_DMA_Init` 才会把它写进去。HAL 的 `UART_DMAReceiveCplt` 是**照寄存器**判断
+ * "收完了要不要把接收拆掉"的（非循环分支里清 CR3 的 DMAR）—— 这正是接收路径
+ * 那个"每收满一个缓冲就哑掉"的根因。替身里留着 CR，那类回归才测得到。 */
+typedef struct {
+    uint32_t CR;
+} DMA_TypeDef;
+
+typedef struct {
+    DMA_TypeDef *Instance;
+    /* pl_uart 报"DMA 发送没起来"时会打它（诊断用），桩不推进这个状态 */
+    uint32_t     State;
+    struct {
+        uint32_t Mode;     /* pl_uart 把接收流改成循环模式 */
+        uint32_t FIFOMode; /* 直接模式（FIFO 关）—— NDTR 与内存必须同步 */
+    } Init;
+} DMA_HandleTypeDef;
+
+#define DMA_NORMAL      (0U)
+#define DMA_CIRCULAR    (1U << 8) /* == DMA_SxCR_CIRC（真 HAL 里就是同一个值） */
+#define DMA_SxCR_CIRC   (1U << 8)
+#define DMA_FIFOMODE_DISABLE (0U)
+#define DMA_FIFOMODE_ENABLE  (1U)
+
+typedef struct {
+    TIM_TypeDef *Instance;
+} TIM_HandleTypeDef;
+
+/* ---- 硬件 CRC 单元 ----
+ * DR 是可读写的（写一次算一拍、读出来是当前结果），CR 只用到复位位。
+ * 真单元是有状态的，所以 test_crc.c 里的 HAL_CRC_Calculate 桩按真语义逐字推进。 */
+typedef struct {
+    volatile uint32_t DR;
+    volatile uint32_t CR;
+} CRC_TypeDef;
+
+typedef struct {
+    CRC_TypeDef *Instance;
+} CRC_HandleTypeDef;
+
+uint32_t HAL_CRC_Calculate(CRC_HandleTypeDef *hcrc, uint32_t pBuffer[], uint32_t BufferLength);
+/** 累加（不重置内部状态）—— pl_crc.c 的非对齐路径靠它分块算完长输入 */
+uint32_t HAL_CRC_Accumulate(CRC_HandleTypeDef *hcrc, uint32_t pBuffer[], uint32_t BufferLength);
+
+typedef struct {
+    uint32_t BaudRate; /* pl_uart 用它按波特率算发送超时下限 */
+} UART_InitTypeDef;
+
+typedef struct {
+    USART_TypeDef     *Instance;
+    DMA_HandleTypeDef *hdmarx;
+    DMA_HandleTypeDef *hdmatx; /* TX DMA：pl_uart 的 DMA 发送模式靠它判有无 */
+    UART_InitTypeDef   Init;
+    /* 同 DMA_HandleTypeDef.State：只给诊断输出用 */
+    uint32_t gState;
+    uint32_t RxState;
+} UART_HandleTypeDef;
+
+/* UART 状态机：pl_uart 的接收重启兜底要把 RxState 拽回 READY */
+#define HAL_UART_STATE_READY (0U)
+
+typedef enum {
+    HAL_OK   = 0x00,
+    HAL_ERROR = 0x01,
+    HAL_BUSY = 0x02,
+    HAL_TIMEOUT = 0x03,
+} HAL_StatusTypeDef;
+
+typedef enum {
+    NonMaskableInt_IRQn = -14,
+    HardFault_IRQn = -13,
+    SysTick_IRQn = -1,
+} IRQn_Type;
+
+/* 四个定时器实例的"地址"：只要彼此不同即可，ISR 只拿它做透传 */
+extern TIM_TypeDef   s_fake_tim2, s_fake_tim3, s_fake_tim4, s_fake_tim5, s_fake_tim6,
+                     s_fake_tim7;
+extern USART_TypeDef s_fake_usart1;
+
+#define TIM2 (&s_fake_tim2)
+#define TIM3 (&s_fake_tim3)
+#define TIM4 (&s_fake_tim4)
+#define TIM5 (&s_fake_tim5)
+#define TIM6 (&s_fake_tim6)
+#define TIM7 (&s_fake_tim7)
+
+/* ---- 被 pl_tim.c / pl_uart.c 用到的 HAL 接口（实现在测试文件里） ---- */
+void HAL_TIM_IRQHandler(TIM_HandleTypeDef *htim);
+void HAL_TIM_Base_Start_IT(TIM_HandleTypeDef *htim);
+void HAL_IncTick(void);
+
+void          HAL_UART_IRQHandler(UART_HandleTypeDef *huart);
+HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len,
+                                    uint32_t timeout);
+HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+HAL_StatusTypeDef HAL_UART_DMAStop(UART_HandleTypeDef *huart);
+/* 空闲中断里**只**停接收用（HAL_UART_DMAStop 会把发送 DMA 一起中止，见 pl_uart.c） */
+HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *huart);
+/* 桩不模拟 TC 中断，故这个回调在 host 上不会被调用；声明是为了让
+   pl_uart.c 能原样通过编译（生产源码不替换、不改写） */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
+
+void HAL_DMA_IRQHandler(DMA_HandleTypeDef *hdma);
+HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *hdma);
+/* 只有它会照 `Init` 把配置写进流寄存器（影子 → 硬件的那一步） */
+HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *hdma);
+
+void NVIC_DisableIRQ(IRQn_Type irq);
+void NVIC_EnableIRQ(IRQn_Type irq);
+
+/* ---- 寄存器访问宏：替身里退化成读写一个公共影子，只为让代码编得过 ---- */
+extern uint32_t s_fake_reg;
+
+#define __HAL_DBGMCU_FREEZE_TIM2() ((void)0)
+#define __HAL_DBGMCU_FREEZE_TIM3() ((void)0)
+#define __HAL_DBGMCU_FREEZE_TIM4() ((void)0)
+#define __HAL_DBGMCU_FREEZE_TIM5() ((void)0)
+#define __HAL_DBGMCU_FREEZE_TIM6() ((void)0)
+#define __HAL_DBGMCU_FREEZE_TIM7() ((void)0)
+
+#define UART_FLAG_IDLE (1U << 0)
+#define UART_FLAG_ORE  (1U << 1)
+#define UART_FLAG_FE   (1U << 2)
+#define UART_FLAG_NE   (1U << 3)
+#define UART_FLAG_PE   (1U << 4)
+#define HAL_UART_STATE_ERROR (0x20U)
+#define HAL_DMA_STATE_READY  (0x01U)
+#define __HAL_UART_CLEAR_PEFLAG(h)     ((void)(h))
+#define UART_IT_IDLE   (1U << 1)
+
+#define __HAL_UART_GET_FLAG(h, f)      ((s_fake_reg & (f)) != 0)
+#define __HAL_UART_CLEAR_IDLEFLAG(h)   ((void)(h))
+#define __HAL_UART_ENABLE_IT(h, it)    ((void)(h), (void)(it))
+#define __HAL_DMA_GET_COUNTER(h)       (0U)
+
+#define __NOP() ((void)0)

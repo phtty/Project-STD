@@ -1,0 +1,887 @@
+/**
+ * @file    app_render.c
+ * @brief   文字/图形渲染实现 — 数据驱动字库引擎
+ *
+ * 字库布局: (字号, 编码, 字型) 三元组在 Flash 中顺序拼接。
+ * 具体有哪些三元组、各自多大、怎么索引，**都是板级事实**（两板字库不是同一版：
+ * 3833024 是 GBK/14-16-20-24-32，5006048 是 GB2312/16-24-32-48），由
+ * boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 的 g_board_font_lib 提供，本模块只消费。
+ */
+
+#include "app_render.h"
+
+#include <stdio.h>
+#include <string.h>
+#include "board.h" /* BOARD_FONT_LIB_TOTAL_BYTES（编译期容量契约） */
+#include "cmsis_os2.h"
+#include "text_cvt.h"
+#include "initcall.h"
+#include "crc_utils.h"
+#include "dev_w25qxx.h"
+#include "dev_cfg_record.h"   /* DEV_CFG_RECORD_STATE_OK */
+#include "app_cfg_sched.h" /* 显存持久化走调度器 */
+
+/* 字库表、可用字号集合、总字节数全部是板级事实（两板的字号集合与字符集都不同：
+ * 3833024 是 GBK 14/16/20/24/32，5006048 是 GB2312 16/24/32/48），见
+ * app_render.h 的 app_font_lib_desc_t 与 board.h 的 BOARD_FONT_LIB_TOTAL_BYTES。
+ * 本文件不再持有任何具体数字。 */
+
+/* ---- 内部: bytes_per_char ---- */
+static inline uint16_t _glyph_bytes(app_font_key_t k)
+{
+    uint8_t w = (k.charset == APP_FONT_ENC_ASCII) ? k.size / 2 : k.size;
+    return (uint16_t)k.size * ((w + 7) / 8);
+}
+
+/* ---- 内部: 字符宽度 ---- */
+static inline uint8_t _glyph_width_px(app_font_key_t k)
+{
+    return (k.charset == APP_FONT_ENC_ASCII) ? k.size / 2 : k.size;
+}
+
+/* ---- 内部: 把请求字号解析为本板实际可用的字号 ----
+ *
+ * 两板的字号集合不同（3833024 无 48，5006048 无 14/20），而请求字号来自运行期
+ * 协议（LDI 的 0BH 等），编译期拦不住。**回落到最近邻。**
+ *
+ * 旧实现是让 _font_offset 找不到就返回偏移 0 —— 那会拿本板第 0 个字库单元当该
+ * 字号用，渲染出完全无关的内容，且不报错、不打日志，是最难查的一种失效。
+ *
+ * 并列时取**较小**的一个：调用方的显示区域是按请求字号预留的，取小的不会溢出。
+ * sizes[] 必须升序（app_font_lib_desc_t 的约定），下面"严格小于才替换"正是靠它
+ * 保证并列时留下先遇到的、也就是更小的那个。 */
+static app_font_size_t _resolve_size(app_font_size_t want)
+{
+    const app_font_lib_desc_t *d = &g_board_font_lib;
+    if (d->size_count == 0) return (app_font_size_t)0; /* 板级表为空：调用方据此放弃渲染 */
+
+    app_font_size_t best   = d->sizes[0];
+    uint32_t    best_d = (want > best) ? (uint32_t)(want - best) : (uint32_t)(best - want);
+
+    for (uint8_t i = 1; i < d->size_count; i++) {
+        app_font_size_t s   = d->sizes[i];
+        uint32_t    dif = (want > s) ? (uint32_t)(want - s) : (uint32_t)(s - want);
+        if (dif < best_d) {
+            best_d = dif;
+            best   = s;
+        }
+    }
+    return best;
+}
+
+/* ---- 内部: 查字库单元并给出其 Flash 起始偏移 ----
+ * 单元线性连续排列，偏移 = 前 i 项 unit_size 之和（见 app_font_lib_desc_t）。 */
+static bool _find_unit(const app_font_key_t *key, uint32_t *offset)
+{
+    uint32_t off = 0;
+    for (uint16_t i = 0; i < g_board_font_lib.lib_count; i++) {
+        const app_font_unit_t *u = &g_board_font_lib.lib[i];
+        /* 逐字段比较而非 memcmp：结构体可能有填充字节，memcmp 会连填充一起比 */
+        if (u->key.size == key->size && u->key.charset == key->charset && u->key.type == key->type) {
+            *offset = off;
+            return true;
+        }
+        off += u->unit_size;
+    }
+    return false;
+}
+
+/* ---- 内部: 单个字符在 Flash 中的地址 ----
+ *
+ * 单元缺失（板级表缺项）返回 false，**调用方跳过该字** —— 不要退回偏移 0 去读，
+ * 那是别的字型的字形。索引式按 g_board_font_lib 指定的方案选：两版字库的 ASCII 起点
+ * （0x20 / 0x00）与汉字区位基准（GBK 190 进制 / GB2312 94 进制）都不同。 */
+static bool _char_addr(const app_font_key_t *key, const uint8_t *ch, uint32_t *addr)
+{
+    uint32_t base;
+    if (!_find_unit(key, &base)) return false;
+
+    uint16_t bytes = _glyph_bytes(*key);
+
+    if (key->charset == APP_FONT_ENC_ASCII) {
+        /* ASCII: 1字节, ch[0] = 字符码。起点由字库决定，不是想当然的 0x20 ——
+           5006048 的映像就是 0x00 起、按原始码索引的 128 槽表。 */
+        if (ch[0] < g_board_font_lib.asc_index_base) return false;
+        *addr = base + ((uint32_t)ch[0] - g_board_font_lib.asc_index_base) * bytes;
+        return true;
+    }
+
+    /* 汉字: 2字节, ch[0]=高字节, ch[1]=低字节 */
+    uint32_t idx;
+    if (g_board_font_lib.gb_index == APP_FONT_IDX_KIND_GB2312) {
+        /* hi 从 0x81 起也要拦：_is_gbk 放行 0x81~0xFE，而 (hi-0xA1) 在 hi<0xA1 时
+           下溢；lo=0xA0 同理（参考工程对 0xA1~0xA9 区正是放行 lo>=0xA0 的）。
+           两处下溢都会回绕成一个巨大索引，读到**别的字型的尾部** —— 真实可达。 */
+        if (ch[0] < 0xA1 || ch[1] < 0xA1) return false;
+        idx = 94U * (uint32_t)(ch[0] - 0xA1) + (uint32_t)(ch[1] - 0xA1);
+    } else {
+        if (ch[0] < 0x81 || ch[1] < 0x40) return false;
+        idx = (uint32_t)(ch[0] - 0x81) * 190U + (ch[1] >= 0x80 ? ch[1] - 0x41 : ch[1] - 0x40);
+    }
+    *addr = base + idx * bytes;
+    return true;
+}
+
+/* ---- 判断两字节是否为合法 GBK 码 ---- */
+static bool _is_gbk(uint8_t high, uint8_t low)
+{
+    return (high >= 0x81 && high <= 0xFE) && (low >= 0x40 && low <= 0xFE && low != 0x7F);
+}
+
+/* ---- 注册的句柄 ---- */
+static dev_display_t *s_render_display;
+static dev_storage_t *s_render_font;
+
+/* ---- 渲染目标（见 app_render.h）----
+ * 未设置时回落"直写实屏"，与这条缝引入之前的行为完全一致。 */
+static const app_render_target_t *s_target;
+static const app_render_persist_hook_fn_t *s_persist_hook;
+
+/* ---- "这一帧要落盘"的请求位 ----
+ *
+ * **只在有画布时才用**（多卡主卡）：渲染返回时内容还在画布上、没落屏，此刻读实屏
+ * 存下去的是**上一帧** —— 这正是 `app_rls_cmd.c` / `app_vms_ctrl.c` 那三个
+ * "render 完立刻 save" 调用点的旧缺陷。所以这里只记请求，由 `app_screen` 在
+ * **落屏之后**（`commit_bitmap` / `commit_self`）取走。
+ *
+ * 没有画布时（单卡、或从卡直写实屏）画的就是实屏，当场存即可 —— 见 app_render()。 */
+static volatile bool s_persist_req;
+
+/** @brief 取走"要落盘"的请求（清标志）；由落屏路径调用 */
+bool app_render_take_persist_req(void)
+{
+    const bool r = s_persist_req;
+    s_persist_req = false;
+    return r;
+}
+
+/** @brief **不取走**、只看：级联开轮时用它决定这一轮的 IMAGE 带不带 persist
+ *         （帧在落屏**之前**发出去，那时还不能取走标志） */
+bool app_render_peek_persist_req(void)
+{
+    return s_persist_req;
+}
+
+/* ---- "正在渲染"的计数（见 app_render_busy 的说明）----
+ *
+ * 用计数而不是 bool：渲染内部还有可能回调（持久化钩子），将来若有人嵌套调用，
+ * 计数不会让闸提前打开。 */
+static volatile int s_render_busy;
+
+bool app_render_busy(void)
+{
+    return s_render_busy > 0;
+}
+
+static void _direct_fill(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
+{
+    dev_display_fill((dev_display_t *)ctx, x, y, w, h, c);
+}
+static void _direct_bitmap(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                           const uint8_t *bm, dev_display_color_t c)
+{
+    dev_display_draw_bitmap((dev_display_t *)ctx, x, y, w, h, bm, c);
+}
+
+/** @brief 取当前渲染目标；未显式设置时按实屏现搭一个。
+ *
+ *  每次现搭而不是缓存：几何来自 dev_display_t，而它在 hw initcall 里才注册，
+ *  缓存在模块静态里会锁住一个可能为 NULL 的早期值。现搭是 5 次赋值，可以忽略。 */
+static const app_render_target_t *_rt(void)
+{
+    static app_render_target_t direct;
+    if (s_target) return s_target;
+
+    direct.fill   = _direct_fill;
+    direct.bitmap = _direct_bitmap;
+    direct.ctx    = s_render_display;
+    direct.rows   = s_render_display ? s_render_display->screen_rows : 0;
+    direct.cols   = s_render_display ? s_render_display->screen_cols : 0;
+    return &direct;
+}
+
+void app_render_set_target(const app_render_target_t *t)
+{
+    s_target = t;
+}
+
+void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h)
+{
+    s_persist_hook = h;
+}
+
+/* 显存持久化的调度器句柄（地址/归属/CRC/去重都由调度器管） */
+static uint8_t s_persist_id = 0xFF;
+
+/* 保护载荷组装缓冲（s_persist_buf，定义见文件末尾的持久化段）。
+   放在这里是因为 _render_init 要创建它，而那在文件前部。 */
+static osMutexId_t s_persist_lock;
+
+/* 渲染模块互斥量：串行化 `app_render()` 的**整段执行**（见 app_render() 处的锁说明）。
+   它保护 font_buf / text_buf / s_line_widths 三个文件静态缓冲 —— app_render 会被
+   LDI / RLS / 工厂等多个任务并发调用。同样在本层创建：RTOS 已启动且早于任何调用。 */
+static osMutexId_t s_render_lock;
+
+static const app_cfg_sched_desc_t s_render_persist_desc = {
+    .name    = "render_persist",
+    .version = RENDER_PERSIST_VERSION,
+    /* 不在启动加载遍里恢复显示：上电该显示什么由 app_boot 的 app_default_display
+       决定（先试 restore，失败再画默认内容）。调度器只负责存取。 */
+    .load = NULL,
+};
+
+static void _render_persist_register(void)
+{
+    s_persist_id = app_cfg_sched_register(&s_render_persist_desc);
+    if (s_persist_id == 0xFF)
+        printf("[render] 显存持久化注册失败，本次上电不落盘\n");
+}
+/* sw_dev(2)：注册只需早于 sw_app(3) 的启动加载遍，以及早于任何 save。 */
+sw_dev_initcall(_render_persist_register);
+
+
+/* ---- 模块自注册，依赖storage和display模块）---- */
+static void _render_init(void)
+{
+    s_render_display = dev_display_get();
+    s_render_font    = dev_w25qxx_get();
+
+    /* 运行期交叉校验。三条都是"错了不会报错、只会让字库取到乱码"的失效模式，
+       所以宁可每次上电多说一句。 */
+    uint32_t sum = 0;
+    for (uint16_t i = 0; i < g_board_font_lib.lib_count; i++)
+        sum += g_board_font_lib.lib[i].unit_size;
+
+    if (sum != g_board_font_lib.total_bytes)
+        printf("[render] 板级字库表求和 %u != 表内 total_bytes %u，其后每个单元的偏移都错位了\n",
+               (unsigned)sum, (unsigned)g_board_font_lib.total_bytes);
+
+    /* 表内 total_bytes 与编译期常量分居两处（前者板级 .c、后者 board.h）。不同步的
+       后果不只是取字乱码 —— 配置区地址 = capacity - (blk+1)*4096，门槛按哪个值算的
+       就是按哪个；常量偏小会让配置区落进字库区，首次擦写直接毁字库。 */
+    if (g_board_font_lib.total_bytes != BOARD_FONT_LIB_TOTAL_BYTES)
+        printf("[render] 板级字库 total_bytes %u != board.h 的 %u，配置区地址会算错\n",
+               (unsigned)g_board_font_lib.total_bytes, (unsigned)BOARD_FONT_LIB_TOTAL_BYTES);
+
+    /* sizes[] 必须升序 —— _resolve_size 的"并列取小"依赖这个前提，
+       乱序时最近邻会挑错，且同样没有任何报错。 */
+    for (uint8_t i = 1; i < g_board_font_lib.size_count; i++) {
+        if (g_board_font_lib.sizes[i] <= g_board_font_lib.sizes[i - 1]) {
+            printf("[render] 板级字号集合非升序（%u 号在 %u 号之后），最近邻回落会选错\n",
+                   (unsigned)g_board_font_lib.sizes[i], (unsigned)g_board_font_lib.sizes[i - 1]);
+            break;
+        }
+    }
+
+
+    /* 持久化区的地址/容量门槛不再由本模块计算 —— 配置调度器统一管
+     * （见 app_cfg_sched.c 的 s_storage_ready：要求"字库之后还放得下整个配置区"）。 */
+
+    /* 载荷组装锁。在本层创建：RTOS 已启动，且早于任何协议任务可能触发的 save。 */
+    const osMutexAttr_t persist_attr = {.name = "render_persist", .attr_bits = osMutexPrioInherit};
+    s_persist_lock                   = osMutexNew(&persist_attr);
+
+    /* 渲染模块锁：见 s_render_lock / app_render() 的说明。同样在本层创建 ——
+       RTOS 已启动，且早于任何协议任务可能发起的渲染。 */
+    const osMutexAttr_t render_attr = {.name = "render", .attr_bits = osMutexPrioInherit};
+    s_render_lock                   = osMutexNew(&render_attr);
+}
+sw_app_initcall(_render_init);
+
+/* ================================================================
+ *  文字渲染的几何辅助
+ *
+ *  **区域契约**：目标区域 = `[x, x+w) × [y, y+h)`。x/y 是左上角，w/h 是**尺寸**
+ *  （不是绝对右/下边界）；"够不够放"一律用 `x+w` / `y+h` 判。越界语义是**裁剪**：
+ *  `_render_text` 入口先把区域夹到目标几何（`_rt()->rows` 是宽、`cols` 是高），
+ *  之后所有布局与判断都用夹取后的局部 rx/ry/rw/rh。直写实屏与逻辑画布两路走的是
+ *  同一段代码，故同一 cfg + 同一目标几何 → 逐位相同。**两层各自防御**：入口自己
+ *  夹，不指望 `_rt()` 的绘制原语侧兜底。
+ * ================================================================ */
+
+/* ---- 行宽测量缓冲 ----
+ *
+ * 行数上限 = **源文本字节数 + 1**：每个源字节最多起一个新行（`\n` 占一个字节起一行；
+ * 自动换行也至少消耗一个字形对应的源字节），末尾再加"最后一行"。源文本先落进
+ * 256 字节的 text_buf，故上限 ≤ 257；+2 留余量（text_buf 若加大，这里要同步）。
+ *
+ * 原先它是 `_render_text` 内函数局部的 `uint16_t line_widths[32]`，而 LDI 文本可达
+ * 33 行以上 —— 越界写栈。改成文件静态并加 push 上限门禁，读处（line_idx）也夹取。
+ *
+ * 本缓冲与 font_buf / text_buf 一样是文件静态，由 `s_render_lock` 在 `app_render()`
+ * 整段执行期间保护（见 app_render() 处的锁说明）。 */
+#define RENDER_LINE_MAX (258U) /**< ≥ sizeof(text_buf) + 2 */
+static uint16_t s_line_widths[RENDER_LINE_MAX];
+
+/** @brief 追加一行宽度；已达上限返回 false（调用方据此**停止测量**） */
+static inline bool _line_push(uint16_t *line_count, uint16_t line_w)
+{
+    if (*line_count >= RENDER_LINE_MAX) return false;
+    s_line_widths[(*line_count)++] = line_w;
+    return true;
+}
+
+/** @brief 区域内逐行水平对齐的起点：line_w ≥ 区域宽时偏移取 0（防无符号下溢） */
+static inline uint16_t _line_origin_x(uint16_t rx, uint16_t rw, const app_render_style_t *style,
+                                      uint16_t line_w)
+{
+    if (style && line_w < rw) {
+        if (style->h_align == APP_RENDER_ALIGN_CENTER) return (uint16_t)(rx + (rw - line_w) / 2);
+        if (style->h_align == APP_RENDER_ALIGN_RIGHT_DOWN) return (uint16_t)(rx + (rw - line_w));
+    }
+    return rx;
+}
+
+/** @brief 进入下一行：回区域左、下移一行高，并做**高度门禁**
+ *
+ *  自动换行与显式 `\n` **共用本门禁**：下一行放不下就返回 false，调用方**停止绘制**
+ *  （已画的行保留）——即"放得下几行显示几行、不画半截字"。 */
+static inline bool _line_advance(uint16_t *cur_x, uint16_t *cur_y, uint16_t *line_idx,
+                                 const app_render_style_t *style, uint16_t line_h, uint16_t rx,
+                                 uint16_t rw, uint16_t region_bottom, uint16_t line_count)
+{
+    (*line_idx)++;
+    if (*line_idx >= line_count) return false; /* 没有已测量的行：越界读不得发生 */
+    *cur_y = (uint16_t)(*cur_y + line_h);
+    if ((uint32_t)*cur_y + line_h > region_bottom) return false; /* 下一行放不下 */
+    *cur_x = _line_origin_x(rx, rw, style, s_line_widths[*line_idx]);
+    return true;
+}
+
+/** @brief 取文本 `pos` 处一个字形：写出其像素宽与消耗字节数；不可渲染时宽为 0、步进 1
+ *
+ *  ASCII（0x20..0x7F）= size/2、GBK 双字节 = size —— 与 `_glyph_width_px` 同源。
+ *  测量趟与 prefer_one_line 的单行宽度都用它，避免两处分类各自漂移。 */
+static inline uint8_t _glyph_width_at(const char *text, uint16_t len, uint16_t pos,
+                                      const app_font_key_t *asc_key, const app_font_key_t *gbk_key,
+                                      uint16_t *step)
+{
+    if ((uint8_t)text[pos] >= 0x20 && (uint8_t)text[pos] <= 0x7F) {
+        *step = 1;
+        return _glyph_width_px(*asc_key);
+    }
+    if (pos + 1 < len && _is_gbk((uint8_t)text[pos], (uint8_t)text[pos + 1])) {
+        *step = 2;
+        return _glyph_width_px(*gbk_key);
+    }
+    *step = 1; /* 换行 / 半截码 / 不可渲染：跳过 1 字节 */
+    return 0;
+}
+
+/** @brief 文本在给定字号下的**单行总宽**（逐字形累加，不读字库、无 SPI）
+ *
+ *  只累加、不换行 —— 供 prefer_one_line 从大到小试字号。调用方须先排除含 `\n` 的文本。 */
+static uint32_t _text_line_width(const char *text, uint16_t len, app_font_size_t size,
+                                 app_font_type_t type)
+{
+    const app_font_key_t asc_key = {.size = size, .type = type, .charset = APP_FONT_ENC_ASCII};
+    const app_font_key_t gbk_key = {.size = size, .type = type, .charset = APP_FONT_ENC_GBK};
+    uint32_t             total   = 0;
+    for (uint16_t pos = 0; pos < len;) {
+        uint16_t step;
+        total += _glyph_width_at(text, len, pos, &asc_key, &gbk_key, &step);
+        pos = (uint16_t)(pos + step);
+    }
+    return total;
+}
+
+/** @brief 文本是否含显式换行 `\n`（prefer_one_line 的适用前提之一） */
+static bool _text_has_newline(const char *text, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++)
+        if (text[i] == '\n') return true;
+    return false;
+}
+
+/** @brief 按 `\n` 切出的行数（空段也算一行；无 `\n` 时为 1） */
+static uint16_t _text_line_count(const char *text, uint16_t len)
+{
+    uint16_t n = 1;
+    for (uint16_t i = 0; i < len; i++)
+        if (text[i] == '\n') n++;
+    return n;
+}
+
+/** @brief 含 `\n` 文本在给定字号下的**最宽一行**宽度（逐字形累加，不读字库、无 SPI）
+ *
+ *  逐段调用 `_text_line_width`（段内不换行）取最大值 —— 供含 `\n` 的文本"按实际行
+ *  选字号"用。段边界是 `\n`，不改动文本本身。 */
+static uint32_t _text_max_line_width(const char *text, uint16_t len, app_font_size_t size,
+                                     app_font_type_t type)
+{
+    uint32_t max_w = 0;
+    uint16_t start = 0;
+    for (uint16_t i = 0; i <= len; i++) {
+        if (i == len || text[i] == '\n') {
+            uint32_t w = _text_line_width(text + start, (uint16_t)(i - start), size, type);
+            if (w > max_w) max_w = w;
+            start = (uint16_t)(i + 1);
+        }
+    }
+    return max_w;
+}
+
+/* ---- 渲染分支（各功能静态内联）---- */
+
+static inline void _render_text(const app_render_cfg_t *cfg)
+{
+    /* 入口参数检查：w/h 是**尺寸**，0 尺寸不画 */
+    if (!cfg->text || !cfg->len)
+        return;
+    if (!cfg->w || !cfg->h)
+        return;
+
+    /* ---- 入口夹取：把请求区域 [x, x+w) × [y, y+h) 夹到目标几何 ----
+     * `_rt()->rows` 是目标宽、`cols` 是高。夹取后所有布局与判断一律用局部
+     * rx/ry/rw/rh，不再碰 cfg->x/w/h。`!s_render_display` 已在 app_render()
+     * 门口拦下，这里几何为 0 同样不画。 */
+    const app_render_target_t *rt = _rt();
+    if (!rt->rows || !rt->cols) return; /* 目标几何为 0：不画 */
+
+    uint16_t rx = cfg->x, ry = cfg->y, rw = cfg->w, rh = cfg->h;
+    if (rx >= rt->rows || ry >= rt->cols) return; /* 起点已在目标之外 */
+    if ((uint32_t)rx + rw > rt->rows) rw = (uint16_t)(rt->rows - rx);
+    if ((uint32_t)ry + rh > rt->cols) rh = (uint16_t)(rt->cols - ry);
+    if (!rw || !rh) return;
+
+    app_font_key_t gbk_key = {.size = cfg->font_size, .type = cfg->font_type, .charset = APP_FONT_ENC_GBK};
+    app_font_key_t asc_key = {.size = gbk_key.size, .type = gbk_key.type, .charset = APP_FONT_ENC_ASCII};
+
+    uint16_t cur_x;
+    uint16_t cur_y;
+    static uint8_t font_buf[512];
+    static char text_buf[256];
+    uint16_t text_len;
+
+    if (cfg->text_enc == APP_FONT_ENC_UTF8) {
+        /* 输入先夹到 text_buf 容量：切在多字节中间由 cvt_utf8_to_gbk 的"干净停止"兜住。
+         * 输出再复核后才赋给 text_len —— 依 cvt_utf8_to_gbk 的不变量①（输出 ≤ 输入）
+         * 与②（调用方保证目的缓冲 ≥ 输入字节数），两条互相咬合、缺一不可：
+         * 不先夹输入，②对不上；不复核输出，①一旦回归就直接越界写 text_buf。 */
+        uint32_t in_len = cfg->len;
+        if (in_len > sizeof(text_buf)) in_len = sizeof(text_buf);
+        uint32_t out_len = sizeof(text_buf);
+        cvt_utf8_to_gbk(cfg->text, in_len, text_buf, &out_len);
+        if (out_len > sizeof(text_buf)) out_len = sizeof(text_buf); /* 复核后才赋值 */
+        text_len = (uint16_t)out_len;
+    } else {
+        uint16_t n = cfg->len < sizeof(text_buf) ? cfg->len : sizeof(text_buf);
+        memcpy(text_buf, cfg->text, n);
+        text_len = n;
+    }
+
+    /* ---- 换行策略 ----
+     * 默认就是 style->word_wrap（style 为空 = 不换行，逐字与旧行为一致）。
+     * prefer_one_line 命中时会局部改写它：选到单行字号 → 强制不换行；
+     * 都没选到 → 最小字号 + 强制换行。改写只影响本次调用，不动调用方的 style。 */
+    bool wrap = cfg->style && cfg->style->word_wrap;
+
+    /* ---- 字号落定 ---- */
+    const app_font_lib_desc_t *flib = &g_board_font_lib;
+    if (flib->size_count == 0) return; /* 板级字库表为空：本板根本没有字库 */
+
+    if (cfg->font_size == APP_FONT_SIZE_SELF_ADAPT) {
+        /* 自适应字号。**含显式 `\n` 与不含分开处理**：
+           旧实现把文本当一个**整体 blob** 估容量（`text_len ≤ (rh/size)×(rw/(size/2))`），
+           看不到行数 —— 现场 128×32、`"回归\n测试"`（GBK 9 字节）在 24 号命中
+           （h_res=1、w_res=10 → 10 ≥ 9），但 24 号下两行=48 > 32，高度门禁只画出第一行、
+           居中也失效。含 `\n` 时按**实际行数/最宽行**选字号即可消除这个缺陷；
+           不含 `\n` 时维持原 blob 口径，单行行为逐字不变。 */
+        gbk_key.size = flib->sizes[0];
+        asc_key.size = flib->sizes[0];
+
+        if (_text_has_newline(text_buf, text_len)) {
+            /* 按 `\n` 切段，逐候选字号算最宽行，选**最大**的满足
+               "行数 × 字号 ≤ rh **且** 最宽行 ≤ rw" 的字号。
+               （现场：32 高、2 行 → 16 号：2×16=32 ≤ 32，最宽行 2 汉字=32 ≤ 128 ✓）
+               都不满足 → 保持最小字号，由下面的换行/高度门禁收尾（放不下的行不画）。 */
+            const uint16_t lines = _text_line_count(text_buf, text_len);
+            for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                app_font_size_t s = flib->sizes[i];
+                if ((uint32_t)lines * s > rh) continue; /* 行数×字号要放得下 */
+                if (_text_max_line_width(text_buf, text_len, s, cfg->font_type) > rw) continue;
+                gbk_key.size = s;
+                asc_key.size = s;
+                break;
+            }
+        } else {
+            /* 无 `\n`：保持原"按面积估算"口径（不改单行行为）。 */
+            for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                uint16_t h_res = rh / flib->sizes[i];
+                uint16_t w_res = rw / (flib->sizes[i] / 2);
+                if (text_len <= h_res * w_res) {
+                    gbk_key.size = flib->sizes[i];
+                    asc_key.size = flib->sizes[i];
+                    break;
+                }
+            }
+
+            /* prefer_one_line：样式开关打开时，改用"整段一行"的口径覆盖上面按面积选出的
+               字号。从大到小选**第一个**"一行放得下且字号 ≤ 区域高"的字号 —— 一行宽只
+               逐字形累加，**不读字库、无 SPI**。都没选中就取最小字号，并强制换行（由下面的
+               word_wrap 语义收尾，仍受高度门禁约束：放不下的行不画）。
+               （本分支已保证文本不含 `\n`，故不再重复判。） */
+            if (cfg->style && cfg->style->prefer_one_line) {
+                bool            found = false;
+                app_font_size_t pick  = flib->sizes[0];
+                for (int8_t i = (int8_t)flib->size_count - 1; i >= 0; i--) {
+                    app_font_size_t s = flib->sizes[i];
+                    if ((uint16_t)s > rh) continue; /* 字号 ≤ 区域高：一行才放得下 */
+                    if (_text_line_width(text_buf, text_len, s, cfg->font_type) <= rw) {
+                        pick  = s;
+                        found = true;
+                        break;
+                    }
+                }
+                gbk_key.size = pick;
+                asc_key.size = pick;
+                wrap         = !found; /* 选中 → 不换行；都没选中 → 最小字号 + 强制换行 */
+            }
+        }
+    } else {
+        /* 请求字号不在本板上时回落到最近邻 —— 否则 _find_unit 找不到，会一路
+           退化成"什么都不画"或（旧实现）拿偏移 0 的单元去读 */
+        app_font_size_t r = _resolve_size(cfg->font_size);
+        gbk_key.size  = r;
+        asc_key.size  = r;
+    }
+
+    /* 三元组齐全性：缺项就整条不画。逐字失败会把同一条日志每字刷一遍，
+       而缺项是板级表的问题，一次说清就够。 */
+    uint32_t probe;
+    if (!_find_unit(&gbk_key, &probe) || !_find_unit(&asc_key, &probe)) {
+        printf("[render] 板级字库缺 %u 号/%u 字型，本次不渲染\n", (unsigned)gbk_key.size,
+               (unsigned)gbk_key.type);
+        return;
+    }
+
+    /* ---- 测量趟：记录每行宽度（用于逐行对齐） ---- */
+    uint16_t line_count = 0;
+    uint16_t line_w     = 0;
+    uint16_t line_h     = gbk_key.size;
+    uint16_t char_pos   = 0;
+
+    while (char_pos < text_len) {
+        if (text_buf[char_pos] == '\n') {
+            if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
+            line_w = 0;
+            char_pos++;
+            continue;
+        }
+
+        uint16_t step;
+        uint8_t  glyph_w = _glyph_width_at(text_buf, text_len, char_pos, &asc_key, &gbk_key, &step);
+        char_pos         = (uint16_t)(char_pos + step);
+        if (!glyph_w) continue; /* 不可渲染：跳过（与旧路径一致，不参与换行判断） */
+
+        if ((uint32_t)line_w + glyph_w > rw) {
+            if (wrap) {
+                if (!_line_push(&line_count, line_w)) break; /* 超上限：停止测量 */
+                line_w = glyph_w;
+            }
+            /* 不换行：超出部分截断，不计入宽度 */
+        } else {
+            line_w += glyph_w;
+        }
+    }
+    (void)_line_push(&line_count, line_w); /* 最后一行 */
+
+    /* ---- 高度门禁（首行）----
+     * 首行都放不下（区域高 < 单行字高）→ 整段不画。自动换行与显式 `\n` 之后
+     * 的行由 _line_advance 用**同一门禁**逐行判断（放得下几行显示几行）。 */
+    if (rh < line_h) return;
+
+    /* ---- 垂直对齐：在区域内算 ---- */
+    uint16_t text_h = line_count * line_h;
+    cur_y = ry;
+    if (cfg->style) {
+        if (cfg->style->v_align == APP_RENDER_ALIGN_CENTER && rh > text_h)
+            cur_y = (uint16_t)(ry + (rh - text_h) / 2);
+        else if (cfg->style->v_align == APP_RENDER_ALIGN_RIGHT_DOWN && rh > text_h)
+            cur_y = (uint16_t)(ry + (rh - text_h));
+    }
+    const uint16_t region_bottom = (uint16_t)(ry + rh);
+
+    /* ---- 渲染趟：逐行独立水平对齐 ---- */
+    uint16_t line_idx = 0;
+    cur_x    = _line_origin_x(rx, rw, cfg->style, s_line_widths[0]);
+    char_pos = 0;
+
+    while (char_pos < text_len) {
+        if (text_buf[char_pos] == '\n') {
+            /* 显式 `\n` 与自动换行共用同一高度门禁：放不下就停止绘制（已画的保留） */
+            if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw, region_bottom,
+                               line_count))
+                return;
+            char_pos++;
+            continue;
+        }
+
+        if ((uint8_t)text_buf[char_pos] >= 0x20 && (uint8_t)text_buf[char_pos] <= 0x7F) {
+            uint8_t glyph_w = _glyph_width_px(asc_key);
+
+            if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
+                if (wrap) {
+                    /* 自动换行：续行回区域左；下一行放不下则停止 */
+                    if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
+                                       region_bottom, line_count))
+                        return;
+                } else {
+                    /* 不换行：逐字形整体截断，保留已放下的 */
+                    char_pos++;
+                    continue;
+                }
+            }
+
+            uint8_t  ch_byte = (uint8_t)text_buf[char_pos];
+            uint32_t addr;
+            /* 取址失败（板级表缺项或码位越界）就只跳过这个字，仍照常推进光标 ——
+               否则后面的字会挤到同一个位置叠着画 */
+            if (_char_addr(&asc_key, &ch_byte, &addr)) {
+                dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(asc_key));
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, DEV_DISPLAY_COLOR_BLACK);
+                rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, asc_key.size, font_buf, cfg->color);
+            }
+
+            cur_x = (uint16_t)(cur_x + glyph_w);
+            char_pos++;
+            continue;
+
+        } else if (char_pos + 1 < text_len && _is_gbk((uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1])) {
+            uint8_t glyph_w = _glyph_width_px(gbk_key);
+
+            if ((uint32_t)cur_x + glyph_w > (uint32_t)rx + rw) {
+                if (wrap) {
+                    if (!_line_advance(&cur_x, &cur_y, &line_idx, cfg->style, line_h, rx, rw,
+                                       region_bottom, line_count))
+                        return;
+                } else {
+                    char_pos += 2;
+                    continue;
+                }
+            }
+
+            uint8_t  gbk_ch[2] = {(uint8_t)text_buf[char_pos], (uint8_t)text_buf[char_pos + 1]};
+            uint32_t addr;
+            if (_char_addr(&gbk_key, gbk_ch, &addr)) {
+                dev_storage_read(s_render_font, addr, font_buf, _glyph_bytes(gbk_key));
+                rt->fill(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, DEV_DISPLAY_COLOR_BLACK);
+                rt->bitmap(rt->ctx, cur_x, cur_y, glyph_w, gbk_key.size, font_buf, cfg->color);
+            }
+
+            cur_x = (uint16_t)(cur_x + glyph_w);
+            char_pos += 2;
+            continue;
+
+        } else {
+            char_pos++;
+        }
+    }
+}
+
+static inline void _render_bitmap(const app_render_cfg_t *cfg)
+{
+    if (!cfg->w || !cfg->h || !cfg->bitmap) return;
+
+    const app_render_target_t *rt = _rt();
+    rt->bitmap(rt->ctx, cfg->x, cfg->y, cfg->w, cfg->h, cfg->bitmap, cfg->color);
+}
+
+static inline void _render_fill(const app_render_cfg_t *cfg)
+{
+    const app_render_target_t *rt = _rt();
+    uint16_t w = cfg->w, h = cfg->h;
+    if (!w || !h) {
+        w = rt->rows;
+        h = rt->cols;
+    }
+    rt->fill(rt->ctx, cfg->x, cfg->y, w, h, cfg->color);
+}
+
+/* ---- 渲染跳表 ---- */
+typedef void (*app_render_fn_t)(const app_render_cfg_t *);
+static const app_render_fn_t s_render_fn_table[] = {
+    [APP_RENDER_TYPE_TEXT]   = _render_text,
+    [APP_RENDER_TYPE_BITMAP] = _render_bitmap,
+    [APP_RENDER_TYPE_FILL]   = _render_fill,
+};
+
+/* ---- 公开 API：tagged union 分派 ----
+ *
+ * 锁的作用域是**整个 `app_render()` 调用**（含 `_render_locked` 内的所有提前返回
+ * 路径）。它保护 font_buf / text_buf / s_line_widths 三个文件静态缓冲 —— app_render
+ * 会被 LDI / RLS / 工厂等多个任务并发调用。**不能把锁放进 `_render_text` 内部**：
+ * 那会漏掉 `_render_bitmap` / `_render_fill` 与持久化这些同样碰共享状态的路径。
+ *
+ * 单一出口：真正实现收进 `_render_locked`，包装层无条件成对 Acquire/Release。内层从
+ * 哪条 return 出去都不会漏解锁。
+ *
+ * 锁序：本锁（render）只在 app_render 内持有，期间可能调 `app_render_save()`，后者取
+ * 的是另一把 `s_persist_lock`。没有任何路径"持 persist 锁再调 app_render"，故固定为
+ * render → persist 的嵌套顺序，不会死锁。`app_render` 亦无自嵌套调用（渲染目标原语
+ * 与持久化钩子都不回调 app_render），与 os_stub 的非递归互斥量语义一致。
+ *
+ * `s_render_lock` 为 NULL（`_render_init` 之前）时按"**不锁但照常执行**"处理：那时
+ * RTOS 尚未起来，也不会有第二个任务并发进到这里。 */
+static void _render_locked(const app_render_cfg_t *cfg)
+{
+    s_render_busy++;
+    if (cfg->type < sizeof(s_render_fn_table) / sizeof(s_render_fn_table[0]) && s_render_fn_table[cfg->type])
+        s_render_fn_table[cfg->type](cfg);
+    s_render_busy--;
+
+    /* ---- 持久化请求（见 app_render.h 的 persist 说明）----
+     * **不能在这里直接存**：有画布时内容还在画布上、没落屏，此刻存下去是上一帧。 */
+    if (!cfg->persist) return;
+
+    if (s_target) {
+        s_persist_req = true; /* 交给 app_screen，落屏之后取走 */
+    } else {
+        /* 没画布：画的就是实屏（单卡、或从卡直写实屏），此刻已在屏上 → 当场存 */
+        app_render_save();
+    }
+}
+
+void app_render(const app_render_cfg_t *cfg)
+{
+    if (!cfg || !s_render_display) return;
+
+    if (s_render_lock) osMutexAcquire(s_render_lock, osWaitForever);
+    _render_locked(cfg); /* 单一出口：内层所有 return 都回到此处成对释放 */
+    if (s_render_lock) osMutexRelease(s_render_lock);
+}
+
+/* ================================================================
+ *  持久化显示 — 将显存以位图格式保存/恢复到存储设备
+ *
+ *  pixel_map (逐像素颜色) → bitmap (1bit/pixel + 单色)，大幅压缩闪存占用。
+ *  恢复阶段 fill(BLACK) + draw_bitmap(color) 重建 pixel_map。
+ *
+ *  载荷的归属/版本/长度/CRC 由配置调度器统一管（记录名 "render_persist"），
+ *  本模块不再自带头内魔数与 CRC，也不再自己算 Flash 地址。
+ * ================================================================ */
+
+/** 位图区按"全工程最大模组"定长，故载荷缓冲也按它定长（见 app_render.h） */
+static uint8_t s_persist_buf[RENDER_PERSIST_PAYLOAD_MAX];
+
+/* s_persist_buf 由 s_persist_lock 保护（声明见文件前部的句柄段）：
+   save 会来自**不同任务**（RLS 任务经 app_rls_cmd、LDI 任务经 app_vms_ctrl），
+   而载荷是"先组装进这个缓冲、再交给调度器落盘"。调度器自己的锁只覆盖落盘那一步，
+   覆盖不到组装阶段 —— 两个任务同时组装的话，先到者的缓冲会在落盘前被后到者改写，
+   存下去的是两张屏的混合体。嵌套顺序固定为"先本锁、后调度器锁"，无反向获取故不会死锁。 */
+
+/** @brief 组装/解析载荷期间持锁；锁不可用时退化为不锁（启动早期尚无竞争） */
+static void _persist_lock(void)
+{
+    if (s_persist_lock) osMutexAcquire(s_persist_lock, osWaitForever);
+}
+
+static void _persist_unlock(void)
+{
+    if (s_persist_lock) osMutexRelease(s_persist_lock);
+}
+
+/** @brief 本屏的位图字节数；同时做上界检查。越界返回 0。 */
+static uint16_t _persist_bm_bytes(const dev_display_t *d)
+{
+    uint32_t row_bytes = ((uint32_t)d->screen_rows + 7U) / 8U;
+    uint32_t bm_bytes  = (uint32_t)d->screen_cols * row_bytes;
+
+    /* 本工程真 dev_display.h 没有编译期几何宏，位图区只能按"全工程最大模组"定长。
+     * 换上更大的模组时在这里拦下 —— 拒绝保存而不是越界写。 */
+    if (bm_bytes > RENDER_PERSIST_BITMAP_MAX) {
+        printf("[render] 本屏位图 %u 字节超过持久化上限 %u，已跳过\n", (unsigned)bm_bytes,
+               (unsigned)RENDER_PERSIST_BITMAP_MAX);
+        return 0;
+    }
+    return (uint16_t)bm_bytes;
+}
+
+void app_render_save(void)
+{
+    /* 装了逻辑画布就整体委托：那时"该存什么"由画布所有者决定 ——
+       直接读 dev_display 会只存到主卡自己那块，与发给从卡的内容不是一回事。 */
+    if (s_persist_hook && s_persist_hook->save) {
+        s_persist_hook->save();
+        return;
+    }
+
+    dev_display_t *d = s_render_display;
+    if (!d || s_persist_id == 0xFF) return;
+
+    uint16_t rows     = d->screen_rows;
+    uint16_t cols     = d->screen_cols;
+    uint16_t bm_bytes = _persist_bm_bytes(d);
+    if (!bm_bytes) return;
+    uint16_t row_bytes = (rows + 7) / 8;
+
+    _persist_lock(); /* 直到落盘返回前都持有：组装缓冲不能被另一个任务改写 */
+
+    app_render_persist_t *r = (app_render_persist_t *)s_persist_buf;
+    memset(r->bitmap, 0, bm_bytes);
+
+    uint8_t color = DEV_DISPLAY_COLOR_BLACK;
+    for (uint16_t y = 0; y < cols; y++) {
+        for (uint16_t x = 0; x < rows; x++) {
+            uint8_t px = d->pixel_map[y * rows + x];
+            if (px != DEV_DISPLAY_COLOR_BLACK) {
+                r->bitmap[y * row_bytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
+                if (color == DEV_DISPLAY_COLOR_BLACK) color = px;
+            }
+        }
+    }
+
+    r->screen_rows = rows;
+    r->screen_cols = cols;
+    r->color       = color;
+
+    /* 落盘失败必须可见：此前调用方一律忽略返回值，现场只表现为
+     * "改了显示、重启回到旧内容"，无从查起。 */
+    uint32_t len = (uint32_t)sizeof(app_render_persist_t) + bm_bytes;
+    if (app_cfg_sched_save(s_persist_id, s_persist_buf, (uint16_t)len) != 0)
+        printf("[render] 显存持久化失败（%u 字节）\n", (unsigned)len);
+
+    _persist_unlock();
+}
+
+bool app_render_restore(void)
+{
+    /* 同 save：有画布就整体委托。这条尤其要紧 —— 不委托时会出现"主卡自己的带
+       恢复了旧内容、画布却是黑的"，上电后第一轮静默提交会把从卡全刷黑。 */
+    if (s_persist_hook && s_persist_hook->restore) return s_persist_hook->restore();
+
+    dev_display_t *d = s_render_display;
+    if (!d || s_persist_id == 0xFF)
+        return false;
+
+    uint16_t rows     = d->screen_rows;
+    uint16_t cols     = d->screen_cols;
+    uint16_t bm_bytes = _persist_bm_bytes(d);
+    if (!bm_bytes) return false;
+
+    /* 传入的容量取"本屏实际需要"：记录里的 len 与之不符会被 dev_cfg_record_load
+     * 判为 INVALID —— 这正是我们要的（换了模组则旧显存不适用）。 */
+    uint16_t payload_cap = (uint16_t)(sizeof(app_render_persist_t) + bm_bytes);
+    uint16_t rec_len     = 0;
+
+    /* 与 save 共用同一个组装缓冲，故同样要持锁 */
+    _persist_lock();
+
+    if (app_cfg_sched_load(s_persist_id, s_persist_buf, payload_cap, &rec_len) != DEV_CFG_RECORD_STATE_OK)
+        goto fail;
+    if (rec_len != payload_cap) goto fail;
+
+    app_render_persist_t *r = (app_render_persist_t *)s_persist_buf;
+    /* 几何已由 len 比对隐含校验（len 由本屏几何算出），这里再核一次字段，
+     * 防止"长度碰巧相同但内容不是本屏"的情况。 */
+    if (r->screen_rows != rows || r->screen_cols != cols) goto fail;
+
+    dev_display_fill(d, 0, 0, rows, cols, DEV_DISPLAY_COLOR_BLACK);
+    dev_display_draw_bitmap(d, 0, 0, rows, cols, r->bitmap, (dev_display_color_t)r->color);
+    _persist_unlock();
+    return true;
+
+fail:
+    _persist_unlock();
+    return false;
+}

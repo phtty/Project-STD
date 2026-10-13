@@ -6,6 +6,7 @@
 #include "dev_w25qxx.h"
 
 #include <string.h>
+#include "container_of.h"
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_spi.h"
@@ -25,7 +26,7 @@
 #define W25Q_READ_STATUS1  0x05
 
 typedef struct {
-    dev_storage_t me;
+    dev_storage_t base;
     pl_spi_handle_t spi;
     uint16_t device_id; /* JEDEC ID: Memory Type << 8 | Capacity */
     uint16_t page_size;
@@ -33,7 +34,7 @@ typedef struct {
 } dev_w25qxx_t;
 
 /* ---- 全局实例 ---- */
-static dev_w25qxx_t g_w25qxx = {.page_size = 256, .sector_size = 4096};
+static dev_w25qxx_t s_w25qxx_dev = {.page_size = 256, .sector_size = 4096};
 
 /* JEDEC ID → 容量
  *
@@ -70,7 +71,7 @@ static inline uint8_t _put_addr(uint8_t *cmd, uint32_t addr, dev_w25qxx_t *s)
 
 dev_storage_t *dev_w25qxx_get(void)
 {
-    return &g_w25qxx.me;
+    return &s_w25qxx_dev.base;
 }
 
 /* ---- CS 控制 ---- */
@@ -99,7 +100,7 @@ static void _dma_cb(void *ctx)
  * 本驱动**不可重入**，三处共享状态：
  *   - s_ok 是全局的 DMA 完成标志：两个并发读会互相"吃掉"完成事件，先发起的一方
  *     会带着半满的缓冲返回（它看到的是对方置的标志）；
- *   - _write 的读-改-写用共享的 static sec[4096]；
+ *   - _write 的读-改-写用共享的 static s_sec[4096]；
  *   - _cs_high() 由一方调用会打断另一方正在进行的传输。
  *
  * 而调用方确实来自不同任务：app_render 读字库（LDI 任务与 RLS 任务都会调），
@@ -134,7 +135,7 @@ static void _unlock(void)
 /* ---- OPS 实现 ---- */
 static int32_t _init(dev_storage_t *dev)
 {
-    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
+    dev_w25qxx_t *self = container_of(dev, dev_w25qxx_t, base);
     self->spi          = pl_spi_get_handle();
 
     /* 注意：这里**不能**创建访问锁。RTOS 尚未启动，而创建内核对象要从堆上分配，
@@ -170,13 +171,13 @@ static int32_t _init(dev_storage_t *dev)
 /** @brief 读扇区数据（调用者已持锁；_write 的读-改-写也走这里） */
 static int32_t _read_unlocked(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
-    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
+    dev_w25qxx_t *self = container_of(dev, dev_w25qxx_t, base);
     if (!buf || len == 0) return -1;
 
     if (!s_evt) {
         s_evt = osEventFlagsNew(NULL);
         if (!s_evt) return -1;
-        pl_spi_set_rx_cplt_cb(self->spi, _dma_cb, NULL);
+        pl_spi_set_rx_done_fn(self->spi, _dma_cb, NULL);
     }
 
     uint8_t al = _addr_len(self);
@@ -258,10 +259,10 @@ static int32_t _write_no_check(dev_w25qxx_t *self, uint32_t addr, const uint8_t 
 /** @brief 读-改-写（调用者已持锁） */
 static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uint32_t len)
 {
-    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
+    dev_w25qxx_t *self = container_of(dev, dev_w25qxx_t, base);
     if (!buf || len == 0) return -1;
 
-    static uint8_t sec[4096];
+    static uint8_t s_sec[4096];
     uint32_t w = 0;
 
     while (w < len) {
@@ -270,11 +271,11 @@ static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t 
         uint32_t ch  = 4096 - off;
         if (len - w < ch) ch = len - w;
 
-        _read_unlocked(dev, sa, sec, 4096);
+        _read_unlocked(dev, sa, s_sec, 4096);
 
         bool need = false;
         for (uint16_t i = off; i < off + ch; i++)
-            if (sec[i] != 0xFF) {
+            if (s_sec[i] != 0xFF) {
                 need = true;
                 break;
             }
@@ -289,11 +290,11 @@ static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t 
             pl_spi_transmit(self->spi, ec, (uint16_t)(eal + 1));
             _cs_high();
             _wait_busy(self, 3000);
-            memset(sec, 0xFF, 4096);
+            memset(s_sec, 0xFF, 4096);
         }
 
-        memcpy(sec + off, buf + w, ch);
-        if (_write_no_check(self, sa, sec, 4096) != 0) return -1;
+        memcpy(s_sec + off, buf + w, ch);
+        if (_write_no_check(self, sa, s_sec, 4096) != 0) return -1;
         w += ch;
         addr += ch;
     }
@@ -312,7 +313,7 @@ static int32_t _write(dev_storage_t *dev, uint32_t addr, const uint8_t *buf, uin
 static int32_t _erase_unlocked(dev_storage_t *dev, uint32_t addr, uint32_t len)
 {
     (void)len;
-    dev_w25qxx_t *self = (dev_w25qxx_t *)dev;
+    dev_w25qxx_t *self = container_of(dev, dev_w25qxx_t, base);
 
     _write_enable(self);
     uint8_t al = _addr_len(self);
@@ -338,7 +339,7 @@ static uint32_t _capacity(dev_storage_t *dev)
     return dev->capacity;
 }
 
-static const dev_storage_ops_t w25qxx_ops = {
+static const dev_storage_ops_t s_w25qxx_ops = {
     .init     = _init,
     .read     = _read,
     .write    = _write,
@@ -349,8 +350,8 @@ static const dev_storage_ops_t w25qxx_ops = {
 /* ---- 自动初始化 ---- */
 void dev_w25qxx_init(void)
 {
-    g_w25qxx.me.ops = &w25qxx_ops;
-    _init(&g_w25qxx.me);
+    s_w25qxx_dev.base.ops = &s_w25qxx_ops;
+    _init(&s_w25qxx_dev.base);
 }
 hw_dev_initcall(dev_w25qxx_init);
 

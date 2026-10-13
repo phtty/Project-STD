@@ -44,6 +44,11 @@ typedef struct {
     pthread_mutex_t mtx;
 } stub_mutex_t;
 
+/* 测试观测：成功获取/释放次数。用例可据此断言"某段调用恰好成对加解锁"
+   （如 test_render 断言 app_render 每次调用一次 Acquire/Release，含提前返回路径）。 */
+uint32_t g_os_mutex_acquire_count;
+uint32_t g_os_mutex_release_count;
+
 /* ================================================================
  *  时间辅助
  * ================================================================ */
@@ -180,8 +185,13 @@ osStatus_t osMutexAcquire(osMutexId_t mutex_id, uint32_t timeout)
     stub_mutex_t *m = (stub_mutex_t *)mutex_id;
     if (m == NULL) return osErrorParameter;
 
-    if (timeout == 0)
-        return pthread_mutex_trylock(&m->mtx) == 0 ? osOK : osErrorResource;
+    if (timeout == 0) {
+        if (pthread_mutex_trylock(&m->mtx) == 0) {
+            g_os_mutex_acquire_count++;
+            return osOK;
+        }
+        return osErrorResource;
+    }
 
     int rc = pthread_mutex_lock(&m->mtx);
     if (rc == EDEADLK) {
@@ -189,14 +199,22 @@ osStatus_t osMutexAcquire(osMutexId_t mutex_id, uint32_t timeout)
         fprintf(stderr, "osMutexAcquire: 同一线程重复加锁（非递归互斥量）\n");
         abort();
     }
-    return rc == 0 ? osOK : osError;
+    if (rc == 0) {
+        g_os_mutex_acquire_count++;
+        return osOK;
+    }
+    return osError;
 }
 
 osStatus_t osMutexRelease(osMutexId_t mutex_id)
 {
     stub_mutex_t *m = (stub_mutex_t *)mutex_id;
     if (m == NULL) return osErrorParameter;
-    return pthread_mutex_unlock(&m->mtx) == 0 ? osOK : osError;
+    if (pthread_mutex_unlock(&m->mtx) == 0) {
+        g_os_mutex_release_count++;
+        return osOK;
+    }
+    return osError;
 }
 
 /* ================================================================
@@ -265,4 +283,87 @@ uint32_t osKernelGetTickCount(void)
 size_t xPortGetFreeHeapSize(void)
 {
     return 32768U;
+}
+
+/* ================================================================
+ *  信号量（二进制）
+ *
+ *  只实现 pl_uart 的 TX 完成通知用到的那几个。用 pthread 条件变量模拟
+ *  CMSIS 的"计数 0→1"语义：Acquire 等到 count>0 再减一，Release 置一。
+ *  host 上不会有真的 TX 完成中断来 Release，所以超时路径才是被覆盖的那条 ——
+ *  这正是我们要测的（超时下限不足时会提前返回）。
+ * ================================================================ */
+
+typedef struct {
+    pthread_mutex_t mtx;
+    pthread_cond_t  cv;
+    uint32_t        count;
+    uint32_t        max;
+} stub_sema_t;
+
+osSemaphoreId_t osSemaphoreNew(uint32_t max_count, uint32_t initial_count,
+                               const osSemaphoreAttr_t *attr)
+{
+    (void)attr;
+    stub_sema_t *s = (stub_sema_t *)calloc(1, sizeof(*s));
+    if (s == NULL) return NULL;
+
+    pthread_mutex_init(&s->mtx, NULL);
+    pthread_cond_init(&s->cv, NULL);
+    s->count = initial_count;
+    s->max   = max_count ? max_count : 1;
+    return (osSemaphoreId_t)s;
+}
+
+osStatus_t osSemaphoreAcquire(osSemaphoreId_t semaphore_id, uint32_t timeout)
+{
+    stub_sema_t *s = (stub_sema_t *)semaphore_id;
+    if (s == NULL) return osErrorParameter;
+
+    pthread_mutex_lock(&s->mtx);
+    if (timeout == 0) {
+        osStatus_t r = (s->count > 0) ? (--s->count, osOK) : osErrorResource;
+        pthread_mutex_unlock(&s->mtx);
+        return r;
+    }
+
+    /* 无限等待：host 上没有 TX 完成中断，用了会挂死 —— 当作参数错误拦住，
+       免得测试"看起来在跑"其实卡住 */
+    if (timeout == osWaitForever) {
+        pthread_mutex_unlock(&s->mtx);
+        fprintf(stderr, "osSemaphoreAcquire: host 上不支持无限等待\n");
+        abort();
+    }
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += (time_t)(timeout / 1000U);
+    ts.tv_nsec += (long)(timeout % 1000U) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000L;
+    }
+
+    osStatus_t r = osOK;
+    while (s->count == 0) {
+        if (pthread_cond_timedwait(&s->cv, &s->mtx, &ts) == ETIMEDOUT) {
+            r = osErrorTimeout;
+            break;
+        }
+    }
+    if (r == osOK) s->count--;
+    pthread_mutex_unlock(&s->mtx);
+    return r;
+}
+
+osStatus_t osSemaphoreRelease(osSemaphoreId_t semaphore_id)
+{
+    stub_sema_t *s = (stub_sema_t *)semaphore_id;
+    if (s == NULL) return osErrorParameter;
+
+    pthread_mutex_lock(&s->mtx);
+    if (s->count < s->max) s->count++;
+    pthread_cond_signal(&s->cv);
+    pthread_mutex_unlock(&s->mtx);
+    return osOK;
 }

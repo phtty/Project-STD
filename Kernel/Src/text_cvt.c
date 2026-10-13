@@ -1,12 +1,14 @@
+/**
+ * @file    text_cvt.c
+ * @brief   文本编码转换实现：十六进制互转与 GBK/UTF-8/Unicode 码表
+ */
+
 #include "text_cvt.h"
 
 /**
- * @brief ʮ�������ַ�תʮ��������������'A' -> 0xA
- *
- * @param chr Ҫת����ʮ�������ַ�
- * @return ת�����ֵ
+ * @brief 十六进制字符转十六进制数，例：'A' -> 0xA
  */
-uint8_t chr2hex(uint8_t chr)
+uint8_t cvt_chr_to_hex(uint8_t chr)
 {
     if (chr >= '0' && chr <= '9')
         return chr - '0';
@@ -21,12 +23,9 @@ uint8_t chr2hex(uint8_t chr)
 }
 
 /**
- * @brief ʮ��������תΪ�ַ�����ʽ������0x0A->'A'
- *
- * @param hex Ҫת����������Χ0~F
- * @return ת�����ֵ
+ * @brief 十六进制数转为字符串形式，例：0x0A->'A'
  */
-uint8_t hex2chr(uint8_t hex)
+uint8_t cvt_hex_to_chr(uint8_t hex)
 {
     if (hex <= 9)
         return hex + '0';
@@ -38,43 +37,33 @@ uint8_t hex2chr(uint8_t hex)
 }
 
 /**
- * @brief ʮ��������ֵת�ַ���������{0XAA,0XBB,0XCC} -> "AABBCC"
- *
- * @param from ��ת����ʮ����������
- * @param fromSize ��ת����ʮ���������ݴ�С
- * @param to ���ת�����ַ���
- * @param toSize ���ת�����ַ����Ĵ�С
+ * @brief 十六进制面值转字符串，例：{0XAA,0XBB,0XCC} -> "AABBCC"
  */
-void HexToStr(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_hex_to_str(const uint8_t *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
     uint32_t size = 0;
 
     while (fromSize != 0) {
-        *to++ = hex2chr((*from >> 4) & 0X0F);
-        *to++ = hex2chr((*from) & 0X0F);
+        *to++ = cvt_hex_to_chr((*from >> 4) & 0X0F);
+        *to++ = cvt_hex_to_chr((*from) & 0X0F);
         size += 2;
         from++;
         fromSize--;
     }
 
-    *to     = 0; // ���ӽ�����
+    *to     = 0; // 添加结束符
     *toSize = size;
 }
 
 /**
- * @brief ʮ�������ַ���ת��ֵ������"AABBCC" -> {0XAA,0XBB,0XCC}
- *
- * @param from ��ת����ʮ�������ַ���
- * @param fromSize �ַ�������
- * @param to ����ַ�����ʮ������ֵ
- * @param toSize ����ַ�����ʮ������ֵ�Ĵ�С
+ * @brief 十六进制字符串转数值，例："AABBCC" -> {0XAA,0XBB,0XCC}
  */
-void StrToHex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize)
+void cvt_str_to_hex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize)
 {
     uint32_t size = 0;
 
     while (fromSize > 1) {
-        *to++ = (chr2hex(from[0]) << 4) | chr2hex(from[1]);
+        *to++ = (cvt_chr_to_hex(from[0]) << 4) | cvt_chr_to_hex(from[1]);
         size++;
         from += 2;
         fromSize -= 2;
@@ -83,33 +72,95 @@ void StrToHex(const char *from, uint32_t fromSize, uint8_t *to, uint32_t *toSize
     *toSize = size;
 }
 
-#if (TEXTCODEC_ENABLE == 1)
+#if (CVT_TEXTCODEC_ENABLE == 1)
 
-static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode);
+static uint16_t _cvt_convert_encoding(uint16_t input_char, bool is_oem_to_unicode);
+
+/* ---- UTF-8 序列解码（供 cvt_utf8_to_gbk / cvt_utf8_to_unicode 共用）----
+ *
+ * 按**首字节**定序列长度，所有字节读取一律经 `uint8_t` —— 不依赖 `char` 的符号性
+ * （host 的 `char` 默认 signed、ARM 上是 unsigned，同一份代码两边语义必须一致）。
+ *
+ * @return **已消费的字节数**；返回 0 表示"剩余字节不足以构成一个完整序列"，调用方
+ *         应干净停止（保留已转换的部分）。
+ * `*ok` 为 false 表示该序列非法 / 过长（不是合法 UTF-8）：调用方应**跳过它、不产出
+ * 任何字节**，但须按返回的消费数推进 —— 这样后面的文字不会被一起丢掉。
+ */
+static uint32_t _utf8_next(const uint8_t *p, uint32_t remain, uint32_t *cp, bool *ok)
+{
+    uint32_t b0 = p[0];
+
+    if (b0 < 0X80U) { /* ASCII */
+        *cp = b0;
+        *ok = true;
+        return 1U;
+    }
+
+    uint32_t len;
+    uint32_t min_cp;
+    if ((b0 & 0XE0U) == 0XC0U) { /* 110xxxxx：2 字节 */
+        len    = 2U;
+        min_cp = 0X80U;
+        *cp    = b0 & 0X1FU;
+    } else if ((b0 & 0XF0U) == 0XE0U) { /* 1110xxxx：3 字节 */
+        len    = 3U;
+        min_cp = 0X800U;
+        *cp    = b0 & 0X0FU;
+    } else if ((b0 & 0XF8U) == 0XF0U) { /* 11110xxx：4 字节 */
+        len    = 4U;
+        min_cp = 0X10000U;
+        *cp    = b0 & 0X07U;
+    } else {
+        /* 0x80~0xBF 的续字节当成了首字节，或 0xF8~0xFF：非法首字节，跳过一个字节 */
+        *ok = false;
+        return 1U;
+    }
+
+    if (remain < len) return 0U; /* 剩余不足一个完整序列：干净停止 */
+
+    for (uint32_t i = 1U; i < len; i++) {
+        uint32_t b = p[i];
+        if ((b & 0XC0U) != 0X80U) { /* 续字节必须是 10xxxxxx */
+            *ok = false;
+            return 1U; /* 只跳首字节，后面按新序列重新解析（不连坐丢弃） */
+        }
+        *cp = (*cp << 6) | (b & 0X3FU);
+    }
+
+    if (*cp < min_cp || *cp > 0X10FFFFU) { /* 过长编码 / 越界码位：非法 */
+        *ok = false;
+        return 1U;
+    }
+
+    *ok = true;
+    return len;
+}
 
 /**
- * @brief GBK��תUTF8��
+ * @brief GBK码转UTF8码
  *
- * @param from GBK��
- * @param fromSize GBK��Ĵ�С
- * @param to UTF8��
- * @param toSize UTF8��Ĵ�С
+ * 逐字符转换：ASCII 1 字节原样复制，GBK 双字节先查表转 UNICODE 再编码为 1~3 字节
+ * UTF-8。字节读取经 `uint8_t`，不依赖 `char` 的符号性；剩余不足一个 GBK 码时
+ * 干净停止（保留已转换的部分），不再发生 `fromSize -= 2` 的无符号下溢。
  */
-void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_gbk_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t unicode;
-    uint32_t utfcode;
-    uint32_t size = 0;
-    while (fromSize != 0) {
+    const uint8_t *src = (const uint8_t *)from;
+    uint32_t       unicode;
+    uint32_t       utfcode;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
+    while (pos < fromSize) {
 
-        if (*from < 0X80) { // ASCII
-            unicode = *from++;
-            fromSize--;
-        } else {                                    // GBK
-            unicode = (from[0] << 8) | from[1];     // һ��GBK�ַ�ռ�������ֽ�(���ģʽ)
-            unicode = convert_encoding(unicode, 1); // to unicode
-            from += 2;
-            fromSize -= 2;
+        uint32_t b0 = src[pos];
+        if (b0 < 0X80U) { // ASCII
+            unicode = b0;
+            pos += 1;
+        } else {                                         // GBK
+            if (fromSize - pos < 2U) break;              // 半个 GBK 码：干净停止
+            unicode = (b0 << 8) | src[pos + 1U];         // 一个GBK字符占用两个字节(大端模式)
+            unicode = _cvt_convert_encoding((uint16_t)unicode, 1); // to unicode
+            pos += 2;
         }
 
         if (unicode < 0X80U) { // ASCII
@@ -151,49 +202,43 @@ void GBKToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 }
 
 /**
- * @brief UTF8��תGBK��
+ * @brief UTF8码转GBK码
  *
- * @param from UTF8��
- * @param fromSize UTF8��Ĵ�С
- * @param to GBK��
- * @param toSize GBK���С
+ * 按首字节定序列长度，并**先校验剩余字节是否够**；不够就干净停止、返回已转换的部分。
+ * 所有字节读取显式经 `uint8_t`，不依赖 `char` 的符号性（host 的 signed 与 ARM 的
+ * unsigned 得到同一结果）。
+ *
+ * 两条不变量：
+ *  ① 良构输入下**输出字节数 ≤ 输入字节数**——ASCII 1→1、2 字节→2、3 字节→2、
+ *     4 字节→0（GBK 只覆盖 BMP，4 字节码位一律**跳过该字**、继续后面的文字）；
+ *  ② **调用方必须保证目的缓冲容量 ≥ 输入字节数**（本函数不接收容量参数，
+ *     `*toSize` 保持"纯输出"语义）。`app_render.c` 的 UTF-8 入口正是依这两条，
+ *     先把输入夹到 `sizeof(text_buf)`、再复核输出长度。
  */
-void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_utf8_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t unicode;
-    uint32_t utfcode;
-    uint32_t size = 0;
-    while (fromSize != 0) {
-        if (*from < 0X80) { // ASCII
-            utfcode = *from;
-            from++;
-            fromSize--;
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
+    while (pos < fromSize) {
+        uint32_t cp  = 0;
+        bool     ok  = false;
+        uint32_t len = _utf8_next(src + pos, fromSize - pos, &cp, &ok);
 
-        } else {                                                  // UTF8
-            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8�������ֽڱ�ʾһ�����ĺ���(���ģʽ)
-            from += 3;
-            fromSize -= 3;
-        }
+        if (len == 0U) break; /* 剩余不足一个完整序列：干净停止 */
+        pos += len;
+        if (!ok) continue;          /* 非法序列：跳过，不产出 */
+        if (cp > 0XFFFFU) continue; /* GBK 只覆盖 BMP：4 字节码位跳过该字 */
 
-        if (utfcode < 0X80U)
-            unicode = utfcode;
-        else if (utfcode >= 0X0000C080U && utfcode <= 0X0000DFBFU)
-            unicode = (((utfcode >> 8) & 0X1FU) << 6) | (utfcode & 0X3FU);
-        else if (utfcode >= 0X00E08080U && utfcode <= 0X00EFBFBFU)
-            unicode = (((utfcode >> 16) & 0XFU) << 12) | (((utfcode >> 8) & 0X3FU) << 6) | (utfcode & 0X3FU);
-        else if (utfcode >= 0XF0808080U && utfcode <= 0XF7BFBFBFU)
-            unicode = (((utfcode >> 24) & 0X7U) << 18) | (((utfcode >> 16) & 0X3FU) << 12) | (((utfcode >> 8) & 0X3FU) << 6) | (utfcode & 0X3FU);
-        else
-            break; // ERROR: not support
-
-        if (unicode < 0X80) { // ASCII
-            *to++ = unicode;
+        if (cp < 0X80U) { // ASCII
+            *to++ = (char)cp;
             size++;
 
-        } else {                                    // NOT ASCII
-            unicode = convert_encoding(unicode, 0); // UNICODE TO GBK
-            to[0]   = (unicode >> 8) & 0XFF;        // ��˴洢
-            to[1]   = unicode & 0XFF;               // ��˴洢
+        } else { /* NOT ASCII */
+            uint16_t gbk = _cvt_convert_encoding((uint16_t)cp, 0); // UNICODE TO GBK
+            if (gbk == 0U) continue; /* 无对应 GBK 码位：跳过该字，不写 NUL 对 */
+            to[0] = (char)((gbk >> 8) & 0XFF); // 大端存储
+            to[1] = (char)(gbk & 0XFF);        // 大端存储
             to += 2;
             size += 2;
         }
@@ -202,33 +247,39 @@ void UTF8ToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 }
 
 /**
- * @brief GBK��ת˫�ֽ�UNICODE��
+ * @brief GBK码转双字节UNICODE码
  *
- * @param from GBK��
- * @param fromSize GBK���С
- * @param to UNICODE��
- * @param toSize UNICODE���С
+ * 逐字符转换：ASCII 占 1 字节、GBK 双字节先查表转 UNICODE；**输出一律 2 字节**
+ * （ASCII 也补成 16 位小端，高位 0）—— 语义与修复前逐字一致，**调用方须保证目的
+ * 缓冲 ≥ 2 × 输入字节数**。字节读取经 `uint8_t`，不依赖 `char` 的符号性
+ * （host 的 signed 与 ARM 的 unsigned 得到同一结果）；剩余不足一个 GBK 码
+ * （ASCII 需 1 字节、GBK 需 2 字节）时干净停止，保留已转换的部分，
+ * 不再发生 `fromSize -= 2` 的无符号下溢。
  */
-void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_gbk_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t size = 0;
-    uint16_t unicode;
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-    while (fromSize != 0) {
+    while (pos < fromSize) {
 
-        if (*from < 0X80) { // ASCII
-            unicode = *from++;
-            fromSize--;
+        uint32_t b0 = src[pos];
+        uint16_t unicode;
 
-        } else {                                    // GBK
-            unicode = (from[0] << 8) | from[1];     // GBKΪ���ģʽ
-            unicode = convert_encoding(unicode, 1); // to unicode
-            from += 2;
-            fromSize -= 2;
+        if (b0 < 0X80U) { // ASCII
+            unicode = (uint16_t)b0;
+            pos += 1;
+
+        } else {                                             // GBK
+            if (fromSize - pos < 2U) break;                  // 半个 GBK 码：干净停止
+            unicode = (uint16_t)((b0 << 8) | src[pos + 1U]); // GBK为大端模式
+            unicode = _cvt_convert_encoding(unicode, 1);     // to unicode
+            pos += 2;
         }
 
-        to[0] = unicode & 0XFF;        // С��ģʽ�洢UNICODE��
-        to[1] = (unicode >> 8) & 0XFF; // С��ģʽ�洢UNICODE��
+        to[0] = (char)(unicode & 0XFF);        // 小端模式存储UNICODE码
+        to[1] = (char)((unicode >> 8) & 0XFF); // 小端模式存储UNICODE码
         to += 2;
         size += 2;
     }
@@ -236,80 +287,62 @@ void GBKToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSiz
 }
 
 /**
- * @brief ˫�ֽ�UNICODE��תGBK��
+ * @brief 双字节UNICODE码转GBK码
  *
- * @param from ˫�ֽ�UNICODE��
- * @param fromSize UNICODE���С
- * @param to GBK��
- * @param toSize GBK���С
+ * 输入按**小端 16 位**逐字读：先判余量、不足 2 字节即干净停止（UTF-16 码元不能是
+ * 半个），不再发生 `fromSize -= 2` 的无符号下溢。字节读取经 `uint8_t`，不依赖
+ * `char` 的符号性。ASCII 输出 1 字节、其余查表后输出 2 字节（大端）。
  */
-void UnicodeToGBK(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_unicode_to_gbk(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t size = 0;
-    uint16_t unicode;
-    while (fromSize != 0) {
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-        unicode = (from[1] << 8) | from[0]; // unicode��ΪС��ģʽ
-        if (unicode < 0X80) {               // ASCII
-            *to++ = unicode;
+    while (fromSize - pos >= 2U) {
+
+        uint16_t unicode = (uint16_t)((src[pos + 1U] << 8) | src[pos]); // unicode码为小端模式
+        pos += 2;
+
+        if (unicode < 0X80U) { // ASCII
+            *to++ = (char)unicode;
             size++;
 
-        } else {                                    // NOT ASCII
-            unicode = convert_encoding(unicode, 0); // TO GBK
-            to[0]   = (unicode >> 8) & 0XFF;        // ���ģʽ�洢GBK��
-            to[1]   = unicode & 0XFF;               // ���ģʽ�洢GBK��
+        } else {                                         // NOT ASCII
+            unicode = _cvt_convert_encoding(unicode, 0); // TO GBK
+            to[0]   = (char)((unicode >> 8) & 0XFF);     // 大端模式存储GBK码
+            to[1]   = (char)(unicode & 0XFF);            // 大端模式存储GBK码
             size += 2;
             to += 2;
         }
-
-        from += 2;
-        fromSize -= 2;
     }
     *toSize = size;
 }
 
 /**
- * @brief ���ֽ�UTF8��ת˫�ֽ�UNICODE��
+ * @brief UTF8码转双字节UNICODE码
  *
- * @param from UTF8��
- * @param fromSize UTF8���С
- * @param to GBK��
- * @param toSize GBK���С
+ * 与 `cvt_utf8_to_gbk` 同一套解析：按首字节定长、消费前校验余量（不足即干净停止）、
+ * 字节读取经 `uint8_t`。输出为 16 位 UNICODE（小端），故 4 字节码位（> 0xFFFF）
+ * 无法表示 —— **跳过该字、继续后面的文字**。
  */
-void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_utf8_to_unicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t unicode;
-    uint32_t utfcode;
-    uint32_t size = 0;
-    while (fromSize != 0) {
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
+    while (pos < fromSize) {
 
-        if (*from < 0X80) { // ASCII
-            utfcode = *from;
-            from++;
-            fromSize--;
+        uint32_t cp  = 0;
+        bool     ok  = false;
+        uint32_t len = _utf8_next(src + pos, fromSize - pos, &cp, &ok);
 
-        } else {                                                  // NOT ASCII
-            utfcode = (from[0] << 16) | (from[1] << 8) | from[2]; // UTF8�������ֽڱ�ʾһ�����ĺ���(���ģʽ)
-            from += 3;
-            fromSize -= 3;
-        }
+        if (len == 0U) break; /* 剩余不足一个完整序列：干净停止 */
+        pos += len;
+        if (!ok || cp > 0XFFFFU) continue; /* 非法序列 / 16 位放不下（4 字节码位）：跳过 */
 
-        if (utfcode < 0X80U) { // ASCII
-            unicode = utfcode;
-
-        } else { // NOT ASCII
-            if (utfcode >= 0X0000C080U && utfcode <= 0X0000DFBFU)
-                unicode = (((utfcode >> 8) & 0X1FU) << 6) | (utfcode & 0X3FU);
-            else if (utfcode >= 0X00E08080U && utfcode <= 0X00EFBFBFU)
-                unicode = (((utfcode >> 16) & 0XFU) << 12) | (((utfcode >> 8) & 0X3FU) << 6) | (utfcode & 0X3FU);
-            else if (utfcode >= 0XF0808080U && utfcode <= 0XF7BFBFBFU)
-                unicode = (((utfcode >> 24) & 0X7U) << 18) | (((utfcode >> 16) & 0X3FU) << 12) | (((utfcode >> 8) & 0X3FU) << 6) | (utfcode & 0X3FU);
-            else
-                break; // ERROR: not support
-        }
-
-        to[0] = unicode & 0XFF;        // С�˴洢UNICODE
-        to[1] = (unicode >> 8) & 0XFF; // С�˴洢UNICODE
+        to[0] = (char)(cp & 0XFF);        // 小端存储UNICODE
+        to[1] = (char)((cp >> 8) & 0XFF); // 小端存储UNICODE
         to += 2;
         size += 2;
     }
@@ -317,52 +350,52 @@ void UTF8ToUnicode(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
 }
 
 /**
- * @brief ˫�ֽ�UNICODE��ת���ֽ�UTF8��
+ * @brief 双字节UNICODE码转三字节UTF8码
  *
- * @param from
- * @param fromSize
- * @param to
- * @param toSize
+ * 输入按**小端 16 位**逐字读：先判余量、不足 2 字节即干净停止（保留已转换的部分），
+ * 不再发生 `fromSize -= 2` 的无符号下溢。字节读取经 `uint8_t`，不依赖 `char` 的
+ * 符号性；输出 UTF-8 的编码写法与 `cvt_gbk_to_utf8` 一致。
  */
-void UnicodeToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
+void cvt_unicode_to_utf8(const char *from, uint32_t fromSize, char *to, uint32_t *toSize)
 {
-    uint32_t unicode;
-    uint32_t utfcode;
-    uint32_t size = 0;
+    const uint8_t *src  = (const uint8_t *)from;
+    uint32_t       size = 0;
+    uint32_t       pos  = 0;
 
-    while (fromSize != 0) {
-        unicode = (from[1] << 8) | from[0]; // unicode��ΪС��ģʽ
-        from += 2;
-        fromSize -= 2;
+    while (fromSize - pos >= 2U) {
+
+        uint32_t unicode = (uint32_t)((src[pos + 1U] << 8) | src[pos]); // unicode码为小端模式
+        uint32_t utfcode;
+        pos += 2;
 
         if (unicode < 0X80U) // ASCII
         {
-            *to = unicode;
+            *to = (char)unicode;
             to++;
             size++;
         } else // NOT ASCII
         {
             if (unicode >= 0X80U && unicode <= 0X7FFU) {
                 utfcode = 0XC080U | (unicode & 0X3FU) | (((unicode >> 6) & 0X1FU) << 8);
-                to[1]   = utfcode & 0XFF;
-                to[0]   = (utfcode >> 8) & 0XFF;
+                to[1]   = (char)(utfcode & 0XFF);
+                to[0]   = (char)((utfcode >> 8) & 0XFF);
                 to += 2;
                 size += 2;
 
             } else if (unicode >= 0X800U && unicode <= 0XFFFFU) {
                 utfcode = 0XE08080U | (unicode & 0X3FU) | (((unicode >> 6) & 0X3FU) << 8) | (((unicode >> 12) & 0XFU) << 16);
-                to[2]   = utfcode & 0XFF;
-                to[1]   = (utfcode >> 8) & 0XFF;
-                to[0]   = (utfcode >> 16) & 0XFF;
+                to[2]   = (char)(utfcode & 0XFF);
+                to[1]   = (char)((utfcode >> 8) & 0XFF);
+                to[0]   = (char)((utfcode >> 16) & 0XFF);
                 to += 3;
                 size += 3;
 
             } else if (unicode >= 0X10000U && unicode <= 0X10FFFFU) {
                 utfcode = 0XF0808080U | ((unicode & 0X3FU)) | (((unicode >> 6) & 0X3FU) << 8) | (((unicode >> 12) & 0X3FU) << 16) | (((unicode >> 18) & 0X7U) << 24);
-                to[3]   = utfcode & 0XFF;
-                to[2]   = (utfcode >> 8) & 0XFF;
-                to[1]   = (utfcode >> 16) & 0XFF;
-                to[0]   = (utfcode >> 24) & 0XFF;
+                to[3]   = (char)(utfcode & 0XFF);
+                to[2]   = (char)((utfcode >> 8) & 0XFF);
+                to[1]   = (char)((utfcode >> 16) & 0XFF);
+                to[0]   = (char)((utfcode >> 24) & 0XFF);
                 to += 4;
                 size += 4;
 
@@ -375,13 +408,13 @@ void UnicodeToUTF8(const char *from, uint32_t fromSize, char *to, uint32_t *toSi
 }
 
 /**
- * @brief UNICODE��GBK��ת����
+ * @brief UNICODE和GBK互转函数
  *
- * @param input_char ��ת����ֵ
- * @param is_oem_to_unicode 0��unicodeתgbk  1��gbkתunicode
- * @return ת�����ֵ
+ * @param input_char 待转换的值
+ * @param is_oem_to_unicode 0：unicode转gbk  1：gbk转unicode
+ * @return 转换后的值
  */
-static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
+static uint16_t _cvt_convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
 {
     static const uint16_t uni2oem[] = {
         /*  Unicode - OEM,  Unicode - OEM,  Unicode - OEM,  Unicode - OEM */
@@ -11290,31 +11323,31 @@ static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
     const uint16_t *lookup_table;
     uint16_t result_char = 0;
     int32_t mid, low = 0, high;
-    int32_t max_steps = 16; // ��������Ȳ�����2^16(65536)
+    int32_t max_steps = 16; // 假设表长度不超过2^16(65536)
 
-    // ����ASCII�ַ�(0x00 - 0x7F)
+    // 处理ASCII字符(0x00 - 0x7F)
     if (input_char < 0x80) {
         return input_char;
     }
 
-    // ����ת������ѡ��ӳ���
+    // 根据转换方向选择映射表
     if (is_oem_to_unicode) {
         lookup_table = oem2uni;
-        high         = (sizeof(oem2uni) / 4) - 1; // ����ÿ����Ŀռ2��uint16(Key��Value)�������ܴ�С����4
+        high         = (sizeof(oem2uni) / 4) - 1; // 表中每个条目占2个uint16(Key和Value)，所以总大小除以4
 
     } else {
         lookup_table = uni2oem;
         high         = (sizeof(uni2oem) / 4) - 1;
     }
 
-    while (max_steps > 0 && low <= high) { // ���ֲ���
+    while (max_steps > 0 && low <= high) { // 二分查找
         mid = low + (high - low) / 2;
 
-        // table[mid << 1]ΪKey(ԭʼ����)
+        // table[mid << 1]为Key(原始编码)
         uint16_t current_key = lookup_table[mid << 1];
 
         if (input_char == current_key) {
-            // �ҵ�ƥ���table[(mid << 1) + 1]��Value(Ŀ�����)
+            // 找到匹配项，table[(mid << 1) + 1]是Value(目标编码)
             result_char = lookup_table[(mid << 1) + 1];
             break;
         }
@@ -11331,4 +11364,4 @@ static uint16_t convert_encoding(uint16_t input_char, bool is_oem_to_unicode)
     return result_char;
 }
 
-#endif // TEXTCODEC_ENABLE
+#endif // CVT_TEXTCODEC_ENABLE

@@ -1,0 +1,270 @@
+/*
+******************************************************************************
+**
+
+**  File        : LinkerScript.ld
+**
+**  Author		: STM32CubeMX
+**
+**  Abstract    : Linker script for STM32F407ZGTx series
+**                1024Kbytes FLASH and 192Kbytes RAM
+**
+**                Set heap size, stack size and stack location according
+**                to application requirements.
+**
+**                Set memory bank area and size if external memory is used.
+**
+**  Target      : STMicroelectronics STM32
+**
+**  Distribution: The file is distributed “as is,�? without any warranty
+**                of any kind.
+**
+*****************************************************************************
+** @attention
+**
+** <h2><center>&copy; COPYRIGHT(c) 2025 STMicroelectronics</center></h2>
+**
+** Redistribution and use in source and binary forms, with or without modification,
+** are permitted provided that the following conditions are met:
+**   1. Redistributions of source code must retain the above copyright notice,
+**      this list of conditions and the following disclaimer.
+**   2. Redistributions in binary form must reproduce the above copyright notice,
+**      this list of conditions and the following disclaimer in the documentation
+**      and/or other materials provided with the distribution.
+**   3. Neither the name of STMicroelectronics nor the names of its contributors
+**      may be used to endorse or promote products derived from this software
+**      without specific prior written permission.
+**
+** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+** AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+** IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+** DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+** FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+** DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+** SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+** CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+** OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+** OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**
+*****************************************************************************
+*/
+
+/* Entry Point */
+ENTRY(Reset_Handler)
+
+/* Highest address of the user mode stack */
+_estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
+/* Generate a link error if heap and stack don't fit into RAM */
+_Min_Heap_Size = 0x200;      /* required amount of heap  */
+_Min_Stack_Size = 0x800; /* required amount of stack */
+
+/* ---- 防误用 ----
+ * 本文件**不能**直接作为 -T 的目标：它不含 FLASH 布局。直接 -T 本文件时
+ * FLASH_ORIGIN/FLASH_LENGTH 未定义，ld 的报错是
+ *     invalid origin for memory region FLASH
+ *     FLASH:  <大小>  18446744073709551615 B   0.00%
+ * （18446744073709551615 = 0xFFFFFFFFFFFFFFFF = -1，即"未定义"），
+ * 从这条信息看不出问题在哪，所以在这里主动补一条说明。
+ * 正确用法：-T boards/<板>/STM32F407XX_FLASH.ld，由它定义两个常量后 include 本文件。 */
+ASSERT(DEFINED(FLASH_ORIGIN) && FLASH_ORIGIN != 0,
+       "-T 应指向 boards/<板>/STM32F407XX_FLASH.ld，而不是 Compiler/sections.ld")
+
+/* ---- MEMORY ----
+ * FLASH 的起始与长度是板级参数（直烧 vs 带 IAP bootloader），由**外层脚本**在本文件
+ * 被 include 之前定义：
+ *     FLASH_ORIGIN / FLASH_LENGTH
+ * 外层脚本是 boards/<板>/STM32F407XX_FLASH.ld，由构建系统的 -T 指定。
+ * 本文件不含任何板级事实，两板共用。
+ *
+ * 为什么用"外层脚本 + INCLUDE 根相对路径"而不是"-- defsym / -L"：
+ * ld 的 INCLUDE 是按**解析 -T 那一刻已累积的 -L 目录**去找文件的 —— 同样一条
+ * `-T x.ld -L dir`，gcc 驱动（collect2 会把 -L 提前）能找到，裸 ld 找不到。
+ * 这个差异不写在任何文档里，且换构建系统就会翻车。改为 -T 直接指向板级脚本、
+ * 内部的 INCLUDE 用根相对固定路径，则与 -L、与参数顺序、与用 ld 还是 gcc 都无关。
+ */
+
+/* Specify the memory areas */
+MEMORY
+{
+RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
+CCMRAM (xrw)      : ORIGIN = 0x10000000, LENGTH = 64K
+FLASH (rx)      : ORIGIN = FLASH_ORIGIN, LENGTH = FLASH_LENGTH
+}
+
+/* Define output sections */
+SECTIONS
+{
+  /* The startup code goes first into FLASH */
+  .isr_vector :
+  {
+    . = ALIGN(4);
+    KEEP(*(.isr_vector)) /* Startup code */
+    . = ALIGN(4);
+  } >FLASH
+
+  /* The program code and other data goes into FLASH */
+  .text :
+  {
+    . = ALIGN(4);
+    *(.text)           /* .text sections (code) */
+    *(.text*)          /* .text* sections (code) */
+    *(.glue_7)         /* glue arm to thumb code */
+    *(.glue_7t)        /* glue thumb to arm code */
+    *(.eh_frame)
+
+    KEEP (*(.init))
+    KEEP (*(.fini))
+
+    . = ALIGN(4);
+    _etext = .;        /* define a global symbols at end of code */
+  } >FLASH
+
+  /* Constant data goes into FLASH */
+  .rodata :
+  {
+    . = ALIGN(4);
+    *(.rodata)         /* .rodata sections (constants, strings, etc.) */
+    *(.rodata*)        /* .rodata* sections (constants, strings, etc.) */
+    . = ALIGN(4);
+  } >FLASH
+
+  .hw_initcall :
+  {
+    . = ALIGN(4);
+    PROVIDE(__hw_initcall_start = .);
+    KEEP(*(SORT(.hw_initcall.0)))
+    KEEP(*(SORT(.hw_initcall.1)))
+    KEEP(*(SORT(.hw_initcall.2)))
+    KEEP(*(SORT(.hw_initcall.3)))
+    PROVIDE(__hw_initcall_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  .sw_initcall :
+  {
+    . = ALIGN(4);
+    PROVIDE(__sw_initcall_start = .);
+    KEEP(*(SORT(.sw_initcall.0)))
+    KEEP(*(SORT(.sw_initcall.1)))
+    KEEP(*(SORT(.sw_initcall.2)))
+    KEEP(*(SORT(.sw_initcall.3)))
+    KEEP(*(SORT(.sw_initcall.4)))
+    PROVIDE(__sw_initcall_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  .ARM.extab (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  {
+    . = ALIGN(4);
+    *(.ARM.extab* .gnu.linkonce.armextab.*)
+    . = ALIGN(4);
+  } >FLASH
+
+  .ARM (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  {
+    . = ALIGN(4);
+    __exidx_start = .;
+    *(.ARM.exidx*)
+    __exidx_end = .;
+    . = ALIGN(4);
+  } >FLASH
+
+  .preinit_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN (__preinit_array_start = .);
+    KEEP (*(.preinit_array*))
+    PROVIDE_HIDDEN (__preinit_array_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  .init_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN (__init_array_start = .);
+    KEEP (*(SORT(.init_array.*)))
+    KEEP (*(.init_array*))
+    PROVIDE_HIDDEN (__init_array_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  .fini_array (READONLY) : /* The "READONLY" keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN (__fini_array_start = .);
+    KEEP (*(SORT(.fini_array.*)))
+    KEEP (*(.fini_array*))
+    PROVIDE_HIDDEN (__fini_array_end = .);
+    . = ALIGN(4);
+  } >FLASH
+
+  /* used by the startup to initialize data */
+  _sidata = LOADADDR(.data);
+
+  /* Initialized data sections goes into RAM, load LMA copy after code */
+  .data :
+  {
+    . = ALIGN(4);
+    _sdata = .;        /* create a global symbol at data start */
+    *(.data)           /* .data sections */
+    *(.data*)          /* .data* sections */
+    *(.RamFunc)        /* .RamFunc sections */
+    *(.RamFunc*)       /* .RamFunc* sections */
+
+    . = ALIGN(4);
+    _edata = .;        /* define a global symbol at data end */
+  } >RAM AT> FLASH
+
+  /* CCM-RAM（NOLOAD，启动时整体清零，行为等同 SRAM .bss） */
+  .ccmram (NOLOAD) :
+  {
+    . = ALIGN(4);
+    _sccmram = .;
+    *(.ccmram)
+    *(.ccmram*)
+
+    . = ALIGN(4);
+    _eccmram = .;
+  } >CCMRAM
+
+
+  /* Uninitialized data section */
+  . = ALIGN(4);
+  .bss :
+  {
+    /* This is used by the startup in order to initialize the .bss secion */
+    _sbss = .;         /* define a global symbol at bss start */
+    __bss_start__ = _sbss;
+    *(.bss)
+    *(.bss*)
+    *(COMMON)
+
+    . = ALIGN(4);
+    _ebss = .;         /* define a global symbol at bss end */
+    __bss_end__ = _ebss;
+  } >RAM
+
+  /* User_heap_stack section, used to check that there is enough RAM left */
+  ._user_heap_stack :
+  {
+    . = ALIGN(8);
+    PROVIDE ( end = . );
+    PROVIDE ( _end = . );
+    . = . + _Min_Heap_Size;
+    . = . + _Min_Stack_Size;
+    . = ALIGN(8);
+  } >RAM
+
+
+
+  /* Remove information from the standard libraries */
+  /DISCARD/ :
+  {
+    libc.a ( * )
+    libm.a ( * )
+    libgcc.a ( * )
+  }
+
+}
+
+
