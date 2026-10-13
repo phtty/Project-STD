@@ -121,6 +121,14 @@ docs/                              命名约定.md（评审契约）、架构说
 12. **`app_render` 的 `x/y/w/h` 是区域 `[x, x+w) × [y, y+h)`**（`w/h` 是**尺寸**，不是绝对右/下边界）；
     越界语义是**裁剪**，且**两层各自防御**（`dev_display_*` 与画布 `_sink_*` 都自带裁剪）。改渲染/
     裁剪相关代码前，先读 `Application/Inc/Render/app_render.h` 顶部的"区域契约"块。
+13. **Windows 上 binutils ≥ 2.47 的 `ld` 会把"同盘的第二份脚本"误判成重复**：判重按 `stat()` 的
+    (st_dev, st_ino) 比较，而 Windows 上 `st_ino` 恒为 0、`st_dev` 只是盘符号 —— 于是同一盘符上的两份
+    脚本必然报 `error: linker script file '...' appears multiple times`。两块板的 `STM32F407XX_FLASH.ld`
+    都 `INCLUDE Compiler/sections.ld`，**两套构建的链接会一起失败**（`make` 与 EIDE 一样；写成两个 `-T`
+    也逃不掉）。上游修复只在 binutils master（commit `ab1830f6`，改为无 inode 时按文件名比较），
+    2.47 发布版没有。本机已把 MSYS2 ucrt64 的 `arm-none-eabi-binutils` **钉在 2.46.1**
+    （`/etc/pacman.conf` 的 `IgnorePkg`，注释写明理由与解除条件）；`pacman -Syu` 后若再撞这个错，
+    先跑 `arm-none-eabi-ld --version` 看是不是被升回 ≥ 2.47。
 
 ## 7. 测试（host 侧，`make test`）
 

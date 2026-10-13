@@ -30,7 +30,7 @@ typedef struct [[gnu::packed]] {
 
 #define DEV_CFG_RECORD_HDR_SIZE ((uint32_t)sizeof(dev_cfg_record_hdr_t)) /**< 记录头字节数 (24) */
 
-_Static_assert(sizeof(dev_cfg_record_hdr_t) == 24, "dev_cfg_record_hdr_t must be 24 bytes");
+static_assert(sizeof(dev_cfg_record_hdr_t) == 24, "dev_cfg_record_hdr_t must be 24 bytes");
 
 /** @brief 记录镜像（头 + 载荷）上限，用于两处静态缓冲的定长
  *
@@ -40,7 +40,7 @@ _Static_assert(sizeof(dev_cfg_record_hdr_t) == 24, "dev_cfg_record_hdr_t must be
  * 取 2589 向上留余量到 2600，两处静态缓冲因此各占 2600B（合计约 5.1KB SRAM）。
  *
  * 这不是可以随手调小的"缓冲大小"：调小于最大载荷时 save 会返回 -1，
- * 表现为"配置存不下去"而不是越界。上界由 app_cfg_sched.h 的 _Static_assert
+ * 表现为"配置存不下去"而不是越界。上界由 app_cfg_sched.h 的 static_assert
  * 与渲染侧的运行期检查共同守住。
  *
  * 若以后要省这几 KB，可以改成"分块读回比对"（逐 256B 比较即可判定是否一致），
@@ -52,10 +52,10 @@ typedef uint32_t (*dev_cfg_record_crc_fn_t)(const uint8_t *data, size_t len);
 
 /** @brief 读取结果状态 */
 typedef enum {
-    DEV_CFG_RECORD_STATE_OK      = 0, /**< 读取成功, payload 有效 */
-    DEV_CFG_RECORD_STATE_EMPTY,       /**< 区域全 0xFF, 从未写入 → 调用方应用默认值 */
-    DEV_CFG_RECORD_STATE_INVALID,     /**< name/version/len/CRC 任一不符 → 调用方应用默认值 */
-    DEV_CFG_RECORD_STATE_IO_ERR,      /**< 底层读写失败 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_OK = 0,  /**< 读取成功, payload 有效 */
+    DEV_CFG_RECORD_STATE_EMPTY,   /**< 区域全 0xFF, 从未写入 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_INVALID, /**< name/version/len/CRC 任一不符 → 调用方应用默认值 */
+    DEV_CFG_RECORD_STATE_IO_ERR,  /**< 底层读写失败 → 调用方应用默认值 */
 } dev_cfg_record_state_t;
 
 /**
@@ -72,8 +72,8 @@ typedef enum {
  * @return dev_cfg_record_state_t 状态; 仅 OK 时 payload 有效
  */
 dev_cfg_record_state_t dev_cfg_record_load(dev_storage_t *stor, uint32_t addr,
-                              const char *name, uint16_t version, dev_cfg_record_crc_fn_t crc,
-                              uint8_t *payload, uint16_t payload_cap, uint16_t *payload_len);
+                                           const char *name, uint16_t version, dev_cfg_record_crc_fn_t crc,
+                                           uint8_t *payload, uint16_t payload_cap, uint16_t *payload_len);
 
 /**
  * @brief  保存配置记录 (scratch 组包 → 读回对比去重 → 单次写入)
@@ -97,6 +97,6 @@ dev_cfg_record_state_t dev_cfg_record_load(dev_storage_t *stor, uint32_t addr,
  *       自带串行化锁，故这一层不必再包。
  */
 int32_t dev_cfg_record_save(dev_storage_t *stor, uint32_t addr,
-                        const char *name, uint16_t version, dev_cfg_record_crc_fn_t crc,
-                        const uint8_t *payload, uint16_t payload_len,
-                        uint8_t *scratch, uint16_t scratch_cap);
+                            const char *name, uint16_t version, dev_cfg_record_crc_fn_t crc,
+                            const uint8_t *payload, uint16_t payload_len,
+                            uint8_t *scratch, uint16_t scratch_cap);

@@ -277,7 +277,7 @@ SRC_PLATFORM = \
 	Platform/Src/pl_exti.c \
 	Platform/Src/pl_net.c \
 	Platform/Src/pl_eth.c \
-	test/stubs/pl_crc_stub.c \
+	Platform/Src/pl_crc.c \
 	Platform/Src/pl_iwdg.c \
 	Platform/Src/pl_dma.c \
 	Platform/Src/pl_dwt.c \

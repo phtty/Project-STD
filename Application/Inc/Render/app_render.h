@@ -57,9 +57,9 @@ typedef enum {
 
 /** @brief 字库检索键（字号 + 字库编码 + 字型） */
 typedef struct {
-    app_font_size_t size; /**< 字号 */
+    app_font_size_t size;   /**< 字号 */
     app_font_enc_t charset; /**< 字库编码 (ASCII/GBK) — 渲染器内部按字符自动填充 */
-    app_font_type_t type; /**< 字型 */
+    app_font_type_t type;   /**< 字型 */
 } app_font_key_t;
 
 /* ---- 汉字在字库单元内的索引方式 ----
@@ -69,16 +69,16 @@ typedef struct {
  * 由板级表逐块指定 —— 同一个型号的屏换一批字库母片就可能换一种。 */
 /** @brief 汉字在字库单元内的索引方式（两版字库区位基准不同） */
 typedef enum {
-    APP_FONT_IDX_KIND_GBK = 0,   /**< GBK 区位索引（23940 字） */
-    APP_FONT_IDX_KIND_GB2312,    /**< GB2312 区位索引（8836 字） */
+    APP_FONT_IDX_KIND_GBK = 0, /**< GBK 区位索引（23940 字） */
+    APP_FONT_IDX_KIND_GB2312,  /**< GB2312 区位索引（8836 字） */
 } app_font_idx_kind_t;
 
 /* ---- 字库单元（板级表的一项）---- */
 
 /** @brief 字库单元：一个 (字号, 编码, 字型) 三元组及其 Flash 占用量 */
 typedef struct {
-    app_font_key_t key;        /**< 检索键 */
-    uint32_t   unit_size; /**< 该三元组在 Flash 中占用的总字节数 */
+    app_font_key_t key; /**< 检索键 */
+    uint32_t unit_size; /**< 该三元组在 Flash 中占用的总字节数 */
 } app_font_unit_t;
 
 /* ---- 板级字库描述 ----
@@ -93,19 +93,19 @@ typedef struct {
  * 唯一实例 g_board_font_lib 由 boards/&lt;板&gt;/Application/Src/app_font_lib_board.c 提供。 */
 /** @brief 板级字库描述（单元表、可用字号与容量契约） */
 typedef struct {
-    const app_font_unit_t *lib;    /**< 单元表，顺序必须与实物映像一致 */
-    uint16_t           lib_count;  /**< 单元表项数 */
+    const app_font_unit_t *lib;   /**< 单元表，顺序必须与实物映像一致 */
+    uint16_t lib_count;           /**< 单元表项数 */
     const app_font_size_t *sizes; /**< 本板可用字号，**必须升序**（最近邻回落依赖它） */
-    uint8_t            size_count; /**< sizes[] 项数 */
-    uint8_t            asc_index_base; /**< ASCII 索引起点：0x20（96 槽）或 0x00（128 槽） */
-    app_font_idx_kind_t    gb_index; /**< 汉字索引式 */
-    uint32_t           total_bytes; /**< 必须等于 lib[] 各项之和 */
+    uint8_t size_count;           /**< sizes[] 项数 */
+    uint8_t asc_index_base;       /**< ASCII 索引起点：0x20（96 槽）或 0x00（128 槽） */
+    app_font_idx_kind_t gb_index; /**< 汉字索引式 */
+    uint32_t total_bytes;         /**< 必须等于 lib[] 各项之和 */
 } app_font_lib_desc_t;
 
 extern const app_font_lib_desc_t g_board_font_lib; /**< 唯一板级字库描述实例 */
 
 /* 容量契约用编译期量 BOARD_FONT_LIB_TOTAL_BYTES（在 board.h，因为 app_cfg_sched.h
- * 的 _Static_assert 要用它）。g_board_font_lib.total_bytes 是它的运行期副本，两者由
+ * 的 static_assert 要用它）。g_board_font_lib.total_bytes 是它的运行期副本，两者由
  * _render_init 的交叉校验钉住 —— 单靠编译期常量挡不住"表里写错一项"。 */
 
 /* ---- 水平/垂直对齐 ---- */
@@ -123,11 +123,11 @@ typedef enum {
 typedef struct {
     app_render_align_t h_align; /**< 水平对齐 */
     app_render_align_t v_align; /**< 垂直对齐 */
-    bool word_wrap; /**< 超宽时自动换行；false = 逐字形截断（见 app_render_cfg_t 上方契约） */
-    bool prefer_one_line; /**< 自适应优先整段单行：默认 false（逐字保持旧的按面积自适应）。
-                           *   仅 `font_size == APP_FONT_SIZE_SELF_ADAPT` 且文本不含 `\n` 时生效：
-                           *   从大到小选"整段一行放得下且字号 ≤ 区域高"的字号，选定则**不换行**；
-                           *   都不满足则取最小字号并**强制换行**。 */
+    bool word_wrap;             /**< 超宽时自动换行；false = 逐字形截断（见 app_render_cfg_t 上方契约） */
+    bool prefer_one_line;       /**< 自适应优先整段单行：默认 false（逐字保持旧的按面积自适应）。
+                                 *   仅 `font_size == APP_FONT_SIZE_SELF_ADAPT` 且文本不含 `\n` 时生效：
+                                 *   从大到小选"整段一行放得下且字号 ≤ 区域高"的字号，选定则**不换行**；
+                                 *   都不满足则取最小字号并**强制换行**。 */
 } app_render_style_t;
 
 /* ---- 渲染类型：告诉 app_render 如何解析 union ---- */
@@ -165,12 +165,12 @@ typedef enum {
 /** @brief 统一渲染参数（tagged union；type 决定哪个分支生效） */
 typedef struct {
     /* 公共 — 调用方设置后渲染器只读 */
-    const uint16_t x; /**< 区域左上角 X（区域语义见上方契约） */
-    const uint16_t y; /**< 区域左上角 Y（同上） */
-    const uint16_t w; /**< 区域宽（**尺寸**；fill 时 0 = 全屏） */
-    const uint16_t h; /**< 区域高（**尺寸**；fill 时 0 = 全屏） */
+    const uint16_t x;                /**< 区域左上角 X（区域语义见上方契约） */
+    const uint16_t y;                /**< 区域左上角 Y（同上） */
+    const uint16_t w;                /**< 区域宽（**尺寸**；fill 时 0 = 全屏） */
+    const uint16_t h;                /**< 区域高（**尺寸**；fill 时 0 = 全屏） */
     const dev_display_color_t color; /**< 绘制颜色 */
-    const app_render_type_t type; /**< 标签: 指定使用哪个 union 分支 */
+    const app_render_type_t type;    /**< 标签: 指定使用哪个 union 分支 */
 
     /** @brief **这一帧的内容要落盘**（掉电再上电自动恢复）。默认 false。
      *
@@ -193,12 +193,12 @@ typedef struct {
     union {
         /* APP_RENDER_TYPE_TEXT — 文字专属 */
         struct {
-            const char *text; /**< 字符串 */
-            const uint16_t len; /**< 字符串长度（字节数） */
+            const char *text;                /**< 字符串 */
+            const uint16_t len;              /**< 字符串长度（字节数） */
             const app_font_size_t font_size; /**< 字号 */
             const app_font_type_t font_type; /**< 字型 */
             const app_render_style_t *style; /**< 对齐/换行 (NULL=默认) */
-            const app_font_enc_t text_enc; /**< 输入文本编码 (UTF8 内部转 GBK / GBK 直通)；UTF8 路径内部缓冲 256B，超长截断 */
+            const app_font_enc_t text_enc;   /**< 输入文本编码 (UTF8 内部转 GBK / GBK 直通)；UTF8 路径内部缓冲 256B，超长截断 */
         };
 
         /* APP_RENDER_TYPE_BITMAP — 位图专属 */
@@ -224,9 +224,9 @@ typedef struct {
     void (*fill)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c); /**< 矩形填充原语 */
     void (*bitmap)(void *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bm,
                    dev_display_color_t c); /**< 位图绘制原语 */
-    void    *ctx; /**< 目标上下文，随原语回传 */
-    uint16_t rows; /**< 目标宽（_render_fill 的全屏语义、_render_text 的边界判断要用） */
-    uint16_t cols; /**< 目标高 */
+    void *ctx;                             /**< 目标上下文，随原语回传 */
+    uint16_t rows;                         /**< 目标宽（_render_fill 的全屏语义、_render_text 的边界判断要用） */
+    uint16_t cols;                         /**< 目标高 */
 } app_render_target_t;
 
 /** @brief 换渲染目标；传 NULL 回落 `dev_display_get()`（默认）。
@@ -268,8 +268,8 @@ void app_render(const app_render_cfg_t *cfg);
 typedef struct [[gnu::packed]] {
     uint16_t screen_rows; /**< 屏宽（一行像素数） */
     uint16_t screen_cols; /**< 屏高（行数） */
-    uint8_t  color; /**< 非黑像素颜色 (dev_display_color_t) */
-    uint8_t  bitmap[]; /**< (cols × ((rows+7)/8)) 字节, MSB first per row */
+    uint8_t color;        /**< 非黑像素颜色 (dev_display_color_t) */
+    uint8_t bitmap[];     /**< (cols × ((rows+7)/8)) 字节, MSB first per row */
 } app_render_persist_t;
 
 /** @brief 记录格式版本。布局变更时 +1 —— 版本不符会被判为记录失效、回落默认，
@@ -285,7 +285,7 @@ typedef struct [[gnu::packed]] {
  * 本工程的真 dev_display.h 里**没有**编译期几何宏（尺寸是运行期从 dev_display_t 读的），
  * 所以这里只能取"全工程最大值"这个常量，由 app_render_save 在写入前按运行期几何
  * 检查来兜底。新增更大的模组时这里与 DEV_CFG_RECORD_MAX_IMAGE 都要跟着调 ——
- * 两者的一致性由 app_cfg_sched.h 的 _Static_assert 守住。 */
+ * 两者的一致性由 app_cfg_sched.h 的 static_assert 守住。 */
 #define RENDER_PERSIST_BITMAP_MAX (2560U)
 
 /** @brief 显存持久化载荷上限 = 位图上限 + 头部(5B) */

@@ -17,8 +17,8 @@
 
 /* ---- 单元字节数 ----
  * ASCII = (size/2)宽 × size高 × 96 字; GBK = size宽 × size高 × 23940 字 */
-#define N_ASC_CHARS (96U)
-#define N_GBK_CHARS (23940U)
+#define N_ASC_CHARS  (96U)
+#define N_GBK_CHARS  (23940U)
 
 #define ASC_UNIT(sz) ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
 #define GBK_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GBK_CHARS)
@@ -89,5 +89,5 @@ const app_font_lib_desc_t g_board_font_lib = {
 
 /* 表内 total_bytes 直接取编译期常量，所以两者不可能不一致；但 lib[] 的实际求和
  * 是否等于它是另一回事（写错一个数字就会错位）—— 那条由 _render_init 运行期校验。 */
-_Static_assert(BOARD_FONT_LIB_TOTAL_BYTES == 30713088U,
-               "3833024 font total changed - board.h and s_lib[] must be updated together");
+static_assert(BOARD_FONT_LIB_TOTAL_BYTES == 30713088U,
+              "3833024 font total changed - board.h and s_lib[] must be updated together");

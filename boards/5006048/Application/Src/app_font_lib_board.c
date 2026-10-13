@@ -32,8 +32,8 @@
 /* ---- 单元字节数 ----
  * ASCII    = (size/2)宽 × size高 × 128 槽   ← 按**原始码**索引，不是 0x20 起
  * GB2312   = size宽 × size高 × 8836 字      ← 94×94 区位全集 */
-#define N_ASC_CHARS    (128U)
-#define N_GB2312_CHARS (8836U)
+#define N_ASC_CHARS     (128U)
+#define N_GB2312_CHARS  (8836U)
 
 #define ASC_UNIT(sz)    ((uint32_t)(sz) * (((sz) / 2 + 7) / 8) * N_ASC_CHARS)
 #define GB2312_UNIT(sz) ((uint32_t)(sz) * (((sz) + 7) / 8) * N_GB2312_CHARS)
@@ -48,41 +48,41 @@ static const app_font_size_t s_sizes[] = {APP_FONT_SIZE_16, APP_FONT_SIZE_24, AP
  * 每组内部的地理顺序是 FS → HT → KT → ST，与 3833024 那份的 ST→FS→KT→HT 相反。 */
 static const app_font_unit_t s_lib[] = {
     /* 16号 — 块起点 0 */
-    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(16)},          /* 0       */
-    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(16)},          /* 2048    */
-    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(16)},          /* 4096    */
-    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(16)},          /* 6144    */
-    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(16)},         /* 8192    */
-    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(16)},         /* 290944  */
-    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(16)},         /* 573696  */
-    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(16)},         /* 856448  */
+    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(16)},  /* 0       */
+    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(16)},  /* 2048    */
+    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(16)},  /* 4096    */
+    {{.size = 16, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(16)},  /* 6144    */
+    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(16)}, /* 8192    */
+    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(16)}, /* 290944  */
+    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(16)}, /* 573696  */
+    {{.size = 16, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(16)}, /* 856448  */
     /* 24号 — 块起点 1139200 */
-    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(24)},          /* 1139200 */
-    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(24)},          /* 1145344 */
-    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(24)},          /* 1151488 */
-    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(24)},          /* 1157632 */
-    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(24)},         /* 1163776 */
-    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(24)},         /* 1799968 */
-    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(24)},         /* 2436160 */
-    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(24)},         /* 3072352 */
+    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(24)},  /* 1139200 */
+    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(24)},  /* 1145344 */
+    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(24)},  /* 1151488 */
+    {{.size = 24, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(24)},  /* 1157632 */
+    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(24)}, /* 1163776 */
+    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(24)}, /* 1799968 */
+    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(24)}, /* 2436160 */
+    {{.size = 24, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(24)}, /* 3072352 */
     /* 32号 — 块起点 3708544 */
-    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(32)},          /* 3708544 */
-    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(32)},          /* 3716736 */
-    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(32)},          /* 3724928 */
-    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(32)},          /* 3733120 */
-    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(32)},         /* 3741312 */
-    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(32)},         /* 4872320 */
-    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(32)},         /* 6003328 */
-    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(32)},         /* 7134336 */
+    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(32)},  /* 3708544 */
+    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(32)},  /* 3716736 */
+    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(32)},  /* 3724928 */
+    {{.size = 32, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(32)},  /* 3733120 */
+    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(32)}, /* 3741312 */
+    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(32)}, /* 4872320 */
+    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(32)}, /* 6003328 */
+    {{.size = 32, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(32)}, /* 7134336 */
     /* 48号 — 块起点 8265344 */
-    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(48)},          /* 8265344 */
-    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(48)},          /* 8283776 */
-    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(48)},          /* 8302208 */
-    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(48)},          /* 8320640 */
-    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(48)},         /* 8339072 */
-    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(48)},         /* 10883840 */
-    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(48)},         /* 13428608 */
-    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(48)},         /* 15973376 */
+    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_FS}, ASC_UNIT(48)},  /* 8265344 */
+    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_HT}, ASC_UNIT(48)},  /* 8283776 */
+    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_KT}, ASC_UNIT(48)},  /* 8302208 */
+    {{.size = 48, .charset = APP_FONT_ENC_ASCII, .type = APP_FONT_TYPE_ST}, ASC_UNIT(48)},  /* 8320640 */
+    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_FS}, GB2312_UNIT(48)}, /* 8339072 */
+    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_HT}, GB2312_UNIT(48)}, /* 10883840 */
+    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_KT}, GB2312_UNIT(48)}, /* 13428608 */
+    {{.size = 48, .charset = APP_FONT_ENC_GBK, .type = APP_FONT_TYPE_ST}, GB2312_UNIT(48)}, /* 15973376 */
 };
 
 const app_font_lib_desc_t g_board_font_lib = {
@@ -95,11 +95,11 @@ const app_font_lib_desc_t g_board_font_lib = {
        输入文本经 cvt_utf8_to_gbk 转成 GBK 后，**再按本板的区位方案映射到 GB2312 字形**。
        代价：GBK 有而 GB2312 没有的字（生僻字、部分符号）会落到区位界外，
        _char_addr 返回 false 跳过该字 —— 这是本板字库的固有边界，不是缺陷。 */
-    .gb_index       = APP_FONT_IDX_KIND_GB2312,
-    .total_bytes    = BOARD_FONT_LIB_TOTAL_BYTES,
+    .gb_index    = APP_FONT_IDX_KIND_GB2312,
+    .total_bytes = BOARD_FONT_LIB_TOTAL_BYTES,
 };
 
 /* 表内 total_bytes 直接取编译期常量，两者不可能不一致；lib[] 的实际求和是否等于它
  * 是另一回事（写错一个数字就整体错位）—— 那条由 _render_init 运行期校验。 */
-_Static_assert(BOARD_FONT_LIB_TOTAL_BYTES == 18518144U,
-               "5006048 font total changed - board.h and s_lib[] must be updated together");
+static_assert(BOARD_FONT_LIB_TOTAL_BYTES == 18518144U,
+              "5006048 font total changed - board.h and s_lib[] must be updated together");

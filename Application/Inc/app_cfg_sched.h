@@ -26,27 +26,27 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "app_render.h" /* RENDER_PERSIST_PAYLOAD_MAX */
-#include "board.h"      /* BOARD_FONT_LIB_TOTAL_BYTES（板级，两版字库大小不同） */
+#include "app_render.h"     /* RENDER_PERSIST_PAYLOAD_MAX */
+#include "board.h"          /* BOARD_FONT_LIB_TOTAL_BYTES（板级，两版字库大小不同） */
 #include "dev_cfg_record.h" /* dev_cfg_record_state_t */
 
 /* ---- 编译期契约 ---- */
-#define CFG_REGION_SECTOR     (4096U)                                   /**< 单个配置块（扇区）字节数 */
-#define CFG_CAP_CONTRACT      (32U * 1024U * 1024U)                     /**< 器件容量契约：W25Q256 = 32MB */
-#define CFG_REGION_MAX_BLOCKS (8U)                                      /**< 尾部预留区块数：8 × 4KB */
+#define CFG_REGION_SECTOR     (4096U)                                     /**< 单个配置块（扇区）字节数 */
+#define CFG_CAP_CONTRACT      (32U * 1024U * 1024U)                       /**< 器件容量契约：W25Q256 = 32MB */
+#define CFG_REGION_MAX_BLOCKS (8U)                                        /**< 尾部预留区块数：8 × 4KB */
 #define CFG_REGION_BYTES      (CFG_REGION_MAX_BLOCKS * CFG_REGION_SECTOR) /**< 配置区总字节数 */
 
 /* 字库与配置区在器件上都必须放得下。器件实配容量由运行期门槛把关
    （见 app_cfg_sched.c 的 s_storage_ready）—— 这里锁的是"设计假定的容量"。
    字库大小是板级量（两版字库不同），取自 board.h。 */
-_Static_assert(BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES <= CFG_CAP_CONTRACT,
-               "font region overlaps config region");
+static_assert(BOARD_FONT_LIB_TOTAL_BYTES + CFG_REGION_BYTES <= CFG_CAP_CONTRACT,
+              "font region overlaps config region");
 
 /* 记录头的定长缓冲（dev_cfg_record 的去重读回缓冲 + 本模块的组包缓冲）必须装得下
    本工程最大的一个载荷。这两处取小了不会越界（save 返回 -1），但会表现为
    "配置存不下去"，且要到现场才发现。 */
-_Static_assert(RENDER_PERSIST_PAYLOAD_MAX + DEV_CFG_RECORD_HDR_SIZE <= DEV_CFG_RECORD_MAX_IMAGE,
-               "DEV_CFG_RECORD_MAX_IMAGE 装不下最大的记录：调大它，或核对 RENDER_PERSIST_BITMAP_MAX");
+static_assert(RENDER_PERSIST_PAYLOAD_MAX + DEV_CFG_RECORD_HDR_SIZE <= DEV_CFG_RECORD_MAX_IMAGE,
+              "DEV_CFG_RECORD_MAX_IMAGE 装不下最大的记录：调大它，或核对 RENDER_PERSIST_BITMAP_MAX");
 
 /* ---- 注册描述 ---- */
 /** @brief 配置所有者注册描述：注册名 + 记录格式版本 + 启动加载回调 */

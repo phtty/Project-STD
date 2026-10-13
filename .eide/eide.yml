@@ -449,9 +449,9 @@ targets:
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
-      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
       - <virtual_root>/Application/protocol/cas
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

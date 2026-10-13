@@ -111,24 +111,24 @@ typedef enum {
     APP_CASC_TYPE_NACK    = 0x23, /**< 本轮拒收（配置错，重发没用） */
 } app_casc_type_t;
 
-#define CASC_TYPE_MASK (0x3FU)                      /**< 帧类型字段掩码（ver_type 低 6 位） */
+#define CASC_TYPE_MASK   (0x3FU)                            /**< 帧类型字段掩码（ver_type 低 6 位） */
 #define CASC_TYPE_OF(vt) ((uint8_t)((vt) & CASC_TYPE_MASK)) /**< 取 ver_type 的帧类型低 6 位 */
 
 /* ---- 帧头 ---- */
 
 /** @brief 级联帧头（11 字节） */
 typedef struct [[gnu::packed]] {
-    uint8_t sof[2];    /**< 帧定界，固定 0xA5 0x5A */
-    uint8_t ver_type;  /**< b7..b6 = 协议版本，b5..b0 = 帧类型 */
-    uint8_t dst;       /**< 目的地址：00 = 主卡，01..1F = 从卡，FF = 广播 */
-    uint8_t src;       /**< 源地址：主卡恒 00，从卡填自身地址 */
-    uint8_t seq[2];    /**< 轮次序号，大端 */
-    uint8_t idx;       /**< 保留（分片已废弃，恒 0） */
-    uint8_t frag_n;    /**< 保留（分片已废弃，同上） */
-    uint8_t len[2];    /**< 整帧字节数（含头含 CRC），大端 */
+    uint8_t sof[2];   /**< 帧定界，固定 0xA5 0x5A */
+    uint8_t ver_type; /**< b7..b6 = 协议版本，b5..b0 = 帧类型 */
+    uint8_t dst;      /**< 目的地址：00 = 主卡，01..1F = 从卡，FF = 广播 */
+    uint8_t src;      /**< 源地址：主卡恒 00，从卡填自身地址 */
+    uint8_t seq[2];   /**< 轮次序号，大端 */
+    uint8_t idx;      /**< 保留（分片已废弃，恒 0） */
+    uint8_t frag_n;   /**< 保留（分片已废弃，同上） */
+    uint8_t len[2];   /**< 整帧字节数（含头含 CRC），大端 */
 } app_casc_hdr_t;
 
-_Static_assert(sizeof(app_casc_hdr_t) == 11, "级联帧头必须是 11 字节");
+static_assert(sizeof(app_casc_hdr_t) == 11, "级联帧头必须是 11 字节");
 
 /* ---- 大端存取（帧内多字节字段一律走这两个）---- */
 static inline uint16_t _casc_get_u16(const uint8_t *p)
@@ -167,7 +167,7 @@ typedef struct [[gnu::packed]] {
     uint8_t proto_ver; /**< 级联协议版本 */
 } app_casc_present_t;
 
-_Static_assert(sizeof(app_casc_present_t) == 7, "PRESENT 载荷必须是 7 字节");
+static_assert(sizeof(app_casc_present_t) == 7, "PRESENT 载荷必须是 7 字节");
 
 /** @brief 主 → 全：整屏调光 */
 typedef struct [[gnu::packed]] {
@@ -200,7 +200,7 @@ typedef struct [[gnu::packed]] {
     uint8_t claim[4];    /**< 认领时刻（内核 tick），大端 */
 } app_casc_set_addr_t;
 
-_Static_assert(sizeof(app_casc_set_addr_t) == 7, "SET_ADDR 载荷必须是 7 字节");
+static_assert(sizeof(app_casc_set_addr_t) == 7, "SET_ADDR 载荷必须是 7 字节");
 
 /** @brief `yours` 的这个值 = "按自己的格自算地址"（广播识别帧用） */
 #define CASC_ADDR_SELF_CALC (0xFFU)
@@ -235,13 +235,13 @@ _Static_assert(sizeof(app_casc_set_addr_t) == 7, "SET_ADDR 载荷必须是 7 字
  *
  *  整帧 = 11 帧头 + 13 本头 + bmp_len + 4 CRC；本板满幅即 **1428** 字节。 */
 typedef struct [[gnu::packed]] {
-    uint8_t x[2];  /**< 本卡矩形左上角 X（整屏坐标），大端 */
-    uint8_t y[2];  /**< 本卡矩形左上角 Y（整屏坐标），大端 */
-    uint8_t w[2];  /**< 本卡矩形宽（整屏坐标），大端 */
-    uint8_t h[2];  /**< 本卡矩形高（整屏坐标），大端 */
-    uint8_t bmp_len[2];  /**< 位图字节数 = ceil(w/8)*h，大端 */
-    uint8_t bright;      /**< 本轮亮度断言 0..7 */
-    uint8_t color;       /**< 本卡颜色（dev_display_color_t）*/
+    uint8_t x[2];       /**< 本卡矩形左上角 X（整屏坐标），大端 */
+    uint8_t y[2];       /**< 本卡矩形左上角 Y（整屏坐标），大端 */
+    uint8_t w[2];       /**< 本卡矩形宽（整屏坐标），大端 */
+    uint8_t h[2];       /**< 本卡矩形高（整屏坐标），大端 */
+    uint8_t bmp_len[2]; /**< 位图字节数 = ceil(w/8)*h，大端 */
+    uint8_t bright;     /**< 本轮亮度断言 0..7 */
+    uint8_t color;      /**< 本卡颜色（dev_display_color_t）*/
     /** @brief 本轮内容要不要在**从卡**落盘（掉电再上电自动恢复）。0/1。
      *
      *  由主卡决定：它那一轮的渲染带了 `persist` 就置 1 —— 这样上位机
@@ -249,10 +249,10 @@ typedef struct [[gnu::packed]] {
      *  **用整字节不用位域**：本文件开头就写明"不写 uint16_t 成员、避开打包结构的
      *  对齐与字节序陷阱"，位域是同一类陷阱且收益只有 1 字节。 */
     uint8_t persist;
-    uint8_t bitmap[];    /**< bmp_len 字节 */
+    uint8_t bitmap[]; /**< bmp_len 字节 */
 } app_casc_image_t;
 
-_Static_assert(sizeof(app_casc_image_t) == 13, "IMAGE 载荷头必须是 13 字节");
+static_assert(sizeof(app_casc_image_t) == 13, "IMAGE 载荷头必须是 13 字节");
 
 /* ---- 帧长上限 ----
  *
@@ -260,10 +260,10 @@ _Static_assert(sizeof(app_casc_image_t) == 13, "IMAGE 载荷头必须是 13 字�
  * 也就是 `BOARD_CASC_BAND_MAX`。换模组只改 board.h 一处，这里自动跟上；
  * 装不下时下面这条断言会在编译期就把话说清楚（而不是运行期静默跳过那张卡）。 */
 #define CASC_FRAME_MAX (CASC_OVERHEAD + sizeof(app_casc_image_t) + BOARD_CASC_BAND_MAX) /**< 单帧最大字节数（含整块本卡位图） */
-#define CASC_FRAME_MIN (CASC_OVERHEAD) /**< 单帧最小字节数（仅固定开销） */
+#define CASC_FRAME_MIN (CASC_OVERHEAD)                                                  /**< 单帧最小字节数（仅固定开销） */
 
-_Static_assert(CASC_FRAME_MAX <= FRAME_DATA_MAX_LEN,
-               "本卡位图一帧装不下 —— 抬 FRAME_DATA_MAX_LEN（app_dispatch.h）");
+static_assert(CASC_FRAME_MAX <= FRAME_DATA_MAX_LEN,
+              "本卡位图一帧装不下 —— 抬 FRAME_DATA_MAX_LEN（app_dispatch.h）");
 
 /* ================================================================
  *  图传：一轮一条 IMAGE（载荷结构见上面的 app_casc_image_t）

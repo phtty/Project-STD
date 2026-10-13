@@ -27,7 +27,7 @@
 /* IAP ABI 记录必须适配 Sector 1（16KB 单一擦除单元，与 Bootloader 共享布局）。
    记录长度是 A/B 两侧的接口契约：本地 .c 改了结构体而 Bootloader 侧未同步，
    唯一的表现是上电读不出配置。把这条钉在编译期。 */
-_Static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
+static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
 
 /* 记录扇区**必须落在固件映像之外**。固件起点 = FLASH_BASE + BOARD_VECT_TAB_OFFSET，
    与 boards/&lt;板&gt;/STM32F407XX_FLASH.ld 的 FLASH_ORIGIN 同源（两处由这条断言间接钉住）。
@@ -41,18 +41,18 @@ _Static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record 
 
    反过来的情况（改了布局忘了置 flag）不会崩，只是记录区白留着不用，属安全失败。 */
 #define IAP_FLASH_BASE 0x08000000UL
-_Static_assert(BOARD_HAS_IAP_RECORD == 0 ||
-                   ADDR_CONFIG_SECTOR < (IAP_FLASH_BASE + BOARD_VECT_TAB_OFFSET),
-               /* 断言文本用 ASCII：中文会被 GCC 按八进制转义，在最需要它的时刻读不出来。
-                  详细说明在上面的注释里。 */
-               "IAP record sector lies inside the firmware image - erasing it erases the "
-               "running code. A board WITH a bootloader must move board.ld FLASH_ORIGIN and "
-               "BOARD_VECT_TAB_OFFSET together to 0x08040000; a direct-flash board must keep "
-               "BOARD_HAS_IAP_RECORD at 0");
+static_assert(BOARD_HAS_IAP_RECORD == 0 ||
+                  ADDR_CONFIG_SECTOR < (IAP_FLASH_BASE + BOARD_VECT_TAB_OFFSET),
+              /* 断言文本用 ASCII：中文会被 GCC 按八进制转义，在最需要它的时刻读不出来。
+                 详细说明在上面的注释里。 */
+              "IAP record sector lies inside the firmware image - erasing it erases the "
+              "running code. A board WITH a bootloader must move board.ld FLASH_ORIGIN and "
+              "BOARD_VECT_TAB_OFFSET together to 0x08040000; a direct-flash board must keep "
+              "BOARD_HAS_IAP_RECORD at 0");
 
 /* ---- IAP Flash 存储实例 ---- */
 static dev_flash_int_t s_flash_iap = {
-    .base        = {.capacity = IAP_SIZE},
+    .base      = {.capacity = IAP_SIZE},
     .base_addr = ADDR_CONFIG_SECTOR,
     .sector    = PL_FLASH_SECTOR_1,
 };
@@ -211,7 +211,7 @@ void app_flash_iap_init_config(app_flash_iap_sys_info_t *info)
 {
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);
 
-    info->magic      = APP_FLASH_IAP_MAGIC;
+    info->magic         = APP_FLASH_IAP_MAGIC;
     info->update_status = APP_FLASH_IAP_FAILED;
     memset(&(info->app_info), 0, sizeof(info->app_info));
 
@@ -296,7 +296,7 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
         if (!empty)
             printf("[iap_cfg] IAP 记录损坏（magic=0x%08X），按空记录以有效骨架重建\n",
                    (unsigned)info.magic);
-        info.magic      = APP_FLASH_IAP_MAGIC;
+        info.magic         = APP_FLASH_IAP_MAGIC;
         info.update_status = APP_FLASH_IAP_UPDATED;
         memset(&info.app_info, 0, sizeof(info.app_info));
     } else if (memcmp(info.net_cfg.ip, ip, 4) == 0 && memcmp(info.net_cfg.mask, mask, 4) == 0 &&

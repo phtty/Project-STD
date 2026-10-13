@@ -27,14 +27,14 @@
 
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
- * （见 app_cfg_sched.h 的 _Static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。
+ * （见 app_cfg_sched.h 的 static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。
  *
  * **两板的字库不是同一版**：本板 GBK、5 字号（14/16/20/24/32）；5006048 是
  * GB2312、4 字号（16/24/32/48），总量 18518144。所以这是板级量，不能放共享头。
  *
  * 必须与 Application/Src/app_font_lib_board.c 的 g_board_font_lib.total_bytes 一致。不同步的后果
  * 不只是取字乱码 —— 常量偏小会让配置区落进字库区，首次 save 的扇区擦除直接
- * 毁掉字库。那个 .c 里有 _Static_assert 钉住，_render_init 里另有一条运行期校验。 */
+ * 毁掉字库。那个 .c 里有 static_assert 钉住，_render_init 里另有一条运行期校验。 */
 #define BOARD_FONT_LIB_TOTAL_BYTES 30713088U /**< 本板 W25Qxx 字库总字节数，须与 g_board_font_lib.total_bytes 一致 */
 
 /* ---- 整屏逻辑画布（app_screen）----
@@ -52,20 +52,20 @@
 #define BOARD_SCREEN_CANVAS_MAX (2048U) /**< 整屏逻辑画布上限（字节），按本板最大级联规模留 */
 #endif
 #ifndef BOARD_SCREEN_CANVAS
-#define BOARD_SCREEN_CANVAS     (0) /**< 1 = 启用整屏逻辑画布；本板单卡默认关闭 */
+#define BOARD_SCREEN_CANVAS (0) /**< 1 = 启用整屏逻辑画布；本板单卡默认关闭 */
 #endif
 /* 本卡颜色（dev_display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
-#define BOARD_SCREEN_COLOR      (2) /**< 本卡默认颜色：DEV_DISPLAY_COLOR_GREEN */
+#define BOARD_SCREEN_COLOR (2) /**< 本卡默认颜色：DEV_DISPLAY_COLOR_GREEN */
 
 /* ---- 级联切分（整屏 = 若干张等尺寸卡按网格拼）----
  * 与 5006048 同名同义，说明见那边的 board.h。本板单卡屏 128×32，
  * 整屏 = 128×COLS 宽 × 32×ROWS 高，地址 = 网格下标（行优先，0 = 左上 = 主卡）。
  * 默认 1×1 = 单卡直显，行为与没有级联之前逐字节相同。 */
 #ifndef BOARD_CASC_COLS
-#define BOARD_CASC_COLS      (1) /**< 级联网格列数（横排卡数） */
+#define BOARD_CASC_COLS (1) /**< 级联网格列数（横排卡数） */
 #endif
 #ifndef BOARD_CASC_ROWS
-#define BOARD_CASC_ROWS      (1) /**< 级联网格行数（竖排卡数） */
+#define BOARD_CASC_ROWS (1) /**< 级联网格行数（竖排卡数） */
 #endif
 
 /* 主卡所在的**网格下标**（行优先：0 = 左上）。主卡不必在原点 —— 现场的拼法就有
@@ -90,7 +90,7 @@
 /* ---- 单卡矩形位图的上限（字节）----
  * 1bpp、ceil(屏宽/8)×屏高：本板单卡 128×32 → 16×32 = **512**。
  * app_screen 的抽带缓冲与 app_casc 的从卡暂存都按它静态分配。 */
-#define BOARD_CASC_BAND_MAX  (512U) /**< 单卡矩形位图上限（1bpp，字节） */
+#define BOARD_CASC_BAND_MAX (512U) /**< 单卡矩形位图上限（1bpp，字节） */
 
 /* ---- 级联总线地址（app_screen_self_addr）----
  * 0 = 主卡，1..0x1F = 从卡。
@@ -111,7 +111,7 @@
 #endif
 
 #ifndef BOARD_CASC_ADDR
-#define BOARD_CASC_ADDR      (0) /**< 出厂默认总线地址（0 = 主卡） */
+#define BOARD_CASC_ADDR (0) /**< 出厂默认总线地址（0 = 主卡） */
 #endif
 
 /* ---- 板级组合校验（放在最后：上面几个宏都要已定义）---- */

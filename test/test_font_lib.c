@@ -30,10 +30,10 @@
 #include "board.h"      /* BOARD_FONT_LIB_TOTAL_BYTES / CFG_CAP_CONTRACT */
 
 typedef struct {
-    uint8_t    size;
+    uint8_t size;
     app_font_enc_t cs;
     app_font_type_t type;
-    uint32_t   off;
+    uint32_t off;
 } font_expect_t;
 
 /* 用 BOARD 的编译期量做板间判别 —— 测试按板级头分层的包含路径分板编译（-I $(BOARD_DIR)/&lt;层&gt;/Inc），
@@ -41,82 +41,82 @@ typedef struct {
 #if BOARD_FONT_LIB_TOTAL_BYTES == 18518144U
 /* ---- 5006048：GB2312，16/24/32/48，每组 FS,HT,KT,ST ---- */
 static const font_expect_t s_expect[] = {
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,        0U}, /* 0 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,     2048U}, /* 2048 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,     4096U}, /* 4096 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,     6144U}, /* 6144 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,     8192U}, /* 8192 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT,   290944U}, /* 290944 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,   573696U}, /* 573696 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,   856448U}, /* 856448 */
-    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,  1139200U}, /* 1139200 */
-    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,  1145344U}, /* 1145344 */
-    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,  1151488U}, /* 1151488 */
-    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,  1157632U}, /* 1157632 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,  1163776U}, /* 1163776 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT,  1799968U}, /* 1799968 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,  2436160U}, /* 2436160 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,  3072352U}, /* 3072352 */
-    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,  3708544U}, /* 3708544 */
-    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,  3716736U}, /* 3716736 */
-    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,  3724928U}, /* 3724928 */
-    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,  3733120U}, /* 3733120 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,  3741312U}, /* 3741312 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT,  4872320U}, /* 4872320 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,  6003328U}, /* 6003328 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,  7134336U}, /* 7134336 */
-    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,  8265344U}, /* 8265344 */
-    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,  8283776U}, /* 8283776 */
-    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,  8302208U}, /* 8302208 */
-    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,  8320640U}, /* 8320640 */
-    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,  8339072U}, /* 8339072 */
-    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 10883840U}, /* 10883840 */
-    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 13428608U}, /* 13428608 */
-    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 15973376U}, /* 15973376 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 0U},       /* 0 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 2048U},    /* 2048 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 4096U},    /* 4096 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 6144U},    /* 6144 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 8192U},      /* 8192 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 290944U},    /* 290944 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 573696U},    /* 573696 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 856448U},    /* 856448 */
+    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 1139200U}, /* 1139200 */
+    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 1145344U}, /* 1145344 */
+    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 1151488U}, /* 1151488 */
+    {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 1157632U}, /* 1157632 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 1163776U},   /* 1163776 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 1799968U},   /* 1799968 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 2436160U},   /* 2436160 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 3072352U},   /* 3072352 */
+    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 3708544U}, /* 3708544 */
+    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 3716736U}, /* 3716736 */
+    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 3724928U}, /* 3724928 */
+    {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 3733120U}, /* 3733120 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 3741312U},   /* 3741312 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 4872320U},   /* 4872320 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 6003328U},   /* 6003328 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 7134336U},   /* 7134336 */
+    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 8265344U}, /* 8265344 */
+    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 8283776U}, /* 8283776 */
+    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 8302208U}, /* 8302208 */
+    {48, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 8320640U}, /* 8320640 */
+    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 8339072U},   /* 8339072 */
+    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 10883840U},  /* 10883840 */
+    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 13428608U},  /* 13428608 */
+    {48, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 15973376U},  /* 15973376 */
 };
 #elif BOARD_FONT_LIB_TOTAL_BYTES == 30713088U
 /* ---- 3833024：GBK，14/16/20/24/32，每组 ST,FS,KT,HT ---- */
 static const font_expect_t s_expect[] = {
-    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,        0U}, /* 0 */
-    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,     1344U}, /* 1344 */
-    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,     2688U}, /* 2688 */
-    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,     4032U}, /* 4032 */
-    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,     5376U}, /* 5376 */
-    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,   675696U}, /* 675696 */
-    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,  1346016U}, /* 1346016 */
-    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT,  2016336U}, /* 2016336 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,  2686656U}, /* 2686656 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,  2688192U}, /* 2688192 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,  2689728U}, /* 2689728 */
-    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,  2691264U}, /* 2691264 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,  2692800U}, /* 2692800 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,  3458880U}, /* 3458880 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,  4224960U}, /* 4224960 */
-    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT,  4991040U}, /* 4991040 */
-    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST,  5757120U}, /* 5757120 */
-    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS,  5760960U}, /* 5760960 */
-    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT,  5764800U}, /* 5764800 */
-    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT,  5768640U}, /* 5768640 */
-    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST,  5772480U}, /* 5772480 */
-    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS,  7208880U}, /* 7208880 */
-    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT,  8645280U}, /* 8645280 */
-    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 10081680U}, /* 10081680 */
+    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 0U},        /* 0 */
+    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 1344U},     /* 1344 */
+    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 2688U},     /* 2688 */
+    {14, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 4032U},     /* 4032 */
+    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 5376U},       /* 5376 */
+    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 675696U},     /* 675696 */
+    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 1346016U},    /* 1346016 */
+    {14, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 2016336U},    /* 2016336 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 2686656U},  /* 2686656 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 2688192U},  /* 2688192 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 2689728U},  /* 2689728 */
+    {16, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 2691264U},  /* 2691264 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 2692800U},    /* 2692800 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 3458880U},    /* 3458880 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 4224960U},    /* 4224960 */
+    {16, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 4991040U},    /* 4991040 */
+    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 5757120U},  /* 5757120 */
+    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 5760960U},  /* 5760960 */
+    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 5764800U},  /* 5764800 */
+    {20, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 5768640U},  /* 5768640 */
+    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 5772480U},    /* 5772480 */
+    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 7208880U},    /* 7208880 */
+    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 8645280U},    /* 8645280 */
+    {20, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 10081680U},   /* 10081680 */
     {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 11518080U}, /* 11518080 */
     {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 11522688U}, /* 11522688 */
     {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 11527296U}, /* 11527296 */
     {24, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 11531904U}, /* 11531904 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 11536512U}, /* 11536512 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 13260192U}, /* 13260192 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 14983872U}, /* 14983872 */
-    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 16707552U}, /* 16707552 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 11536512U},   /* 11536512 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 13260192U},   /* 13260192 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 14983872U},   /* 14983872 */
+    {24, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 16707552U},   /* 16707552 */
     {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_ST, 18431232U}, /* 18431232 */
     {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_FS, 18437376U}, /* 18437376 */
     {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_KT, 18443520U}, /* 18443520 */
     {32, APP_FONT_ENC_ASCII, APP_FONT_TYPE_HT, 18449664U}, /* 18449664 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 18455808U}, /* 18455808 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 21520128U}, /* 21520128 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 24584448U}, /* 24584448 */
-    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 27648768U}, /* 27648768 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_ST, 18455808U},   /* 18455808 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_FS, 21520128U},   /* 21520128 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_KT, 24584448U},   /* 24584448 */
+    {32, APP_FONT_ENC_GBK, APP_FONT_TYPE_HT, 27648768U},   /* 27648768 */
 };
 #else
 #error "新板：请为它补一份期望偏移表（来源应是该板实物字库映像的权威地址表）"
@@ -126,16 +126,16 @@ static const font_expect_t s_expect[] = {
 static int g_pass;
 static int g_fail;
 
-#define CHECK_MSG(cond, ...)                                                                       \
-    do {                                                                                           \
-        if (cond) {                                                                                \
-            g_pass++;                                                                              \
-        } else {                                                                                   \
-            g_fail++;                                                                              \
-            printf("      \033[31m✘\033[0m %s:%d  ", __FILE__, __LINE__);                     \
-            printf(__VA_ARGS__);                                                                   \
-            printf("\n");                                                                          \
-        }                                                                                          \
+#define CHECK_MSG(cond, ...)                                              \
+    do {                                                                  \
+        if (cond) {                                                       \
+            g_pass++;                                                     \
+        } else {                                                          \
+            g_fail++;                                                     \
+            printf("      \033[31m✘\033[0m %s:%d  ", __FILE__, __LINE__); \
+            printf(__VA_ARGS__);                                          \
+            printf("\n");                                                 \
+        }                                                                 \
     } while (0)
 
 #define TEST_BEGIN(name) printf("\n\033[36m▶ %s\033[0m\n", name)
@@ -222,8 +222,8 @@ static void case_sizes_ascending(void)
     /* 每个可用字号都必须真有 2 编码 × 4 字型 共 8 个单元 —— 缺项时
        _find_unit 找不到，该字直接不显示（不是崩溃，更难查） */
     for (uint8_t i = 0; i < g_board_font_lib.size_count; i++) {
-        const app_font_size_t sz     = g_board_font_lib.sizes[i];
-        int               found  = 0;
+        const app_font_size_t sz = g_board_font_lib.sizes[i];
+        int found                = 0;
         for (uint16_t k = 0; k < g_board_font_lib.lib_count; k++)
             if (g_board_font_lib.lib[k].key.size == sz) found++;
         CHECK_MSG(found == 8, "%u 号只有 %d 个单元（应为 2 编码 × 4 字型 = 8）", (unsigned)sz,
@@ -235,7 +235,7 @@ static void case_fits_capacity_contract(void)
 {
     TEST_BEGIN("字库 + 配置区放得进容量契约");
 
-    /* 与 app_cfg_sched.h 的 _Static_assert 同一条件，这里再钉一次：
+    /* 与 app_cfg_sched.h 的 static_assert 同一条件，这里再钉一次：
        改 board.h 的常量或板级表时，运行期门槛与编译期契约必须一起走 */
     CHECK_MSG(g_board_font_lib.total_bytes + 8U * 4096U <= 32U * 1024U * 1024U,
               "字库 %u + 配置区放不进 32MB", (unsigned)g_board_font_lib.total_bytes);
