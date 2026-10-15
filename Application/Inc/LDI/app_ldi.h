@@ -162,12 +162,6 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self);
 
 /* ---- API ---- */
 
-extern osMessageQueueId_t g_ldi_msg_queue;         /**< LDI 帧队列 */
-extern osThreadId_t g_ldi_task_handle;             /**< LDI 协议任务句柄 */
-extern const osThreadAttr_t g_ldi_task_attr;       /**< LDI 协议任务属性 */
-extern osThreadId_t g_ldi_timer_task_handle;       /**< LDI 定时任务句柄 */
-extern const osThreadAttr_t g_ldi_timer_task_attr; /**< LDI 定时任务属性 */
-
 /** @brief LDI 协议任务入口：从队列取帧并分派处理 */
 void app_ldi_task(void *argument);
 /** @brief LDI 定时任务入口：周期发送 0EH 验证申请与 0CH 状态上报 */

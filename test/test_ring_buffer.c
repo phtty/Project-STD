@@ -1,11 +1,13 @@
 /**
  * @file    test_ring_buffer.c
- * @brief   ring_buffer 窥视路径的 host 单测（重点是 rb_peek_capped 的容量夹紧）
+ * @brief   ring_buffer 窥视路径的 host 单测（重点是 rb_peek 的容量夹紧）
  *
  * 为什么需要这个测试：窥视越界写是"在硬件上极难构造、在现场表现为偶尔有点怪"
  * 的一类缺陷——溢出落在相邻 .bss 变量上，不崩溃、不报错。LDI 与 RLS 的探针
- * 曾用 `rb_peek(buff, 0, mem_pool, avail, nullptr)` 把最多 2047 字节写进 512 字节的
- * 栈数组，就是这么来的。这里用 ASan 的红区把它变成必现的失败。
+ * 曾用**旧契约**的 `rb_peek(buff, 0, mem_pool, avail, nullptr)` 把最多 2047 字节写进
+ * 512 字节的栈数组——那版契约的 `len` 只按缓冲区自身容量夹紧、根本不知道 dest 有多大。
+ * 旧契约已被废除：现在的 `rb_peek` 第 4 个参数是 `dest_cap`（硬上限），本题用 ASan
+ * 的红区把越界变成必现的失败。
  *
  * 内容比对不用手推偏移，而是维护一个**影子模型**：按入队顺序把字节记进平铺数组，
  * 于是"rb 里应该读到什么"就是 shadow[rd..wr) —— 手推环形偏移极易算错，
@@ -73,7 +75,7 @@ static void check_contents_match_shadow(const char *what)
     if (avail == 0) return;
 
     uint8_t *dest = malloc(avail);
-    uint16_t got  = rb_peek_capped(&s_rb, 0, dest, avail, nullptr);
+    uint16_t got  = rb_peek(&s_rb, 0, dest, avail, nullptr);
     if (got != avail) {
         printf("  FAIL %s: 窥视返回 %u 应为 %u\n", what, got, avail);
         g_failures++;
@@ -146,7 +148,7 @@ static void case_capped_never_exceeds_dest(void)
     uint8_t *dest      = malloc(cap);
     memset(dest, 0xAA, cap);
 
-    uint16_t got = rb_peek_capped(&s_rb, 0, dest, cap, nullptr);
+    uint16_t got = rb_peek(&s_rb, 0, dest, cap, nullptr);
 
     CHECK_MSG(got == cap, "应拷满 dest_cap=%u，实际 %u", cap, got);
 
@@ -174,7 +176,7 @@ static void case_capped_returns_avail_when_dest_larger(void)
 
     const uint16_t cap = 1024;
     uint8_t *dest      = malloc(cap);
-    uint16_t got       = rb_peek_capped(&s_rb, 0, dest, cap, nullptr);
+    uint16_t got       = rb_peek(&s_rb, 0, dest, cap, nullptr);
 
     CHECK_MSG(got == 300, "应返回 avail=300，实际 %u", got);
     free(dest);
@@ -187,7 +189,7 @@ static void case_capped_zero_cap_touches_nothing(void)
     reset_all();
     CHECK(rb_write_pattern(100) == 100);
 
-    uint16_t got = rb_peek_capped(&s_rb, 0, nullptr, 0, nullptr);
+    uint16_t got = rb_peek(&s_rb, 0, nullptr, 0, nullptr);
     CHECK_MSG(got == 0, "dest_cap=0 应返回 0，实际 %u", got);
     CHECK(rb_avail(&s_rb, nullptr) == 100);
 }
@@ -220,7 +222,7 @@ static void case_capped_wraparound(void)
 
     /* 跨边界处按 cap 截断也要正确 */
     uint8_t *dest = malloc(avail);
-    uint16_t got  = rb_peek_capped(&s_rb, 0, dest, (uint16_t)(avail - 1), nullptr);
+    uint16_t got  = rb_peek(&s_rb, 0, dest, (uint16_t)(avail - 1), nullptr);
     CHECK(got == avail - 1);
     free(dest);
 }
@@ -233,41 +235,84 @@ static void case_capped_offset_beyond_avail(void)
     CHECK(rb_write_pattern(10) == 10);
 
     uint8_t dest[64];
-    CHECK(rb_peek_capped(&s_rb, 10, dest, sizeof(dest), nullptr) == 0);
-    CHECK(rb_peek_capped(&s_rb, 999, dest, sizeof(dest), nullptr) == 0);
+    CHECK(rb_peek(&s_rb, 10, dest, sizeof(dest), nullptr) == 0);
+    CHECK(rb_peek(&s_rb, 999, dest, sizeof(dest), nullptr) == 0);
+}
+
+/* ================================================================
+ *  rb_peek 的单接口契约（这次收敛要守住的点）
+ *
+ *  收敛前有两套窥视 API：旧 `rb_peek` 的 `len` 是"想要多少"，只按缓冲区自身容量
+ *  夹紧、不知道 dest 有多大；另一版收 `dest_cap` 作硬上限（安全版）。收敛后安全版
+ *  成为唯一的 `rb_peek`，旧语义不再存在。下面两个用例只钉住**这次收敛**的契约点，
+ *  已被其它用例覆盖到的就不再重复：
+ *    - dest 比可读量小 → 返回 dest_cap、不越界：见 case_capped_never_exceeds_dest。
+ *    - offset 越界或 offset >= avail → 0：见 case_capped_offset_beyond_avail。
+ * ================================================================ */
+
+/**
+ * @brief 核心不变量：小数组 + dest_cap 超过可读量时，只写数组容量那么多
+ *
+ * 这是这次收敛要守住的核心不变量。故正好取旧契约会越界写的那副形状：
+ * 缓冲区里堆到 2047 字节（远多于 dest 的 512），第 4 个参数给的是 `dest_cap`
+ * （= sizeof(dest)），而不是"想要 2047 字节"。旧契约会照 2047 全写进这 512 字节
+ * 的栈数组；现在返回值被夹到小数组的容量，数组内容也只被写这么多——ASan 红区下无越界。
+ */
+static void case_peek_dest_cap_is_hard_limit(void)
+{
+    printf("case_peek_dest_cap_is_hard_limit\n");
+    reset_all();
+
+    /* 塞到可读上限 2047（ring 保留一空槽），远多于 dest 的 512 */
+    CHECK(rb_write_pattern(2047) == 2047);
+    const uint16_t avail = rb_avail(&s_rb, nullptr);
+    CHECK(avail == 2047);
+
+    uint8_t dest[512];
+    memset(dest, 0xAA, sizeof(dest));
+
+    uint16_t got = rb_peek(&s_rb, 0, dest, sizeof(dest), nullptr);
+
+    CHECK_MSG(got == sizeof(dest), "应夹到 dest_cap=%u，实际 %u", (unsigned)sizeof(dest), got);
+
+    int mismatch = -1;
+    for (uint16_t i = 0; i < (uint16_t)sizeof(dest); i++)
+        if (dest[i] != s_shadow[s_shadow_rd + i]) {
+            mismatch = i;
+            break;
+        }
+    CHECK_MSG(mismatch < 0, "第 %d 字节内容不符", mismatch);
+
+    /* 窥视不移动读指针 */
+    CHECK(rb_avail(&s_rb, nullptr) == avail);
 }
 
 /**
- * @brief rb_peek 语义未被改动：仍是"想要 len 字节"，按缓冲区容量防御性夹紧
+ * @brief dest 够大时按可读量返回：是 avail-offset，不是 dest_cap、也不是缓冲区容量
  *
- * 重构后 rb_peek 委托给 rb_peek_capped，本用例守住这次重构的等价性。
+ * 收敛后返回值只由"可读量"与 dest_cap 两者夹紧，与 rb 自身容量无关——
+ * 若实现改回按缓冲区容量返回，本用例在 dest_cap 大于可读量时就会拿到错值。
  */
-static void case_peek_behaviour_unchanged(void)
+static void case_peek_returns_avail_minus_offset(void)
 {
-    printf("case_peek_behaviour_unchanged\n");
+    printf("case_peek_returns_avail_minus_offset\n");
     reset_all();
-    CHECK(rb_write_pattern(1500) == 1500);
 
-    /* dest 必须容得下"被夹紧后的最大量"，即 rb->size。
-     * 这里不用小数组：rb_peek 按设计只认缓冲区容量、不认 dest 有多大——
-     * 给它一个 1024 字节的 dest 再要 4096，它会照写 1500 字节并踩穿栈
-     * （本测试初版就是这么写的，ASan 当场抓住）。
-     * 探针因此必须用 rb_peek_capped，它的 dest_cap 是硬上限。 */
-    uint8_t dest[TEST_RB_SIZE];
+    CHECK(rb_write_pattern(1000) == 1000);
 
-    /* 想要 100，拿到 100 */
-    CHECK(rb_peek(&s_rb, 0, dest, 100, nullptr) == 100);
-    for (uint16_t i = 0; i < 100; i++)
-        CHECK(dest[i] == s_shadow[s_shadow_rd + i]);
+    uint8_t dest[1024]; /* 容得下，故 dest_cap 不是限制项 */
 
-    /* 想要 4096（超过缓冲区容量），被夹到 avail */
-    CHECK(rb_peek(&s_rb, 0, dest, 4096, nullptr) == 1500);
+    /* offset=300 → 可读量 700；dest_cap=1024 大于它，不该被当成返回值 */
+    const uint16_t got = rb_peek(&s_rb, 300, dest, sizeof(dest), nullptr);
+    CHECK_MSG(got == 700, "应返回 avail-offset=700，实际 %u", got);
 
-    /* 带偏移 */
-    CHECK(rb_peek(&s_rb, 1490, dest, 100, nullptr) == 10);
-
-    /* 想要 0 —— 返回 0，不触碰 dest */
-    CHECK(rb_peek(&s_rb, 0, nullptr, 0, nullptr) == 0);
+    int mismatch = -1;
+    for (uint16_t i = 0; i < 700; i++)
+        if (dest[i] != s_shadow[s_shadow_rd + 300 + i]) {
+            mismatch = i;
+            break;
+        }
+    CHECK_MSG(mismatch < 0, "第 %d 字节内容不符", mismatch);
 }
 
 /* ================================================================
@@ -283,7 +328,8 @@ int main(void)
     case_capped_zero_cap_touches_nothing();
     case_capped_wraparound();
     case_capped_offset_beyond_avail();
-    case_peek_behaviour_unchanged();
+    case_peek_dest_cap_is_hard_limit();
+    case_peek_returns_avail_minus_offset();
 
     if (g_failures) {
         printf("=== %d 项断言失败 ===\n", g_failures);

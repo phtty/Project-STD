@@ -25,10 +25,6 @@ typedef enum {
     APP_RLS_CMD_TYPE_DISPLAY_SAVE = 0x5653, /**< 显示并保存命令 */
 } app_rls_cmd_type_t;
 
-extern osMessageQueueId_t g_rls_msg_queue;   /**< RLS 帧队列 */
-extern osThreadId_t g_rls_task_handle;       /**< RLS 协议任务句柄 */
-extern const osThreadAttr_t g_rls_task_attr; /**< RLS 协议任务属性 */
-
 /** @brief RLS 协议任务入口 */
 void app_rls_task(void *argument);
 

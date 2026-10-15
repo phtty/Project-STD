@@ -317,7 +317,7 @@ static app_pcb_probe_state_t _casc_probe_frame(app_pcb_t *self, const app_ccb_t 
     const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_casc_hdr_t))
                                   ? scratch_size
                                   : (uint16_t)sizeof(app_casc_hdr_t);
-    if (rb_peek_capped(self->rb, 0, scratch, head_cap, nullptr) < sizeof(app_casc_hdr_t))
+    if (rb_peek(self->rb, 0, scratch, head_cap, nullptr) < sizeof(app_casc_hdr_t))
         return APP_PCB_PROBE_STATE_WAIT;
 
     app_casc_hdr_t *h = (app_casc_hdr_t *)scratch;
@@ -338,7 +338,7 @@ static app_pcb_probe_state_t _casc_probe_frame(app_pcb_t *self, const app_ccb_t 
     }
 
     /* 到这里才需要整帧（CRC 要覆盖到帧尾） */
-    if (rb_peek_capped(self->rb, 0, scratch, len, nullptr) < len) return APP_PCB_PROBE_STATE_WAIT;
+    if (rb_peek(self->rb, 0, scratch, len, nullptr) < len) return APP_PCB_PROBE_STATE_WAIT;
 
     /* CRC32 覆盖 [2, len-4)：不含 SOF（恒定值不增加信息量）、不含 CRC 自身。
        走硬件单元（1KB 约 9µs；软件 CRC16 要 71µs）。

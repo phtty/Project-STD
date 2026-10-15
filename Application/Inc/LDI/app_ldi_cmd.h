@@ -5,7 +5,8 @@
  * @brief   LDI 命令定义：复合指令载荷结构与命令处理表
  */
 
-#include "main.h"
+#include <stdio.h>
+#include <stdint.h>
 
 #include "app_ldi.h"
 #include "app_dispatch.h"
@@ -14,7 +15,7 @@
 
 /**
  * @brief LDI 命令处理函数指针类型
- * @param ccb      通道元信息（来源通道类型、编号等）
+ * @param ccb      通道控制块
  * @param data     指向帧 DATA 域首字节，布局视具体命令而定
  * @param data_len DATA 域字节数（从 data 起）。**处理器必须用它校验帧内字段**
  *                 —— device_num 之类是帧内值，不能当数组长度/循环边界直接用
@@ -44,7 +45,7 @@ extern const app_ldi_cmd_handler_fn_t g_ldi_cmd_table[];
  * 所有复合指令的每个 module 均以此 2 字节开头
  */
 typedef struct [[gnu::packed]] {
-    uint8_t device_type; /**< 外设功能模块类型编码, 对应 app_ldi_device_t 枚举值, 如 E4H=电动栏杆机 */
+    uint8_t device_type;  /**< 外设功能模块类型编码, 对应 app_ldi_device_t 枚举值, 如 E4H=电动栏杆机 */
     uint8_t device_index; /**< 功能模块序号, 同类型多实例时区分, 从 01H 开始编号 */
 } app_ldi_module_head_t;
 
@@ -65,7 +66,7 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t filter_time; /**< 杂波信号过滤时间阈值, 单位毫秒, 用于消抖 */
-    uint8_t vendor[10]; /**< 厂商自定义参数段 */
+    uint8_t vendor[10];  /**< 厂商自定义参数段 */
 } app_ldi_cfg_barrier_t;
 
 /**
@@ -75,7 +76,7 @@ typedef struct [[gnu::packed]] {
  *      1 byte     |     10 bytes
  */
 typedef struct [[gnu::packed]] {
-    uint8_t font_line; /**< 默认显示行数: 01H~06H, 00H=自适应 */
+    uint8_t font_line;  /**< 默认显示行数: 01H~06H, 00H=自适应 */
     uint8_t vendor[10]; /**< 厂商自定义参数段 */
 } app_ldi_cfg_display_t;
 
@@ -139,7 +140,7 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (栏杆控制) */
-    uint8_t status; /**< 00H = 落杆, 01H = 抬杆 */
+    uint8_t status;           /**< 00H = 落杆, 01H = 抬杆 */
 } app_ldi_ctrl_barrier_t;
 
 /**
@@ -158,9 +159,9 @@ typedef struct [[gnu::packed]] {
     union {
         struct {
             uint8_t font_color; /**< 字体颜色: 01H=绿色, 02H=红色, 03H=黄色 */
-            uint8_t font_size; /**< 字体大小: 01H~08H, 00H=自适应 */
-            uint8_t font_line; /**< 显示行数: 01H~06H, 00H=自适应 */
-            uint8_t keep_time; /**< 显示停留时间: 00H=永久停留, 01H~FFH=秒 */
+            uint8_t font_size;  /**< 字体大小: 01H~08H, 00H=自适应 */
+            uint8_t font_line;  /**< 显示行数: 01H~06H, 00H=自适应 */
+            uint8_t keep_time;  /**< 显示停留时间: 00H=永久停留, 01H~FFH=秒 */
         };
         uint8_t clear_type; /**< 清屏类型: 00H=文字清屏, 01H=全红, 02H=全绿 */
     };
@@ -177,7 +178,7 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (显示控制) */
-    uint8_t color; /**< 信号灯颜色: 01H=绿色(通行), 02H=红色(禁行), 03H=黄色(过渡) */
+    uint8_t color;            /**< 信号灯颜色: 01H=绿色(通行), 02H=红色(禁行), 03H=黄色(过渡) */
 } app_ldi_ctrl_signal_t;
 
 /**
@@ -188,9 +189,9 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (报警控制) */
-    uint8_t status; /**< 报警开关: 00H=停止报警, 01H=开始报警 */
-    uint8_t work_mode; /**< 工作模式: 00H=持续报警, 01H~FFH=频率报警 */
-    uint8_t keep_time; /**< 报警保持时长: 00H=一直报警, 01H~FFH=秒 */
+    uint8_t status;           /**< 报警开关: 00H=停止报警, 01H=开始报警 */
+    uint8_t work_mode;        /**< 工作模式: 00H=持续报警, 01H~FFH=频率报警 */
+    uint8_t keep_time;        /**< 报警保持时长: 00H=一直报警, 01H~FFH=秒 */
 } app_ldi_ctrl_alarm_t;
 
 /**
@@ -207,11 +208,11 @@ typedef struct [[gnu::packed]] {
     union {
         struct {
             uint8_t font_color; /**< 字体颜色: 01H=绿色, 02H=红色, 03H=黄色 */
-            uint8_t font_size; /**< 字体大小: 01H~08H 按本板可用字号升序落档（第 n 档=本板第 n 小
-                                    字号，超档取最大档）, 00H=自适应 */
-            uint8_t font_line; /**< 显示行数: 01H~FFH, 00H=自适应 */
-            uint8_t keep_time; /**< 显示停留时间: 00H=永久停留, 01H~FFH=秒 */
-            uint8_t format; /**< 对齐方式: 01H=居中, 02H=左对齐, 03H=右对齐 */
+            uint8_t font_size;  /**< 字体大小: 01H~08H 按本板可用字号升序落档（第 n 档=本板第 n 小
+                                     字号，超档取最大档）, 00H=自适应 */
+            uint8_t font_line;  /**< 显示行数: 01H~FFH, 00H=自适应 */
+            uint8_t keep_time;  /**< 显示停留时间: 00H=永久停留, 01H~FFH=秒 */
+            uint8_t format;     /**< 对齐方式: 01H=居中, 02H=左对齐, 03H=右对齐 */
         };
         uint8_t clear_type; /**< 清屏类型（86号文）: 00H=文字清屏/黑, 01H=全红, 02H=全绿,
                                  03H=全黄, 04H=全蓝, 05H=全紫, 06H=全青, 07H=全白 */
@@ -229,7 +230,7 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (显示控制) */
-    uint8_t color; /**< 信号灯颜色: 01H=绿色(通行), 02H=红色(禁行), 03H=黄色 */
+    uint8_t color;            /**< 信号灯颜色: 01H=绿色(通行), 02H=红色(禁行), 03H=黄色 */
 } app_ldi_ctrl_canopy_light_t;
 
 /**
@@ -240,8 +241,8 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (显示控制) */
-    uint8_t status; /**< 雾灯开关: 00H=关闭, 01H=开启 */
-    uint8_t work_mode; /**< 工作模式: 00H=长亮, 01H~FFH=频率闪烁 */
+    uint8_t status;           /**< 雾灯开关: 00H=关闭, 01H=开启 */
+    uint8_t work_mode;        /**< 工作模式: 00H=长亮, 01H~FFH=频率闪烁 */
 } app_ldi_ctrl_fog_light_t;
 
 /**
@@ -256,9 +257,9 @@ typedef struct [[gnu::packed]] {
  */
 typedef struct [[gnu::packed]] {
     uint8_t device_func_type; /**< 功能编号, 此处取值 01H (播放提示音) */
-    uint8_t type; /**< 语音控制类型 */
-    uint8_t length[2]; /**< 语音内容字节长度 N, 大端序 */
-    uint8_t data[]; /**< 语音内容, GBK 编码 */
+    uint8_t type;             /**< 语音控制类型 */
+    uint8_t length[2];        /**< 语音内容字节长度 N, 大端序 */
+    uint8_t data[];           /**< 语音内容, GBK 编码 */
 } app_ldi_ctrl_voice_t;
 
 // ============================================================================
@@ -267,16 +268,16 @@ typedef struct [[gnu::packed]] {
 
 /** @brief 设备状态信息（0CH 上报帧中每个功能模块 17 字节） */
 typedef struct [[gnu::packed]] {
-    uint8_t device_type; /**< 功能模块类型编码 (E1H~EBH) */
-    uint8_t device_index; /**< 功能模块序号, 从 01H 开始 */
+    uint8_t device_type;      /**< 功能模块类型编码 (E1H~EBH) */
+    uint8_t device_index;     /**< 功能模块序号, 从 01H 开始 */
     uint8_t available_status; /**< 可用状态 */
-    uint8_t error_code; /**< 异常编码 (00H=正常, 见附录A.2) */
-    uint8_t running_status; /**< 运行状态 (00H=正常, 见附录A.1) */
-    uint8_t vendor_code[2]; /**< 厂商代码 */
-    uint8_t model_code[2]; /**< 型号代码 */
-    uint8_t date_bcd[4]; /**< 日期 BCD 码 (如 2026-05-12 → 0x20 0x26 0x05 0x12) */
-    uint8_t version_serial; /**< 版本序列号 */
-    uint8_t reserved[3]; /**< 保留, 填 00H */
+    uint8_t error_code;       /**< 异常编码 (00H=正常, 见附录A.2) */
+    uint8_t running_status;   /**< 运行状态 (00H=正常, 见附录A.1) */
+    uint8_t vendor_code[2];   /**< 厂商代码 */
+    uint8_t model_code[2];    /**< 型号代码 */
+    uint8_t date_bcd[4];      /**< 日期 BCD 码 (如 2026-05-12 → 0x20 0x26 0x05 0x12) */
+    uint8_t version_serial;   /**< 版本序列号 */
+    uint8_t reserved[3];      /**< 保留, 填 00H */
 } app_ldi_device_info_t;
 
 static_assert(sizeof(app_ldi_device_info_t) == 17, "app_ldi_device_info_t must be 17 bytes");
@@ -286,18 +287,18 @@ typedef struct [[gnu::packed]] {
     app_ldi_req_head_t head; /**< 请求头（20 字节） */
     uint8_t device_num;      /**< 功能模块数量 N */
     struct {
-        uint8_t device_type; /**< 功能模块类型编码 (E1H~EBH) */
+        uint8_t device_type;  /**< 功能模块类型编码 (E1H~EBH) */
         uint8_t device_index; /**< 功能模块序号, 从 01H 开始 */
-    } devices[]; /**< N × 2 字节 */
+    } devices[];              /**< N × 2 字节 */
 } app_ldi_cert_req_t;
 
 /** @brief 设备状态监控上报帧 DATA 域（0CH） */
 typedef struct [[gnu::packed]] {
-    app_ldi_req_head_t head; /**< 上报头（20 字节） */
-    uint8_t running_time[4]; /**< 设备运行时长(秒), 大端 */
-    uint8_t running_status; /**< 00H=正常, 01H=异常 */
-    uint8_t connect_status; /**< 与服务端连接状态 */
-    uint8_t device_num; /**< 功能模块数量 N */
+    app_ldi_req_head_t head;         /**< 上报头（20 字节） */
+    uint8_t running_time[4];         /**< 设备运行时长(秒), 大端 */
+    uint8_t running_status;          /**< 00H=正常, 01H=异常 */
+    uint8_t connect_status;          /**< 与服务端连接状态 */
+    uint8_t device_num;              /**< 功能模块数量 N */
     app_ldi_device_info_t devices[]; /**< N × 17 字节 */
 } app_ldi_state_rpt_t;
 

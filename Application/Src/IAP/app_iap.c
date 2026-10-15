@@ -7,15 +7,18 @@
  */
 
 #include "app_iap.h"
+
 #include "FreeRTOS.h"
 #include "initcall.h"
+
 #include "pl_crc.h"
+#include "pl_net.h"
+#include "pl_task.h"
+
 #include "app_rs485.h"
 #include "app_udp.h"
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
-#include "pl_net.h"
-#include "pl_task.h"
 
 /* ---- IAP 记录镜像同步 ----
  * IAP 记录里的 net_cfg 唯一职责 = 镜像 main app 当前使用的网络参数（供 Recovery 上报）。
@@ -46,7 +49,7 @@ static void _iap_ip_change_cb(const uint8_t ip[4], const uint8_t mask[4], const 
 
 /* ---- proto_iap_queue 静态分配 ---- */
 #define IAP_PAYLOAD_MAX (1044U) /* FRAME_MAX_LEN * 4 */
-#define IAP_MSG_SIZE (sizeof(app_dispatch_msg_t) + IAP_PAYLOAD_MAX)
+#define IAP_MSG_SIZE    (sizeof(app_dispatch_msg_t) + IAP_PAYLOAD_MAX)
 
 static StaticQueue_t s_iap_queue_cb;
 static uint8_t s_iap_queue_buf[2 * IAP_MSG_SIZE] PL_CCMRAM;
@@ -56,6 +59,14 @@ static const osMessageQueueAttr_t s_iap_queue_attr = {
     .cb_size = sizeof(s_iap_queue_cb),
     .mq_mem  = s_iap_queue_buf,
     .mq_size = sizeof(s_iap_queue_buf),
+};
+
+static osMessageQueueId_t s_iap_msg_queue;
+static osThreadId_t s_iap_task_handle;
+static const osThreadAttr_t s_iap_task_attr = {
+    .name       = "app_iap_task",
+    .stack_size = 384 * 4,
+    .priority   = (osPriority_t)osPriorityNormal,
 };
 
 /* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
@@ -88,8 +99,8 @@ app_pcb_t *app_iap_pcb(void)
 
     /* 队列在 initcall 内建好：通道任务可能早于协议任务首次运行就投递帧，
        晚建会留下"向空队列投递"的窗口 */
-    g_iap_msg_queue  = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
-    s_iap_pcb.queue = g_iap_msg_queue;
+    s_iap_msg_queue = osMessageQueueNew(2, IAP_MSG_SIZE, &s_iap_queue_attr);
+    s_iap_pcb.queue = s_iap_msg_queue;
 
     /* 绑定两块板都有的通道。板级特有的通道（如 3833024 的两路 RS232）不在这里绑：
        由各板的板级文件调 app_iap_pcb() 自行绑定，否则共享文件要认识每块板的外设。 */
@@ -100,22 +111,12 @@ app_pcb_t *app_iap_pcb(void)
     pl_net_register_ip_listener(_iap_ip_change_cb);
 
     /* 创建协议处理任务 */
-    g_iap_task_handle = pl_task_new(app_iap_task, nullptr, &g_iap_task_attr);
+    s_iap_task_handle = pl_task_new(app_iap_task, nullptr, &s_iap_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，移动源文件即改变，
    不能用同层顺序表达依赖。 */
 sw_post_initcall(_iap_module_init);
-
-const uint8_t frame_len[] = {0, 0, 4, 0, 1, 0, 0, 0};
-
-osMessageQueueId_t g_iap_msg_queue;
-osThreadId_t g_iap_task_handle;
-const osThreadAttr_t g_iap_task_attr = {
-    .name       = "app_iap_task",
-    .stack_size = 384 * 4,
-    .priority   = (osPriority_t)osPriorityNormal,
-};
 
 /* ================================================================
  *  任务实现
@@ -131,7 +132,7 @@ void app_iap_task(void *argument)
 
     for (;;) {
         /* 带超时地取帧：空闲窗口用来做 IAP 记录的镜像同步（延迟写，不阻塞改 IP 的调用方） */
-        if (osOK != osMessageQueueGet(g_iap_msg_queue, msg, NULL, 100)) {
+        if (osOK != osMessageQueueGet(s_iap_msg_queue, msg, NULL, 100)) {
             if (s_sync_pending) {
                 s_sync_pending = false;
                 app_flash_iap_sync_from_runtime(); /* 内部内容去重，无变化零擦写 */
@@ -163,8 +164,8 @@ void app_iap_task(void *argument)
  * @retval APP_PCB_PROBE_STATE_SKIP   帧长超出暂存区，无法校验，交由框架整帧跳过
  */
 app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
-                                uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
-                                uint8_t *aux)
+                                          uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
+                                          uint8_t *aux)
 {
     (void)src; /* 本协议不区分来源 */
     (void)ccb;
@@ -211,7 +212,7 @@ app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     }
 
     /* CRC32 validation（scratch 由框架提供且 4 字节对齐，可直接按 app_iap_frame_t 访问）*/
-    rb_peek_capped(buff, 0, scratch, scratch_size, nullptr);
+    rb_peek(buff, 0, scratch, scratch_size, nullptr);
     app_iap_frame_t *ptemp = (app_iap_frame_t *)scratch;
 
     uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), scratch, (ptemp->len + 4) * 4);

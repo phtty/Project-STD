@@ -431,7 +431,8 @@ static void case_split_across_rb_wrap(void)
  *  挤掉（`app_ccb_dispatch` 装不下就"丢旧留新"），现场表现就是
  *  "跨回绕被拆成两段的帧总是丢、一次发完的就成"。
  *
- *  **反向验证**：把探针改回"上来就 `rb_peek_capped(..., scratch_size, ...)`"，本用例立刻红。
+ *  **反向验证**：把探针改回按**缓冲区可读量**（而不是按暂存区容量 scratch_size）
+ *  去夹紧 `rb_peek` 的 dest_cap，本用例立刻红。
  */
 static void case_fake_does_not_copy_whole(void)
 {

@@ -433,7 +433,8 @@ static void test_scratch_contract(void)
  *  以外**原封不动。判"是不是本协议的帧"最多只需要读到自己的长度域，所以取一个宽松
  *  上界 32 字节 —— 比 1440 小两个数量级，足以抓住"拷了整帧"这一类回归。
  *
- *  **反向验证**：把任一探针改回 `rb_peek_capped(..., scratch_size, ...)`，本用例红。
+ *  **反向验证**：把任一探针改回按**缓冲区可读量**（而不是按暂存区容量 scratch_size）
+ *  去夹紧 `rb_peek` 的 dest_cap，本用例红。
  * ================================================================ */
 
 static void test_fake_does_not_copy_whole(void)

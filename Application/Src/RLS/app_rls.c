@@ -33,9 +33,9 @@ static const app_rls_cmd_type_t cmd_index_table[] = {
     APP_RLS_CMD_TYPE_DISPLAY_SAVE,
 };
 
-osMessageQueueId_t g_rls_msg_queue;
-osThreadId_t g_rls_task_handle;
-const osThreadAttr_t g_rls_task_attr = {
+static osMessageQueueId_t s_rls_msg_queue;
+static osThreadId_t s_rls_task_handle;
+static const osThreadAttr_t s_rls_task_attr = {
     .name       = "app_rls_task",
     .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
@@ -50,7 +50,7 @@ void app_rls_task(void *argument)
     app_dispatch_msg_t *msg = (app_dispatch_msg_t *)_msg_buf;
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_rls_msg_queue, msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(s_rls_msg_queue, msg, NULL, osWaitForever))
             continue;
 
         app_rls_frame_t *rls_frame = (app_rls_frame_t *)(msg->data);
@@ -86,7 +86,7 @@ app_pcb_probe_state_t app_rls_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     if (avail < sizeof(app_rls_frame_t) + 4)
         return APP_PCB_PROBE_STATE_WAIT;
 
-    /* 窥视一律经 rb_peek_capped —— 按暂存区容量夹紧。此前 rb_peek(buff, 0, mem_pool,
+    /* 窥视一律经 rb_peek —— 按暂存区容量夹紧。此前用旧语义的 rb_peek(buff, 0, mem_pool,
        avail, nullptr) 配 525 字节的 mem_pool，而 rb 有 2048 字节，avail 超过 525
        即写穿栈数组。
        **而且这里只拷帧头那几个字节**：伪帧时框架会"跳 1 字节再探"，若每次都按
@@ -97,7 +97,7 @@ app_pcb_probe_state_t app_rls_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_rls_frame_t))
                                   ? scratch_size
                                   : (uint16_t)sizeof(app_rls_frame_t);
-    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(app_rls_frame_t))
+    if (rb_peek(buff, 0, scratch, head_cap, nullptr) < sizeof(app_rls_frame_t))
         return APP_PCB_PROBE_STATE_SKIP;
     app_rls_frame_t *frame = (app_rls_frame_t *)scratch;
 
@@ -124,7 +124,7 @@ app_pcb_probe_state_t app_rls_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     /* 到这里才需要整帧（尾标在帧尾）。拷的**正好是 data_len** —— 上面两条已经保证
        `data_len ≤ avail`（⑦）且 `data_len ≤ scratch_size`（⑧），所以既不越界、
        也不必像原先那样按 scratch_size 多拷一截无关数据。 */
-    rb_peek_capped(buff, 0, scratch, data_len, nullptr);
+    rb_peek(buff, 0, scratch, data_len, nullptr);
 
     if (memcmp(rls_tail, (uint8_t *)frame + data_len - 2, sizeof(rls_tail)))
         return APP_PCB_PROBE_STATE_FAKE;
@@ -161,12 +161,12 @@ static_assert(RLS_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "RLS 最长帧超过框架�
 {
     rb_init(&s_rls_rb, "rls");
 
-    g_rls_msg_queue = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
-    s_rls_pcb.queue = g_rls_msg_queue;
+    s_rls_msg_queue = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
+    s_rls_pcb.queue = s_rls_msg_queue;
 
     app_dispatch_bind(&s_rls_pcb, app_rs485_ccb());
 
-    g_rls_task_handle = pl_task_new(app_rls_task, nullptr, &g_rls_task_attr);
+    s_rls_task_handle = pl_task_new(app_rls_task, nullptr, &s_rls_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */

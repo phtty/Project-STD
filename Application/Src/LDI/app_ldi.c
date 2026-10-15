@@ -124,12 +124,6 @@ void app_ldi_ctx_init(app_ldi_ctx_t *self)
         }
         self->cfg_valid = true;
 
-        /* 不再在这里显式同步 IAP 记录：上面第 81 行的 pl_net_set_ip 会触发 IP 变更
-           监听，IAP 侧据此做镜像同步（见 app_iap.c 的 _iap_ip_change_cb）。
-           原先这里那段"仅当 IAP 已有有效配置且不一致时"的守卫，是为了绕开
-           update_net_cfg 对空记录会写出永久无效记录的老 bug —— 那个 bug 已在
-           app_flash_iap_update_net_cfg 里修掉，守卫连同调用一并去除。 */
-
     } else {
         /* 外部 flash 无有效配置，尝试从 IAP 内部 flash 读取 */
         app_flash_iap_net_cfg_t iap_net = {0};
@@ -182,6 +176,26 @@ static app_pcb_t s_ldi_pcb = {
 
 static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂存上限");
 
+static osMessageQueueId_t s_ldi_msg_queue;
+static osThreadId_t s_ldi_task_handle;
+static const osThreadAttr_t s_ldi_task_attr = {
+    .name       = "app_ldi_task",
+    .stack_size = 384 * 4,
+    .priority   = (osPriority_t)osPriorityNormal,
+};
+
+static osThreadId_t s_ldi_timer_task_handle;
+static const osThreadAttr_t s_ldi_timer_task_attr = {
+    .name = "app_ldi_timer_task",
+    /* 1536：实测峰值 768 字节（app_diag 的栈水位），留 2 倍余量。
+       曾按 -fstack-usage 的函数帧估成 ~310 而收窄到 1024，实测只剩 256 字节 ——
+       那次估算漏了 LwIP 那段（app_ccb_send → netconn_write 走 mailbox，栈消耗不小）
+       与 app_vms_timer_poll → app_render → draw_bitmap 的渲染链。
+       教训：函数帧累加低估库调用，以实测水位为准。 */
+    .stack_size = 384 * 4,
+    .priority   = (osPriority_t)osPriorityNormal,
+};
+
 /* ---- 协议自注册 ---- */
 [[maybe_unused]] static void _ldi_module_init(void)
 {
@@ -189,8 +203,8 @@ static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂
 
     /* 队列在 initcall 内建好：通道任务可能早于协议任务首次运行就投递帧，
        晚建会留下"向空队列投递"的窗口 */
-    g_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
-    s_ldi_pcb.queue = g_ldi_msg_queue;
+    s_ldi_msg_queue = osMessageQueueNew(2, LDI_MSG_SIZE, &s_ldi_queue_attr);
+    s_ldi_pcb.queue = s_ldi_msg_queue;
 
     // 绑定协议使用到的通道
     app_dispatch_bind(&s_ldi_pcb, app_tcp_server_ccb());
@@ -205,32 +219,12 @@ static_assert(LDI_FRAME_MAX <= FRAME_DATA_MAX_LEN, "LDI 最长帧超过框架暂
     g_ldi_ctx.tx_lock                = osMutexNew(&tx_lock_attr);
 
     // 创建协议相关处理任务
-    g_ldi_task_handle       = pl_task_new(app_ldi_task, nullptr, &g_ldi_task_attr);
-    g_ldi_timer_task_handle = pl_task_new(app_ldi_timer_task, nullptr, &g_ldi_timer_task_attr);
+    s_ldi_task_handle       = pl_task_new(app_ldi_task, nullptr, &s_ldi_task_attr);
+    s_ldi_timer_task_handle = pl_task_new(app_ldi_timer_task, nullptr, &s_ldi_timer_task_attr);
 }
 /* sw_post(4)：让"读配置"排在"加载配置"之后（cfg 调度器在 sw_app(3) 执行加载遍）。
    同层 initcall 的相对次序 = 链接顺序 = 构建清单文件次序，不能用它表达依赖。 */
 sw_post_initcall(_ldi_module_init);
-
-osMessageQueueId_t g_ldi_msg_queue;
-osThreadId_t g_ldi_task_handle;
-const osThreadAttr_t g_ldi_task_attr = {
-    .name       = "app_ldi_task",
-    .stack_size = 384 * 4,
-    .priority   = (osPriority_t)osPriorityNormal,
-};
-
-osThreadId_t g_ldi_timer_task_handle;
-const osThreadAttr_t g_ldi_timer_task_attr = {
-    .name = "app_ldi_timer_task",
-    /* 1536：实测峰值 768 字节（app_diag 的栈水位），留 2 倍余量。
-       曾按 -fstack-usage 的函数帧估成 ~310 而收窄到 1024，实测只剩 256 字节 ——
-       那次估算漏了 LwIP 那段（app_ccb_send → netconn_write 走 mailbox，栈消耗不小）
-       与 app_vms_timer_poll → app_render → draw_bitmap 的渲染链。
-       教训：函数帧累加低估库调用，以实测水位为准。 */
-    .stack_size = 384 * 4,
-    .priority   = (osPriority_t)osPriorityNormal,
-};
 
 /* ================================================================
  *  状态门禁
@@ -318,7 +312,7 @@ void app_ldi_task(void *argument)
     app_dispatch_msg_t *msg = (app_dispatch_msg_t *)_msg_buf;
 
     for (;;) {
-        if (osOK != osMessageQueueGet(g_ldi_msg_queue, msg, NULL, osWaitForever))
+        if (osOK != osMessageQueueGet(s_ldi_msg_queue, msg, NULL, osWaitForever))
             continue;
 
         app_ldi_frame_t *ldi_frame   = (app_ldi_frame_t *)msg->data;
@@ -364,7 +358,7 @@ static const uint8_t ldi_stx[2] = {0xFF, 0xFF};
  * 探针在一次排空里会被反复调用（FAKE 时逐字节重试），在此写全局状态会让后续帧
  * 覆盖前一帧的取值，而前一帧可能还排在队列里没被处理。
  *
- * 窥视一律经 rb_peek_capped —— 它按暂存区容量夹紧。此前用 rb_peek(buff, 0, mem_pool,
+ * 窥视一律经 rb_peek —— 它按暂存区容量夹紧。此前用旧语义的 rb_peek(buff, 0, mem_pool,
  * avail, nullptr) 配一个 512 字节的 mem_pool，而 rb 有 2048 字节，avail 超过 512 时
  * 就会写穿栈数组（TCP 合并分段时是常态）。
  */
@@ -381,7 +375,7 @@ app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
         return APP_PCB_PROBE_STATE_WAIT;
 
     /* 先窥视帧头（含 4 字节长度域），据此判断整帧是否已到齐。
-       rb_peek_capped 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。
+       rb_peek 按暂存区容量截断；连帧头都放不下时该协议无法工作，整帧丢弃。
        **注意这里拷的只有帧头那几个字节**（原先传的是 scratch_size，等于每探一次就把
        整帧拷一遍）：框架对伪帧的做法是"跳 1 字节再探"，每次拷一整帧就退化成 O(n²) 的
        memcpy —— 实测一条 1428 字节的杂物 ~2MB、两个协议 ~4MB，把帧分发任务拖住
@@ -390,7 +384,7 @@ app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     const uint16_t head_cap = (scratch_size < (uint16_t)sizeof(app_ldi_frame_t))
                                   ? scratch_size
                                   : (uint16_t)sizeof(app_ldi_frame_t);
-    if (rb_peek_capped(buff, 0, scratch, head_cap, nullptr) < sizeof(app_ldi_frame_t))
+    if (rb_peek(buff, 0, scratch, head_cap, nullptr) < sizeof(app_ldi_frame_t))
         return APP_PCB_PROBE_STATE_SKIP;
     app_ldi_frame_t *frame = (app_ldi_frame_t *)scratch;
 
@@ -422,7 +416,7 @@ app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
        **拷的正好是 full_len**，不必按 scratch_size 多拷一截无关数据。
        身份校验最多读到 data_crc[21]，而顶部已保证 avail ≥ 8+20+2 = 30，
        故这些字节必在本次拷入的范围内。 */
-    rb_peek_capped(buff, 0, scratch, (uint16_t)full_len, nullptr);
+    rb_peek(buff, 0, scratch, (uint16_t)full_len, nullptr);
 
     uint16_t frame_crc =
         (uint16_t)((frame->data_crc[data_len] << 8) | frame->data_crc[data_len + 1]);

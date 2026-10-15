@@ -154,7 +154,7 @@ app_pcb_probe_state_t app_ahmq_probe_frame(app_pcb_t *self, const app_ccb_t *ccb
     /* 一条 MQTT 消息即一帧，以结尾 NUL 定界（通道投递前补的），据此逐条成帧 ——
        连续两条消息同处缓冲区时也能各自成帧，不必依赖通道给出长度（那是 per-message
        的值，寄存在通道对象上会被后一条消息覆盖）。 */
-    uint16_t n = rb_peek_capped(self->rb, 0, scratch, scratch_size, nullptr);
+    uint16_t n = rb_peek(self->rb, 0, scratch, scratch_size, nullptr);
     if (n == 0) return APP_PCB_PROBE_STATE_WAIT;
 
     const uint8_t *z = memchr(scratch, 0, n);
