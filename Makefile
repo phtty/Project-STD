@@ -369,7 +369,11 @@ SRC_ALL = \
 SRC_EXCLUDE = Application/Src/AHMQ/app_ahmq.c
 SRC_EXCLUDE += Application/Src/AHMQ/app_ahmq_cmd.c
 
-# board.mk 还可以追加本板不参与编译的**共享源**（板级源直接不写进 SRC_BOARD 即可）。
+# 板级排除由 boards/<板>/board.mk 追加到 BOARD_SRC_EXCLUDE，在这里并入。
+# **别让 board.mk 直接往 SRC_EXCLUDE 里 +=** —— board.mk 在 300 行就被 include，
+# 而上面两行是覆盖式赋值，board.mk 的追加会被冲掉（曾经如此，且是静默失效）。
+SRC_EXCLUDE += $(BOARD_SRC_EXCLUDE)
+
 # 用 filter-out 而非让各板复制清单：排除项是少数、共享清单是多数，反过来的话
 # 每加一个共享文件都要改每一块板。
 # 必须放在 SRC_ALL **之后**：放前面的话 := 当场展开，那时 SRC_ALL 还是空的。
@@ -386,10 +390,14 @@ all: $(BUILD_DIR)/Project_STD.elf $(BUILD_DIR)/Project_STD.hex $(BUILD_DIR)/Proj
 	@echo "==== Build complete ===="
 	@$(SIZE) $(BUILD_DIR)/Project_STD.elf
 
-$(BUILD_DIR)/Project_STD.elf: $(OBJ_ALL)
+# $(MAKEFILE_LIST)（Makefile + boards/<板>/board.mk）必须列为依赖：从 OBJ_ALL 里
+# **删**源文件（改 SRC_EXCLUDE / BOARD_SRC_EXCLUDE）只会少一个依赖，make 认为 .elf
+# 仍然新鲜 —— 增量构建会静默留旧固件（"排掉了却还在链"就是这么来的）。
+# 注意配方里用 $(OBJ_ALL) 而非 $^：后者会把链接脚本与 makefile 一起当输入文件喂给 ld。
+$(BUILD_DIR)/Project_STD.elf: $(OBJ_ALL) $(LDSCRIPT) $(MAKEFILE_LIST)
 	@echo "Linking $@"
 	@mkdir -p $(dir $@)
-	$(LD) $(LDFLAGS) -o $@ $^
+	$(LD) $(LDFLAGS) -o $@ $(OBJ_ALL)
 
 $(BUILD_DIR)/Project_STD.hex: $(BUILD_DIR)/Project_STD.elf
 	$(OBJCOPY) -O ihex $< $@
