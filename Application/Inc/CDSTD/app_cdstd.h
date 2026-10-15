@@ -17,7 +17,8 @@ typedef struct [[gnu::packed]] {
     uint8_t head[2];
     uint8_t ver;
     uint8_t seq;
-    uint8_t len[4];
+    uint8_t reserved[2];
+    uint8_t len[2];
     uint8_t cmd;
     uint8_t data_crc[];
 } app_cdstd_frame_t;

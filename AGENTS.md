@@ -28,7 +28,7 @@ make -j8 CONFIG=Release        # 另一套输出目录（注意：CFLAGS 恒为 
 make -j8 TOOLCHAIN=clang       # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 17 个测试套件（见 §7）
+make test                      # host 侧 18 个测试套件（见 §7）
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
 
 # 编译数据库（clangd 用）
@@ -132,7 +132,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-17 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+18 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -153,6 +153,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
+| `test_cdstd` | CDSTD 协议探针（四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化）、队列取帧与命令分派 |
 
 **host 测试覆盖不到真实硬件时序**（TIM3/TIM4 扫描、BSRR、真实 SPI/DMA）——涉及显示路径或外设时序的改动，
 除 `make test` 外还应上机冒烟（两板、含级联显示与工厂逐色老化）。

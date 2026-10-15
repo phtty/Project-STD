@@ -339,6 +339,7 @@ SRC_APPLICATION = \
 	Application/Src/RLS/app_rls_cmd.c \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Src/CDSTD/app_cdstd_cfg.c \
 	Application/Src/AHMQ/app_ahmq.c \
 	Application/Src/AHMQ/app_ahmq_cmd.c \
 	Application/Src/Channel/app_udp.c \
@@ -647,6 +648,17 @@ TEST_FOLD_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
+# 套件十八：CDSTD 协议（折叠屏创迪标准）
+# 用例 TU-include app_cdstd.c（探针是 non-static、任务与模块资源是 static，外部够不着），
+# 命令表整个换成记录桩（生产表全是空桩，观察不到分派）；os_stub + pl_task 让真实任务
+# 跑在 pthread 上。app_cdstd_cmd.c **不列进 SRCS** —— 表由用例定义，链进去会重定义。
+TEST_CDSTD_SRCS = \
+	test/test_cdstd.c \
+	test/stubs/os_stub.c \
+	Platform/Src/pl_task.c \
+	Kernel/Src/ring_buffer.c \
+	Kernel/Src/crc_utils.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
@@ -655,7 +667,8 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_casc_frame $(TEST_BUILD)/test_screen_layout \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
-      $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold
+      $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
+      $(TEST_BUILD)/test_cdstd
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -706,6 +719,9 @@ test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/t
 	@echo ""
 	@echo "──── 折叠屏 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_fold
+	@echo ""
+	@echo "──── CDSTD 协议 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cdstd
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -808,6 +824,15 @@ $(TEST_BUILD)/test_fold: $(TEST_FOLD_SRCS) Application/Src/LDI/app_vms_ctrl.c \
 
 $(TEST_BUILD)/test_fold: Application/Src/LDI/app_fold.c Application/Src/LDI/app_ldi.c \
 	Application/Inc/LDI/app_fold.h Application/Inc/LDI/app_ldi.h $(BOARD_DIR)/board.h
+
+# 用例 TU-include 了 app_cdstd.c（它不在 SRCS 里），必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_cdstd: $(TEST_CDSTD_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CDSTD_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cdstd: Application/Src/CDSTD/app_cdstd.c \
+	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

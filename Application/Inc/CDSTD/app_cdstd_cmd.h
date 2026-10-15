@@ -35,3 +35,28 @@ typedef enum {
     CDSTD_CMD_RELEASE_DISPLAY,    // 发布盒显示
     CDSTD_CMD_COUNT,              // 命令总数
 } app_cdstd_cmd_t;
+
+typedef struct [[gnu::packed]] {
+    uint16_t head;
+    uint8_t ver;
+    uint8_t seq;
+    uint8_t reserved[2];
+    uint8_t len[2];
+    uint8_t cmd;
+    uint8_t status;
+    uint8_t crc[2];
+} app_cdstd_reply_status_t;
+
+typedef struct [[gnu::packed]] {
+    uint16_t head;
+    uint8_t ver;
+    uint8_t seq;
+    uint8_t reserved[2];
+    uint8_t len[2];
+    uint8_t cmd;
+    uint8_t ip[4];
+    uint8_t mask[4];
+    uint8_t gw[4];
+    uint8_t port[2];
+    uint8_t crc[2];
+} app_cdstd_reply_ip_t;

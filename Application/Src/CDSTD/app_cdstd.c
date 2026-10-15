@@ -15,11 +15,13 @@
 
 #include "app_rs485.h"
 #include "app_udp.h"
+#include "app_cdstd_cfg.h"
 #include "app_cdstd_cmd.h"
 
 /* ---- 队列和缓冲区资源静态分配 ---- */
 #define CDSTD_PAYLOAD_MAX (512U)
-#define CDSTD_MSG_SIZE    (sizeof(app_dispatch_msg_t) + CDSTD_PAYLOAD_MAX)
+#define CDSTD_FRAME_MAX   (sizeof(app_cdstd_frame_t) + CDSTD_PAYLOAD_MAX + 2U)
+#define CDSTD_MSG_SIZE    (sizeof(app_dispatch_msg_t) + CDSTD_FRAME_MAX)
 
 /*
  * 协议私有资源声明，包括帧消息队列、消息队列缓冲区、队列属性
@@ -46,17 +48,17 @@ void app_cdstd_task(void *argument);
 /*
  * 构造协议上下文资源，包括协议缓冲区、协议探针前向声明、协议控制块声明
  */
-RB_DEFINE_ATTR(s_cdstd_rb, 1024, PL_CCMRAM);
+RB_DEFINE_ATTR(s_cdstd_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 523, 单次最大写入 2048 + 1) */
 app_pcb_probe_state_t app_cdstd_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src, uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len, uint8_t *aux);
 static const app_pcb_ops_t s_cdstd_ops = {.probe = app_cdstd_probe_frame};
 static app_pcb_t s_cdstd_pcb           = {
     .name        = "cdstd",
     .ops         = &s_cdstd_ops,
     .rb          = &s_cdstd_rb,
-    .payload_max = CDSTD_PAYLOAD_MAX,
+    .payload_max = CDSTD_FRAME_MAX,
 };
 
-static_assert(CDSTD_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "CDSTD 最长帧超过框架暂存上限");
+static_assert(CDSTD_FRAME_MAX <= FRAME_DATA_MAX_LEN, "CDSTD 最长帧超过框架暂存上限");
 
 [[maybe_unused]] static void _cdstd_module_init(void)
 {
@@ -93,7 +95,7 @@ void app_cdstd_task(void *argument)
             continue;
 
         uint16_t len = (uint16_t)(frame_data->len[0] << 8) | frame_data->len[1];
-        g_cdstd_cmd_table[cmd](msg->ccb, frame_data, len);
+        g_cdstd_cmd_table[cmd](msg->ccb, frame_data->data_crc, len - 1); // 长度-1的原因见协议探针内注释
     }
 }
 
@@ -113,29 +115,37 @@ app_pcb_probe_state_t app_cdstd_probe_frame(app_pcb_t *self, const app_ccb_t *cc
     const ring_buffer_t *buff = self->rb;
     uint32_t available        = rb_avail(buff, nullptr);
 
+    // 环形缓冲区里的数据不足一帧最小的长度
     if (available < sizeof(app_cdstd_frame_t) + 2)
         return APP_PCB_PROBE_STATE_WAIT;
 
+    // 伪造枕头
     uint16_t head = 0;
     rb_peek(buff, 0, (uint8_t *)&head, 2, nullptr);
     if (head != CDSTD_HEAD)
         return APP_PCB_PROBE_STATE_FAKE;
 
-    uint8_t len[4]       = {0};
+    /*
+     * 这个协议比较奇葩，不知道是哪个傻屌设计的，数据载荷长度部分居然还包含命令字段
+     * 不知道为啥非要包含这个命令字段，理论上讲这个协议的所有帧都有命令字段，只有数据载荷是变长的
+     * 在变长协议中，长度字段描述变长字段的大小按理说就足够了，非要加入一个定长的字段，完全意义不明
+     */
+    uint8_t len[2]       = {0};
     uint16_t payload_len = 0;
-    rb_peek(buff, 4, len, 4, nullptr);
+    rb_peek(buff, 6, len, 2, nullptr);
     payload_len |= (uint16_t)(len[0] << 8);
     payload_len |= len[1];
-    if (payload_len > 512)
+    if (payload_len > CDSTD_PAYLOAD_MAX + 1)
         return APP_PCB_PROBE_STATE_FAKE;
 
-    uint32_t full_bytes = (sizeof(app_cdstd_frame_t) + payload_len + 2);
+    // 计算全帧长度
+    uint32_t full_bytes = (sizeof(app_cdstd_frame_t) + payload_len + 1);
 
-    /* 整帧到齐之前不得窥视整帧：scratch 里还是**尚未写入**的旧内容，拿它比 CRC
-       必然不过，分段到达的帧会被整批判成坏帧。 */
+    // 整帧到齐闸门
     if (available < full_bytes)
         return APP_PCB_PROBE_STATE_WAIT;
 
+    // 全帧长度超过解析缓冲区上限，无法解析
     if (full_bytes > scratch_size) {
         *total_len = full_bytes;
         return APP_PCB_PROBE_STATE_SKIP;
@@ -144,10 +154,10 @@ app_pcb_probe_state_t app_cdstd_probe_frame(app_pcb_t *self, const app_ccb_t *cc
     rb_peek(buff, 0, scratch, scratch_size, nullptr);
     app_cdstd_frame_t *ptemp = (app_cdstd_frame_t *)scratch;
 
-    uint16_t crc = crc16_xmodem(scratch + 2, payload_len + 7);
-    /* CRC 不过 = 伪帧/坏帧 → 跳 1 字节重探。**不能返回 SKIP** —— SKIP 会按
-       total_len 把后面的字节一并吞掉，一条坏帧会连带丢掉它后面的真帧。 */
-    if (crc != *(uint16_t *)(&(ptemp->data_crc[payload_len])))
+    // 进行crc校验
+    uint16_t crc       = crc16_xmodem(scratch + 2, payload_len + 6);
+    uint16_t frame_crc = (uint16_t)((uint16_t)ptemp->data_crc[payload_len] | ((uint16_t)ptemp->data_crc[payload_len - 1] << 8));
+    if (crc != frame_crc)
         return APP_PCB_PROBE_STATE_FAKE;
 
     *total_len = full_bytes;
