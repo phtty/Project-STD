@@ -172,6 +172,7 @@ static bool s_rec_present;                                            /* 有没�
 static uint8_t s_rec_addr, s_rec_src;                                 /* 记录里的内容 */
 static uint8_t s_rec_mc                    = 1;                       /* 记录里的主卡格 */
 static dev_cfg_record_state_t s_load_state = DEV_CFG_RECORD_STATE_OK; /* 用例可摆成 IO_ERR */
+static uint16_t s_load_len = 4; /* 读出的负载长度（4 = 本工程的记录体）；用例可摆成"长度不符" */
 static int s_load_calls;
 static int s_save_calls;
 static uint8_t s_last_saved_addr, s_last_saved_src, s_last_saved_mc;
@@ -192,7 +193,7 @@ dev_cfg_record_state_t app_cfg_sched_load(uint8_t id, uint8_t *p, uint16_t c, ui
     p[1] = s_rec_src;
     p[2] = s_rec_mc;
     p[3] = 0;
-    *l   = 4;
+    *l   = s_load_len; /* 长度由用例摆：≠4 时生产侧应判"记录不可用"并回落 */
     return DEV_CFG_RECORD_STATE_OK;
 }
 int32_t app_cfg_sched_save(uint8_t id, const uint8_t *p, uint16_t n)
@@ -583,6 +584,7 @@ static void fixture_reset(void)
     s_rec_mc               = 1;
     s_last_saved_mc        = 0xFF;
     s_load_state           = DEV_CFG_RECORD_STATE_OK;
+    s_load_len             = 4;
     s_load_calls           = 0;
     s_save_calls           = 0;
     s_last_saved_addr      = 0xFF;
@@ -957,6 +959,74 @@ static void case_id_resolve_sources(void)
     _casc_id_boot();
     CHECK_MSG(s_self_addr == 1, "本板不读拨码，应取记录里的 1，得到 %u", (unsigned)s_self_addr);
 #endif
+}
+
+/** @brief 身份记录**不可用**时的读侧回落：状态/长度/地址越界 → 回落板级默认（两板 = 主卡），src=0
+ *
+ *  与"根本没有记录"（EMPTY，出厂态的正常一档）分开：那种情况**不出声**，而"槽已注册、
+ *  读出来却不可用"会打一条 `[casc·id] 身份记录不可用 …` 的错误日志（给现场的诊断输出）。
+ *  **日志本身不写断言**（日志没有稳定的可断言通道；断的是"回落后的行为"，日志有无靠
+ *  代码评审保证）。
+ *
+ *  回落成 `BOARD_CASC_ADDR`（两板都是 0 = **主卡**）是**有意保留**的处置（用户口径：
+ *  "不能停用；默认为主卡这个行为是可以的；报错可以有"）：记录坏掉的从卡上电后**会先当
+ *  主卡**（可能两张主卡、一半屏停更），靠那条日志现场重新编址。
+ *  这是**现状哨兵**：若将来把处置改成别的（停用 / 拒绝启动 / 按切分表收紧读侧），
+ *  这些期望要一并改。 */
+static void case_id_resolve_bad_record(void)
+{
+    TEST_BEGIN("身份记录不可用（状态/长度/地址越界）→ 回落板级默认（两板 = 主卡），src=0");
+
+    uint8_t src  = 0xEE;
+    uint8_t mc   = 0xEE;
+    uint8_t addr = 0;
+
+    /* ① 状态不对（INVALID：name/version/len/CRC 任一不符）→ 回落 */
+    fixture_reset();
+    s_rec_present = true;
+    s_rec_addr    = 1;
+    s_load_state  = DEV_CFG_RECORD_STATE_INVALID;
+    addr = _id_resolve(&src, &mc);
+    CHECK_MSG(addr == (uint8_t)BOARD_CASC_ADDR && src == 0,
+              "记录 INVALID 应回落板级默认 %u（src=0），得到 addr=%u src=%u",
+              (unsigned)BOARD_CASC_ADDR, (unsigned)addr, (unsigned)src);
+    CHECK_MSG(mc == (uint8_t)BOARD_CASC_MASTER_CELL, "回落时主卡格取板级默认 %u，得到 %u",
+              (unsigned)BOARD_CASC_MASTER_CELL, (unsigned)mc);
+
+    /* ② 长度不对（load 报 OK，但负载长度 ≠ 本工程的记录体）→ 回落 */
+    fixture_reset();
+    s_rec_present = true;
+    s_rec_addr    = 1;
+    s_load_len    = 7; /* 本工程的记录体是 4 字节 */
+    addr = _id_resolve(&src, &mc);
+    CHECK_MSG(addr == (uint8_t)BOARD_CASC_ADDR && src == 0,
+              "长度不符应回落板级默认 %u（src=0），得到 addr=%u src=%u", (unsigned)BOARD_CASC_ADDR,
+              (unsigned)addr, (unsigned)src);
+    CHECK_MSG(mc == (uint8_t)BOARD_CASC_MASTER_CELL, "回落时主卡格取板级默认 %u，得到 %u",
+              (unsigned)BOARD_CASC_MASTER_CELL, (unsigned)mc);
+
+    /* ③ 记录里的地址越界（> 0x1F 的地址根本不存在）→ 回落成主卡 */
+    fixture_reset();
+    s_rec_present = true;
+    s_rec_addr    = 0x20; /* 刚越过读侧容错的上界 0x1F */
+    addr = _id_resolve(&src, &mc);
+    CHECK_MSG(addr == (uint8_t)BOARD_CASC_ADDR && src == 0,
+              "越界地址（0x20）应回落成主卡（板级默认 %u），得到 addr=%u src=%u",
+              (unsigned)BOARD_CASC_ADDR, (unsigned)addr, (unsigned)src);
+    CHECK_MSG(mc == (uint8_t)BOARD_CASC_MASTER_CELL, "回落时主卡格取板级默认 %u，得到 %u",
+              (unsigned)BOARD_CASC_MASTER_CELL, (unsigned)mc);
+
+    /* ④ 对照组：有效记录 → 取记录里的地址与主卡格（**不回落**） */
+    fixture_reset();
+    s_rec_present = true;
+    s_rec_addr    = 1;
+    s_rec_src     = 3; /* 这条记录最初是谁写的，与"这次从哪读"无关 */
+    s_rec_mc      = (uint8_t)(BOARD_CASC_MASTER_CELL == 0U ? 1U : 0U); /* 与板级默认不同的格 */
+    addr = _id_resolve(&src, &mc);
+    CHECK_MSG(addr == 1 && src == 1, "有效记录应取记录里的地址 1（src=1），得到 addr=%u src=%u",
+              (unsigned)addr, (unsigned)src);
+    CHECK_MSG(mc == s_rec_mc, "主卡格要取自记录（%u；板级默认是 %u），得到 %u",
+              (unsigned)s_rec_mc, (unsigned)BOARD_CASC_MASTER_CELL, (unsigned)mc);
 }
 
 /** @brief 不该采纳的识别帧：非主卡发起（NACK）、自己的回声（静默）、拨码冲突（NACK）
@@ -1469,6 +1539,7 @@ int main(void)
     case_evict_skip_recover();
     case_retrans_counted();
     case_id_resolve_sources();
+    case_id_resolve_bad_record();
     case_set_addr_rejected();
     case_set_addr_applied();
     case_set_addr_yours_edges();

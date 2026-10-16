@@ -1054,11 +1054,15 @@ static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
         return _id_dip(); /* 每次现读：现场拨一下即生效 */
     }
 
-    app_casc_id_rec_t r;
-    uint16_t n = 0;
-    if (s_id_cfg != 0xFF &&
-        app_cfg_sched_load(s_id_cfg, (uint8_t *)&r, sizeof(r), &n) == DEV_CFG_RECORD_STATE_OK &&
-        n == sizeof(r) && r.addr <= 0x1FU) {
+    /* 记录体预置成"没读到"的样子：`app_cfg_sched_load` 的契约是"**仅 OK 时 payload
+       有效**"（见 dev_cfg_record.h），失败时缓冲不被写 —— 不预置的话下面那条错误日志
+       打印的就是栈上不确定值。 */
+    app_casc_id_rec_t r = {.addr = 0xFFU, .master_cell = 0xFFU};
+    uint16_t n          = 0;
+    dev_cfg_record_state_t st = DEV_CFG_RECORD_STATE_EMPTY; /* 槽没注册时停在 EMPTY：不出声 */
+    if (s_id_cfg != 0xFF) st = app_cfg_sched_load(s_id_cfg, (uint8_t *)&r, sizeof(r), &n);
+
+    if (st == DEV_CFG_RECORD_STATE_OK && n == sizeof(r) && r.addr <= 0x1FU) {
         /* 标签只能报"**记录**"：`r.src` 是这条记录**当初被写下来时**的来源
            （认领写的是 3=识别帧），拿它当"这次从哪读的"会打出一句
            `本机地址=0（来源 识别帧）` —— 看起来像开机时跑了一次识别，其实是读记录。 */
@@ -1067,8 +1071,22 @@ static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
         return r.addr;
     }
 
+    /* **记录槽已注册、却读不出可用的记录**（状态是 INVALID/IO_ERR、长度不符、地址越界）
+       —— 这是"记录坏了"，与"**根本没有记录**"（EMPTY，出厂态的正常一档）分开：后者
+       不出声，日志噪声只留给真出事的板子。
+       处置是**有意保留**的"回落成板级默认"（两板 `BOARD_CASC_ADDR = 0` = **主卡**）——
+       用户口径："不能停用；默认为主卡这个行为是可以的；报错可以有"。代价是这张卡会
+       先当主卡（可能两张主卡、一半屏停更），所以这条日志要让现场一眼看懂**需要重新
+       编址**（按 TEST 键认领，或重写记录）。 */
+    if (s_id_cfg != 0xFF && st != DEV_CFG_RECORD_STATE_EMPTY) {
+        CASC_LOG("[casc·id] 身份记录不可用（状态=%u 长度=%u 记录addr=%u）→ 回落板级默认 "
+                 "addr=%u（= 主卡）：本卡可能因此成为主卡，请重新编址\n",
+                 (unsigned)st, (unsigned)n, (unsigned)r.addr, (unsigned)BOARD_CASC_ADDR);
+    }
+
     *src = 0;
-    return (uint8_t)BOARD_CASC_ADDR; /* 板级默认（= 从卡） */
+    return (uint8_t)BOARD_CASC_ADDR; /* 板级默认（两板都是 0 = **主卡**）：回落到主卡是
+                                        有意保留的处置（记录坏不停用），见上面那条日志 */
 }
 
 /** @brief 上电：解析身份 → 应用 → 打印 */
