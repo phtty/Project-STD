@@ -24,10 +24,19 @@
 #define BOARD_SCREEN_CANVAS 1
 #define BOARD_CASC_ENABLED  1 /* 套件要测级联：单卡配置下也要把它编进来 */
 
+/* 本夹具是一个 **1×2** 网格（见下面 s_card_table 的排布）—— 必须与它对齐：
+   生产用 `CASC_CELL_COUNT`（合法地址集合 `[0, nx*ny)` 的大小）直接由这两个宏算出。
+   `board.h` 里它们有 `#ifndef` 守卫：5006048 板本来就是这个形状（此处为 no-op），
+   而默认的 3833024 是 1×1 —— 不钉住的话，用例里的 addr=1 会全变成越界值。 */
+#define BOARD_CASC_COLS 1
+#define BOARD_CASC_ROWS 2
+
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h> /* write()/_exit()：看门狗（见 main 前的说明） */
 
 /* 身份/记录/按键的桩要用到这些类型（本套件不测它们的行为）*/
 #include "app_cfg_sched.h"
@@ -641,7 +650,9 @@ static void check_content_is_card(uint8_t card_idx, const char *what)
 
 /* ================================================================ */
 
-/** 正常一轮：整块位图一条帧到齐，从卡收下并应答，主卡提交本地 */
+/** @brief 正常一轮：整块位图一条帧到齐、从卡收下并应答、主卡提交本地
+ *
+ *  任何一环少一次，现场就是"某块屏不更新"——而两侧都没有日志会指出是哪一步。 */
 static void case_round_ok(void)
 {
     TEST_BEGIN("正常一轮：一条 IMAGE 装下整块位图，从卡收下、主卡提交本地");
@@ -662,7 +673,9 @@ static void case_round_ok(void)
     CHECK_MSG(s_commit_self_calls == 1, "主卡应提交本地一次，得到 %d", s_commit_self_calls);
 }
 
-/** 发出去的那帧必须带**那张卡自己**的矩形 —— 地址与下标不许错配 */
+/** @brief 发出去的那帧必须带**那张卡自己**的矩形 —— 地址与下标不许错配
+ *
+ *  错配时 CRC、长度、几何校验**全部通过**，代价是两块屏的内容悄悄对调。 */
 static void case_rect_matches_addr(void)
 {
     TEST_BEGIN("IMAGE 带的是该卡自己的矩形（地址与下标不许错配）");
@@ -698,7 +711,7 @@ static void case_rect_matches_addr(void)
               s_extract_calls);
 }
 
-/** 丢一条：整帧重发（一帧一轮之后没有"只补某一片"这种粒度） */
+/** @brief 丢一条 → 整帧重发（一帧一轮之后没有"只补某一片"这种粒度），补上后内容必须正确 */
 static void case_retransmit_whole_frame(void)
 {
     TEST_BEGIN("丢一条 IMAGE → 整帧重发，补上后从卡内容正确");
@@ -713,7 +726,8 @@ static void case_retransmit_whole_frame(void)
     CHECK_MSG(s_commit_self_calls == 1, "重发成功后主卡应提交本地");
 }
 
-/** 从卡始终不回 ACK：主卡**不许冻结**，本地照常更新，且重试必须封顶 */
+/** @brief 从卡始终不回 ACK：主卡**不许冻结**（整块屏跟着一起停是最坏的失效形态），
+ *         本地照常更新，且重试次数必须封顶 */
 static void case_silent_slave_master_still_commits(void)
 {
     TEST_BEGIN("从卡不回 ACK → 主卡仍提交本地（整块屏不许跟着停）");
@@ -736,7 +750,9 @@ static void case_silent_slave_master_still_commits(void)
               (unsigned)dt);
 }
 
-/** 一直落不下去：重试封顶后放弃该卡，主卡自己照常更新 */
+/** @brief 一直落不下去：重试封顶后放弃该卡，主卡自己照常更新
+ *
+ *  一张坏卡拖住整轮，表现就是"级联特别慢"，而两块屏的内容其实都是对的。 */
 static void case_permanent_loss_gives_up(void)
 {
     TEST_BEGIN("持续落不下去 → 重试封顶后放弃，主卡不跟着卡死");
@@ -755,7 +771,9 @@ static void case_permanent_loss_gives_up(void)
     CHECK_MSG(dt < 1000U, "放弃要及时（重试封顶），实测 %ums", (unsigned)dt);
 }
 
-/** 从卡回 NACK（几何不符）：立刻放弃这张卡，**不做无用的重传** */
+/** @brief 从卡回 NACK（几何不符）：立刻放弃该卡，**不做无用的重传**
+ *
+ *  重发还是不符，而每次白白占用一整帧的总线时间。 */
 static void case_nack_gives_up(void)
 {
     TEST_BEGIN("从卡回 NACK → 立刻放弃该卡，不做无用的重传");
@@ -769,7 +787,7 @@ static void case_nack_gives_up(void)
     CHECK_MSG(s_commit_self_calls == 1, "一张卡参与不了，主卡自己仍要更新画面");
 }
 
-/** 整轮不许重复抽取：每张从卡一次（重发用的是已经抽好的那帧） */
+/** @brief 整轮不许重复抽取：每张从卡一次（重发用的是已经抽好的那帧）—— 多抽一次就多读一整块屏 */
 static void case_one_extract_per_card(void)
 {
     TEST_BEGIN("每张从卡只抽一次（重发用的是已经组好的那帧）");
@@ -782,7 +800,8 @@ static void case_one_extract_per_card(void)
               s_extract_calls);
 }
 
-/** 不在线的卡一帧都不发；连续失败到阈值才剔除；PRESENT 回来立刻复在线 */
+/** @brief 不在线的卡一帧都不发（剔除的全部收益）；连续失败到阈值才剔除（剔太早会来回抖）；
+ *         收到 PRESENT 立刻复在线并要求马上开一轮（否则它屏上还是掉线前那幅旧的） */
 static void case_evict_skip_recover(void)
 {
     TEST_BEGIN("跳过不在线 / 连续失败才剔除 / 收到 PRESENT 立刻复在线");
@@ -828,7 +847,7 @@ static void case_evict_skip_recover(void)
               "等下一次内容更新可能要几分钟");
 }
 
-/** 整帧重传会计数 —— 状态快照要用它 */
+/** @brief 整帧重传会计数 —— 状态快照要用它（"总线是不是在反复重传"只有这个数字能看出来） */
 static void case_retrans_counted(void)
 {
     TEST_BEGIN("整帧重传计入快照计数器");
@@ -851,7 +870,10 @@ static void case_retrans_counted(void)
  *  三档来源的优先级、回声过滤、拨码优先、认领后的状态作废，只有在这儿才看得见。
  * ================================================================ */
 
-/** 身份三档来源的优先级：拨码 > 记录 > 板级默认 */
+/** @brief 身份三档来源的优先级：拨码 > 记录 > 板级默认
+ *
+ *  读错只是两块屏的角色不对（画面照出），不会有任何一处报错；越界记录不拒、
+ *  IO_ERR 被缓存这两条则会让身份永远停在错值上。 */
 static void case_id_resolve_sources(void)
 {
     TEST_BEGIN("身份来源：拨码 > 记录 > 板级默认（出厂态 = 主卡）");
@@ -937,10 +959,15 @@ static void case_id_resolve_sources(void)
 #endif
 }
 
-/** 收到识别帧：四个分支 + 回声过滤（一个都不许判错） */
-static void case_set_addr_branches(void)
+/** @brief 不该采纳的识别帧：非主卡发起（NACK）、自己的回声（静默）、拨码冲突（NACK）
+ *
+ *  三条都要求**零副作用**（身份、记录、门面一个都不许动）：
+ *   · 非主卡那条守住"整个装置不会没有主卡" —— 从卡按键不能把唯一的主卡降级；
+ *   · 回声那条若回了 ACK，会把发起方自己的等待槽当成"对方的答复"；
+ *   · 拨码冲突那条守住"地址以拨码为准"（现场拨一下即生效，不需要工具）。 */
+static void case_set_addr_rejected(void)
 {
-    TEST_BEGIN("识别帧：非主卡拒绝 / 同址确认落记录 / 回声丢弃 / 让位 / 按格重算");
+    TEST_BEGIN("识别帧·不该采纳的：非主卡拒绝 / 回声丢弃 / 拨码冲突拒绝");
 
     /* ① `mine != 0`：对方不是主卡 → 拒绝，本机身份不动。
        这一条守住"整个装置不会没有主卡"：从卡按键不能把唯一的主卡降级。 */
@@ -953,21 +980,6 @@ static void case_set_addr_branches(void)
     CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
               "应以 NACK(ADDR) 明确回绝（静默回绝会让现场只能猜）");
 
-    /* ② 同址确认（`yours` 就是本机地址）→ 回 ACK，**而且要把身份写进记录**。
-       从前这条路不写记录，于是从卡的地址一直靠出厂默认撑着 —— 默认值一改、
-       或换一块板，它就跑到别的格上去了。 */
-    fixture_reset();
-    s_self_addr = 1; /* 本机是从卡，与记录里那条一致 */
-    p           = set_addr_payload(CASC_ADDR_MASTER, 1, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 12, &p, sizeof(p));
-    _casc_drain();
-    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "同址确认应回 ACK");
-    CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 1 && s_last_saved_mc == 1,
-              "同址确认也要落记录（addr=1 主卡格=1），得到 save=%d addr=%u mc=%u", s_save_calls,
-              (unsigned)s_last_saved_addr, (unsigned)s_last_saved_mc);
-    CHECK_MSG(s_self_addr == 1 && s_reinit_calls == 0,
-              "身份没变就不该重装门面（重装会清掉屏上刚画好的内容）");
-
     /* ③ 自己的回声：地址与自己相同**且 claim 也是自己那一刻** → 丢弃，连 ACK 都不回
        （回了会把发起方的等待槽当成"对方的答复"）。 */
     fixture_reset();
@@ -979,16 +991,64 @@ static void case_set_addr_branches(void)
     CHECK_MSG(s_tx_last.len == 0, "回声不该有任何应答，却发了 %u 字节", (unsigned)s_tx_last.len);
     CHECK_MSG(s_self_addr == 0 && s_save_calls == 0, "回声不该改身份");
 
-    /* ④ 从卡收到**具体地址**的单播：改址 + 落记录（含主卡格）+ 回 ACK + 作废陈旧状态 */
+#if BOARD_HAS_ADDR_DIP
+    /* ⑧ 拨码板：`yours` 与拨码不符 → **拒绝**（拨码优先）。
+       `yours` 必须是**范围内**的冲突值：1×2 网格上 yours=2 会先被"超出网格"的门禁
+       拒掉，那样测到的就不是"拨码优先"这条理由了（两条都回 NACK(ADDR)，现场难分）。 */
     fixture_reset();
-    s_self_addr = 1;
+    s_has_dip    = true;
+    s_dip_bit[0] = false;             /* 拨码 = 0 */
+    s_self_addr  = CASC_ADDR_MASTER;  /* 本机与拨码一致 */
+    p            = set_addr_payload(CASC_ADDR_MASTER, 1, 1); /* 1 = 范围内、且与拨码冲突 */
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_MASTER, APP_CASC_TYPE_SET_ADDR, 15, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == CASC_ADDR_MASTER, "拨码板不许被改成 1（拨码=0 优先），得到 %u",
+              (unsigned)s_self_addr);
+    CHECK_MSG(s_save_calls == 0, "被拒绝时不该写记录");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "拨码冲突应以 NACK(ADDR) 回绝");
+#endif
+}
+
+/** @brief 该采纳的识别帧：同址确认也落记录 / 单播改址 / 让位 / claim 更晚不让位 / 主卡格变了重算
+ *
+ *  共同点是"**身份、记录、门面三者必须一起动**"：只改内存不落盘（掉电忘）或
+ *  只落盘不改内存（要重启才生效）在现场都是"时好时坏"。
+ *  ⑦ 是"两块屏内容对调"那条的守门用例：**格不动、地址按新表重算**。 */
+static void case_set_addr_applied(void)
+{
+    TEST_BEGIN("识别帧·该采纳的：同址确认落记录 / 单播改址 / 让位 / 不让位 / 按新格重算");
+
+    /* ② 同址确认（`yours` 就是本机地址）→ 回 ACK，**而且要把身份写进记录**。
+       从前这条路不写记录，于是从卡的地址一直靠出厂默认撑着 —— 默认值一改、
+       或换一块板，它就跑到别的格上去了。 */
+    fixture_reset();
+    s_self_addr = 1; /* 本机是从卡，与记录里那条一致 */
+    app_casc_set_addr_t p = set_addr_payload(CASC_ADDR_MASTER, 1, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 12, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "同址确认应回 ACK");
+    CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 1 && s_last_saved_mc == 1,
+              "同址确认也要落记录（addr=1 主卡格=1），得到 save=%d addr=%u mc=%u", s_save_calls,
+              (unsigned)s_last_saved_addr, (unsigned)s_last_saved_mc);
+    CHECK_MSG(s_self_addr == 1 && s_reinit_calls == 0,
+              "身份没变就不该重装门面（重装会清掉屏上刚画好的内容）");
+
+    /* ④ **生产里真正单播出去的那条**（`_claim_notify_peers` 逐卡发的那条）：
+       对方按键成了新主卡（新主卡格 = 0），本卡是旧主卡、在格 1 —— 新表里本卡是
+       addr 1。本卡要接受"把主卡位让出去"：地址 0→1、主卡格 1→0，**地址与格一起走**。
+       （旧用例这里用 yours=2 当"单播改址"，而它正是 1×2 网格上的越界值：范围门禁
+       落地后那条会被 NACK —— 换成本条，测的还是同一条单播路，且是真帧。） */
+    fixture_reset();
+    s_self_addr = 0; /* 旧身份：主卡（格 1 那块） */
     s_state[0]  = APP_SCREEN_CARD_STATE_ONLINE;
     s_state[1]  = APP_SCREEN_CARD_STATE_ONLINE;
-    p           = set_addr_payload(CASC_ADDR_MASTER, 2, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 14, &p, sizeof(p));
+    p           = set_addr_payload(CASC_ADDR_MASTER, 1, 0); /* 新表：主卡格 0、本卡 addr 1 */
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_MASTER, APP_CASC_TYPE_SET_ADDR, 14, &p, sizeof(p));
     _casc_drain();
-    CHECK_MSG(s_self_addr == 2, "从卡收到识别帧应改成 yours=2，得到 %u", (unsigned)s_self_addr);
-    CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 2 && s_last_saved_mc == 1,
+    CHECK_MSG(s_self_addr == 1, "让出主卡位后本卡应是 addr 1，得到 %u", (unsigned)s_self_addr);
+    CHECK_MSG(s_master_cell == 0, "主卡格要跟新表一起走（1→0），得到 %u", (unsigned)s_master_cell);
+    CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == 1 && s_last_saved_mc == 0,
               "改完必须**立刻写记录**（地址 + 主卡格），掉电不忘是这条的全部意义");
     CHECK_MSG(s_reinit_calls == 1, "改完必须重装门面（渲染目标/持久化钩子要跟着换）");
     CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "改完应回 ACK，否则发起方以为没通知到");
@@ -1035,24 +1095,194 @@ static void case_set_addr_branches(void)
               (unsigned)s_self_addr);
     CHECK_MSG(s_last_saved_mc == 0, "新的主卡格要落记录（掉电不忘）");
     CHECK_MSG(s_reinit_calls == 1, "格变了要重装门面（本卡渲染的矩形跟着变）");
-
-#if BOARD_HAS_ADDR_DIP
-    /* ⑧ 拨码板：`yours` 与拨码不符 → **拒绝**（拨码优先） */
-    fixture_reset();
-    s_has_dip    = true;
-    s_dip_bit[0] = true; /* 拨码 = 1 */
-    s_self_addr  = 1;
-    p            = set_addr_payload(CASC_ADDR_MASTER, 2, 1);
-    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 15, &p, sizeof(p));
-    _casc_drain();
-    CHECK_MSG(s_self_addr == 1, "拨码板不许被改成 2（拨码优先），得到 %u", (unsigned)s_self_addr);
-    CHECK_MSG(s_save_calls == 0, "被拒绝时不该写记录");
-    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
-              "拨码冲突应以 NACK(ADDR) 回绝");
-#endif
 }
 
-/** 按键认领：**按哪块哪块是主卡，且它那一格变成主卡格**（F3 的核心） */
+/** @brief 识别帧 `yours` 的**两端取值**：0（主卡地址）不得点名 → 拒绝；count-1（合法上界）→ 采纳
+ *
+ *  本夹具是 1×2 网格 → 具体地址的合法集 = `1..count-1`，而 `0` 虽然网格里存在
+ *  （它正是主卡地址），**作为指令一律拒绝**：主卡身份只由广播自算 + claim/按键产生，
+ *  识别帧不得把接收方点名为主卡。从前这一支会**跳过 claim 仲裁**直接采纳 0 ——
+ *  一张从卡被单播点名就自封主卡并落盘（两张主卡、一半屏停更），重启不忘。
+ *  发侧本来也只发 `0xFF`（自算）或 `1..格数-1`（单播），所以拒掉 0 只是把"发侧约定"
+ *  升格为**收侧强制**。
+ *  上界这一条保留"上界不是排他边界"的意义：记错一位（写成 `>= count-1`）会被误拒，
+ *  ② 立刻红。
+ *
+ *  （越界一侧与"门禁不能写成总线字段宽度"见下面的 out_of_grid 两案。） */
+static void case_set_addr_yours_edges(void)
+{
+    TEST_BEGIN("识别帧 yours·两端：0（点名主卡）拒绝、count-1（合法上界）采纳");
+
+    /* ① `yours == 0`（主卡地址）→ **拒绝**：主卡身份只由广播自算 + claim/按键产生，
+       识别帧不得把接收方点名为主卡。 */
+    fixture_reset();
+    s_self_addr          = 1; /* 本机是从卡 */
+    app_casc_set_addr_t p = set_addr_payload(CASC_ADDR_MASTER, CASC_ADDR_MASTER, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 21, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1 && s_master_cell == 1,
+              "yours=0 不得把从卡点名为主卡（连格都不许动），得到 addr=%u mc=%u",
+              (unsigned)s_self_addr, (unsigned)s_master_cell);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用（不落盘、不 apply）");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "点名主卡应以 NACK(ADDR) 明确回绝");
+
+    /* ② `yours == 网格格数-1`（**合法上界**）→ 采纳。 */
+    fixture_reset();
+    s_self_addr = 1;
+    p           = set_addr_payload(CASC_ADDR_MASTER, CASC_CELL_COUNT - 1U, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 22, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == CASC_CELL_COUNT - 1U, "合法上界（= 网格格数-1）应被采纳，得到 %u",
+              (unsigned)s_self_addr);
+    CHECK_MSG(s_save_calls == 1 && s_last_saved_addr == CASC_CELL_COUNT - 1U, "采纳了就要落记录");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_ACK, "采纳应回 ACK");
+}
+
+/** @brief 识别帧 `yours` **越界**（含"总线字段放得下、网格放不下"的值）→ 一律 NACK(ADDR) + 零副作用
+ *
+ *  **为什么需要它**：`yours` 是识别帧的**直接输入**，合法集 = 新切分表的地址集合
+ *  `[0, nx*ny)`（本夹具 1×2 → `{0, 1}`）。曾经的实现没有任何范围校验，线上一个越界值
+ *  会被原样采纳并落盘：本卡随即落到切分表外（门面停用、不落屏，RS485 单播也不再认它），
+ *  而且**重启不会自愈** —— 读侧对 `> 0x1F` 的地址会拒掉、回落板级默认 0（= 主卡），
+ *  本卡静默变成**第二张主卡**（两路 PING、各开各的轮，一半屏停更）。
+ *
+ *  注意 `0x1F` **不是"合法上界"**：它只是总线地址字段的宽度 —— 2 卡网格上
+ *  `yours = 2` 同样会砖，所以判据只能用网格格数（`CASC_CELL_COUNT`）。
+ *  每条拒绝都要求**零副作用**（身份、记录、门面一个都不许动）—— 光是"回了 NACK
+ *  但顺手改了别的"在现场同样难查。⑤ 还钉住：越界值不许绕过**门禁之前**的 claim 仲裁。 */
+static void case_set_addr_yours_out_of_grid(void)
+{
+    TEST_BEGIN("识别帧 yours·越界（count/0x1F/0x20/0xFE）：NACK(ADDR) + 零副作用，仲裁不被短路");
+
+    /* ① `yours == 网格格数`（= 2，越界一位）→ 拒绝。它就是旧用例拿来做"单播改址"的
+       那个值：采纳后本卡就落到切分表外。判据把 `>=` 写成 `>` 时，这一条立刻红。 */
+    fixture_reset();
+    s_self_addr          = 1;
+    app_casc_set_addr_t p = set_addr_payload(CASC_ADDR_MASTER, CASC_CELL_COUNT, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 23, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1, "越界一位（yours=%u）不该改身份，得到 %u", (unsigned)CASC_CELL_COUNT,
+              (unsigned)s_self_addr);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用（不落盘、不 apply）");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 yours 应以 NACK(ADDR) 明确回绝");
+
+    /* ② `yours == 0x1F`：总线字段放得下、但 1×2 网格放不下 —— 它是 `dst` 字段的宽度
+       （01..1F），**不是本板的合法集**。这条钉的正是"判据不能写成 `<= 0x1F`"。 */
+    fixture_reset();
+    s_self_addr = 1;
+    p           = set_addr_payload(CASC_ADDR_MASTER, 0x1F, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 24, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1, "0x1F 只是总线字段宽度、不是合法集：不该采纳，得到 %u",
+              (unsigned)s_self_addr);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 yours 应以 NACK(ADDR) 回绝");
+
+    /* ③④ 0x20 / 0xFE：一个离 `0x1F` 差一位、一个离"自算"的 `0xFF` 差一位。
+       判据若写成"字段值域"的形态（`> 0x1F`、`>= 0xFF`、位掩码），这两条会走岔。 */
+    fixture_reset();
+    s_self_addr = 1;
+    p           = set_addr_payload(CASC_ADDR_MASTER, 0x20, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 25, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1 && s_save_calls == 0 && s_reinit_calls == 0, "0x20 应拒绝、零副作用");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 yours 应以 NACK(ADDR) 回绝");
+
+    fixture_reset();
+    s_self_addr = 1;
+    p           = set_addr_payload(CASC_ADDR_MASTER, 0xFE, 1);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 26, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1 && s_save_calls == 0 && s_reinit_calls == 0, "0xFE 应拒绝、零副作用");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 yours 应以 NACK(ADDR) 回绝");
+
+    /* ⑤ 仲裁不被非法值短路：本卡自称主卡、**按得更晚**（claim 更大）→ 照旧回绝。
+       这条走的是**门禁之前**的 claim 分支（理由不同、结论一样）—— 少了它，
+       `yours` 一旦越界就能绕过"最近按的那张卡作数"这条规则。 */
+    fixture_reset();
+    s_my_claim = 300; /* 本卡在 300ms 认领过（本机此刻是主卡 addr 0） */
+    p          = set_addr_payload(CASC_ADDR_MASTER, 0xFE, 1);
+    _casc_put_u32(p.claim, 200); /* 对方更早 */
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_MASTER, APP_CASC_TYPE_SET_ADDR, 29, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == CASC_ADDR_MASTER,
+              "越界 yours 也要走 claim 仲裁：本卡按得更晚就不让位，得到 %u", (unsigned)s_self_addr);
+    CHECK_MSG(s_save_calls == 0, "回绝时不该写记录");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK, "应明确回绝（静默会让对方一直等）");
+}
+
+/** @brief 识别帧 `master_cell` **越界**（`yours` 完全合法也拒）：NACK(ADDR)、身份与格都不动
+ *
+ *  今天"连地址都不用越界就能把卡写砖"的那条 —— 越界主卡格落盘后各卡渲染的格子对不上，
+ *  重启读回来还是它。两个越界方向都测：`= 网格格数`（差一位）与 `0xFF`。
+ *  只卡 `new_addr`、漏掉 `mc` 的实现会让这两条立刻红。
+ *  "连格都不许动"（`s_master_cell` 不变）是**零副作用**的一半，必须与身份断言同案。 */
+static void case_set_addr_mc_out_of_grid(void)
+{
+    TEST_BEGIN("识别帧 master_cell 越界（= count / 0xFF）：NACK(ADDR)、身份与格都不动");
+
+    /* ① `mc == 网格格数`（差一位）→ 拒绝。 */
+    fixture_reset();
+    s_self_addr          = 1;
+    app_casc_set_addr_t p = set_addr_payload(CASC_ADDR_MASTER, 1, CASC_CELL_COUNT);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 27, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1 && s_master_cell == 1,
+              "mc=%u 越界不该动身份（连格都不许动），得到 addr=%u mc=%u", (unsigned)CASC_CELL_COUNT,
+              (unsigned)s_self_addr, (unsigned)s_master_cell);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 mc 应以 NACK(ADDR) 回绝");
+
+    /* ② `mc == 0xFF` → 拒绝。 */
+    fixture_reset();
+    s_self_addr = 1;
+    p           = set_addr_payload(CASC_ADDR_MASTER, 1, 0xFF);
+    peer_frame(CASC_ADDR_MASTER, 1, APP_CASC_TYPE_SET_ADDR, 28, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == 1 && s_master_cell == 1,
+              "mc=0xFF 越界不该动身份，得到 addr=%u mc=%u", (unsigned)s_self_addr,
+              (unsigned)s_master_cell);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "越界 mc 应以 NACK(ADDR) 回绝");
+}
+
+/** @brief 存量砖 × 广播自算：**救不回**（恒等映射）且不许把越界身份再写一遍
+ *
+ *  本卡身份已经越界（addr = 网格格数）时收到广播自算（`yours=0xFF`）：自算是
+ *  **恒等映射**（越界地址不在表里，格↔址互推只在原地打转），算出来还是那个越界值
+ *  → 门禁拒绝。即"用广播重编址把这块砖救回来"**不成立**；存量砖只能靠外部工具
+ *  向越界地址发一条 `yours=合法` 的单播、或擦身份记录。 */
+static void case_set_addr_brick_broadcast(void)
+{
+    TEST_BEGIN("越界身份 + 广播自算：拒绝、不落盘、地址与格都不动（广播救不回）");
+
+    /* ① 砖（addr=网格格数）收到 `yours=0xFF` 的广播：拒绝要零副作用 —— 救不回，
+       也不许把越界身份再写一遍。 */
+    fixture_reset();
+    s_self_addr   = CASC_CELL_COUNT; /* 砖：越界地址 */
+    s_master_cell = 1;
+    app_casc_set_addr_t p = set_addr_payload(CASC_ADDR_MASTER, CASC_ADDR_SELF_CALC, 0);
+    _casc_put_u32(p.claim, 500);
+    peer_frame(CASC_ADDR_MASTER, CASC_ADDR_BCAST, APP_CASC_TYPE_SET_ADDR, 30, &p, sizeof(p));
+    _casc_drain();
+    CHECK_MSG(s_self_addr == CASC_CELL_COUNT && s_master_cell == 1,
+              "广播自算是恒等映射，救不回越界身份，得到 addr=%u mc=%u", (unsigned)s_self_addr,
+              (unsigned)s_master_cell);
+    CHECK_MSG(s_save_calls == 0 && s_reinit_calls == 0, "拒绝要零副作用（不落盘、不 apply）");
+    CHECK_MSG(s_tx_last.type == APP_CASC_TYPE_NACK && s_tx_last.payload[0] == APP_CASC_NACK_ADDR,
+              "应回 NACK(ADDR)，而不是静默");
+}
+
+/** @brief 按键认领：**按哪块哪块是主卡，且它那一格变成主卡格**（F3 的核心）
+ *
+ *  格不跟着走，现场就是那半幅内容对调 —— 而两块屏"各自都对"，看不出错。 */
 static void case_claim_master_flow(void)
 {
     TEST_BEGIN("按键认领：成为 addr 0 + **本卡那一格变成主卡格**，广播 + 逐卡单播");
@@ -1101,7 +1331,8 @@ static void case_claim_master_flow(void)
               "认领后应立刻重新枚举（否则新主卡要等下一个 10s 周期才被发现）");
 }
 
-/** 身份变了：在途轮次必须自己收尾（不许按旧身份继续发、也不许提交本地） */
+/** @brief 身份变了：在途轮次必须自己收尾（不许按旧身份继续发、也不许提交**已被重装清空**的画布），
+ *         而且这次失败不算该卡的（算了的话几轮认领下来会把一张好卡剔除） */
 static void case_round_aborts_on_identity_change(void)
 {
     TEST_BEGIN("一轮中途身份变了 → 立即收尾：不重发、不提交本地、不计失败");
@@ -1118,7 +1349,8 @@ static void case_round_aborts_on_identity_change(void)
               "这次失败**不算这张卡的**：算了的话，几轮认领下来会把一张好卡剔除");
 }
 
-/** `_identity_poke`：把协议侧按旧身份建立的陈旧状态全部作废 */
+/** @brief `_identity_poke`：身份一变，按**旧身份**建立的陈旧状态（在线表、失败计数、
+ *         开轮请求、应答槽）必须全部作废 —— 留着它们会让新身份按旧表工作 */
 static void case_identity_poke(void)
 {
     TEST_BEGIN("身份变了 → 作废陈旧状态并立刻重新枚举");
@@ -1144,7 +1376,7 @@ static void case_identity_poke(void)
               "应把下一次枚举提前到**现在**，而不是等 10s 周期");
 }
 
-/** 开轮三闸：画布没写过不开 / **渲染途中不开** / 静默期没到不开
+/** @brief 开轮三闸：画布没写过不开 / **渲染途中不开** / 静默期没到不开（force 也要过前两闸）
  *
  *  第三条是现场"切换下一个字之前闪一下"的根因：渲染是"测量趟 + 渲染趟"，
  *  清屏与文字之间画布是空的 —— 这一眼推下去，两块屏先黑一帧再出新字。
@@ -1198,10 +1430,32 @@ static void case_round_ready_gates(void)
     CHECK_MSG(!_round_ready(), "force 用掉之后要靠静默期那条路");
 }
 
-/* ================================================================ */
+/* ================================================================
+ *  看门狗
+ *
+ *  本套件是这批里唯一走**阻塞等待**的（`_round_run` → `_wait_ack` →
+ *  `osMessageQueueGet(..., timeout_ms)`，上界 `CASC_ACK_TIMEOUT_MS`）。
+ *  生产侧一旦把超时改成 `osWaitForever`、或等待循环丢掉 deadline 判断，
+ *  症状是**挂死**而不是失败 —— 在 CI 里挂死比失败更糟（没有诊断、还占住机器）。
+ *  用 SIGALRM 把它转成明确的失败退出（范式：test_dispatch.c 的看门狗）。
+ * ================================================================ */
+
+#define TEST_TIMEOUT_S (20)
+
+static void on_alarm(int sig)
+{
+    (void)sig;
+    static const char msg[] = "\n\033[31m✘ 测试超时（等待应答/开轮疑似永不返回）\033[0m\n";
+    ssize_t r = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    (void)r;
+    _exit(2);
+}
 
 int main(void)
 {
+    signal(SIGALRM, on_alarm);
+    alarm(TEST_TIMEOUT_S);
+
     printf("\n\033[36m级联图传 · 主卡侧（本板单卡 %ux%u，一帧 %u 字节）\033[0m\n", (unsigned)CARD_W,
            (unsigned)CARD_H, (unsigned)(CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM));
 
@@ -1215,7 +1469,12 @@ int main(void)
     case_evict_skip_recover();
     case_retrans_counted();
     case_id_resolve_sources();
-    case_set_addr_branches();
+    case_set_addr_rejected();
+    case_set_addr_applied();
+    case_set_addr_yours_edges();
+    case_set_addr_yours_out_of_grid();
+    case_set_addr_mc_out_of_grid();
+    case_set_addr_brick_broadcast();
     case_claim_master_flow();
     case_round_aborts_on_identity_change();
     case_round_ready_gates();

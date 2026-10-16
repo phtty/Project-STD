@@ -540,7 +540,7 @@ static void _nack(uint16_t seq, uint8_t err, const char *why)
 {
     const app_casc_nack_t nack = {.err = err};
 
-    CASC_LOG("[casc·从] 拒绝 IMAGE seq=%u：%s\n", (unsigned)seq, why);
+    CASC_LOG("[casc·从] 拒绝 seq=%u：%s\n", (unsigned)seq, why);
     (void)_send_seq(APP_CASC_TYPE_NACK, CASC_ADDR_MASTER, seq, &nack, sizeof(nack));
 }
 
@@ -964,6 +964,18 @@ static bool _round_run(void)
  *  **跑在 `sw_app(3)`（`_screen_init` 是 `sw_dev(2)` 之后）**：那时切分表已按默认身份
  *  建过一遍，这里解析出真身份后再 `reinit_identity()` 重装一次 —— 两条路走的是
  *  同一个 `_apply_identity()`，不会漂。 */
+
+/** @brief 本板网格的格数 = **新切分表的地址集合** `[0, nx*ny)`（`nx*ny` 格）
+ *
+ *  `app_screen_addr_of_cell` 是"格 → 址"的**双射**（主卡格编 0、其余按格序编 1..），
+ *  像恰为该区间 —— 所以这个集合与"主卡格在哪"无关，任何合法主卡格下都成立。
+ *
+ *  ⚠ 这是**本期网格合成**的结论。将来切分表改为 W25Qxx 记录驱动 / 异形拼法
+ *  （`Application/Src/Render/app_screen.c` 的 `_layout_build_grid` 一带写着计划注释），
+ *  地址集合可能**不再是连续区间** —— 那时用它做范围判据的地方（`_cmd_set_addr`
+ *  的门禁）必须改成"∈ 新表的地址集合"。 */
+#define CASC_CELL_COUNT ((uint8_t)((BOARD_CASC_COLS) * (BOARD_CASC_ROWS)))
+
 #define CASC_ID_REC_VERSION (2U)
 
 typedef struct [[gnu::packed]] {
@@ -1092,8 +1104,10 @@ sw_dev_initcall(_casc_id_register);
  *  主从识别（识别帧的收发与认领）
  *
  *  **谁能改身份**：只有"按下按键的那张卡"是发起者（`mine=0`），接收方从不自封主卡
- *  （`yours` 恒非 0）→ 重放/迟到/回声都造不出第二张主卡。两张卡都自称主卡时由
- *  `claim` 时刻裁决（更早者胜）—— 两卡做同一个比较，结论一致。
+ *  （`yours` 恒非 0 —— 这已从"发侧约定"升格为**收侧强制**：显式分支直接拒
+ *  `yours == 0`，自算分支也产不出 0，见 `_cmd_set_addr`）→ 重放/迟到/回声都造不出
+ *  第二张主卡。两张卡都自称主卡时由 `claim` 时刻裁决（更早者胜）—— 两卡做同一个
+ *  比较，结论一致。
  * ================================================================ */
 
 /** 本卡最近一次认领主卡的时刻；`0xFFFFFFFF` = 从未认领（最晚，别人优先） */
@@ -1156,6 +1170,10 @@ static void _cmd_set_addr(app_dispatch_msg_t *msg)
 
     uint8_t new_addr;
     if (yours == CASC_ADDR_SELF_CALC) {
+        /* **这一支产不出 0**（不会把接收方算成主卡）：`my_cell == mc` 时要么按 claim
+           回绝（本卡身份不变）、要么让到别的格；否则 `addr_of_cell(my_cell, mc)` 是把
+           非主卡格重新编号，像里没有 0（0 只留给主卡格）。与显式分支拒 `yours == 0`
+           合起来 —— **"主卡身份不经识别帧下发"在收侧被完整封死**。 */
         if (my_cell == mc) {
             /* **我也认为自己在主卡格，但发起方不是我** —— 两张卡都自称主卡的那种局面。
                让不让由 claim 裁决：**更晚按下者作数**（两卡对同一对数做同一个比较，
@@ -1176,10 +1194,21 @@ static void _cmd_set_addr(app_dispatch_msg_t *msg)
             new_addr = app_screen_addr_of_cell(my_cell, mc); /* 格不动，只按新表重算地址 */
         }
     } else {
-        /* 明确的地址（逐卡单播）。`yours == 0` 只在"本卡就是主卡格"时才对得上，
-           那时下面 apply 的 addr==0 与 mc 一致，等于只更新主卡格。 */
-        if (yours != CASC_ADDR_MASTER && yours != self && app_screen_is_master() &&
-            (int32_t)(claim - s_my_claim) < 0) {
+        /* 明确的地址（逐卡单播）。**`yours == 0` 一律拒绝**：主卡身份只由"广播自算 +
+           claim 仲裁"与按键产生，识别帧不得把接收方点名为主卡 —— 从前这一支会
+           **跳过 claim 仲裁**直接采纳 0，一张从卡被单播点名就自封主卡并落盘
+           （两张主卡、一半屏停更），重启不忘。发侧本来也不发这个值（广播发 `0xFF`、
+           单播只发 `1..格数-1`），拒掉它只是把"发侧约定"升格为**收侧强制**。 */
+        if (yours == CASC_ADDR_MASTER) {
+            CASC_LOG("[casc] ← 识别帧试图把本卡点名为主卡，拒绝：seq=%u yours=%u self=%u\n",
+                     (unsigned)seq, (unsigned)yours, (unsigned)self);
+            _nack(seq, APP_CASC_NACK_ADDR,
+                  "识别帧不得把接收方点名为主卡（主卡身份只由广播自算与按键产生）");
+            return;
+        }
+        /* （原判据里还有 `yours != CASC_ADDR_MASTER` 一个子句：`yours == 0` 已在上游
+           被直接拒绝，该子句恒真、不再需要。） */
+        if (yours != self && app_screen_is_master() && (int32_t)(claim - s_my_claim) < 0) {
             /* 我也自称主卡、而且**我按得更晚**（claim 更大 ⇒ 差为负）→ 我不让位，
                只回绝。两卡对同一对数做同一个比较，结论一致，不会两张都让。 */
             CASC_LOG("[casc] ← 对方的 claim=%ums 早于本卡，回绝（本卡留主卡）\n",
@@ -1188,6 +1217,23 @@ static void _cmd_set_addr(app_dispatch_msg_t *msg)
             return;
         }
         new_addr = yours;
+    }
+
+    /* **范围门禁（分支合流之后、落盘/apply 之前）**：合法地址集合 = 新切分表的地址
+       集合 `[0, CASC_CELL_COUNT)`（见那个宏的注释），`yours` 与 `master_cell`
+       **两个都要卡**：任一越界，落盘后本卡就落到切分表外 —— 门面停用（不落屏），
+       RS485 单播也不再点得着它。而重启**不会自愈**：读侧对越界记录要么拒掉、
+       回落板级默认 0（= 主卡）→ 静默变成**第二张主卡**（两路 PING、各开各的轮，
+       一半屏停更），要么原样读回继续隐身 —— 两种都比黑屏更难查。
+       判据只能用本板网格格数：`0x1F` 只是**总线字段宽度**、不是合法集 ——
+       1×2 网格上 `yours = 2` 同样会砖，写成 `<= 0x1F` / 掩码之类的都错。
+       也**不放进 `_id_set_local`**：那里只表达"拨码优先"，理由会被混掉。
+       非法帧要**零副作用**：不写记录、不 apply，与拨码拒绝一样只回 NACK(ADDR)。 */
+    if (mc >= CASC_CELL_COUNT || new_addr >= CASC_CELL_COUNT) {
+        CASC_LOG("[casc] ← 识别帧的地址/主卡格超出本板网格：seq=%u new_addr=%u mc=%u（本板 %u 格）\n",
+                 (unsigned)seq, (unsigned)new_addr, (unsigned)mc, (unsigned)CASC_CELL_COUNT);
+        _nack(seq, APP_CASC_NACK_ADDR, "识别帧的地址或主卡格超出本板网格");
+        return;
     }
 
     /* ② 改成算出来的地址 + 新的主卡格并持久化。**哪怕原来就是主卡，收到也照改**
