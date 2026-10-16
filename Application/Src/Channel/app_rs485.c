@@ -141,6 +141,13 @@ static void _rs485_isr_fn(uint8_t *data, uint16_t len, void *ctx)
 
     if (len > RS485_BUF_SIZE) return; /* 不可能：DMA 缓冲就这么大 */
 
+    /* 空段直接丢弃（**纵深防御，别删**）：收包槽只有 RS485_RX_SLOTS 格，而空段一样会占格、
+       置 busy、投一条消息 —— 连着来就会把真数据段挤掉，症状是"偶发丢帧/偶发收不到命令"，
+       最难从现场反推。
+       今天它到不了这里：上游 pl_uart 的空闲交付两处都有守卫（`pos == rx_pos` 直接返回；
+       回绕分支是 `if (n1 && …)` / `if (pos && …)`）。留着是防"上游守卫被改掉/换实现"。 */
+    if (len == 0U) return;
+
     /* 找一个空槽；全占着说明任务已经落后整整一段，这一段落掉（并报出来） */
     uint8_t slot = 0xFF;
     for (uint8_t k = 0; k < RS485_RX_SLOTS; k++) {

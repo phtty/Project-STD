@@ -235,15 +235,16 @@ static void case_depth_covers_slots(void)
     CHECK_MSG(s_slot_busy == 0, "收完仍然不该有占着的槽：busy=%02X", (unsigned)s_slot_busy);
 }
 
-/** @brief 界内最长段（BUF_SIZE-1）与空段：不误拒、不越界、不搅坏槽位状态
+/** @brief 界内最长段（BUF_SIZE-1）必须完整收下；空段必须丢弃（不占槽、不搅坏状态）
  *
  *  **为什么需要它**：守卫写成 `>=`（而不是 `>`）就会把**正好界内**的那一段也拒掉 ——
  *  症状是"总线上的长帧总被丢"且完全没有报错（丢在 ISR 的守卫上，不进队列、不打日志）。
- *  空段是防御性路径（上游 `_uart_idle_handle` 有 `if (n)` 守卫，正常不会产生），
- *  测的是"它不得越界写、也不得把槽位状态搅坏"。 */
+ *  空段（`len == 0`）在今天到不了 ISR：上游 `_uart_idle_handle` 两处交付都有守卫
+ *  （`pos == rx_pos` 直接返回；回绕分支 `if (n1 && …)` / `if (pos && …)`），
+ *  所以 ISR 里那条丢弃是**纵深防御**，但必须钉住 —— 收包槽只有 3 格，空段占格会把真数据挤掉。 */
 static void case_len_bounds_inside(void)
 {
-    TEST_BEGIN("界内最长段与空段：不误拒、不越界");
+    TEST_BEGIN("界内最长段完整收下；空段必须丢弃（不占槽、不搅坏状态）");
 
     /* ① 界内最长：BUF_SIZE-1 必须被完整收下、一点不少 */
     fixture_reset();
@@ -258,13 +259,13 @@ static void case_len_bounds_inside(void)
               (unsigned)n, (unsigned)tag, (unsigned)(RS485_BUF_SIZE - 1U));
     CHECK_MSG(s_slot_busy == 0, "取走之后不该还有占着的槽：busy=%02X", (unsigned)s_slot_busy);
 
-    /* ② 空段：现状是"照占一格槽、长度记 0"（`_rs485_isr_fn` 只挡 `> BUF_SIZE`）。
-       若将来改成"丢弃空段"，这里的期望要一并改成"不入队"—— 本断言钉的是现状契约。 */
+    /* ② 空段：**必须被丢弃**（不入队、不占槽）。收包槽只有 RS485_RX_SLOTS 格，
+       空段一样会占格并投消息 —— 连着来就会把真数据段挤掉（症状是"偶发丢帧"）。 */
     fixture_reset();
     feed_chunk(0x99, 0);
     n = take_and_release(&tag);
-    CHECK_MSG(n == 0, "空段应被收下并记成 0 长度（现状，见注释），得到 %u", (unsigned)n);
-    CHECK_MSG(s_slot_busy == 0, "空段之后不得留下占着的槽：busy=%02X", (unsigned)s_slot_busy);
+    CHECK_MSG(n == 0xFFFF, "空段应被丢弃（不得入队），却取到了 %u 字节", (unsigned)n);
+    CHECK_MSG(s_slot_busy == 0, "空段不得占用任何收包槽：busy=%02X", (unsigned)s_slot_busy);
 
     /* ③ 空段之后仍应正常收包（状态没被搅坏） */
     feed_chunk(0x11, 15);
