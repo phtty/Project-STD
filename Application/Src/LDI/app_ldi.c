@@ -396,6 +396,15 @@ app_pcb_probe_state_t app_ldi_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
     uint32_t data_len = ((uint32_t)frame->len[0] << 24) | ((uint32_t)frame->len[1] << 16) |
                         ((uint32_t)frame->len[2] << 8) | (uint32_t)frame->len[3];
 
+    /* 长度域下界校验：协议不存在 LEN=0 的帧（DATA 域至少有 1 字节命令码），这种字节流
+       只能当坏数据。**不能放行给 READY/SKIP**：两者都必须回正帧长（框架据此推进消费），
+       LEN=0 会让框架零进度空转；且此刻帧内没有命令字节，命令码只能由 data_crc[0]（恰是
+       CRC 高字节）顶替，再按身份分支误判归档。整帧只可能是"坏字节流的巧合"，判伪帧让
+       框架跳 1 字节重新同步。注意与"字节不够"区分：入口门禁 avail 不足时先返回 WAIT
+       （等更多数据），只有帧头（含长度域）已到齐、长度明确为 0 才走这里。 */
+    if (data_len == 0)
+        return APP_PCB_PROBE_STATE_FAKE;
+
     /* 长度域上界校验：DATA 域最大 LDI_DATA_MAX，超限即伪帧。
        必须在用 data_len 索引之前校验 —— 否则下面的 data_crc[data_len] 会越界读
        （data_len 是帧内取来的 32 位值，最远可索引到暂存区之外）。 */

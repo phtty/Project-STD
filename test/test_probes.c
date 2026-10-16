@@ -268,7 +268,8 @@ static void test_iap(void)
 /** @brief LDI 探针：帧头/版本/长度域/CRC 四关，配置指令免身份、其余需 lane/cert 匹配
  *
  *  身份不匹配是 SKIP（整帧丢弃）而不是 FAKE：帧结构合法、只是不属于本机，
- *  逐字节重跳会把后面同一条流里的真帧连坐吞掉。长度域两侧（0 与 512）都要能通过。 */
+ *  逐字节重跳会把后面同一条流里的真帧连坐吞掉。长度域两侧都测：512 是上限（应通过），
+ *  0 是协议上不存在的帧（无命令码字节，应判 FAKE，见下方用例）。 */
 static void test_ldi(void)
 {
     TEST_BEGIN("LDI 探针");
@@ -329,20 +330,19 @@ static void test_ldi(void)
     CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_READY, "1 字节 DATA（只有命令码）的帧应 READY");
     CHECK(s_ldi_len == n);
 
-    /* 长度域 = 0：DATA 只剩 CRC 两个字，帧内**没有命令字节**。实测既不 FAKE 也不 WAIT ——
-       结构/CRC 全通过，命令码由 data_crc[0]（此刻恰是 CRC 高字节）顶替，再按身份分支
-       给 READY/SKIP。这是"长度判据只有上界"的直接后果，不在这里钉死具体归档；
-       只钉"不是伪帧"：若哪天给 LDI 加"DATA 至少 1 字节"的下界判据，本用例先红 ——
-       改的人必须同时定 0 长度帧的归档（丢弃 / 伪帧），而不是随手加一句 return。 */
+    /* 长度域 = 0：协议规定不存在这种帧（DATA 域至少 1 字节命令码），只能当坏字节流
+       → FAKE，框架跳 1 字节重新同步。**绝不能给 READY/SKIP**：那两者都要给出正帧长
+       （框架据此推进消费），LEN=0 会让框架零进度空转（conformance 用例就钉了 READY/SKIP
+       的帧长必须为正）；且此刻帧内没有命令字节，命令码只能由 data_crc[0]（CRC 高字节）
+       顶替，会按身份分支误判归档。字节不够时仍是 WAIT（等更多数据），见下一条断言。 */
     n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 0);
     CHECK_MSG(n == sizeof(app_ldi_frame_t) + 2, "0 长度帧构造应为 10 字节，得到 %u", (unsigned)n);
     feed(s_frame, n);
     CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_WAIT,
               "可见字节不足门禁（10 < 30）时应 WAIT —— 尚不能确认帧不合法");
     rb_write(&s_rb, pad, sizeof(pad), NULL);
-    app_pcb_probe_state_t st0 = ldi_probe();
-    CHECK_MSG(st0 != APP_PCB_PROBE_STATE_FAKE, "长度域 0 不超上界，不应判伪帧（得到 %u）",
-              (unsigned)st0);
+    CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_FAKE,
+              "长度域 0：协议无此帧 + READY/SKIP 必须给正帧长，应判伪帧（跳 1 字节重新同步）");
 
     /* CRC 错 → FAKE */
     n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
