@@ -361,7 +361,9 @@ static int g_fail;
 
 /* ================================================================ */
 
-/** 一条 IMAGE 就是完整一轮：收下即落屏，内容逐字节相等 */
+/** @brief 一条 IMAGE 就是完整一轮：收下即落屏（内容与颜色逐字节相等），回无载荷 ACK
+ *
+ *  少落一次屏、或颜色取错，现场就是"某块屏不更新/颜色不对"，两侧都没有日志。 */
 static void case_image_ok(void)
 {
     TEST_BEGIN("一条 IMAGE：落屏一次，内容与颜色逐字节相等，回无载荷 ACK");
@@ -381,7 +383,7 @@ static void case_image_ok(void)
               (unsigned)CASC_OVERHEAD, (unsigned)s_tx_len);
 }
 
-/** 幂等：主卡没收到 ACK 会重发同一条帧，重落同一份内容无副作用 */
+/** @brief 幂等：主卡没收到 ACK 会重发同一条帧，重落同一份内容无副作用（不得错位、不得累积） */
 static void case_image_idempotent(void)
 {
     TEST_BEGIN("同一条 IMAGE 重发（ACK 丢了）幂等");
@@ -396,7 +398,8 @@ static void case_image_idempotent(void)
     CHECK_MSG(last_is(APP_CASC_TYPE_ACK), "第二次仍应回 ACK");
 }
 
-/** ACK 必须回带**主卡发来的那个 seq** —— 回自己的计数器会让主卡永远匹配不上 */
+/** @brief ACK 必须回带**主卡发来的那个 seq** —— 回自己的计数器，主卡的 (seq,src) 匹配会永远
+ *         落空，表现是"每张卡都超时"，而两侧日志都看不出问题 */
 static void case_ack_echoes_seq(void)
 {
     TEST_BEGIN("ACK 回带 IMAGE 的 seq（主卡按 (seq, src) 匹配）");
@@ -408,7 +411,9 @@ static void case_ack_echoes_seq(void)
     CHECK_MSG(last_seq() == 0x1234, "ACK 应回带 0x1234，得到 0x%04X", (unsigned)last_seq());
 }
 
-/** 帧长与 bmp_len 自相矛盾 —— 两端固件不同版本时最常见，必须回 NACK 而不是照读 */
+/** @brief 帧长与 bmp_len 自相矛盾 → NACK(LEN) 且不落屏
+ *
+ *  两端固件不同版本时最常见（旧版发的是分片帧），也是"按错的偏移读位图"的唯一防线。 */
 static void case_len_mismatch_nack(void)
 {
     TEST_BEGIN("帧长与 bmp_len 不符 → NACK(LEN)，不落屏");
@@ -422,26 +427,60 @@ static void case_len_mismatch_nack(void)
     CHECK_MSG(s_commit_count == 0, "帧长不符时绝不能落屏");
 }
 
-/** 矩形不符 → 明确回 NACK，而不是将就出一幅错位画面（两块屏互换就是这种） */
+/** @brief 矩形与本卡切分表不符 → NACK(GEOM) 且不落屏：**任何一项不等都要拒**
+ *
+ *  **只判上界是本类缺陷的典型形态**（规范 §5）：这里除了"多一列 / y 偏移"，还把
+ *  **下界方向**（宽少一列、甚至宽 0）与**位置**的最低非零偏移（x=1）一起钉住 ——
+ *  判据是"与切分表逐字段相等"，不是"装得下就落"。而 x=0/y=0 是唯一合法值
+ *  （见 case_image_ok），所以末尾再自证一次：低位取值本身不是被拒的原因。
+ *  两块板若烧了不同的切分表，同一地址对应的格子相反，全部放行的后果是
+ *  两块屏内容**悄悄互换**。 */
 static void case_geometry_nack(void)
 {
     TEST_BEGIN("矩形与本卡切分表不符 → NACK(GEOM)，不落屏");
 
-    /* 尺寸不符 */
+    /* ① 尺寸高位方向：多一列 */
     fixture_reset();
     feed_image(SEQ, 0, 0, (uint16_t)(DEV_W + 1U), DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
     CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "尺寸不符应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
     CHECK_MSG(s_commit_count == 0, "几何不符时绝不能落屏");
 
-    /* 尺寸对但**位置**不对：切分表不一致的典型形态（格子一样大、谁占哪格相反） */
+    /* ② 位置高位方向：y 偏移（切分表不一致的典型形态：格子一样大、谁占哪格相反） */
     fixture_reset();
     feed_image(SEQ, 0, (uint16_t)(DEV_H + 1U), DEV_W, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
     CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
               "y 偏移不符也应回 NACK(GEOM) —— 这才是「两块屏内容互换」的那条防线");
     CHECK_MSG(s_commit_count == 0, "位置不符时绝不能落屏");
 
-    /* 本卡地址不在切分表里（配置错） */
+    /* ③ 尺寸**低位**方向：少一列、乃至 0 —— 只判上界会把它们放行 */
+    fixture_reset();
+    feed_image(SEQ, 0, 0, (uint16_t)(DEV_W - 1U), DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
+              "宽少一列（DEV_W-1）也应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "宽度不符时绝不能落屏");
+
+    fixture_reset();
+    feed_image(SEQ, 0, 0, 0, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
+              "零宽（极端低位）也应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "零宽矩形绝不能落屏");
+
+    /* ④ 位置：x 偏移 1（最低的非零偏移）。位置判据同样不能漏低位方向 */
+    fixture_reset();
+    feed_image(SEQ, 1, 0, DEV_W, DEV_H, BMP_LEN, 4, DEV_DISPLAY_COLOR_GREEN, s_bmp, 0);
+    CHECK_MSG(last_is(APP_CASC_TYPE_NACK) && last_nack_err() == APP_CASC_NACK_GEOM,
+              "x 偏移 1 也应回 NACK(GEOM)，得到 err=%u", (unsigned)last_nack_err());
+    CHECK_MSG(s_commit_count == 0, "位置不符时绝不能落屏");
+
+    /* 自证：坐标/尺寸都取 0 与界值时反而应当**通过** —— 否则上面几条可能是因为
+       "0 被判成非法"而红的，那就成了空转。 */
+    fixture_reset();
+    send_image(SEQ, 4);
+    CHECK_MSG(s_commit_count == 1 && last_is(APP_CASC_TYPE_ACK),
+              "x=0/y=0/宽=DEV_W 是唯一合法矩形，必须落屏并回 ACK（上面几条的自证）");
+
+    /* ⑤ 本卡地址不在切分表里（配置错） */
     fixture_reset();
     s_self_idx = 0xFF;
     send_image(SEQ, 4);
@@ -450,7 +489,10 @@ static void case_geometry_nack(void)
     CHECK_MSG(s_commit_count == 0, "配置错时绝不能落屏");
 }
 
-/** bmp_len 与本卡矩形算出来的长度不符 → NACK（否则会按错的长度读载荷） */
+/** @brief bmp_len 与本卡矩形算出来的长度不符 → NACK(GEOM)
+ *
+ *  帧长是**自洽**的（声明多少就真带多少），所以只有这一条能拦住它 ——
+ *  否则会按错的长度读载荷（读到帧外）。 */
 static void case_bmp_len_nack(void)
 {
     TEST_BEGIN("bmp_len 与本卡矩形不符 → NACK(GEOM)");
@@ -465,7 +507,8 @@ static void case_bmp_len_nack(void)
     CHECK_MSG(s_commit_count == 0, "bmp_len 不符时绝不能落屏");
 }
 
-/** 亮度每轮重新断言 —— "从卡永久停在旧亮度" 的唯一防线 */
+/** @brief 每轮 IMAGE 都重新断言亮度 —— "从卡永久停在旧亮度"的唯一防线（SET_BRIGHT 无重传）；
+ *         而被拒绝的那一轮**不许**在屏上留下任何改动（亮度断言在参数校验之后） */
 static void case_bright_asserted(void)
 {
     TEST_BEGIN("每轮 IMAGE 都重新断言亮度");
@@ -487,7 +530,10 @@ static void case_bright_asserted(void)
     CHECK_MSG(s_bright_calls == 0, "被 NACK 的 IMAGE 不该改亮度");
 }
 
-/** 主卡收到发给从卡的帧：什么都不做（半双工回声 / 地址配重时会遇到） */
+/** @brief 主卡收到发给从卡的帧：什么都不做（不落屏、不应答）
+ *
+ *  半双工回声 / 地址配重时主卡会收到这类帧；只要它按从卡路径处理，
+ *  总线上就多出一个应答源，主卡把自己当成从卡。 */
 static void case_master_ignores(void)
 {
     TEST_BEGIN("本卡是主卡时，IMAGE 一律不应答、不落屏");

@@ -24,6 +24,13 @@
  *
  * 单卡 1×1 的退化路径不在这里测 —— 那要求本卡地址是 0，而本文件的地址被钉成 1
  * （见上）。那条由 test_screen_canvas.c 覆盖（它是默认的 1×1 网格 + addr 0）。
+ *
+ * ---- 本片还覆盖（同套件、不另立文件）----
+ *  · 地址 ↔ 下标 ↔ 矩形 的映射（主卡在下时两者顺序相反；拿地址当下标会让两块屏内容互换）；
+ *  · 换身份重装门面（渲染目标 / 持久化钩子的装与撤、画布闩与待落屏清零）；
+ *  · 持久化时机（必须**落屏之后**才存）与"恢复带回颜色"；
+ *  · 颜色账：内容色 / 输出颜色覆盖 / 混色回落；
+ *  · 卡片状态快照与可选告警（`app_screen_status.c` 的覆盖套件）。
  */
 
 #define BOARD_SCREEN_CANVAS 1
@@ -67,12 +74,10 @@ osThreadId_t pl_task_new(osThreadFunc_t fn, void *arg, const osThreadAttr_t *att
    都是靠这两个调用完成的，而**漏掉任何一边**在屏上都不报错（只是不落屏 / 画错地方）。 */
 static const app_render_target_t       *s_target_last;
 static const app_render_persist_hook_fn_t *s_hook_last;
-static int                          s_target_calls;
 
 void app_render_set_target(const app_render_target_t *t)
 {
     s_target_last = t;
-    s_target_calls++;
 }
 void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h) { s_hook_last = h; }
 /* 落盘计数：本套件要断言"**落屏之后**才存"（存早了存的就是上一帧） */
@@ -183,7 +188,7 @@ static void canvas_reset_mc(uint16_t w, uint16_t h, uint8_t nx, uint8_t ny, uint
     }
 }
 
-/** 默认主卡在格 0（左上）—— 绝大多数用例只关心几何，不关心谁主谁从 */
+/** @brief 默认主卡在格 0（左上）—— 绝大多数用例只关心几何，不关心谁主谁从 */
 static void canvas_reset(uint16_t w, uint16_t h, uint8_t nx, uint8_t ny)
 {
     canvas_reset_mc(w, h, nx, ny, 0);
@@ -322,7 +327,7 @@ static void check_all_cards(const char *what)
               (unsigned)bad_x, (unsigned)bad_y);
 }
 
-/** 网格合成出来的几何与地址（三种拼法各验一次地址分配与矩形位置） */
+/** @brief 网格合成出来的几何与地址（三种拼法各验一次地址分配与矩形位置） */
 static void case_grid_shape(void)
 {
     TEST_BEGIN("切分表：左右 / 上下 / 四宫格的几何与地址");
@@ -378,7 +383,7 @@ static void case_grid_shape(void)
               (unsigned)BOARD_CASC_BAND_MAX);
 }
 
-/** 折叠几何门禁：只有"上下两块等高同宽、竖排拼满"才算折叠
+/** @brief 折叠几何门禁：只有"上下两块等高同宽、竖排拼满"才算折叠
  *
  *  判据必须靠几何而不是卡数：2×1 也是两张等高同宽的卡，却是**左右并排**，
  *  误判成折叠会让"下半"取到右边那张卡 —— 现象是内容整块跑到隔壁去。
@@ -443,7 +448,7 @@ static void case_fold_geometry(void)
     /* 本用例把表改成了 1×1，后续用例各自 canvas_reset，无需还原 */
 }
 
-/** 三种网格下逐卡抽带都等于参考（含跨缝图案） */
+/** @brief 三种网格下逐卡抽带都等于参考（含跨缝图案） */
 static void case_extract_grids(void)
 {
     TEST_BEGIN("抽带：左右 / 上下 / 四宫格，逐卡等于参考打包");
@@ -464,7 +469,7 @@ static void case_extract_grids(void)
     }
 }
 
-/** 非对齐矩形 + 末字节补位：卡宽 44（44%8=4），x 也不是 8 的倍数 */
+/** @brief 非对齐矩形 + 末字节补位：卡宽 44（44%8=4），x 也不是 8 的倍数 */
 static void case_extract_unaligned(void)
 {
     TEST_BEGIN("抽带：x%8≠0 且 w%8≠0 的矩形（末字节补位必须归零）");
@@ -491,7 +496,7 @@ static void case_extract_unaligned(void)
     check_all_cards("44×12 上下");
 }
 
-/** 越界与容量：一律拒绝，且不得动调用方的缓冲 */
+/** @brief 越界与容量：一律拒绝，且不得动调用方的缓冲 */
 static void case_extract_bounds(void)
 {
     TEST_BEGIN("抽带：越界下标/容量不足一律拒绝，不动 buf");
@@ -516,8 +521,7 @@ static void case_extract_bounds(void)
     CHECK_MSG(untouched, "被拒绝的调用改动了调用方的缓冲");
 }
 
-/** 本地落屏与抽带必须是同一份内容（主从两侧同步的前提） */
-/** 持久化必须发生在**落屏之后** —— 这是"存到上一帧"那个缺陷的守门
+/** @brief 持久化必须发生在**落屏之后** —— 这是"存到上一帧"那个缺陷的守门
  *
  *  原来是"渲染完立刻 `app_render_save()`"，而那时内容还在画布上、没落屏，
  *  `_persist_save` 读实屏存下去的是**上一帧**。改成"渲染只置请求位、落屏时才取走"。
@@ -556,7 +560,7 @@ static void case_persist_after_commit(void)
     CHECK_MSG(s_save_calls == 1, "没有请求时不该落盘，得到 %d 次", s_save_calls);
 }
 
-/** 换身份重装门面：**两个方向**都要做，且画布闩与待落屏必须清零
+/** @brief 换身份重装门面：**两个方向**都要做，且画布闩与待落屏必须清零
  *
  *  身份现在可以运行期变（按键认领 / 收到识别帧），而门面是按身份装出来的：
  *  渲染目标与持久化钩子只给主卡——从主变从要撤、从从变主要装，**漏掉哪一边**
@@ -612,22 +616,7 @@ static void case_identity_reapply(void)
     canvas_reset(44, 12, 1, 2);
 }
 
-/** 输出颜色覆盖：工厂逐色老化要的（画布是 1bpp，颜色只能逐卡给一次）
- *
- *  现场症状：十种纯色填充全显示成绿色 —— 因为画布只记亮/灭，颜色来自切分表里
- *  本卡那一项。逐色老化只能靠"这一轮所有卡统一按某个颜色输出"来表达。
- *
- *  反向验证：把 `commit_self` 里的 `app_screen_output_color(s_color)` 换回 `s_color`，
- *  本用例第二条立刻红。 */
-/** 渲染传下来的**颜色**要落到屏上（画布只记亮/灭，颜色另行记着）
- *
- *  现场症状：LDI 发红字显示成绿、RLS 的位图颜色同样被吃掉 —— 因为开画布之后
- *  "颜色由像素属于哪张卡决定"，渲染传下来的颜色整段丢了。
- *  RLS / VMS / AHMQ 走的是同一条路（都是 app_render），所以**一起修**。
- *
- *  反向验证：把 `app_screen_output_color` 里的内容色那一条去掉（退回只看卡片色），
- *  本用例第一条立刻红。 */
-/** 持久化恢复也要带回颜色（记录里那个颜色字段不能丢在半路）
+/** @brief 持久化恢复也要带回颜色（记录里那个颜色字段不能丢在半路）
  *
  *  恢复这条路是**直写画布**、不经过渲染 sink，所以内容色要在重建画布时补记 ——
  *  否则上电恢复出来的内容会退回切分表给本卡的颜色（存在记录里的颜色白存了）。 */
@@ -654,6 +643,14 @@ static void case_restore_color(void)
     s_restore_ok = false;
 }
 
+/** @brief 渲染传下来的**颜色**要落到屏上（画布只记亮/灭，颜色另行记着）
+ *
+ *  现场症状：LDI 发红字显示成绿、RLS 的位图颜色同样被吃掉 —— 因为开画布之后
+ *  "颜色由像素属于哪张卡决定"，渲染传下来的颜色整段丢了。
+ *  RLS / VMS / AHMQ 走的是同一条路（都是 app_render），所以**一起修**。
+ *
+ *  反向验证：把 `app_screen_output_color` 里的内容色那一条去掉（退回只看卡片色），
+ *  本用例第一条立刻红。 */
 static void case_content_color(void)
 {
     TEST_BEGIN("内容颜色：单色内容用它的颜色，混色才退回本卡颜色");
@@ -692,6 +689,13 @@ static void case_content_color(void)
               (unsigned)s_fb[0]);
 }
 
+/** @brief 输出颜色覆盖：工厂逐色老化要的（画布是 1bpp，颜色只能逐卡给一次）
+ *
+ *  现场症状：十种纯色填充全显示成绿色 —— 因为画布只记亮/灭，颜色来自切分表里
+ *  本卡那一项。逐色老化只能靠"这一轮所有卡统一按某个颜色输出"来表达。
+ *
+ *  反向验证：把 `commit_self` 里的 `app_screen_output_color(s_color)` 换回 `s_color`，
+ *  本用例第二条立刻红。 */
 static void case_color_override(void)
 {
     TEST_BEGIN("输出颜色覆盖：覆盖生效 / 取消后回到本卡颜色");
@@ -719,7 +723,7 @@ static void case_color_override(void)
               (unsigned)s_fb[0]);
 }
 
-/** 主卡格是**运行期事实**（F3）：同一地址在不同主卡格下对应**不同的格**
+/** @brief 主卡格是**运行期事实**（F3）：同一地址在不同主卡格下对应**不同的格**
  *
  *  这就是"谁被按谁主卡"能不能成立的分水岭 —— 只改地址不改格的话，被按的那张卡
  *  按老规矩去渲染**另一块屏**那一格，两块屏的上下半幅当场对调。
@@ -767,6 +771,10 @@ static void case_master_cell_runtime(void)
     app_screen_apply_identity((uint8_t)BOARD_CASC_ADDR, 0);
 }
 
+/** @brief 本地落屏与抽带必须是同一份内容（主从两侧同步的前提）
+ *
+ *  主卡落屏走 `commit_self`（画布 → 实屏），发给从卡的那一张走 `app_screen_extract` ——
+ *  两者要是各写一套，两块屏就会显示不同的画面，而协议层的长度/CRC 全都对得上。 */
 static void case_commit_self_matches_canvas(void)
 {
     TEST_BEGIN("本卡落屏：实屏内容 == 本卡矩形在画布上的内容");
@@ -795,7 +803,7 @@ static void case_commit_self_matches_canvas(void)
     CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_BLACK || s_fb[0] == c->color, "落屏颜色不是本卡那一色");
 }
 
-/** 主卡在**下面**那一块 —— 现场的实际拼法。地址不按网格下标编。 */
+/** @brief 主卡在**下面**那一块 —— 现场的实际拼法。地址不按网格下标编。 */
 static void case_master_below(void)
 {
     TEST_BEGIN("主卡在下方：地址按「主卡那格编 0」分配，抽带仍按矩形");
@@ -822,7 +830,7 @@ static void case_master_below(void)
     check_all_cards("1×2 主卡在下");
 }
 
-/** 地址 ↔ 下标 ↔ 矩形 的对应必须钉死 —— 级联最容易写错、且错了不报错的地方
+/** @brief 地址 ↔ 下标 ↔ 矩形 的对应必须钉死 —— 级联最容易写错、且错了不报错的地方
  *
  *  协议按**地址**寻址，切分表按**下标**索引，两者顺序可以相反：主卡在下时
  *  （master_cell=1）下标 0 是 addr 1（上面那块）、下标 1 是 addr 0（下面那块）。
@@ -868,7 +876,7 @@ static void on_alarm(uint8_t addr, uint8_t st)
     s_alarm_st   = st;
 }
 
-/** 状态快照与可选告警：**不注册就完全静默**，注册后只在跳变时触发 */
+/** @brief 状态快照与可选告警：**不注册就完全静默**，注册后只在跳变时触发 */
 static void case_status_and_alarm(void)
 {
     TEST_BEGIN("状态快照与告警：不注册完全静默；注册后只在状态真的变了时触发");
@@ -927,7 +935,7 @@ static void case_status_and_alarm(void)
     app_screen_register_alarm(nullptr); /* 别影响后面的用例 */
 }
 
-/** 地址不在切分表里：停用门面，**不静默降级**成"单卡占满" */
+/** @brief 地址不在切分表里：停用门面，**不静默降级**成"单卡占满" */
 static void case_self_addr_not_in_table(void)
 {
     TEST_BEGIN("本卡地址不在切分表里 → 停用，不降级");

@@ -1,6 +1,8 @@
 /**
  * @file    test_casc_frame.c
- * @brief   级联协议探针：四态矩阵、地址过滤、长度域、与既有协议互不毒化
+ * @brief   级联协议探针：四态矩阵、长度域越界、地址过滤（广播/本机/他人/主卡/非法值）、
+ *          载荷内 SOF 不干扰本帧、一条帧分两段写入且跨 RB 回绕、伪帧不拷整帧、
+ *          与既有协议（IAP/LDI/RLS）互不毒化
  *
  * **为什么需要这个测试**：探针是**帧同步的唯一入口**，它的四态判断错一个分支，
  * 症状是"某类帧在某种情况下被吞掉"或"缓冲区只进不出"——前者表现为随机丢命令，
@@ -9,6 +11,13 @@
  * 另一个重点是**地址过滤**：RS485 是共享总线，一张从卡会看到发给别人的每一帧。
  * 过滤写在探针里（`dst` 不是本机就 SKIP 整帧），而不是在任务里丢掉 ——
  * 否则 1KB 的位图会被拷进队列再扔掉，而队列深度只有 2。
+ *
+ * 其余三条各钉一个**实测过的静默失效**：
+ *   · **长度域越界必须 FAKE 而不是 SKIP**：SKIP 会按被干扰的长度把后面的真帧一起吞掉；
+ *   · **伪帧不拷整帧**：否则"逐字节重跳"退化成 O(n²) 的 memcpy（一条 1427 字节的杂物
+ *     拷 ~2MB），把帧分发任务拖住几十毫秒，期间后到的帧把前一条完整帧挤出协议缓冲；
+ *   · **一条帧分两段写入、且第二段让 RB 自己回绕**：接收侧在缓冲环回处会把一段拆成
+ *     两次回调，整帧在 RB 里不连续 —— 那正是"协议层一行都没有"的现场。
  *
  * 探针是 static，从外部够不着，故本用例 include 生产 TU（与 test_screen_canvas.c
  * 同一手法）。生产源码不替换、不改写。
@@ -251,10 +260,14 @@ static void case_length_bounds(void)
     CHECK_MSG(1, "越界一律 FAKE（不吞帧）");
 }
 
-/** @brief 地址过滤：广播收、本机收、别人的 SKIP 且 total_len 给出整帧长度 */
+/** @brief 地址过滤：广播收、本机收，其余（他人 / 主卡地址 / 非法值）SKIP 且报出整帧长度
+ *
+ *  契约依据 `app_casc.c` 的 `_is_for_me()`：**只有"广播(0xFF)"与"本机地址"放行**，
+ *  其余一律 SKIP。探针不做地址范围校验 —— 非法地址走的是同一条 SKIP 路径，
+ *  所以这里把主卡地址 0 与非法值 0xFE 一并钉住（漏判会让本卡去处理/吃掉别人的帧）。 */
 static void case_address_filter(void)
 {
-    TEST_BEGIN("地址过滤：广播/本机通过，别人的 SKIP 且报出整帧长度");
+    TEST_BEGIN("地址过滤：广播/本机通过，别人的与非法地址 SKIP 且报出整帧长度");
 
     uint32_t tl;
     uint8_t  ax;
@@ -280,6 +293,24 @@ static void case_address_filter(void)
     CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_SKIP, "发给别人的帧应 SKIP");
     CHECK_MSG(tl == n, "SKIP 也要报出整帧长度（%u），得到 %u —— 否则框架不知道跳多少",
               (unsigned)n, (unsigned)tl);
+
+    /* 主卡地址 0：本卡是从卡 1，发给主卡的单播同样不是给本卡的 → SKIP
+       （主卡自己那侧也靠同一条判据滤回声：它发的单播 dst 是从卡地址，按本机地址 0 一比即弃） */
+    fixture_reset();
+    n = build(s_f, APP_CASC_TYPE_IMAGE, CASC_ADDR_MASTER, CASC_ADDR_MASTER, 1, nullptr, 0);
+    feed(s_f, n);
+    tl = 0;
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_SKIP, "dst=0（主卡地址）不是给本卡的，应 SKIP");
+    CHECK_MSG(tl == n, "SKIP 也要报出整帧长度（%u），得到 %u", (unsigned)n, (unsigned)tl);
+
+    /* 非法地址 0xFE：既不是广播也不是本机 → SKIP。0xFF 是广播，属**合法**放行值，
+       已由本 case 第一条覆盖；这里补的是"探针只做等值比较、不做范围校验"这一点 */
+    fixture_reset();
+    n = build(s_f, APP_CASC_TYPE_IMAGE, 0xFE, CASC_ADDR_MASTER, 1, nullptr, 0);
+    feed(s_f, n);
+    tl = 0;
+    CHECK_MSG(probe(&tl, &ax) == APP_PCB_PROBE_STATE_SKIP, "非法 dst=0xFE 应 SKIP，不得当成本机收下");
+    CHECK_MSG(tl == n, "SKIP 也要报出整帧长度（%u），得到 %u", (unsigned)n, (unsigned)tl);
 }
 
 /** @brief 与既有协议互不毒化：别人的帧头进来不得 READY */

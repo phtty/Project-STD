@@ -12,19 +12,27 @@
  * 这几个问题恰好是现场踩过的坑 —— 0AH 报"设置成功"而上位机重启后拿到旧 IP，
  * 就是因为回执取自 LDI 那条、而镜像那条没跟上。
  *
- * 本文件把三条性质钉住：
- *   1. 0AH 后两条记录都含新值
- *   2. LDI 那条写失败 → 回执 status=0x01，但 IAP 镜像**仍然被尝试更新**（互不阻塞）
- *   3. LDI 那条成功、镜像那条失败 → 回执仍为成功
- *      （**已知取舍**，见 app_ldi_cmd.c 的注释：回执只反映 LDI 那条。
- *       钉住它是为了它被改动时能显式暴露，而不是当它是正确行为。）
- *   4. 0AH 不改运行态 IP（用户 2026-09-18 定的"下次上电生效"语义）
+ * 覆盖清单（与 main() 的用例表一致；直烧板 5006048 只跑 ⑥/⑦ 与 EA 四条）：
+ *   ① 0AH 的两条记录交互：两条都写 / LDI 写失败 → 回执 0x01 但镜像仍更新（RAM 原子）/
+ *      镜像失败对上位机不可见（**已知取舍**，钉住它）/ 连续两次 0AH 两条都跟着走
+ *   ② app_ldi_ctx_init：W25Qxx 无配置 → 采纳 IAP 记录并通知运行态；
+ *      cfg_ok → Flash 只同步同类型条目的 index+vendor；额外类型忽略；无配置保持编译期默认表
+ *   ③ 1AH 设备初始化：7 模块正常路径 / device_num 超帧内容纳数 → 夹取 / device_num=0 空请求
+ *   ④ 1BH：E9 02H 清屏（FLAT 与变体2 各钉 FILL 颜色/区域）与 01H 显示控制的分派贯通；
+ *      mod_len 下界（0/2 停止解析、3 → status=01H）与非法 func=0x00 不产生副作用；
+ *      EA 变体2 的 00H/01H/02H 接线、拒绝路径、未声明 EA、非折叠保持 TODO
+ *   ⑤ 0BH 增量 upsert（一条一个编码）：未知编码拒绝；被拒路径 RAM 逐字节不变
+ *      （未知编码 / 截断 / device_num=0 / device_num 超上限 / 模块字节数少 1）
+ *   ⑥ 记录读写：save 后 load 必须返回刚存的值（加载缓存失效）
+ *   ⑦ 直烧板（BOARD_HAS_IAP_RECORD=0）：0AH 不碰内部 Flash（短路）；ctx_init 的 else
+ *      分支仍通知运行态（"漏调通知"守卫）
  *
  * 被测代码是生产源码本体。三个实现 TU 直接 include（原因与 test_cfg_sched.c 一致：
  * 注册入口与另两个锁初始化都是 static、由 initcall 调用，host 上没有 initcall 段
  * 运行器，从外部无法触达）。Makefile 里因此**不能**再列这三个 .c。
  */
 
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -429,9 +437,40 @@ static bool ldi_record_is(const uint8_t ip[4], uint16_t port)
     return memcmp(got.device_ip, ip, 4) == 0 && got.device_port == port;
 }
 
+/* ================================================================
+ *  看门狗（范式同 test_dispatch.c）
+ *
+ *  每个用例 fork 出独立进程：子进程若死锁，父进程的 waitpid 会**无限等** ——
+ *  回归以"挂死"而非"失败"的形式出现，在 CI 里比失败更糟。父进程对每个用例单独
+ *  计时（fork 后子进程不继承 alarm，见 fork(2)），超时先 SIGKILL 掉子进程
+ *  （死锁者会攥着 CI 的 stdout 管道不放），再以 _exit(2) 明确失败。
+ *  子进程自己那句 `_exit(g_fail == 0 ? 0 : 1)` 汇总**不动**。
+ * ================================================================ */
+
+#define TEST_TIMEOUT_S (20)
+
+static volatile pid_t s_case_pid; /**< 当前用例的子进程；看门狗据此回收，避免留下孤儿 */
+
+static void on_alarm(int sig)
+{
+    (void)sig;
+    if (s_case_pid > 0) kill(s_case_pid, SIGKILL);
+    static const char msg[] = "\n\033[31m✘ 测试超时（用例子进程疑似死锁）\033[0m\n";
+    ssize_t r = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    (void)r;
+    _exit(2);
+}
+
+/** @brief 在子进程里跑一个用例，父进程带超时兜底；子进程内打印计数、父进程只看退出码 */
 static bool run_case(void (*fn)(void))
 {
+    signal(SIGALRM, on_alarm); /* 幂等：两个 main 都靠这里装看门狗 */
+
     pid_t pid = fork();
+    if (pid < 0) { /* fork 失败别把用例算成"通过" */
+        printf("      \033[31m✘\033[0m fork 失败（资源不足）\n");
+        return false;
+    }
     if (pid == 0) {
         g_pass = g_fail = 0;
         fn();
@@ -439,8 +478,12 @@ static bool run_case(void (*fn)(void))
         fflush(stdout);
         _exit(g_fail == 0 ? 0 : 1);
     }
+    s_case_pid = pid;
+    alarm(TEST_TIMEOUT_S); /* 单个用例的预算：子进程死锁时父进程不再无限等 */
     int st = 0;
     waitpid(pid, &st, 0);
+    alarm(0);
+    s_case_pid = 0;
     return WIFEXITED(st) && WEXITSTATUS(st) == 0;
 }
 
@@ -530,7 +573,7 @@ static int init_rsp_status(unsigned i)
     return s_tx_buf[off];
 }
 
-/** 变体2：Color=00H → 清下半屏；Color=01H/02H → 取对应预置槽；CtlStatus=00H */
+/** @brief 变体2：Color=00H → 清下半屏；Color=01H/02H → 取对应预置槽；CtlStatus=00H */
 static void case_ctrl_ea_ok_paths(void)
 {
     TEST_BEGIN("1BH EA：00H→lower_clear；01H/02H→preset_show，CtlStatus=00H");
@@ -562,7 +605,7 @@ static void case_ctrl_ea_ok_paths(void)
     CHECK_MSG(ctrl_rsp_status() == 0x00, "成功时 CtlStatus 应 00H，实际 0x%02X", ctrl_rsp_status());
 }
 
-/** 变体2：非法颜色 / 预置图拒画 → CtlStatus=01H，且不误调别的函数 */
+/** @brief 变体2：非法颜色 / 预置图拒画 → CtlStatus=01H，且不误调别的函数 */
 static void case_ctrl_ea_reject(void)
 {
     TEST_BEGIN("1BH EA：非法颜色 / 操作失败 → CtlStatus=01H");
@@ -591,7 +634,7 @@ static void case_ctrl_ea_reject(void)
     s_preset_show_ret = true;
 }
 
-/** 未声明 EA：即使分派层进了 switch，也必须再查一次 device_idx 而拒绝 */
+/** @brief 未声明 EA：即使分派层进了 switch，也必须再查一次 device_idx 而拒绝 */
 static void case_ctrl_ea_unconfigured(void)
 {
     TEST_BEGIN("1BH EA：未声明 EA → 不进处理，CtlStatus=01H");
@@ -614,7 +657,7 @@ static void case_ctrl_ea_unconfigured(void)
               ctrl_rsp_status());
 }
 
-/** 非折叠（FLAT）：保持引入折叠前的 TODO 行为 —— 不控制、状态按分派层 */
+/** @brief 非折叠（FLAT）：保持引入折叠前的 TODO 行为 —— 不控制、状态按分派层 */
 static void case_ctrl_ea_flat_untouched(void)
 {
     TEST_BEGIN("1BH EA：非折叠 → 不控制（保持 TODO），状态按分派层");
@@ -644,6 +687,7 @@ static void case_ctrl_ea_flat_untouched(void)
 
 #if !BOARD_HAS_IAP_RECORD
 
+/** @brief 直烧板的 0AH 短路：只写 LDI 记录，内部 Flash 一个字节都不碰（否则一条命令擦掉固件） */
 static void case_0ah_leaves_internal_flash_alone(void)
 {
     TEST_BEGIN("直烧板：0AH 只写 LDI 记录，内部 Flash 一个字节都不碰");
@@ -683,6 +727,7 @@ static void case_0ah_leaves_internal_flash_alone(void)
  *  否则 LDI 报的 / 实际运行的 / IAP 记录三者漂移。
  *  反向验证：删掉 else 分支里的 pl_net_set_ip，本用例立刻变红（s_set_ip_calls 为 0）。
  * ================================================================ */
+/** @brief 直烧板 else 分支的"漏调通知"守卫：无 Flash 配置时仍须把决定应用到运行态（三者不漂移） */
 static void case_ctx_init_else_notifies_runtime(void)
 {
     TEST_BEGIN("直烧板：W25Qxx 无配置 → app_ldi_ctx_init 仍通知运行态");
@@ -720,6 +765,7 @@ int main(void)
  *  用例
  * ================================================================ */
 
+/** @brief 0AH 后两条记录都含新值：LDI 记录与 IAP 镜像缺一不可（只有一条时重启后 IP 回退） */
 static void case_both_records_written(void)
 {
     TEST_BEGIN("0AH 后两条记录都含新值");
@@ -739,6 +785,7 @@ static void case_both_records_written(void)
               s_set_ip_calls);
 }
 
+/** @brief LDI 记录写失败不阻塞 IAP 镜像（互不短路），且 RAM 保持逐字节不变（原子提交） */
 static void case_ldi_failure_does_not_block_mirror(void)
 {
     TEST_BEGIN("LDI 记录写失败 → 回执报失败，IAP 镜像仍更新，RAM 原子不动");
@@ -766,6 +813,7 @@ static void case_ldi_failure_does_not_block_mirror(void)
     s_w25_fail_write = false;
 }
 
+/** @brief 镜像写失败对上位机不可见（**已知取舍**）：回执只反映 LDI 那条，钉住它以便改动时显式暴露 */
 static void case_mirror_failure_is_invisible_to_host(void)
 {
     TEST_BEGIN("IAP 镜像写失败 → 回执仍报成功（已知取舍，钉住它）");
@@ -786,6 +834,7 @@ static void case_mirror_failure_is_invisible_to_host(void)
     pl_flash_stub_fail_after(-1);
 }
 
+/** @brief 连续两次 0AH：两条记录都必须跟着走（后写的那条不许覆盖/回退） */
 static void case_second_0ah_overwrites_both(void)
 {
     TEST_BEGIN("连续两次 0AH：两条记录都跟着走");
@@ -810,6 +859,7 @@ static void case_second_0ah_overwrites_both(void)
  *  断言：① g_ldi_ctx.cfg 采纳了 IAP 的地址；② pl_net_set_ip 被调用且参数正确。
  *  反向验证：删掉 else 分支里的 pl_net_set_ip，s_set_ip_calls 保持 0，本用例变红。
  * ================================================================ */
+/** @brief 无 W25Qxx 配置 → else 分支采纳 IAP 记录，并调 pl_net_set_ip（参数=采纳地址） */
 static void case_ctx_init_else_adopts_iap_and_notifies(void)
 {
     TEST_BEGIN("W25Qxx 无配置：app_ldi_ctx_init 采纳 IAP 记录并通知运行态");
@@ -852,7 +902,7 @@ static void seed_ldi_cfg(const app_flash_ldi_module_cfg_t *mods, uint8_t count)
     CHECK_MSG(st == 0, "seed：保存配置应成功，返回 %d", (int)st);
 }
 
-/** Flash 同类型条目：同步 index + vendor 到编译期表；条数/类型集合不变 */
+/** @brief Flash 同类型条目：同步 index + vendor 到编译期表；条数/类型集合不变 */
 static void case_ctx_init_syncs_same_type(void)
 {
     TEST_BEGIN("Flash 同类型：同步 index+vendor，编译期表条数/类型不变");
@@ -886,7 +936,7 @@ static void case_ctx_init_syncs_same_type(void)
     CHECK_MSG(vendor_ok, "同类型条目的 vendor 也应从记录同步");
 }
 
-/** Flash 里编译期表没有的类型：忽略，不改变本机类型集合 */
+/** @brief Flash 里编译期表没有的类型：忽略，不改变本机类型集合 */
 static void case_ctx_init_ignores_extra_type(void)
 {
     TEST_BEGIN("Flash 额外类型：忽略（类型集合由编译期决定）");
@@ -909,7 +959,7 @@ static void case_ctx_init_ignores_extra_type(void)
               (unsigned)g_ldi_ctx.cfg.module_count);
 }
 
-/** 无有效配置：保持编译期默认模块表（默认含 EA —— 用户已定的默认配置） */
+/** @brief 无有效配置：保持编译期默认模块表（默认含 EA —— 用户已定的默认配置） */
 static void case_ctx_init_no_cfg_keeps_default(void)
 {
     TEST_BEGIN("无有效配置：保持编译期默认模块表（默认含 EA）");
@@ -930,7 +980,7 @@ static void case_ctx_init_no_cfg_keeps_default(void)
  *  1AH 设备初始化：device_num 是帧内值 —— 必须夹取后才能当循环边界
  * ================================================================ */
 
-/** 正常路径：7 个模块逐个回 status，全注册 → state READY */
+/** @brief 正常路径：7 个模块逐个回 status，全注册 → state READY */
 static void case_init_seven_modules(void)
 {
     TEST_BEGIN("1AH 正常路径：7 个模块逐个回 status，全注册 → READY");
@@ -952,7 +1002,7 @@ static void case_init_seven_modules(void)
     CHECK_MSG(g_ldi_ctx.state == APP_LDI_STATE_READY, "全模块注册应置 READY");
 }
 
-/** 越界：device_num=200 但帧里只有 2 个模块 → 夹到 2，不越界、不崩、响应自洽 */
+/** @brief 越界：device_num=200 但帧里只有 2 个模块 → 夹到 2，不越界、不崩、响应自洽 */
 static void case_init_device_num_overflow(void)
 {
     TEST_BEGIN("1AH device_num 超出实际数据：夹到帧内容纳数（2），响应自洽");
@@ -971,6 +1021,29 @@ static void case_init_device_num_overflow(void)
     CHECK_MSG(g_ldi_ctx.state != APP_LDI_STATE_READY, "被夹取的请求不得判初始化成功");
 }
 
+/** @brief 1AH device_num=0（低位端点）：空请求不触发夹取 → 回 device_num=0 并按"成功"收尾
+ *
+ *  **为什么需要**：历史缺陷集中在"只判上界漏低位"；0 是低位的端点。按实现契约
+ *  （`all_ok = (n == requested)`、循环不执行）空请求是"成功处理 0 个模块"，
+ *  响应 device_num=0 且置 READY。钉住它：若哪天把 0 个模块改成拒帧，
+ *  响应 device_num 与 state 必须一起改，本用例会先红 —— 而不是被默默改掉。
+ *  反向验证：把最小合法值判成 1（如 `if (device_num == 0) return;`），
+ *  本用例的两条断言立刻红。 */
+static void case_init_device_num_zero(void)
+{
+    TEST_BEGIN("1AH device_num=0：空请求 → 回 device_num=0、status 自洽、READY");
+    env_setup();
+
+    make_init(0, NULL, 0); /* 无 module 字节，DATA = head + device_num */
+    s_tx_count = 0;
+    _ldi_cmd_init(NULL, s_init_buf, init_buf_len(0));
+
+    CHECK_MSG(init_rsp_device_num() == 0, "空请求应回填 device_num=0，得到 %d",
+              init_rsp_device_num());
+    CHECK_MSG(g_ldi_ctx.state == APP_LDI_STATE_READY,
+              "按实现契约 0==0 不触发夹取，应置 READY（state=%d）", (int)g_ldi_ctx.state);
+}
+
 /* ================================================================
  *  1BH E9（VMS）：分派层 → 渲染的完整链路
  *
@@ -979,18 +1052,26 @@ static void case_init_device_num_overflow(void)
  *  1BH 帧**走分派层，断言真实的 FILL 颜色/区域（不是替身参数）。
  * ================================================================ */
 
-/** @brief 构造 1BH E9 02H 清屏 module：head(2)+func(1)+clear_type(1)=4 */
-static void make_ctrl_vms_clear(uint8_t clear_type)
+/** @brief 构造 1BH E9 module：mod_len / func / clear_type 都由调用方给（低位矩阵用）
+ *  @return DATA 域（不含 LDI 帧头）的字节数 */
+static uint16_t make_ctrl_vms_raw(uint16_t mod_len, uint8_t func, uint8_t clear_type)
 {
     memset(s_ctrl_buf, 0, sizeof s_ctrl_buf);
     uint8_t *p = s_ctrl_buf + sizeof(app_ldi_ctrl_head_t);
     *p++       = 1; /* device_num */
-    *p++       = 0;
-    *p++       = 4; /* mod_len = head(2)+func(1)+clear_type(1) */
+    *p++       = (uint8_t)(mod_len >> 8);
+    *p++       = (uint8_t)mod_len;
     *p++       = APP_LDI_DEVICE_VMS;
-    *p++       = 1;    /* device_index */
-    *p++       = 0x02; /* func = 清屏 */
+    *p++       = 1; /* device_index */
+    *p++       = func;
     *p++       = clear_type;
+    return (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U);
+}
+
+/** @brief 构造 1BH E9 02H 清屏 module：head(2)+func(1)+clear_type(1)=4 */
+static void make_ctrl_vms_clear(uint8_t clear_type)
+{
+    (void)make_ctrl_vms_raw(4, 0x02, clear_type);
 }
 #define CTRL_VMS_CLEAR_DATA_LEN (sizeof(app_ldi_ctrl_head_t) + 1U + 2U + 4U)
 
@@ -1015,7 +1096,10 @@ static uint16_t make_ctrl_vms_display(const char *text, uint8_t textlen)
     return (uint16_t)(sizeof(app_ldi_ctrl_head_t) + 1U + 2U + mod_len);
 }
 
-/** 02H 清屏走分派层（FLAT）：FILL=映射色、整屏语义、status=00H */
+/** @brief 02H 清屏走分派层（FLAT）：FILL=映射色、整屏语义、status=00H；含 clear_type=0x00
+ *
+ *  00H（文字清屏 = 黑）是映射表的低位端点：只测 02H/04H 会漏掉"低位被当成非法拒绝"
+ *  或"下标回绕"这两类历史缺陷。 */
 static void case_ctrl_vms_clear_flat_dispatch(void)
 {
     TEST_BEGIN("1BH E9 02H 清屏走分派层（FLAT）：FILL=映射色、整屏、status=00H");
@@ -1035,9 +1119,22 @@ static void case_ctrl_vms_clear_flat_dispatch(void)
               s_vms_rec_cnt ? (unsigned)s_vms_recs[0].color : 99U);
     CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].w == 0 && s_vms_recs[0].h == 0,
               "FLAT 清屏应为整屏（w=h=0 全屏语义）");
+
+    /* 下界端点：00H = 文字清屏（黑），是映射表 [0] —— 低位回绕/越界的哨兵 */
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+    make_ctrl_vms_clear(0x00);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, (uint16_t)CTRL_VMS_CLEAR_DATA_LEN);
+    CHECK_MSG(ctrl_rsp_status() == 0x00, "clear_type=00H 应成功，status 得到 0x%02X",
+              ctrl_rsp_status());
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].type == APP_RENDER_TYPE_FILL,
+              "clear_type=00H 应产生一次 FILL，得到 %d", s_vms_rec_cnt);
+    CHECK_MSG(s_vms_rec_cnt == 1 && s_vms_recs[0].color == DEV_DISPLAY_COLOR_BLACK,
+              "clear_type=00H（文字清屏）应映射为黑，得到 %u",
+              s_vms_rec_cnt ? (unsigned)s_vms_recs[0].color : 99U);
 }
 
-/** 02H 清屏走分派层（变体2）：只清上半，颜色=映射色 */
+/** @brief 02H 清屏走分派层（变体2）：只清上半，颜色=映射色 */
 static void case_ctrl_vms_clear_variant2_dispatch(void)
 {
     TEST_BEGIN("1BH E9 02H 清屏走分派层（变体2）：只清上半、FILL=映射色");
@@ -1064,7 +1161,7 @@ static void case_ctrl_vms_clear_variant2_dispatch(void)
               "变体2 应只清上半 48x16@(0,0)");
 }
 
-/** 01H 显示控制走分派层（FLAT）：文本长度正确传出、渲染出 TEXT、status=00H */
+/** @brief 01H 显示控制走分派层（FLAT）：文本长度正确传出、渲染出 TEXT、status=00H */
 static void case_ctrl_vms_display_dispatch(void)
 {
     TEST_BEGIN("1BH E9 01H 显示控制走分派层：TEXT 渲染、status=00H");
@@ -1081,6 +1178,65 @@ static void case_ctrl_vms_display_dispatch(void)
     for (int i = 0; i < s_vms_rec_cnt; i++)
         if (s_vms_recs[i].type == APP_RENDER_TYPE_TEXT && s_vms_recs[i].len == 2) text_ok = true;
     CHECK_MSG(text_ok, "应渲染出一笔 len=2 的 TEXT（文本长度按 mod_len 正确传出）");
+}
+
+/** @brief 从捕获到的 B1H 响应里取 device_num（实现回填的是**实际处理数** processed） */
+static int ctrl_rsp_device_num(void)
+{
+    if (s_tx_count == 0) return -1;
+    return s_tx_buf[8 + sizeof(app_ldi_ctrl_head_t)];
+}
+
+/** @brief 1BH mod_len 的低位盲区：<3（连 module 头都装不下）停止解析；3（≥下限但装不下 02H 清屏的 4）→ status=01H 不渲染
+ *
+ *  **为什么需要**：mod_len 是帧内取来的 16 位值，历次缺陷都出在"只判上界漏低位" ——
+ *  用回绕/越界的长度去读子帧，轻则读到帧外，重则按巨量文本排版。这里钉住两个低位端点：
+ *    · mod_len = 0 / 2（< LDI_CTRL_MODULE_MIN=3）：不能按它推进，直接停止解析，
+ *      响应 device_num 回填 0、零渲染；
+ *    · mod_len = 3（过了下限、但装不下 head(2)+func(1)+clear_type(1)=4）：
+ *      该 module 回 status=01H，且**不得**调 render。
+ *  期望值按被测实现的实际契约取值（停止解析 vs 单模块失败），不是"应该拒帧"的假设。 */
+static void case_ctrl_mod_len_low_bounds(void)
+{
+    TEST_BEGIN("1BH mod_len 低位：0/2 停止解析（device_num=0）、3 → status=01H 不渲染");
+    env_setup();
+    s_fold_mode_stub = APP_FOLD_MODE_FLAT;
+
+    /* mod_len = 0：剩余字节够读长度域，但子帧声明为空 → 停止解析，不产生 module 回包 */
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+    make_ctrl_vms_raw(0, 0x02, 0x02); /* 帧里另有 4 字节，但 mod_len 声称 0 */
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, CTRL_VMS_CLEAR_DATA_LEN);
+    CHECK_MSG(ctrl_rsp_device_num() == 0, "mod_len=0 应停止解析、回填 device_num=0，得到 %d",
+              ctrl_rsp_device_num());
+    CHECK_MSG(s_vms_rec_cnt == 0, "mod_len=0 不得渲染（calls=%d）", s_vms_rec_cnt);
+
+    /* mod_len = 2（< 3）：同理 */
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+    make_ctrl_vms_raw(2, 0x02, 0x02);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, CTRL_VMS_CLEAR_DATA_LEN);
+    CHECK_MSG(ctrl_rsp_device_num() == 0, "mod_len=2 应停止解析、回填 device_num=0，得到 %d",
+              ctrl_rsp_device_num());
+    CHECK_MSG(s_vms_rec_cnt == 0, "mod_len=2 不得渲染（calls=%d）", s_vms_rec_cnt);
+
+    /* mod_len = 3：过了全局下限，但 02H 清屏至少需要 4 → 该 module status=01H，不渲染 */
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+    make_ctrl_vms_raw(3, 0x02, 0x02);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, CTRL_VMS_CLEAR_DATA_LEN);
+    CHECK_MSG(ctrl_rsp_device_num() == 1, "mod_len=3 是「处理但失败」，应回填 device_num=1，得到 %d",
+              ctrl_rsp_device_num());
+    CHECK_MSG(ctrl_rsp_status() == 0x01, "mod_len=3 应回 status=01H，得到 0x%02X", ctrl_rsp_status());
+    CHECK_MSG(s_vms_rec_cnt == 0, "mod_len=3 不得渲染（calls=%d）", s_vms_rec_cnt);
+
+    /* func = 0x00（低于 01H 基址）：payload 定长查表返回 0 → 拒绝，且不得按 text_len 排版 */
+    s_vms_rec_cnt = 0;
+    s_tx_count    = 0;
+    make_ctrl_vms_raw(4, 0x00, 0x02);
+    _ldi_cmd_ctrl(NULL, s_ctrl_buf, CTRL_VMS_CLEAR_DATA_LEN);
+    CHECK_MSG(ctrl_rsp_status() == 0x01, "func=0x00 应回 status=01H，得到 0x%02X", ctrl_rsp_status());
+    CHECK_MSG(s_vms_rec_cnt == 0, "func=0x00 不得渲染（calls=%d）", s_vms_rec_cnt);
 }
 
 /* ================================================================
@@ -1112,7 +1268,7 @@ static uint16_t make_0bh(const uint8_t *types, const uint8_t *indices, uint8_t n
     return (uint16_t)(p - s_cfg_buf);
 }
 
-/** 0BH 增量 upsert：先配 {E9} 再配 {EA} → 两者都在、序号各自更新、条数不变 */
+/** @brief 0BH 增量 upsert：先配 {E9} 再配 {EA} → 两者都在、序号各自更新、条数不变 */
 static void case_set_config_incremental_upsert(void)
 {
     TEST_BEGIN("0BH 增量 upsert：先配 E9 再配 EA → 两者都在，序号各自更新");
@@ -1148,7 +1304,7 @@ static void case_set_config_incremental_upsert(void)
     CHECK_MSG(got.lane_hex[0] == 0x12 && got.cert[0] == 0x34, "lane/cert 应落盘");
 }
 
-/** 0BH 未知编码：不采纳（不进表），响应 status=01H，表不变 */
+/** @brief 0BH 未知编码：不采纳（不进表），响应 status=01H，表不变 */
 static void case_set_config_unknown_type_rejected(void)
 {
     TEST_BEGIN("0BH 未知编码：不采纳、status=01H、表不变");
@@ -1188,10 +1344,10 @@ static uint16_t make_0bh_raw(uint8_t device_num)
     return (uint16_t)(sizeof(app_ldi_req_head_t) + 1U);
 }
 
-/** 0BH 被拒路径必须**原子**：短帧 / device_num 非法 / 未知编码 / 截断都不得改 RAM */
+/** @brief 0BH 被拒路径必须**原子**：短帧 / device_num 非法 / 未知编码 / 截断都不得改 RAM */
 static void case_set_config_reject_is_atomic(void)
 {
-    TEST_BEGIN("0BH 被拒（未知编码/截断/device_num 非法）→ RAM 逐字节不变");
+    TEST_BEGIN("0BH 被拒（未知编码/截断/device_num 0 与超限/模块短 1 字节）→ RAM 逐字节不变");
     env_setup();
 
     /* 基线：先成功配一次 E9 index=3，让 RAM 有非默认内容 */
@@ -1230,9 +1386,28 @@ static void case_set_config_reject_is_atomic(void)
     CHECK_MSG(rsp_status() == 0x01, "device_num 非法应 01H，得到 0x%02X", rsp_status());
     CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0,
               "device_num 非法被拒后 RAM 应逐字节不变");
+
+    /* ④ device_num = 0（低位端点，显式拒收）：历史缺陷集中在"只判上界漏低位" */
+    s_tx_count = 0;
+    len        = make_0bh_raw(0);
+    set_0bh_head_ids(0xAA, 0xBB);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, len);
+    CHECK_MSG(rsp_status() == 0x01, "device_num=0 应 01H（不得当空操作静默收下），得到 0x%02X",
+              rsp_status());
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0,
+              "device_num=0 被拒后 RAM 应逐字节不变");
+
+    /* ⑤ 模块字节数少 1：E9 的 module 定长 12B（head 2 + vendor 10），len-1 后只剩 11B →
+       拒绝而不是按 mod_size=12 多读 1 字节（那是帧外的字节） */
+    s_tx_count = 0;
+    len        = make_0bh(t, ix, 1);
+    set_0bh_head_ids(0xAA, 0xBB);
+    _ldi_cmd_set_config(NULL, s_cfg_buf, (uint16_t)(len - 1));
+    CHECK_MSG(rsp_status() == 0x01, "模块声明长度内少 1 字节应 01H，得到 0x%02X", rsp_status());
+    CHECK_MSG(memcmp(&g_ldi_ctx.cfg, &snap, sizeof snap) == 0, "短 1 字节被拒后 RAM 应逐字节不变");
 }
 
-/** ① 写后读：save 成功必须失效加载缓存，否则 load 返回保存前的旧值 */
+/** @brief ① 写后读：save 成功必须失效加载缓存，否则 load 返回保存前的旧值 */
 static void case_save_then_load_returns_new(void)
 {
     TEST_BEGIN("app_flash_ldi_*：save 后 load 必须返回刚存的值（缓存失效）");
@@ -1289,12 +1464,14 @@ int main(void)
         {"0BH 被拒：RAM 逐字节不变（原子）", case_set_config_reject_is_atomic},
         {"1AH：7 个模块逐个回 status", case_init_seven_modules},
         {"1AH：device_num 超出实际数据 → 夹取", case_init_device_num_overflow},
+        {"1AH：device_num=0 空请求 → 回 0、READY", case_init_device_num_zero},
         {"EA 显示控制：00H/01H/02H 接线与 CtlStatus", case_ctrl_ea_ok_paths},
         {"EA 显示控制：拒绝路径 → CtlStatus=01H", case_ctrl_ea_reject},
         {"EA 显示控制：未声明 EA 不进处理", case_ctrl_ea_unconfigured},
         {"E9 02H 清屏走分派层（FLAT）", case_ctrl_vms_clear_flat_dispatch},
         {"E9 02H 清屏走分派层（变体2 只清上半）", case_ctrl_vms_clear_variant2_dispatch},
         {"E9 01H 显示控制走分派层", case_ctrl_vms_display_dispatch},
+        {"1BH mod_len/func 低位盲区", case_ctrl_mod_len_low_bounds},
         {"EA 显示控制：非折叠不动作（保持 TODO）", case_ctrl_ea_flat_untouched},
     };
 

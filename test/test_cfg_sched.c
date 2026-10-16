@@ -43,6 +43,7 @@
  * 所以每个用例 fork 出独立进程；进程内再 fork 出"重启后"的新进程。
  */
 
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -231,6 +232,10 @@ static void fake_reset(void)
  *  用例：基本读写
  * ================================================================ */
 
+/** @brief 空 Flash 的完整生命周期：EMPTY → 首次落位（块 0）→ 写入 → 读回 → 同内容去重跳过
+ *
+ *  去重是 NOR 擦写寿命的守门人：上位机会周期性重下发同一份配置，不去重就是每周期一次
+ *  扇区擦除。同时钉住"未落位的块保持擦除态"（块位不许被"预占"）。 */
 static void case_empty_flash(void)
 {
     TEST_BEGIN("空 Flash：EMPTY → 首次落位 → 写入 → 读回 → 去重跳过");
@@ -269,6 +274,10 @@ static void case_empty_flash(void)
     CHECK(len == 5 && memcmp(buf, "world", 5) == 0);
 }
 
+/** @brief 记录位置与注册顺序解耦：记录写在块 5/2 也要能按名字找回（块位是"扫出来的"）
+ *
+ *  若实现按"块 = 注册序号"直接算地址，换过固件/改过注册顺序后老记录全部丢失，
+ *  现场症状是"升级后配置回到默认值"。 */
 static void case_order_independent(void)
 {
     TEST_BEGIN("记录位置与注册顺序无关（扫描认领的核心）");
@@ -302,6 +311,9 @@ static void case_order_independent(void)
     CHECK(hdr.len == 4);
 }
 
+/** @brief 版本升级判失效但**不搬家**：回落默认值而不是把老记录重写成新版本
+ *
+ *  搬家会掩盖"版本迁移逻辑缺失"的事实；不搬家保证老数据仍可被诊断/回捞。 */
 static void case_version_bump_keeps_address(void)
 {
     TEST_BEGIN("版本升级：判定失效但不搬家（回落默认而非重写）");
@@ -324,6 +336,7 @@ static void case_version_bump_keeps_address(void)
     CHECK(hdr.version == 1);
 }
 
+/** @brief 载荷 CRC 不符判 INVALID：坏记录绝不能当有效配置用（否则是"配置看着生效、行为乱掉"） */
 static void case_crc_corruption(void)
 {
     TEST_BEGIN("载荷被破坏：CRC 不符判失效，绝不当作有效配置");
@@ -344,6 +357,11 @@ static void case_crc_corruption(void)
  *  用例：陌生记录（参考工程那条假信心用例的重写版）
  * ================================================================ */
 
+/** @brief 陌生记录不被误读；撞上落位目标则被覆盖（**已知取舍**，如实钉住而非假装安全）
+ *
+ *  参考工程那版是假信心用例（陌生记录与落位目标从未相撞）；这里把陌生记录直接放在
+ *  被测所有者会认领的块上，断言的是真性质：名字不符者绝不被读成有效配置。
+ *  覆盖行为是取舍：若改成"保护陌生记录"，8 块被占满时新模块去哪必须先答清楚。 */
 static void case_foreign_record(void)
 {
     TEST_BEGIN("陌生记录：不被误读为配置；撞上落位目标则被覆盖（已知取舍）");
@@ -435,6 +453,7 @@ static void reboot_phase2_read(void)
     CHECK(len == 2 && memcmp(buf, "B1", 2) == 0);
 }
 
+/** @brief save → 重启 → load 端到端：块位必须靠重扫（而非"记得的"）找回，且记录刻意与注册序号不符 */
 static void case_save_reboot_load(void)
 {
     TEST_BEGIN("save → 重启 → load：重扫按名字找回，块位不依赖注册序号");
@@ -447,6 +466,10 @@ static void case_save_reboot_load(void)
  *  用例：容量门槛（本工程相对参考工程的第一处偏离）
  * ================================================================ */
 
+/** @brief 容量门槛与字库契约同源：8MB 判未就绪且一个字节都不碰（退回旧门槛会先擦掉字库）
+ *
+ *  用"字库哨兵字节"把后果测出来：门槛低于字库总量时块 0 落在字库区，首次 save 的
+ *  扇区擦除直接毁掉字库 —— 那是不可逆的出厂损坏。 */
 static void case_capacity_gate_font_contract(void)
 {
     TEST_BEGIN("容量门槛与字库契约同源：8MB 判为未就绪，且一个字节都不碰");
@@ -486,6 +509,7 @@ static void case_capacity_gate_font_contract(void)
     CHECK(app_cfg_sched_save(id, NULL, 0) == -1);
 }
 
+/** @brief 容量 0 时不闩锁：器件随后可用 → 持久化自行恢复（闩死 = 本上电周期永久禁用且无重试） */
 static void case_bind_recovers_when_capacity_appears(void)
 {
     TEST_BEGIN("容量 0 时判定不闩锁：器件随后可用 → 持久化自行恢复");
@@ -518,6 +542,10 @@ static void case_bind_recovers_when_capacity_appears(void)
  *  用例：载荷边界（够不够装 / 装不下要能回报）
  * ================================================================ */
 
+/** @brief 载荷边界：最大显存记录存得下、超限（含 uint16 回绕）可回报且不碰已落盘记录
+ *
+ *  回绕那条是修复后才加的：total 先在 uint16 里算，(65536 → 0) 会让校验放行，
+ *  随后 memcpy 写穿 2624B 的组包缓冲 —— ASan 下是 global-buffer-overflow。 */
 static void case_payload_bounds(void)
 {
     TEST_BEGIN("载荷边界：最大显存记录存得下；超限可回报且不破坏已有记录");
@@ -578,6 +606,7 @@ static void case_payload_bounds(void)
  *  用例：注册规则 / 加载遍 / 重扫
  * ================================================================ */
 
+/** @brief 注册规则：空名/超长名（含恰好填满无 NUL 的 16 字符）/重名/满员一律 0xFF，且不消耗块位 */
 static void case_register_rules(void)
 {
     TEST_BEGIN("注册规则：空名/超长名/重名/满员一律忽略（返回 0xFF）");
@@ -621,6 +650,7 @@ static void cb_c(void)
     s_load_seq[s_load_calls++] = 'C';
 }
 
+/** @brief 加载遍按注册顺序调用（NULL 跳过）；新增注册者触发重扫后，老记录仍按名字找回 */
 static void case_load_all_and_rescan(void)
 {
     TEST_BEGIN("加载遍按注册顺序调用（NULL 跳过）；新增注册者触发重扫后记录仍可找回");
@@ -665,6 +695,9 @@ static void case_load_all_and_rescan(void)
  *  用例：LDI 配置的幂等加载（本工程相对参考工程的第三处偏离）
  * ================================================================ */
 
+/** @brief LDI 配置的幂等加载：首次 IO_ERR 不置 s_load_done，条件变好后重试必须能读到
+ *
+ *  IO_ERR 被缓存成"读过了"的话，本上电周期内再无重试机会 —— 配置"存了重启不生效"。 */
 static void case_ldi_cfg_retries_after_io_err(void)
 {
     TEST_BEGIN("LDI 配置：首次读失败（IO_ERR）不缓存，条件变好后重试能读到");
@@ -752,6 +785,30 @@ static const struct {
     {"LDI 配置 IO_ERR 不缓存",       case_ldi_cfg_retries_after_io_err},
 };
 
+/* ================================================================
+ *  看门狗（范式同 test_dispatch.c）
+ *
+ *  每个用例在子进程里跑：子进程若死锁，父进程的 waitpid 会**无限等** ——
+ *  回归以"挂死"而非"失败"的形式出现，在 CI 里比失败更糟。父进程对每个用例
+ *  单独计时（fork 后子进程不继承 alarm，见 fork(2)），超时先 SIGKILL 掉子进程
+ *  （死锁的子进程会攥着 stdout 管道不放），再以 _exit(2) 给出明确失败。
+ *  子进程自己那句 `_exit(g_fail == 0 ? 0 : 1)` 汇总**不动**。
+ * ================================================================ */
+
+#define TEST_TIMEOUT_S (20)
+
+static volatile pid_t s_case_pid; /**< 当前用例的子进程；看门狗据此回收，避免留下孤儿 */
+
+static void on_alarm(int sig)
+{
+    (void)sig;
+    if (s_case_pid > 0) kill(s_case_pid, SIGKILL); /* 防孤儿：它会继续攥着 CI 的 stdout 管道 */
+    static const char msg[] = "\n\033[31m✘ 测试超时（用例子进程疑似死锁）\033[0m\n";
+    ssize_t r = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    (void)r;
+    _exit(2);
+}
+
 int main(void)
 {
     /* 假 Flash 放共享映射：fork 出的"重启进程"要能看到上一次上电写的字节 */
@@ -764,6 +821,8 @@ int main(void)
 
     printf("配置调度器 host 单测\n");
 
+    signal(SIGALRM, on_alarm);
+
     const size_t n_cases = sizeof(s_cases) / sizeof(s_cases[0]);
     int          failed  = 0;
 
@@ -771,6 +830,11 @@ int main(void)
         fflush(stdout); /* 避免 fork 后缓冲区被子进程重复输出 */
 
         pid_t pid = fork();
+        if (pid < 0) { /* fork 失败别把用例算成"通过" */
+            printf("  \033[31m✘\033[0m %s：fork 失败（资源不足）\n", s_cases[i].name);
+            failed++;
+            continue;
+        }
         if (pid == 0) {
             g_pass = g_fail = 0; /* 子进程内独立计数 */
             fake_reset();
@@ -780,8 +844,13 @@ int main(void)
             _exit(g_fail == 0 ? 0 : 1);
         }
 
+        s_case_pid = pid;
+        alarm(TEST_TIMEOUT_S); /* 单个用例的预算：子进程死锁时父进程不再无限等 */
         int st = 0;
         waitpid(pid, &st, 0);
+        alarm(0);
+        s_case_pid = 0;
+
         if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
             failed++;
             if (WIFSIGNALED(st))

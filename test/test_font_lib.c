@@ -20,6 +20,10 @@
  *
  * 换板/换字库母片时，这张表必须跟着换，且新期望值要来自该板实物映像的权威地址表 ——
  * 不要从 g_board_font_lib 反推（那就成了自己验自己）。
+ *
+ * **同片另钉**：`total_bytes` 与 board.h 常量/各项求和三者一致（常量偏小会把配置区
+ * 落进字库区，首次 save 的擦除直接毁字库）、可用字号升序且每个字号齐 2 编码 × 4 字型、
+ * 索引方案（GB2312 8836 / GBK 23940）与单元大小自洽、字库 + 配置区放得进容量契约。
  */
 
 #include <stdint.h>
@@ -144,6 +148,11 @@ static int g_fail;
  *  核心：累加偏移逐条等于实物映像基址
  * ================================================================ */
 
+/** @brief 每个 (字号,编码,字型) 的累加偏移 == 实物映像基址，且期望表一条不落
+ *
+ *  累加式本身是**位置信息**：错一个数字不报错，只是其后每种字型都读到别人的字形。
+ *  末尾两条反向钉住"期望表全被命中"与"链尾落在映像末尾"——板上缺一个三元组
+ *  同样不报错，只表现为"这个字不显示"。 */
 static void case_offsets_match_image(void)
 {
     TEST_BEGIN("每个 (字号,编码,字型) 的累加偏移 == 实物映像基址");
@@ -190,6 +199,9 @@ static void case_offsets_match_image(void)
  *  结构性约束（都是"违反后不报错"的那类）
  * ================================================================ */
 
+/** @brief total_bytes 与编译期常量、与各项求和三者一致
+ *
+ *  常量偏小会把配置区落进字库区 —— 首次 save 的擦除直接毁字库，且不可恢复。 */
 static void case_total_bytes_consistent(void)
 {
     TEST_BEGIN("total_bytes 与编译期常量、与各项求和三者一致");
@@ -207,6 +219,9 @@ static void case_total_bytes_consistent(void)
               (unsigned)g_board_font_lib.total_bytes);
 }
 
+/** @brief 可用字号集合升序（最近邻回落依赖它），且每个字号齐 2 编码 × 4 字型
+ *
+ *  升序是"按实际行选字号/最近邻回落"的前提；缺单元不会崩，只让该字不显示 —— 最难查。 */
 static void case_sizes_ascending(void)
 {
     TEST_BEGIN("可用字号集合升序（最近邻回落依赖它）");
@@ -231,6 +246,9 @@ static void case_sizes_ascending(void)
     }
 }
 
+/** @brief 字库 + 配置区放得进容量契约（与 app_cfg_sched.h 的 static_assert 同一条件）
+ *
+ *  运行期门槛与编译期契约必须一起走：只改一处的表现是"编译过、上电后配置区越界"。 */
 static void case_fits_capacity_contract(void)
 {
     TEST_BEGIN("字库 + 配置区放得进容量契约");
@@ -241,6 +259,10 @@ static void case_fits_capacity_contract(void)
               "字库 %u + 配置区放不进 32MB", (unsigned)g_board_font_lib.total_bytes);
 }
 
+/** @brief 索引方案与字符集匹配（GB2312 的 8836 与 GBK 的 23940 不能互换）
+ *
+ *  索引方案错了会让整片字库错位（屏上是乱字，不报错）；单元大小必须与
+ *  `size × ceil(size/8)` 的每字符字节数自洽，多一少一都让后续单元整体错位。 */
 static void case_index_scheme(void)
 {
     TEST_BEGIN("索引方案与字符集匹配（GB2312 的 8836 与 GBK 的 23940 不能互换）");

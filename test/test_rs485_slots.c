@@ -159,7 +159,9 @@ static int g_fail;
 
 /* ================================================================ */
 
-/** 环回拆帧：两次背靠背的回调，两段都必须接住、顺序不能反 */
+/** @brief 环回拆帧：两次背靠背的回调，两段都必须接住、顺序不能反
+ *
+ *  丢一段整帧就作废（只能等对端重发），而丢的那段不会有任何报错。 */
 static void case_wrap_split_kept(void)
 {
     TEST_BEGIN("环回拆帧：两段背靠背的回调都要接住（顺序不变）");
@@ -184,7 +186,7 @@ static void case_wrap_split_kept(void)
     CHECK_MSG(s_slot_busy == 0, "排空之后不该还有占着的槽：busy=%02X", (unsigned)s_slot_busy);
 }
 
-/** 槽位数至少要能覆盖"环回拆出 2 段 + 任务手上 1 个" */
+/** @brief 槽位数至少要能覆盖"环回拆出 2 段 + 任务手上 1 个" —— 少一个就必然丢一段 */
 static void case_slot_count_enough(void)
 {
     TEST_BEGIN("槽位数覆盖最坏情形（任务手上 1 个 + 环回拆出 2 段）");
@@ -193,7 +195,7 @@ static void case_slot_count_enough(void)
               (unsigned)RS485_RX_SLOTS);
 }
 
-/** 队列深度必须覆盖槽数 —— 少了就有一个槽投不进去，而它已被标成占用 → 永久漏
+/** @brief 队列深度必须覆盖槽数 —— 少了就有一个槽投不进去，而它已被标成占用 → 永久漏
  *
  *  **这是那条"永久哑掉"的守门用例**：`osMessageQueueNew` 的深度若小于 `RS485_RX_SLOTS`，
  *  填满槽的那一轮里必有一次 `osMessageQueuePut` 失败；若失败时还把槽标成占用
@@ -233,7 +235,48 @@ static void case_depth_covers_slots(void)
     CHECK_MSG(s_slot_busy == 0, "收完仍然不该有占着的槽：busy=%02X", (unsigned)s_slot_busy);
 }
 
-/** 超过缓冲容量的段不可能来自 DMA，但守卫在就不该被写出去 */
+/** @brief 界内最长段（BUF_SIZE-1）与空段：不误拒、不越界、不搅坏槽位状态
+ *
+ *  **为什么需要它**：守卫写成 `>=`（而不是 `>`）就会把**正好界内**的那一段也拒掉 ——
+ *  症状是"总线上的长帧总被丢"且完全没有报错（丢在 ISR 的守卫上，不进队列、不打日志）。
+ *  空段是防御性路径（上游 `_uart_idle_handle` 有 `if (n)` 守卫，正常不会产生），
+ *  测的是"它不得越界写、也不得把槽位状态搅坏"。 */
+static void case_len_bounds_inside(void)
+{
+    TEST_BEGIN("界内最长段与空段：不误拒、不越界");
+
+    /* ① 界内最长：BUF_SIZE-1 必须被完整收下、一点不少 */
+    fixture_reset();
+    const uint16_t fed = feed_chunk(0x66, (uint16_t)(RS485_BUF_SIZE - 1U));
+    CHECK_MSG(fed == RS485_BUF_SIZE - 1U, "夹具应能喂进 %u 字节，实际 %u",
+              (unsigned)(RS485_BUF_SIZE - 1U), (unsigned)fed);
+
+    uint8_t  tag = 0;
+    uint16_t n   = take_and_release(&tag);
+    CHECK_MSG(n == RS485_BUF_SIZE - 1U && tag == 0x66,
+              "界内最长段被误拒/长度不对：得到 %u 字节的 0x%02X（应为 %u 字节的 0x66）",
+              (unsigned)n, (unsigned)tag, (unsigned)(RS485_BUF_SIZE - 1U));
+    CHECK_MSG(s_slot_busy == 0, "取走之后不该还有占着的槽：busy=%02X", (unsigned)s_slot_busy);
+
+    /* ② 空段：现状是"照占一格槽、长度记 0"（`_rs485_isr_fn` 只挡 `> BUF_SIZE`）。
+       若将来改成"丢弃空段"，这里的期望要一并改成"不入队"—— 本断言钉的是现状契约。 */
+    fixture_reset();
+    feed_chunk(0x99, 0);
+    n = take_and_release(&tag);
+    CHECK_MSG(n == 0, "空段应被收下并记成 0 长度（现状，见注释），得到 %u", (unsigned)n);
+    CHECK_MSG(s_slot_busy == 0, "空段之后不得留下占着的槽：busy=%02X", (unsigned)s_slot_busy);
+
+    /* ③ 空段之后仍应正常收包（状态没被搅坏） */
+    feed_chunk(0x11, 15);
+    n = take_and_release(&tag);
+    CHECK_MSG(n == 15 && tag == 0x11, "空段之后仍应正常收包，得到 %u 字节的 0x%02X", (unsigned)n,
+              (unsigned)tag);
+}
+
+/** @brief 超过缓冲容量的段被拒（不得越界写槽）：它是**不可能来自 DMA** 的假输入，
+ *         但守卫在就必须挡住，且后续正常段一个都不许受影响
+ *
+ *  界内最长的边界（BUF_SIZE-1）在上面那条用例里，两条合起来才夹住这个 `>` 判据。 */
 static void case_oversize_rejected(void)
 {
     TEST_BEGIN("超过缓冲容量的段被拒（不得越界写槽）");
@@ -258,6 +301,7 @@ int main(void)
     case_slot_count_enough();
     case_wrap_split_kept();
     case_depth_covers_slots();
+    case_len_bounds_inside();
     case_oversize_rejected();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

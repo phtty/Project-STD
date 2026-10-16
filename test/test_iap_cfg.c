@@ -22,12 +22,14 @@
  */
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "app_iap_cfg.h"
 #include "dev_flash_int.h"
@@ -119,7 +121,7 @@ static int g_failures;
     } while (0)
 
 /* __VA_OPT__ 让本宏在"不带可变参数"时也能用（C23）。
-   直接写 __VA_ARGS__ 的话，CHECK_MSG(c, "msg") 会展开成 printf(..., ) 编译不过 ——
+   直接写 __VA_ARGS__ 的话，只给条件与格式串的调用会展开成 printf(..., ) —— 编译不过，
    而"只有一句结论、没有附加数值"恰恰是最常见的用法。 */
 #define CHECK_MSG(cond, fmt, ...)                                                                  \
     do {                                                                                           \
@@ -224,6 +226,26 @@ static void expect_report(const uint8_t ip[4], const uint8_t mask[4], const uint
 }
 
 /* ================================================================
+ *  看门狗（范式同 test_dispatch.c）
+ *
+ *  本套件有两条会**无限等**的路径：
+ *    · 并发用例的 pthread_join：互斥量一旦没生效，两个写线程可以互相把对方钉住；
+ *    · 其余用例本身是同步的，但覆盖的是 flash 驱动，挂死同样是"回归以挂死出现"。
+ *  用 SIGALRM 把挂死转成明确的失败退出（exit 2），CI 里才能区分"失败"与"卡住"。
+ * ================================================================ */
+
+#define TEST_TIMEOUT_S (20)
+
+static void on_alarm(int sig)
+{
+    (void)sig;
+    static const char msg[] = "\n\033[31m✘ 测试超时（疑似死锁：并发写线程未完成）\033[0m\n";
+    ssize_t r = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    (void)r;
+    _exit(2);
+}
+
+/* ================================================================
  *  分板：本板有没有 IAP 记录区
  *
  *  **下面那一整套用例只对"带 bootloader、Sector 1 是记录区"的板成立。**
@@ -240,6 +262,10 @@ static void expect_report(const uint8_t ip[4], const uint8_t mask[4], const uint
 
 #if !BOARD_HAS_IAP_RECORD
 
+/** @brief 直烧板的短路守卫：擦/写原语必须整体不碰 Flash，两个公开入口也要报错
+ *
+ *  没有短路时启动对账会擦掉正在执行的代码（Sector 1 落在固件映像内）——
+ *  上机 HardFault 过一次，这里把它钉死。 */
 static void case_write_path_is_short_circuited(void)
 {
     flash_setup();
@@ -279,6 +305,9 @@ static void case_write_path_is_short_circuited(void)
  *  模拟"代码字节"，若报告路径裸读它，回包就会是 0x5A5A5A5A。
  *  反向验证：把 _iap_cmd_report_ip 改回裸读 ADDR_CONFIG_SECTOR，本用例立刻变红。
  * ================================================================ */
+/** @brief 直烧板报告 IP 必须回落运行态：0x08004000 在固件映像内部，裸读会回传代码字节
+ *
+ *  现场症状："搜索时 IAP 广播的地址是一团乱码"。假记录区铺成 0x5A 来模拟代码字节。 */
 static void case_report_ip_falls_back_to_runtime(void)
 {
     flash_setup();
@@ -301,6 +330,9 @@ static void case_report_ip_falls_back_to_runtime(void)
 
 int main(void)
 {
+    signal(SIGALRM, on_alarm);
+    alarm(TEST_TIMEOUT_S);
+
     printf("\n\033[33m⚠ 本板 BOARD_HAS_IAP_RECORD = 0（直烧板），"
            "记录读写用例不适用，只跑短路守卫\033[0m\n\n");
 
@@ -326,6 +358,7 @@ int main(void)
  *  ① 空记录 → 播种有效骨架
  * ================================================================ */
 
+/** @brief 空记录 → 播种有效骨架：首次写入必须把 magic/update_status/CRC 一次建成完整记录 */
 static void case_empty_is_seeded(void)
 {
     flash_setup();
@@ -347,6 +380,10 @@ static void case_empty_is_seeded(void)
  *  （第二次写入会静默跳过，记录永远停在损坏态）。
  * ================================================================ */
 
+/** @brief 编程中途掉电 → 记录损坏 → 下次写入必须自动修复（**核心用例**）
+ *
+ *  原先对损坏记录直接 return 且全工程没有别的修复入口 —— 现场唯一出路是整片重烧。
+ *  反向验证：把 update_net_cfg 的损坏分支改回 `return`，本用例立刻变红。 */
 static void case_power_loss_leaves_corrupt_and_is_repaired(void)
 {
     flash_setup();
@@ -379,6 +416,7 @@ static void case_power_loss_leaves_corrupt_and_is_repaired(void)
  *  ③ 内容未变 → 不擦写（内部 Flash 擦除会硬停总线）
  * ================================================================ */
 
+/** @brief 内容未变不擦写：内部 Flash 擦除会硬停总线，重复下发同一份配置必须零擦写 */
 static void case_unchanged_skips_erase(void)
 {
     flash_setup();
@@ -404,6 +442,7 @@ static void case_unchanged_skips_erase(void)
  *  记录永远修不好，且没有任何报错。
  * ================================================================ */
 
+/** @brief 损坏记录不被去重短路：去重判定若排在损坏判定之前，记录永远修不好且无报错 */
 static void case_corrupt_is_not_deduped(void)
 {
     flash_setup();
@@ -443,6 +482,7 @@ static void case_corrupt_is_not_deduped(void)
                   "改动 %s 后校验仍通过 —— CRC 覆盖范围漏了该字段", name);                         \
     } while (0)
 
+/** @brief CRC32 覆盖整条记录（除去 config_crc 自身）：漏掉任一字段都会让"改了却不报错" */
 static void case_crc_covers_every_field(void)
 {
     CHECK_FIELD_COVERED("update_status",    REC->update_status = APP_FLASH_IAP_FAILED);
@@ -475,6 +515,9 @@ static void *writer_thread(void *arg)
     return NULL;
 }
 
+/** @brief 并发写必须串行：缺锁时两个"擦除 + 编程 17 word"会逐 word 交错，拼出 CRC 必坏的记录
+ *
+ *  反向验证：去掉 app_iap_cfg.c 的 s_lock，本用例立刻变红（桩每个 word 让出一次 CPU）。 */
 static void case_concurrent_writes_are_serialized(void)
 {
     flash_setup();
@@ -482,13 +525,24 @@ static void case_concurrent_writes_are_serialized(void)
 
     pthread_barrier_init(&g_barrier, NULL, 3);
     pthread_t ta, tb;
-    pthread_create(&ta, NULL, writer_thread, (void *)IP_A);
-    pthread_create(&tb, NULL, writer_thread, (void *)IP_B);
+    int       ra = pthread_create(&ta, NULL, writer_thread, (void *)IP_A);
+    int       rb = pthread_create(&tb, NULL, writer_thread, (void *)IP_B);
+    CHECK_MSG(ra == 0, "writer_thread（IP_A）创建失败：pthread_create 返回 %d", ra);
+    CHECK_MSG(rb == 0, "writer_thread（IP_B）创建失败：pthread_create 返回 %d", rb);
 
-    pthread_barrier_wait(&g_barrier); /* 两个线程同时起跑 */
-    pthread_join(ta, NULL);
-    pthread_join(tb, NULL);
-    pthread_barrier_destroy(&g_barrier);
+    if (ra == 0 && rb == 0) {
+        pthread_barrier_wait(&g_barrier); /* 两个线程同时起跑 */
+        pthread_join(ta, NULL);
+        pthread_join(tb, NULL);
+        pthread_barrier_destroy(&g_barrier);
+    } else {
+        /* 只 join 创建成功的线程：对失败的 pthread_t 调 join 是未定义行为。
+           此时 barrier 少一个到达者，存活线程会停在 barrier 上 —— 不 join 它会让
+           它继续并发写（下面几条断言失去确定性），join 它会由 SIGALRM 看门狗
+           以 _exit(2) 收尾；失败已由上面两条 CHECK 记录，这里选"行为确定"。 */
+        if (ra == 0) pthread_join(ta, NULL);
+        if (rb == 0) pthread_join(tb, NULL);
+    }
 
     CHECK_MSG(!pl_flash_stub_interleaved(),
               "观察到 %d 次擦除、%d 次编程：有擦除打断未完成的编程序列",
@@ -507,6 +561,10 @@ static void case_concurrent_writes_are_serialized(void)
  *  布局碰巧自洽、CRC 也算得对，只是不属于本协议。这里显式构造一条。
  * ================================================================ */
 
+/** @brief 异格式 magic（CRC 自洽）被拒：layout 碰巧自洽但不属于本协议的记录不能认
+ *
+ *  CRC 对近乎蕴含 magic 对，但 magic 检查的作用是挡住"别的格式写进来的记录"
+ *  （变异测试暴露：删掉 magic 检查全套仍全绿，故显式构造一条）。 */
 static void case_foreign_magic_is_rejected(void)
 {
     flash_setup();
@@ -526,6 +584,7 @@ static void case_foreign_magic_is_rejected(void)
  *  全套用例仍全绿。而调用方正是靠这个返回值判定"配置没落盘"。
  * ================================================================ */
 
+/** @brief 写失败必须上报：调用方靠这个返回值判定"配置没落盘"，丢弃它等于静默丢配置 */
 static void case_write_failure_is_reported(void)
 {
     flash_setup();
@@ -549,6 +608,7 @@ static void case_write_failure_is_reported(void)
  *  全套用例仍全绿。约定不钉住的话，下次有人按"返回字节数"理解就会出问题。
  * ================================================================ */
 
+/** @brief dev_storage 的"0 = 成功"约定：改成返回字节数会让所有 `!= 0` 判定当场反转 */
 static void case_storage_returns_zero_on_success(void)
 {
     flash_setup();
@@ -575,6 +635,9 @@ static void case_storage_returns_zero_on_success(void)
  *  当成配置用）；有效记录返回 true 且 ip/mask/gw/port 与写入记录逐字节一致。
  * ================================================================ */
 
+/** @brief 跨模块访问器 app_iap_get_net_cfg()（§4.7）：无效记录返回 false **且不写 out**
+ *
+ *  调用方会把 out 里的残留值当配置用 —— 所以"不写"与"返回 false"必须同时成立。 */
 static void case_net_cfg_accessor_contract(void)
 {
     flash_setup();
@@ -607,6 +670,10 @@ static void case_net_cfg_accessor_contract(void)
  *  app_iap_get_net_cfg() 判有效，无效则回落运行态。
  * ================================================================ */
 
+/** @brief 报告 IP 绝不回传裸 Flash：空/损坏记录回落运行态，有效记录回传记录值
+ *
+ *  缺陷 b 的回归守卫：此前裸读 ADDR_CONFIG_SECTOR，空记录报 255.255.255.255、
+ *  损坏时报 0xFF/陈旧值。 */
 static void case_report_ip_never_returns_raw_flash(void)
 {
     flash_setup();
@@ -639,6 +706,9 @@ static void case_report_ip_never_returns_raw_flash(void)
 
 int main(void)
 {
+    signal(SIGALRM, on_alarm);
+    alarm(TEST_TIMEOUT_S);
+
     struct {
         const char *name;
         void (*fn)(void);

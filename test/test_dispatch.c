@@ -255,6 +255,9 @@ static uint16_t rb_used(fake_proto_t *p)
  *  用例
  * ================================================================ */
 
+/** @brief 单帧 READY 的完整契约：帧内容/来源通道/探针入参（self、ccb、scratch 容量）与 aux 随帧投递
+ *
+ *  这一条是骨架用例：后面所有失败模式都以"这条不该通的时候通了/该通的时候没通"来定位。 */
 static void test_single_frame(void)
 {
     TEST_BEGIN("单帧 READY：帧内容、来源通道与探针契约");
@@ -276,6 +279,7 @@ static void test_single_frame(void)
     CHECK(RX->aux == 0x5A); /* 探针分类随消息投递 */
 }
 
+/** @brief 一次唤醒连抽多帧：循环边界写错（抽一帧就停 / 抽到空）的症状是"多帧连发只处理第一条" */
 static void test_multi_frame_drain(void)
 {
     TEST_BEGIN("一次唤醒抽出多帧：while (avail > 0) 连续解析");
@@ -295,6 +299,7 @@ static void test_multi_frame_drain(void)
     CHECK(s_pa.probe_calls == 3);
 }
 
+/** @brief FAKE 只跳 1 字节后重新同步：若误跳整帧，后面那条嵌入的真帧会被一起吞掉 */
 static void test_fake_skips_one_byte(void)
 {
     TEST_BEGIN("FAKE：只跳 1 字节后重新同步");
@@ -312,6 +317,7 @@ static void test_fake_skips_one_byte(void)
     CHECK(s_pa.probe_calls == 3);
 }
 
+/** @brief SKIP 跳过整帧：帧结构合法但不属于本设备（同上，误跳 1 字节会让后续帧整体错位） */
 static void test_skip_skips_whole_frame(void)
 {
     TEST_BEGIN("SKIP：整帧跳过（不是 1 字节）");
@@ -327,6 +333,7 @@ static void test_skip_skips_whole_frame(void)
     CHECK(memcmp(RX->data, "PQ", 2) == 0);
 }
 
+/** @brief WAIT 不得消费：半帧留在缓冲区，跨通知累积成整帧（消费了就是"分两段到达的帧永远丢"） */
 static void test_wait_consumes_nothing(void)
 {
     TEST_BEGIN("WAIT：不消费数据，跨通知累积成帧");
@@ -347,6 +354,7 @@ static void test_wait_consumes_nothing(void)
     CHECK(memcmp(RX->data, "ABCDE", 5) == 0);
 }
 
+/** @brief 零长度 READY 的守卫：不投递空帧、逐字节丢弃，且引擎不零进度空转（后者会让任务永不归还） */
 static void test_zero_length_guard(void)
 {
     TEST_BEGIN("零长度 READY：不投递空帧，且不零进度死循环");
@@ -367,6 +375,7 @@ static void test_zero_length_guard(void)
     CHECK(memcmp(RX->data, "CD", 2) == 0);
 }
 
+/** @brief 超长 READY：按 payload_max / 暂存区上限拒绝，绝不按帧内长度读写（否则是越界读写的入口） */
 static void test_payload_max_guard(void)
 {
     TEST_BEGIN("超长 READY：被 payload_max 拒绝，且不越界读写");
@@ -396,6 +405,7 @@ static void test_payload_max_guard(void)
     CHECK(memcmp(RX->data, "OK!", 3) == 0);
 }
 
+/** @brief 同一通道上两个协议各自独立缓冲/队列：共享一份就是"两条协议互相抢字节、互相丢帧" */
 static void test_two_protocols_one_channel(void)
 {
     TEST_BEGIN("同一通道绑定两个协议：各自独立缓冲区与队列");
@@ -413,6 +423,7 @@ static void test_two_protocols_one_channel(void)
     CHECK(RX->data_len == 4 && memcmp(RX->data, "DATA", 4) == 0);
 }
 
+/** @brief 通道隔离：数据只进绑定通道的协议缓冲区（未绑定的通道不该被任何协议读到） */
 static void test_channel_isolation(void)
 {
     TEST_BEGIN("通道隔离：数据只进绑定通道的协议缓冲区");
@@ -427,6 +438,7 @@ static void test_channel_isolation(void)
     CHECK(s_pa.probe_calls == 0);
 }
 
+/** @brief 重复绑定同一 (协议, 通道) 幂等：重复条目会让同一段字节被探两次、帧被投两遍 */
 static void test_bind_idempotent(void)
 {
     TEST_BEGIN("重复绑定同一 (协议, 通道) 不产生重复条目");
@@ -443,7 +455,7 @@ static void rx_listener(void)
     s_listener_calls++;
 }
 
-/** 接收事件监听 —— 语义是"**上位机下发了一条指令**"（工厂模式据此退出）
+/** @brief 接收事件监听 —— 语义是"**上位机下发了一条指令**"（工厂模式据此退出）
  *
  *  两条边界都是现场踩出来的，不是推演出来的：
  *   · **半帧不算**：字节到了、帧没齐 → 不触发（调用方拿到的必须是"一条指令"）；
@@ -526,6 +538,7 @@ static void test_rx_listener(void)
     CHECK_MSG(s_listener_calls == 2, "两条帧应触发两次，得到 %d", s_listener_calls);
 }
 
+/** @brief app_ccb_send/_send_to 的虚表分派与空守卫：ops 为空或 ccb 为空时只许静默返回（现场注册表未齐时会走到） */
 static void test_ccb_send(void)
 {
     TEST_BEGIN("app_ccb_send：虚表分派、目的地透传与空守卫");
@@ -554,6 +567,7 @@ static void test_ccb_send(void)
     CHECK(s_send_calls == 2);
 }
 
+/** @brief 写满策略"丢旧留新"：绝不留下半截帧（半截帧会被后续流量按错误长度解析） */
 static void test_write_overflow_policy(void)
 {
     TEST_BEGIN("缓冲区装不下时：丢旧留新，不留半截帧");
@@ -584,6 +598,7 @@ static void test_write_overflow_policy(void)
     CHECK(head[0] == 0x22 && head[15] == 0x22); /* 留下的是新数据，不是半截旧帧 */
 }
 
+/** @brief 来源描述随本次派发拷进通知副本：调用方缓冲被覆盖后探针仍应看到派发当时的取值 */
 static void test_src_passthrough(void)
 {
     TEST_BEGIN("接收来源随通知带到探针（协议据此分类，无需认识通道类型）");
@@ -612,6 +627,7 @@ static void test_src_passthrough(void)
     CHECK_MSG(!s_pa.seen_src_valid, "无来源时探针应收到 nullptr");
 }
 
+/** @brief aux（协议分类）逐帧携带：寄存在长生命周期对象上会让每帧都用"最后一次的值" */
 static void test_aux_propagation(void)
 {
     TEST_BEGIN("探针分类经 app_dispatch_msg_t.aux 逐帧投递给协议任务");
@@ -632,6 +648,7 @@ static void test_aux_propagation(void)
     }
 }
 
+/** @brief 边界入参（空 ccb / 空数据 / 零长度）不崩溃、不入队：通道驱动异常时不该把分发任务带崩 */
 static void test_empty_dispatch(void)
 {
     TEST_BEGIN("边界入参：空指针 / 零长度不崩溃、不入队");

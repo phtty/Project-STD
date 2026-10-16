@@ -194,6 +194,11 @@ static size_t rls_build(uint16_t total_len)
  *  IAP 探针
  * ================================================================ */
 
+/** @brief IAP 探针的四态与长度上下界：合法帧 READY、不足 WAIT、帧头/CRC/超限 FAKE
+ *
+ *  长度域是帧内取来的 32 位值，**两侧都要夹**：上界 256 word（超限即伪帧，否则后面
+ *  的 CRC 读会按它索引到暂存区之外）；下界 0（最小合法帧 = 5 word，CRC 是唯一载荷字）
+ *  也要真的能通过 —— 只测上界会把"合法最小帧被误杀"漏掉。 */
 static void test_iap(void)
 {
     TEST_BEGIN("IAP 探针");
@@ -225,6 +230,20 @@ static void test_iap(void)
     feed(s_frame, sizeof(app_iap_frame_t) + 256 * 4 + 4);
     CHECK(iap_probe() == APP_PCB_PROBE_STATE_READY);
 
+    /* 下界：DATA 域 0 字（帧长即 FRAME_MIN_LEN 5 word = 20 字节）是合法最小帧，不是伪帧。
+       CRC 覆盖 4 个头字，探针按 `(len + 4) * 4` 校验 —— 长度 0 时正好只算头字。
+       （反向验证：把校验长度改成 len*4，本帧立刻变成 FAKE。） */
+    n = iap_build(0x05, 0);
+    CHECK_MSG(n == sizeof(app_iap_frame_t) + 4, "最小帧构造应为 20 字节，得到 %u", (unsigned)n);
+    feed(s_frame, n);
+    CHECK_MSG(iap_probe() == APP_PCB_PROBE_STATE_READY, "0 字载荷的最小帧应 READY（下界 0 合法）");
+    CHECK(s_iap_len == n);
+    CHECK(s_iap_aux == 0x05);
+
+    /* 最小帧少最后 1 个字节（CRC 字不齐）→ WAIT：不足时绝不能提前放行/判死 */
+    feed(s_frame, n - 1);
+    CHECK_MSG(iap_probe() == APP_PCB_PROBE_STATE_WAIT, "最小帧缺 1 字节应 WAIT（不足 ≠ 伪帧）");
+
     /* CRC 错 → FAKE */
     n = iap_build(0x05, 4);
     s_frame[n - 1] ^= 0xFF;
@@ -246,6 +265,10 @@ static void test_iap(void)
  *  LDI 探针
  * ================================================================ */
 
+/** @brief LDI 探针：帧头/版本/长度域/CRC 四关，配置指令免身份、其余需 lane/cert 匹配
+ *
+ *  身份不匹配是 SKIP（整帧丢弃）而不是 FAKE：帧结构合法、只是不属于本机，
+ *  逐字节重跳会把后面同一条流里的真帧连坐吞掉。长度域两侧（0 与 512）都要能通过。 */
 static void test_ldi(void)
 {
     TEST_BEGIN("LDI 探针");
@@ -295,6 +318,32 @@ static void test_ldi(void)
     CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_READY, "DATA 域上限边界应被接受（%u 字节）",
               (unsigned)TEST_LDI_DATA_MAX);
 
+    /* 下界：DATA 域 = 1 字节（只有命令码、没有请求头）是"命令码可读"的最小帧。
+       用配置指令 → 免身份校验 → READY，total = 11。探针入口另有"可见 ≥ 帧头+请求头+2
+       = 30 字节"的门禁（身份字段读到 data_crc[21]），故帧后补 20 字节无关数据。 */
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 1);
+    CHECK_MSG(n == sizeof(app_ldi_frame_t) + 3, "1 长度帧构造应为 11 字节，得到 %u", (unsigned)n);
+    feed(s_frame, n);
+    static const uint8_t pad[20] = {0};
+    rb_write(&s_rb, pad, sizeof(pad), NULL);
+    CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_READY, "1 字节 DATA（只有命令码）的帧应 READY");
+    CHECK(s_ldi_len == n);
+
+    /* 长度域 = 0：DATA 只剩 CRC 两个字，帧内**没有命令字节**。实测既不 FAKE 也不 WAIT ——
+       结构/CRC 全通过，命令码由 data_crc[0]（此刻恰是 CRC 高字节）顶替，再按身份分支
+       给 READY/SKIP。这是"长度判据只有上界"的直接后果，不在这里钉死具体归档；
+       只钉"不是伪帧"：若哪天给 LDI 加"DATA 至少 1 字节"的下界判据，本用例先红 ——
+       改的人必须同时定 0 长度帧的归档（丢弃 / 伪帧），而不是随手加一句 return。 */
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 0);
+    CHECK_MSG(n == sizeof(app_ldi_frame_t) + 2, "0 长度帧构造应为 10 字节，得到 %u", (unsigned)n);
+    feed(s_frame, n);
+    CHECK_MSG(ldi_probe() == APP_PCB_PROBE_STATE_WAIT,
+              "可见字节不足门禁（10 < 30）时应 WAIT —— 尚不能确认帧不合法");
+    rb_write(&s_rb, pad, sizeof(pad), NULL);
+    app_pcb_probe_state_t st0 = ldi_probe();
+    CHECK_MSG(st0 != APP_PCB_PROBE_STATE_FAKE, "长度域 0 不超上界，不应判伪帧（得到 %u）",
+              (unsigned)st0);
+
     /* CRC 错 → FAKE */
     n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
     s_frame[n - 1] ^= 0xFF;
@@ -320,6 +369,10 @@ static void test_ldi(void)
  *  RLS 探针
  * ================================================================ */
 
+/** @brief RLS 探针：帧长域的上下界（0/1/下限-1/上限/上限+1）必须整段拦下
+ *
+ *  长度域是帧内 16 位值，低位侧（0/1）会通过 `data_len - 2` 向前越界读到帧头之前，
+ *  高位侧会读到暂存区之外 —— 两侧都是 ASan 能抓的越界读，故逐一钉住。 */
 static void test_rls(void)
 {
     TEST_BEGIN("RLS 探针");
@@ -390,6 +443,10 @@ static void test_rls(void)
  *  暂存区容量契约
  * ================================================================ */
 
+/** @brief 暂存区容量契约：装不下时必须 SKIP（并报出整帧长度），绝不能按帧内长度拷进去
+ *
+ *  暂存区容量由框架给（scratch_size），探针不能用"缓冲区可读量"去代替它 ——
+ *  后者大于暂存区时就是写穿框架那份静态缓冲（ASan 抓 global-buffer-overflow）。 */
 static void test_scratch_contract(void)
 {
     TEST_BEGIN("暂存区容量契约：装不下时返回 SKIP 且不越界");
@@ -437,6 +494,10 @@ static void test_scratch_contract(void)
  *  去夹紧 `rb_peek` 的 dest_cap，本用例红。
  * ================================================================ */
 
+/** @brief 伪帧时不得把整帧拷进暂存区（否则"跳 1 字节重试"退化成 O(n²) 的 memcpy）
+ *
+ *  判"是不是本协议的帧"最多只需读自己的帧头+长度域（≤32 字节），把 1400 字节的
+ *  杂物整帧拷走会把帧分发任务拖住几十毫秒，期间下游协议缓冲被写满会挤掉完整帧。 */
 static void test_fake_does_not_copy_whole(void)
 {
     TEST_BEGIN("伪帧时不得拷整帧（否则逐字节重跳是 O(n²)，实测拖住 40ms+）");
@@ -481,6 +542,68 @@ static void test_fake_does_not_copy_whole(void)
                   "把帧分发任务拖住几十毫秒，下游协议缓冲在那期间被写满会冲掉完整帧",
                   t[i].name);
     }
+}
+
+/* ================================================================
+ *  FAKE 的处置契约：伪帧头恰好前进 1 字节
+ *
+ *  app_dispatch.h 的四态定义："FAKE = 伪帧头（如误匹配的 0x5A/0xFF），跳过 1 字节重试"。
+ *  探针自身只窥视（rb_peek 不消费），"前进 1 字节"由框架在拿到 FAKE 后执行 ——
+ *  所以这里把框架的动作照抄一遍（rb_skip 1），断言**这一轮的总前进量恰好 1 字节**，
+ *  再断言紧跟在伪字节后的合法帧立刻被认出：
+ *    · 少跳（0 字节）→ 原地空转，每次重跳都重拷同一段（O(n²)，同上一条用例）；
+ *    · 多跳（2 字节）→ 恰好跨过真帧的第一个字节，真帧永远认不出来
+ *      （现场症状："跨回绕拆成两段的帧总丢"）。
+ *  三种协议各测一遍：契约在框架侧共享，任何一家探针偷偷消费一个字节都会让前进量变 2。
+ * ================================================================ */
+
+/** @brief 喂 [1 个伪字节 + 一条合法帧]，跑一轮"探针 + 框架处置"，断言前进量恰好 1 字节 */
+static void fake_advance_check(const char *name, app_pcb_probe_fn_t probe, const uint8_t *frame,
+                               size_t frame_len, uint32_t *got_len)
+{
+    static uint8_t s_one = 0x00; /* 伪字节：帧头首字节失效是 FAKE 的典型来源 */
+    uint8_t        aux   = 0;
+
+    rb_flush(&s_rb, NULL);
+    rb_write(&s_rb, &s_one, 1, NULL);
+    rb_write(&s_rb, frame, (uint16_t)frame_len, NULL);
+
+    uint16_t avail = rb_avail(&s_rb, NULL);
+    CHECK_MSG(probe(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), got_len, &aux) ==
+                  APP_PCB_PROBE_STATE_FAKE,
+              "%s：首字节错开的合法帧应判 FAKE", name);
+
+    /* 框架对 FAKE 的处置（app_dispatch.c：skip = 1）*/
+    rb_skip(&s_rb, 1, NULL);
+    CHECK_MSG((uint16_t)(avail - rb_avail(&s_rb, NULL)) == 1U,
+              "%s：FAKE 处置后应恰好前进 1 字节（得到 %u）—— 探针自己消费 / 框架多跳都会 >1", name,
+              (unsigned)(avail - rb_avail(&s_rb, NULL)));
+
+    /* 前进 1 之后必须立刻认出紧邻的合法帧：多跳 1 字节会把帧头也跨过去 */
+    *got_len = 0;
+    CHECK_MSG(probe(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf), got_len, &aux) ==
+                      APP_PCB_PROBE_STATE_READY &&
+                  *got_len == frame_len,
+              "%s：跳 1 字节后应立即认出紧跟的合法帧（得到 len=%u，期望 %u）", name,
+              (unsigned)*got_len, (unsigned)frame_len);
+}
+
+/** @brief 三种协议的 FAKE 前进量都恰好 1 字节（多跳丢帧、少跳空转；探针偷消费会让它变 2） */
+static void test_fake_advances_exactly_one_byte(void)
+{
+    TEST_BEGIN("FAKE 处置：伪帧头恰好前进 1 字节（多跳丢帧、少跳空转）");
+
+    uint32_t len = 0;
+
+    size_t n = iap_build(0x05, 4);
+    fake_advance_check("iap", app_iap_probe_frame, s_frame, n, &len);
+
+    /* 这里用配置指令（免身份校验）—— 本用例不测身份分支，换别的主角请先看 test_ldi */
+    n = ldi_build(APP_LDI_CMD_TYPE_SET_IP_REQ, 20);
+    fake_advance_check("ldi", app_ldi_probe_frame, s_frame, n, &len);
+
+    n = rls_build(64);
+    fake_advance_check("rls", app_rls_probe_frame, s_frame, n, &len);
 }
 
 /* ================================================================
@@ -571,6 +694,11 @@ static void conformance_run(const probe_entry_t *pe)
     }
 }
 
+/** @brief 通用契约（随机 + 构造字节流）：只断言四条不变量，覆盖"没想到的地方"
+ *
+ *  不变量 = READY/SKIP 帧长为正且 ≤ payload_max、≤ 当前可用字节；WAIT 不消费。
+ *  新增协议只要加一行 s_probes 表项就自动受检，不依赖"记得写用例"
+ *  —— 越界读写由 ASan 直接抓，不必写成断言。 */
 static void test_conformance(void)
 {
     TEST_BEGIN("通用契约：随机与构造字节流下的探针不变量");
@@ -615,8 +743,9 @@ int main(void)
     test_rls();
     test_scratch_contract();
     test_fake_does_not_copy_whole();
+    test_fake_advances_exactly_one_byte();
     test_conformance();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
-    return g_fail == 0 ? 0 : 1;
+    return g_fail ? 1 : 0;
 }

@@ -13,6 +13,9 @@
  *
  * 被测代码是生产源码本体：直接 include `app_screen.c` 与其拆出的 `app_screen_canvas.c`
  * （sink 是 static，从外部够不着；这也顺带让 `#if BOARD_SCREEN_CANVAS` 里的代码真正进到构建里）。
+ *
+ * **还覆盖**：落屏的长度守卫（长度不符只拒、不动屏），以及折叠（1×2）布局下的**逐单元
+ * 颜色账**（单元 = 半屏）：整单元纯色填充定帧色 / 混色回落卡片色 / 半屏清屏只复位本单元。
  */
 
 /* 必须在 include app_screen.c 之前定义：board.h 里是 #ifndef 保护的，
@@ -160,7 +163,7 @@ static void check_bitmaps_equal(const uint8_t *a, const uint8_t *b, uint16_t len
  *  用例
  * ================================================================ */
 
-/** 画布路径（走 sink）与直写实屏（走 dev_display_*）必须产出同一幅画面 */
+/** @brief 画布路径（走 sink）与直写实屏（走 dev_display_*）必须产出同一幅画面 */
 static void case_canvas_matches_direct(void)
 {
     TEST_BEGIN("经画布渲染 == 直写实屏渲染（单色内容逐像素相等）");
@@ -188,7 +191,7 @@ static void case_canvas_matches_direct(void)
     check_bitmaps_equal(got, ref, sizeof(got), "横条+竖条");
 }
 
-/** 位图叠加路径：bit=1 才写、bit=0 不动，与 dev_display_draw_bitmap 同语义 */
+/** @brief 位图叠加路径：bit=1 才写、bit=0 不动，与 dev_display_draw_bitmap 同语义 */
 static void case_bitmap_overlay_semantics(void)
 {
     TEST_BEGIN("bitmap 叠加语义与 draw_bitmap 一致（bit=0 不清除）");
@@ -215,7 +218,7 @@ static void case_bitmap_overlay_semantics(void)
     check_bitmaps_equal(got, ref, sizeof(got), "黑位图擦除");
 }
 
-/** 越界：画布必须自己裁干净，且不得写坏自己的缓冲 */
+/** @brief 越界：画布必须自己裁干净，且不得写坏自己的缓冲 */
 static void case_clipping(void)
 {
     TEST_BEGIN("越界写入被裁掉，不越界也不写坏画布");
@@ -247,7 +250,7 @@ static void case_clipping(void)
     CHECK_MSG(s_canvas_buf[0] == 0, "越界 fill 写进了画布左上角");
 }
 
-/** 位图右边缘裁剪：源 stride 必须按**裁剪前**的 w 算，否则行偏移错位 */
+/** @brief 位图右边缘裁剪：源 stride 必须按**裁剪前**的 w 算，否则行偏移错位 */
 static void case_bitmap_clip_stride(void)
 {
     TEST_BEGIN("位图右边缘裁剪后源行 stride 不错位（w=16→裁到 4）");
@@ -283,7 +286,7 @@ static void case_bitmap_clip_stride(void)
               "第 1 行右端被点亮 —— 源 stride 用了裁剪后的宽度（末字节 %02X）", row1);
 }
 
-/** APP_RENDER_TYPE_FILL 的 w=h=0 全屏语义走的是目标几何，不是实屏几何 */
+/** @brief APP_RENDER_TYPE_FILL 的 w=h=0 全屏语义走的是目标几何，不是实屏几何 */
 static void case_fullscreen_fill(void)
 {
     TEST_BEGIN("全屏填充覆盖整块画布");
@@ -302,7 +305,7 @@ static void case_fullscreen_fill(void)
               (unsigned)(W * H));
 }
 
-/** 落屏：位图长度不符必须拒绝，而不是将就出一幅错位画面 */
+/** @brief 落屏：位图长度不符必须拒绝，而不是将就出一幅错位画面 */
 static void case_commit_length_guard(void)
 {
     TEST_BEGIN("落屏拒绝长度不符的位图");
@@ -321,7 +324,7 @@ static void case_commit_length_guard(void)
     CHECK_MSG(s_fb[0] == DEV_DISPLAY_COLOR_GREEN, "长度正确却没落屏");
 }
 
-/** 折叠半屏全黑填充 = 该单元"新一帧"：只复位**本单元**，另一单元不受影响 */
+/** @brief 折叠半屏全黑填充 = 该单元"新一帧"：只复位**本单元**，另一单元不受影响 */
 static void case_halfscreen_clear_resets_own_unit(void)
 {
     TEST_BEGIN("折叠半屏全黑填充 = 该单元新一帧（只复位本单元，不动另一单元）");
@@ -347,7 +350,7 @@ static void case_halfscreen_clear_resets_own_unit(void)
               (unsigned)app_screen_output_color(1, card));
 }
 
-/** 逐单元独立：上半红 + 下半绿 → 上卡红、下卡绿；上半文本不改下半单元 */
+/** @brief 逐单元独立：上半红 + 下半绿 → 上卡红、下卡绿；上半文本不改下半单元 */
 static void case_per_unit_colors_independent(void)
 {
     TEST_BEGIN("逐单元独立：上半红/下半绿 → 上卡红、下卡绿，互不干扰");
@@ -377,7 +380,7 @@ static void case_per_unit_colors_independent(void)
               "上半文本不得动下半单元，得到 %u（应为绿）", (unsigned)app_screen_output_color(1, card));
 }
 
-/** 整屏纯色填充在折叠布局下 = 两个单元同时复位并定色 */
+/** @brief 整屏纯色填充在折叠布局下 = 两个单元同时复位并定色 */
 static void case_fullscreen_fill_sets_both_units(void)
 {
     TEST_BEGIN("整屏纯色填充 = 两个单元同色（折叠）");
@@ -392,7 +395,7 @@ static void case_fullscreen_fill_sets_both_units(void)
               (unsigned)app_screen_output_color(1, card));
 }
 
-/** 某单元混色只影响它自己：上半异色混用 → 上卡回落；下半单色仍定色 */
+/** @brief 某单元混色只影响它自己：上半异色混用 → 上卡回落；下半单色仍定色 */
 static void case_unit_mixed_isolated(void)
 {
     TEST_BEGIN("混色只影响本单元：上半混色回落，下半单色仍定色");
@@ -412,7 +415,7 @@ static void case_unit_mixed_isolated(void)
               (unsigned)app_screen_output_color(1, card));
 }
 
-/** 非折叠（单单元）：整屏纯色填充定帧色，红→绿、蓝→青不退回卡片色；黑仍只复位 */
+/** @brief 非折叠（单单元）：整屏纯色填充定帧色，红→绿、蓝→青不退回卡片色；黑仍只复位 */
 static void case_full_color_fill_sets_frame_color(void)
 {
     TEST_BEGIN("整屏纯色填充定本帧色：红→绿 / 蓝→青 不退回卡片色；黑仍复位");
@@ -451,7 +454,7 @@ static void case_full_color_fill_sets_frame_color(void)
               (unsigned)app_screen_output_color(0, card));
 }
 
-/** 局部彩色填充仍走累积/混合：异色 → mixed → 退回落卡片色（旧语义不变） */
+/** @brief 局部彩色填充仍走累积/混合：异色 → mixed → 退回落卡片色（旧语义不变） */
 static void case_local_color_fill_still_mixed(void)
 {
     TEST_BEGIN("局部彩色填充仍累积混合：异色 → 回落卡片色");

@@ -661,7 +661,27 @@ TEST_CDSTD_SRCS = \
 
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
-test: $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
+# 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
+
+# ---- 结构规则检查（测试的第一道闸）----
+# 套件骨架 / 断言宏 / 用例纪律 / 登记完整性 / 例外表对账由脚本机器强制（规则 R1~R11，
+# 正文见 docs/测试约定.md；检查器自身有 --list-rules 与 --list-exceptions）。
+# 挂成 test 的依赖而不是只做独立目标：靠人"记得跑 lint"迟早会忘，
+# `make test` 必须先过这一关；有违规时脚本退出 1，make 随之失败。
+lint:
+	python3 test/check_conventions.py
+
+# ---- 变异测试（第二道闸，手动跑）----
+# 故意往生产源码里注入缺陷，看套件能否发现（见 test/mutate.py 文件头的不变量）。
+# 它会**临时改写** Application/** 下的生产源码再还原，不要与并行构建同时跑。
+# 已登记套件：test_iap_cfg（IAP/Flash）、test_cdstd（CDSTD A1/A3）；默认 test_iap_cfg。
+# 参数透传示例：make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"
+mutate:
+	python3 test/mutate.py $(MUT_ARGS)
+
+.PHONY: lint mutate
+
+test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUILD)/test_probes \
       $(TEST_BUILD)/test_cfg_sched $(TEST_BUILD)/test_iap_cfg $(TEST_BUILD)/test_ldi_0ah \
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \

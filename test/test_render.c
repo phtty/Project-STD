@@ -20,6 +20,12 @@
  * **分工**：capture-vs-画布的**逐像素对拍不在本套件做** —— test_screen_canvas.c 已有
  * 一份独立参考实现做对拍。本套件只钉 `app_render` 自身的排版几何（入口夹取、高度
  * 门禁、换行/截断、对齐偏移），两套互补、不重复堆桩。
+ *
+ * **还覆盖**（同套件顺带，不另立文件）：
+ *   · `app_render()` 的模块互斥量 —— 每次调用（含提前返回）恰好一次 Acquire/Release；
+ *   · `text_cvt.c` 的 UTF8/GBK/UNICODE 互转边界（截在多字节序列中间、半个码位）；
+ *   · RLS 显示帧的位图长度门禁（`app_rls_cmd.c`）：不足**拒显且不碰 app_render**，
+ *     下界钉 `data_len ≤ 13` 的守卫（防无符号减法回绕）。
  */
 
 #include <stdbool.h>
@@ -316,7 +322,7 @@ static int g_fail;
  *  用例：模块互斥量（P7）
  * ================================================================ */
 
-/** app_render 的模块锁：每次调用（含内部提前返回）恰好一次 acquire/release */
+/** @brief app_render 的模块锁：每次调用（含内部提前返回）恰好一次 acquire/release */
 static void case_render_lock_balance(void)
 {
     TEST_BEGIN("app_render 每次调用恰好一次 acquire/release（含提前返回路径）");
@@ -352,7 +358,7 @@ static void case_render_lock_balance(void)
  *  用例：高度
  * ================================================================ */
 
-/** 区域高 < 单行字高 → 一次绘制都没有（含显式 `\n` 的文本，二者同门禁） */
+/** @brief 区域高 < 单行字高 → 一次绘制都没有（含显式 `\n` 的文本，二者同门禁） */
 static void case_height_too_small(void)
 {
     TEST_BEGIN("区域高 < 单行字高 → 一次绘制都没有（含 \\n 文本）");
@@ -369,7 +375,7 @@ static void case_height_too_small(void)
     CHECK_MSG(s_rec_cnt == 0, "含 \\n 且 h<行高，却画了 %d 次", s_rec_cnt);
 }
 
-/** 能容 k 行时恰好 k 行，第 k+1 行不得出现 */
+/** @brief 能容 k 行时恰好 k 行，第 k+1 行不得出现 */
 static void case_exact_lines(void)
 {
     TEST_BEGIN("能容 k 行时恰好 k 行，第 k+1 行不得出现");
@@ -386,7 +392,7 @@ static void case_exact_lines(void)
               (unsigned)(2 * LINE_H));
 }
 
-/** y>0 时高度判据必须用 y+h（不是把 h 当绝对下边界） */
+/** @brief y>0 时高度判据必须用 y+h（不是把 h 当绝对下边界） */
 static void case_y_offset_gate(void)
 {
     TEST_BEGIN("y>0 时判据用 y+h（防把 h 当绝对下边界）");
@@ -406,7 +412,7 @@ static void case_y_offset_gate(void)
  *  用例：宽度
  * ================================================================ */
 
-/** 超宽 wrap：续行回区域左 x */
+/** @brief 超宽 wrap：续行回区域左 x */
 static void case_width_wrap(void)
 {
     TEST_BEGIN("超宽 wrap：续行回区域左 x");
@@ -427,7 +433,7 @@ static void case_width_wrap(void)
     CHECK_MSG(left_ok, "续行起点不是区域左 x（应为 10/18/26）");
 }
 
-/** 超宽截断：逐字形整体截断，保留已放下的；不换行 */
+/** @brief 超宽截断：逐字形整体截断，保留已放下的；不换行 */
 static void case_width_truncate(void)
 {
     TEST_BEGIN("超宽截断：整体截断、保留已放下的");
@@ -450,7 +456,7 @@ static void case_width_truncate(void)
  *  用例：对齐
  * ================================================================ */
 
-/** 对齐在区域内算（x>0 + 居中/右） */
+/** @brief 对齐在区域内算（x>0 + 居中/右） */
 static void case_align_in_region(void)
 {
     TEST_BEGIN("对齐在区域内算（x>0 + 居中/右）");
@@ -469,7 +475,7 @@ static void case_align_in_region(void)
               s_rec_cnt ? (unsigned)s_recs[0].x : 999U);
 }
 
-/** 区域窄于单字宽时不得产生巨大 cur_x（防无符号下溢） */
+/** @brief 区域窄于单字宽时不得产生巨大 cur_x（防无符号下溢） */
 static void case_align_no_underflow(void)
 {
     TEST_BEGIN("区域窄于单字宽：对齐偏移不产生巨大 cur_x（防下溢）");
@@ -499,6 +505,10 @@ static void case_align_no_underflow(void)
  *  用例：越界
  * ================================================================ */
 
+/** @brief 越界：x/y 到达或越过目标尺寸时一次都不画
+ *
+ *  判据必须含**等于**（`x >= 目标宽` / `y >= 目标高`）—— 差一个比较符就会在屏的
+ *  右/下边缘画出半张字形，而裁剪会把它悄悄吃掉，现场只表现为"贴边那个字少一块"。 */
 static void case_out_of_bounds(void)
 {
     TEST_BEGIN("越界：x>=目标宽 / y>=目标高 → 不画");
@@ -514,7 +524,7 @@ static void case_out_of_bounds(void)
     CHECK_MSG(s_rec_cnt == 0, "y==目标高 仍画了 %d 次", s_rec_cnt);
 }
 
-/** 区域部分出目标：夹取后不得越界，续行回夹取后的区域左 */
+/** @brief 区域部分出目标：夹取后不得越界，续行回夹取后的区域左 */
 static void case_clamp_partial(void)
 {
     TEST_BEGIN("区域部分出目标：夹取后坐标/尺寸不越界");
@@ -547,7 +557,7 @@ static void case_clamp_partial(void)
  *  用例：行数（A2 回归）
  * ================================================================ */
 
-/** ≥33 行文本不得破坏栈（原 `uint16_t line_widths[32]` 越界写） */
+/** @brief ≥33 行文本不得破坏栈（原 `uint16_t line_widths[32]` 越界写） */
 static void case_many_lines(void)
 {
     TEST_BEGIN("≥33 行文本不再破坏栈（A2 回归）");
@@ -572,7 +582,7 @@ static void case_many_lines(void)
  *  用例：prefer_one_line（S2）
  * ================================================================ */
 
-/** 自适应优先单行：单行放得下就选能放下的**最大**字号且不换行；
+/** @brief 自适应优先单行：单行放得下就选能放下的**最大**字号且不换行；
  *  连最小字号一行都放不下才退回最小字号并强制换行。
  *
  *  合成字库 sizes={14,16,20,24,32}（与 3833024 一致）。GBK 字形宽 = size，ASCII = size/2。 */
@@ -658,7 +668,7 @@ static void case_prefer_one_line(void)
  *  用例：自适应字号 · 含 `\n`（现场回归 R）
  * ================================================================ */
 
-/** 含 `\n` 的多行文本：旧 blob 估算看不到行数 —— 128×32、9 字节"回归\n测试"在 24 号
+/** @brief 含 `\n` 的多行文本：旧 blob 估算看不到行数 —— 128×32、9 字节"回归\n测试"在 24 号
  *  命中（h_res=1、w_res=10 → 10≥9），但 24 号两行=48>32 → 只画第一行、居中也失效。
  *  新口径按"行数 × 字号 ≤ rh 且最宽行 ≤ rw"选，应选 16。 */
 static void case_adaptive_multiline(void)
@@ -715,7 +725,7 @@ static void case_adaptive_multiline(void)
  *  用例：cvt 边界安全（P4）
  * ================================================================ */
 
-/** 2 字节 + 3 字节 + 4 字节混合：前后文字必须仍在、emoji 被安全跳过 */
+/** @brief 2 字节 + 3 字节 + 4 字节混合：前后文字必须仍在、emoji 被安全跳过 */
 static void case_cvt_mixed(void)
 {
     TEST_BEGIN("cvt：2/3/4 字节混合——前后文字仍在、emoji 安全跳过");
@@ -743,7 +753,7 @@ static void case_cvt_mixed(void)
               "😀中文 应为 D6D0 CEC4，得到 out=%u", (unsigned)n);
 }
 
-/** 输入长度切在多字节中间：干净停止、不越界（本套件跑在 ASan 下） */
+/** @brief 输入长度切在多字节中间：干净停止、不越界（本套件跑在 ASan 下） */
 static void case_cvt_truncated(void)
 {
     TEST_BEGIN("cvt：长度切在多字节中间——不越界、只返回已转换部分");
@@ -782,7 +792,7 @@ static void case_cvt_truncated(void)
               "é 应解出 U+00E9（小端 E9 00），得到 out=%u", (unsigned)n);
 }
 
-/** GBK↔UNICODE 与 UNICODE→UTF8（P4 同批残留）：
+/** @brief GBK↔UNICODE 与 UNICODE→UTF8（P4 同批残留）：
  *  半个码位干净停止、字节序/输出语义保持不变 */
 static void case_cvt_unicode_bounds(void)
 {
@@ -836,7 +846,7 @@ static void case_cvt_unicode_bounds(void)
     CHECK_MSG(n == 0, "半个 UNICODE 码元转 UTF-8 应干净停止，得到 %u", (unsigned)n);
 }
 
-/** 长 UTF-8 输入经 app_render：输入夹到 text_buf，输出不越界且排版合理 */
+/** @brief 长 UTF-8 输入经 app_render：输入夹到 text_buf，输出不越界且排版合理 */
 static void case_long_utf8_clamp(void)
 {
     TEST_BEGIN("长 UTF-8 输入经 app_render：输入夹到 text_buf，不越界且排版合理");
@@ -867,6 +877,9 @@ static app_ccb_t s_rls_ccb = {.name = "rls_ut", .ops = nullptr};
  * 只要 `≥ ceil(逻辑屏宽/8)×逻辑屏高` 就放行（多带的字节不用也不拒）。
  * 两条实际几何：3833024 单卡 128×32 需 512 B（一帧 530B 装得下）；
  * 5006048 级联 224×100 需 2800 B，而一帧最多 530 B —— **必然拒显**。
+ *
+ * 下界侧另钉 `app_rls_cmd.c:49-52` 的守卫（`data_len > overhead`）：`data_len ≤ 13`
+ * 时可用位图必须是 0，否则 `data_len − 13` 在 uint16 下回绕、反被当成"位图很足"。
  */
 static void case_rls_display_len(void)
 {
@@ -886,6 +899,31 @@ static void case_rls_display_len(void)
     /* --- 3833024 几何：need = 512 B --- */
     s_stub_rows = 128;
     s_stub_cols = 32;
+
+    /* --- 头部边界（守卫哨兵）：`data_len ≤ 13` = 帧头 6 + 显示头 4 + BCC 1 + 尾 2 ---
+       本组钉的是 `app_rls_cmd.c:49-52` 的 `data_len > overhead ? data_len − 13 : 0`：
+       守卫被拆掉的话 `data_len − 13` 会在 uint16 下**回绕**成 65523~65535，
+       反而被当成"位图很足"放行 → `app_render` 按逻辑屏几何越界读帧缓冲。 */
+    CHECK_MSG(_rls_display_bitmap_have(0) == 0 && _rls_display_bitmap_have(12) == 0 &&
+                  _rls_display_bitmap_have(13) == 0,
+              "data_len ≤ 13 时可用位图必须是 0（回绕即守卫失效）：得到 %u / %u / %u",
+              (unsigned)_rls_display_bitmap_have(0), (unsigned)_rls_display_bitmap_have(12),
+              (unsigned)_rls_display_bitmap_have(13));
+
+    /* 头部 −1 / 恰好头部 / 空帧：三种都必须拒显（一次 app_render 都不许调） */
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 12);
+    CHECK_MSG(s_rec_cnt == 0, "data_len=12（少 1 字节才够帧头）必须拒显：期望 0 次绘制，得到 %d",
+              s_rec_cnt);
+
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 13);
+    CHECK_MSG(s_rec_cnt == 0, "data_len=13（恰好帧头、位图为 0）必须拒显：期望 0 次绘制，得到 %d",
+              s_rec_cnt);
+
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 0);
+    CHECK_MSG(s_rec_cnt == 0, "data_len=0（空帧）必须拒显：期望 0 次绘制，得到 %d", s_rec_cnt);
 
     /* 短帧：整帧 64 B → 位图可用 64−13 = 51 < 512 → 拒显（一次 app_render 都不许调） */
     cap_reset(128, 32);

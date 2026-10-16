@@ -52,12 +52,14 @@ RB_DEFINE(s_rb, TEST_RB_SIZE);
 static uint8_t s_shadow[SHADOW_CAP];
 static uint16_t s_shadow_rd, s_shadow_wr;
 
+/** @brief 影子模型的读/写位置清零 —— 影子与 rb 必须同时复位，否则比对永远对不上 */
 static void shadow_reset(void)
 {
     s_shadow_rd = 0;
     s_shadow_wr = 0;
 }
 
+/** @brief 影子模型里"当前应可读"的字节数（rb_avail 的期望值来源） */
 static uint16_t shadow_avail(void)
 {
     return (uint16_t)(s_shadow_wr - s_shadow_rd);
@@ -119,6 +121,7 @@ static uint16_t rb_read_pattern(uint16_t n)
     return r;
 }
 
+/** @brief 清空 rb 并同步影子模型 —— 每个用例开头都要走一遍，避免用例间串味 */
 static void reset_all(void)
 {
     rb_flush(&s_rb, nullptr);
@@ -227,7 +230,11 @@ static void case_capped_wraparound(void)
     free(dest);
 }
 
-/** @brief offset 超出可读范围时返回 0 */
+/** @brief 下界方向的夹紧：界内最后一位（offset == avail-1）返回恰好 1 字节，且不多写一个；
+ *         offset == avail（已越过可读范围）与远越界（999）都必须返回 0
+ *
+ *  **只判上界是本类缺陷的典型形态**（规范 §5）：这一组把"`>= avail` 判据"的两侧都钉住
+ *  —— 夹错一位的表现是窥视返回 0/多拷，探针据此把真帧判成 WAIT 或读到帧外字节。 */
 static void case_capped_offset_beyond_avail(void)
 {
     printf("case_capped_offset_beyond_avail\n");
@@ -235,8 +242,18 @@ static void case_capped_offset_beyond_avail(void)
     CHECK(rb_write_pattern(10) == 10);
 
     uint8_t dest[64];
+    /* 界内最后一位：恰好 1 字节，且第 2 个字节不许被碰（栈数组，ASan 抓不到，用哨兵） */
+    memset(dest, 0xAA, sizeof(dest));
+    CHECK_MSG(rb_peek(&s_rb, 9, dest, sizeof(dest), nullptr) == 1,
+              "offset=avail-1 应返回 1，实际 %u", rb_peek(&s_rb, 9, dest, sizeof(dest), nullptr));
+    CHECK_MSG(dest[0] == s_shadow[s_shadow_rd + 9], "offset=avail-1 处的内容应为影子模型那一字节（0x%02X）",
+              (unsigned)s_shadow[s_shadow_rd + 9]);
+    CHECK_MSG(dest[1] == 0xAA, "只许写 1 字节，第 2 字节被改成 0x%02X", (unsigned)dest[1]);
+
+    /* 上界：offset == avail 与远越界都返回 0（不移动读指针） */
     CHECK(rb_peek(&s_rb, 10, dest, sizeof(dest), nullptr) == 0);
     CHECK(rb_peek(&s_rb, 999, dest, sizeof(dest), nullptr) == 0);
+    CHECK(rb_avail(&s_rb, nullptr) == 10);
 }
 
 /* ================================================================
@@ -319,6 +336,7 @@ static void case_peek_returns_avail_minus_offset(void)
  *  入口
  * ================================================================ */
 
+/** @brief 入口：顺序跑各用例；只数失败（本套件的汇总行格式是冻结的历史变体，不动） */
 int main(void)
 {
     printf("=== test_ring_buffer ===\n");

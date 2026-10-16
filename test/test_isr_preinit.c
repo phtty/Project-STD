@@ -209,6 +209,9 @@ static int g_fail;
  *  用例 —— 全程不调 pl_tim_init() / pl_uart_init()
  * ================================================================ */
 
+/** @brief initcall 之前：各 TIM ISR 都要真的把中断交给 HAL（不清标志 = 立刻重入 = 中断风暴）
+ *
+ *  TIM7 是 HAL 时基，HAL_Init 阶段就被使能 —— 它就是当初把 CPU 卡死在这里的那一个。 */
 static void case_tim_isrs_before_init(void)
 {
     TEST_BEGIN("initcall 之前：各 TIM ISR 都要真的去清中断源");
@@ -230,6 +233,7 @@ static void case_tim_isrs_before_init(void)
     CHECK_MSG(s_tim_irq_calls == 3, "TIM2 已不用，它的 ISR 不该去碰 HAL");
 }
 
+/** @brief initcall 之前：TIM7 的周期回调仍要喂 HAL tick —— 停了就没有超时/延时基准 */
 static void case_tim7_tick_before_init(void)
 {
     TEST_BEGIN("initcall 之前：TIM7 的周期回调仍要喂 HAL tick");
@@ -239,6 +243,7 @@ static void case_tim7_tick_before_init(void)
     CHECK_MSG(s_inc_tick_calls == 1, "TIM7 周期回调没喂 tick —— HAL 时基会停摆");
 }
 
+/** @brief initcall 之前：UART ISR 也要真的去清中断源（读运行时 ctx 就是"什么都不做"→ 风暴） */
 static void case_uart_isr_before_init(void)
 {
     TEST_BEGIN("initcall 之前：UART ISR 也要真的去清中断源");
@@ -265,6 +270,7 @@ static void case_uart_isr_before_init(void)
  *  （帧发出去了），而它被"简化"掉时不会有任何东西报警。
  * ================================================================ */
 
+/** @brief 发送超时 < 本帧物理时间时，必须被抬到物理时间（否则长帧被 HAL 拦腰截断且完全静默） */
 static void case_tx_timeout_floor(void)
 {
     TEST_BEGIN("发送超时 < 本帧物理时间时，必须被抬到物理时间");
@@ -307,6 +313,7 @@ static void case_tx_timeout_floor(void)
  *  本用例立刻红 —— 见本文件末尾的自检注释。
  * ================================================================ */
 
+/** @brief 接收流必须真编成"循环 + 直接模式"—— 影子改了不算，寄存器里得是 CIRC（见下方长注释） */
 static void case_rx_stream_really_circular(void)
 {
     TEST_BEGIN("接收流必须真编成循环（影子改了不算，寄存器里得是 CIRC）");
@@ -319,13 +326,16 @@ static void case_rx_stream_really_circular(void)
     CHECK_MSG(s_hdma_rx1.Init.Mode == DMA_NORMAL, "夹具起点应当是板级的 DMA_NORMAL");
 
     static uint8_t rx_buf[64];
+    /* 该计数器是文件级的**累计值**，用例之间会串味（规范 §4.4）：先复位，本条只统计
+       **自己这一次** start_rx 的调用。判定语义不变：这一 case 内计到 1 次即可。 */
+    s_dma_init_calls = 0;
     CHECK_MSG(pl_uart_start_rx(h, rx_buf, sizeof(rx_buf)) == 0, "start_rx 应当成功");
 
     /* ① 寄存器里必须真是循环 */
     CHECK_MSG((s_fake_dma2_stream2.CR & DMA_SxCR_CIRC) != 0,
               "DMA_SxCR 的 CIRC 位没写进去 —— Init 只是影子，不重新 HAL_DMA_Init 硬件仍是"
               "非循环，每收满一个缓冲 HAL 就会把接收拆掉");
-    CHECK_MSG(s_dma_init_calls >= 1, "应当重新初始化过 DMA 流（影子写进寄存器的那一步）");
+    CHECK_MSG(s_dma_init_calls >= 1, "应当重新初始化过 DMA 流（影子写进寄存器的那一步）—— 本 case 内计到 1 次即可");
 
     /* ② 直接模式：FIFO 模式下 NDTR 与内存不同步，而分帧正是按 NDTR 算的 */
     CHECK_MSG(s_hdma_rx1.Init.FIFOMode == DMA_FIFOMODE_DISABLE,

@@ -16,6 +16,10 @@
  * 数据面（`app_fold_preset_show` / `app_fold_lower_clear`，含尺寸/空槽/非法颜色拒画）。
  * EA 与 1BH 分派层的接线（CtlStatus 落值）在 test_ldi_0ah.c（那边 TU-include 了
  * app_ldi_cmd.c，不引入符号冲突）。
+ *
+ * **还覆盖**（同样"错了不报错"的旁路）：02H 清屏颜色的 00H~07H 映射与越界回落黑、
+ * 01H 字号的"按本板升序落档 / 超档取最大 / 00H 自适应"，以及**单笔清屏不包帧**
+ * （帧压制只用于"清 + 画"两笔的场景）。
  */
 
 #include <stdbool.h>
@@ -308,7 +312,7 @@ static app_ldi_ctrl_vms_t *make_vms(const char *text, uint16_t len, uint8_t form
  *  用例
  * ================================================================ */
 
-/** 三态判定：几何门禁优先；EA 的判据是"声明了模块"而非 module_count */
+/** @brief 三态判定：几何门禁优先；EA 的判据是"声明了模块"而非 module_count */
 static void case_mode(void)
 {
     TEST_BEGIN("模式判定：非折叠→FLAT；折叠+仅 E9→FOLD_E9；折叠+E9+EA→FOLD_E9_EA");
@@ -336,7 +340,7 @@ static void case_mode(void)
               (unsigned)app_fold_mode());
 }
 
-/** app_fold_rect 薄封装：转发给 app_screen_fold_rect，非折叠时一个输出都不写 */
+/** @brief app_fold_rect 薄封装：转发给 app_screen_fold_rect，非折叠时一个输出都不写 */
 static void case_rect(void)
 {
     TEST_BEGIN("app_fold_rect：折叠时转发上/下半屏；非折叠返回 false 且不写输出");
@@ -362,7 +366,7 @@ static void case_rect(void)
               (unsigned)w, (unsigned)h);
 }
 
-/** 按 \n 切两段：行数含空段、只给指针不改输入、多余行由调用方丢 */
+/** @brief 按 \n 切两段：行数含空段、只给指针不改输入、多余行由调用方丢 */
 static void case_split_lines(void)
 {
     TEST_BEGIN("app_fold_split_lines：行数含空段、只给指针不改输入");
@@ -403,7 +407,7 @@ static void case_split_lines(void)
               "输出参数全为 nullptr 时仍应返回行数");
 }
 
-/** 变体1 · 2 行：上/下半屏各一次渲染，文本片段正确、样式与 font_line 忽略 */
+/** @brief 变体1 · 2 行：上/下半屏各一次渲染，文本片段正确、样式与 font_line 忽略 */
 static void case_variant1_two_lines(void)
 {
     TEST_BEGIN("变体1 · 2 行：上/下半屏各一次渲染，'_'→换行、font_line 被忽略");
@@ -456,7 +460,7 @@ static void case_variant1_two_lines(void)
     CHECK_MSG(top && top->persist && bot && bot->persist, "keep_time==0 时两半都应请求落盘");
 }
 
-/** 变体1 · 1 行：只画上半，下半保持清空（只有一次文本渲染） */
+/** @brief 变体1 · 1 行：只画上半，下半保持清空（只有一次文本渲染） */
 static void case_variant1_one_line(void)
 {
     TEST_BEGIN("变体1 · 1 行：只渲染上半屏（下半不渲染、保持清空）");
@@ -484,7 +488,7 @@ static void case_variant1_one_line(void)
     CHECK_MSG(top && !top->persist, "keep_time!=0 时不该请求落盘");
 }
 
-/** 变体1 · >2 行：只取前 2 行，第 3 行不渲染 */
+/** @brief 变体1 · >2 行：只取前 2 行，第 3 行不渲染 */
 static void case_variant1_three_lines(void)
 {
     TEST_BEGIN("变体1 · 3 行：只取前 2 行（第 3 行不渲染）");
@@ -511,7 +515,7 @@ static void case_variant1_three_lines(void)
     CHECK_MSG(bot && bot->len == 1 && bot->text[0] == 'B', "下半应为 'B'（第 3 段 'C' 被丢弃）");
 }
 
-/** FLAT：与折叠引入前逐字一致 —— 单次渲染、区域 = 逻辑屏（font_line 照旧生效） */
+/** @brief FLAT：与折叠引入前逐字一致 —— 单次渲染、区域 = 逻辑屏（font_line 照旧生效） */
 static void case_flat(void)
 {
     TEST_BEGIN("FLAT：单次渲染、区域 = 逻辑屏；font_line 照旧生效（旧行为不变）");
@@ -549,7 +553,7 @@ static void case_flat(void)
               r2 ? (unsigned)r2->y : 0U);
 }
 
-/** 变体2 · E9 侧：只写上半屏、只清上半屏（下半留给 EA 预置图） */
+/** @brief 变体2 · E9 侧：只写上半屏、只清上半屏（下半留给 EA 预置图） */
 static void case_variant2_e9_top_only(void)
 {
     TEST_BEGIN("变体2：E9 只写上半、只清上半（下半留给 EA 预置图）");
@@ -593,12 +597,14 @@ static void case_variant2_e9_top_only(void)
               "EA 01H 应用自己的信号色绿，不跟上一条 E9 的红（解除耦合）");
 }
 
-/** 变体2 · EA 数据面：00H 只清下半（不调 BITMAP）；01H/02H 取对应槽；空槽拒画 */
-static void case_ea_show_and_clear(void)
+/** @brief EA 00H：只清下半屏 —— 不调 BITMAP、不包帧、不落盘
+ *
+ *  下半是 EA 自己的地盘：既不能碰上半（E9 的文字在上半），也不能顺带落盘
+ *  （清屏落盘会把"上电有内容可判屏"的判据擦掉）。单笔路径包 begin/end 只会压住脏标记。 */
+static void case_ea_clear_lower(void)
 {
-    TEST_BEGIN("EA：00H 只清下半（不调 BITMAP）；01H/02H 映射对应槽；空槽（黄）拒画");
+    TEST_BEGIN("EA 00H：只清下半（不调 BITMAP、不包帧、不落盘）");
 
-    /* 00H → 只清下半屏：FILL(BLACK) 区域 = 下半，且不得有 BITMAP */
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -616,8 +622,16 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0,
               "清下半屏是单笔，不得 begin/end（包了无意义），得到 begin=%d end=%d", s_frame_begins,
               s_frame_ends);
+}
 
-    /* 01H → 绿槽：必须"先清下半屏再画"（bit=0 不动，不清会留残影），且两笔包成一帧 */
+/** @brief EA 01H（绿）：先清下半屏再贴图，两笔包成一帧，颜色取信号色绿
+ *
+ *  bit=0 不动 ⇒ 不清就留上一张图的残影；清与画必须同属一帧，否则中间态（下半全黑）
+ *  会被别的路径落一次屏。 */
+static void case_ea_show_green(void)
+{
+    TEST_BEGIN("EA 01H：清下半 + 贴绿槽（同一帧，颜色取信号色绿）");
+
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -642,8 +656,13 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_GREEN,
               "01H 的颜色应取 Color 自己的信号色（绿），得到 %u", (unsigned)s_recs[1].color);
     CHECK_MSG(s_recs[1].persist, "EA 预置图应请求落盘（掉电恢复）");
+}
 
-    /* 02H → 红槽：同样"先清再画" */
+/** @brief EA 02H（红）：与 01H 同构，只是取红槽 —— 颜色不能串槽 */
+static void case_ea_show_red(void)
+{
+    TEST_BEGIN("EA 02H：清下半 + 贴红槽（颜色与槽位对应）");
+
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -662,8 +681,15 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_recs[1].color == DEV_DISPLAY_COLOR_RED,
               "02H 的颜色应取 Color 自己的信号色（红），得到 %u", (unsigned)s_recs[1].color);
     CHECK_MSG(s_recs[1].persist, "EA 预置图（红）也应请求落盘");
+}
 
-    /* 同一色连发两次：每次都要重新清 + 画，不得因"与上次同色"跳过（缓存会吃残影） */
+/** @brief EA 同色重发：每次都重新清 + 画，不得因"与上次同色"跳过
+ *
+ *  缓存（"同色就跳过"）会吃掉残影，且被跳过的那一轮不再产生成对的 begin/end。 */
+static void case_ea_show_same_color_repeat(void)
+{
+    TEST_BEGIN("EA 同色重发：每次都要重新清 + 画（不许同色跳过）");
+
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -683,8 +709,16 @@ static void case_ea_show_and_clear(void)
               "同色重发第二次同样要有自己的 begin → 两笔 → end");
     CHECK_MSG(memcmp(first_pair, s_recs, sizeof(first_pair)) == 0,
               "同色重发的两次渲染序列必须逐字段一致（每次都重新清+画）");
+}
 
-    /* 03H → 黄槽是空槽：拒画 + false + 无渲染 + 不 begin（不留未配对 begin） */
+/** @brief EA 03H（黄）：空槽拒画 —— false + 零渲染 + 零 begin
+ *
+ *  空槽是"数据待补"的合法状态（5006048 的黄槽即如此）：若是先 begin 再发现没数据，
+ *  那对未配对的 begin 会把脏标记永久压住、屏再也不刷新。 */
+static void case_ea_show_empty_slot(void)
+{
+    TEST_BEGIN("EA 03H（黄）：空槽拒画 —— false + 零渲染 + 零 begin");
+
     env_reset();
     s_fold_count = 2;
     s_scr_w      = 224;
@@ -694,7 +728,7 @@ static void case_ea_show_and_clear(void)
     CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "空槽拒画不得 begin（否则脏标记被永久压住）");
 }
 
-/** EA 拒画：尺寸不符 / 非法颜色 / 非折叠 —— 全部 false 且不渲染 */
+/** @brief EA 拒画：尺寸不符 / 非法颜色 / 非折叠 —— 全部 false 且不渲染 */
 static void case_ea_reject(void)
 {
     TEST_BEGIN("EA：尺寸不符 / 非法颜色 / 非折叠 → 拒画 + false");
@@ -726,7 +760,7 @@ static void case_ea_reject(void)
     CHECK_MSG(s_frame_begins == 0 && s_frame_ends == 0, "非折叠清屏/预置图都不得 begin");
 }
 
-/** 单笔清屏路径（02H / 定时到点）**不包帧**：只有一笔填充，没有中间态可压 */
+/** @brief 单笔清屏路径（02H / 定时到点）**不包帧**：只有一笔填充，没有中间态可压 */
 static void case_clean_and_timer_no_frame(void)
 {
     TEST_BEGIN("02H 清屏 / 定时到点：单笔路径不包帧（零 begin/end）");
@@ -779,7 +813,7 @@ static void case_clean_and_timer_no_frame(void)
               "未激活定时器不得渲染/begin");
 }
 
-/** VMS 清屏颜色（02H clear_type）：86号文 1+7 色，未知值回落黑（清屏的安全默认） */
+/** @brief VMS 清屏颜色（02H clear_type）：86号文 1+7 色，未知值回落黑（清屏的安全默认） */
 static void case_vms_clear_color(void)
 {
     TEST_BEGIN("VMS 清屏：00H~07H = 黑/红/绿/黄/蓝/紫/青/白，08H 越界回落黑");
@@ -804,7 +838,7 @@ static void case_vms_clear_color(void)
     }
 }
 
-/** VMS 字号（01H font_size）：按本板可用字号升序落档，超档取最大；00H=自适应 */
+/** @brief VMS 字号（01H font_size）：按本板可用字号升序落档，超档取最大；00H=自适应 */
 static void case_vms_font_size(void)
 {
     TEST_BEGIN("VMS 字号：按本板升序落档（合成字库 16/32）、超档取最大、00H=自适应");
@@ -846,7 +880,11 @@ int main(void)
     case_variant1_three_lines();
     case_flat();
     case_variant2_e9_top_only();
-    case_ea_show_and_clear();
+    case_ea_clear_lower();
+    case_ea_show_green();
+    case_ea_show_red();
+    case_ea_show_same_color_repeat();
+    case_ea_show_empty_slot();
     case_ea_reject();
     case_clean_and_timer_no_frame();
     case_vms_clear_color();
