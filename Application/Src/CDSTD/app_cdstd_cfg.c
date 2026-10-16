@@ -19,6 +19,7 @@ static bool s_load_done                 = false;
 
 static void _cdstd_load(void)
 {
+    // 存配置入口检查两个守卫，一个去重，一个判配置是否有效
     if (s_load_done)
         return;
 
@@ -40,12 +41,20 @@ static void _cdstd_load(void)
         s_loaded_valid = true;
 }
 
+/**
+ * @brief 加载 CDSTD 的配置信息
+ *
+ * @param info CDSTD 配置结构体
+ * @return true
+ * @return false
+ */
 bool app_cdstd_load_config(app_cdstd_net_cfg_t *info)
 {
     // 读配置去重，若已经读过，则把配置缓存拷贝过去，只有无法读出时，才返回失败
     if (!s_load_done)
         _cdstd_load();
 
+    // 判是否正常读出，若未能读出，则返回失败
     if (!s_loaded_valid) {
         memset(info, 0, sizeof(*info));
         return false;

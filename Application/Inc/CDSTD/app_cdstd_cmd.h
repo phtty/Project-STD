@@ -36,6 +36,29 @@ typedef enum {
     CDSTD_CMD_COUNT,              // 命令总数
 } app_cdstd_cmd_t;
 
+typedef enum {
+    CDSTD_COLOR_BLACK  = 0x30, // 黑色
+    CDSTD_COLOR_RED    = 0x31, // 红色
+    CDSTD_COLOR_GREEN  = 0x32, // 绿色
+    CDSTD_COLOR_YELLOW = 0x33, // 黄色
+} app_cdstd_color_t;
+
+typedef struct [[gnu::packed]] {
+    uint8_t x[2];
+    uint8_t y[2];
+    uint8_t color;
+    uint8_t font_type;
+    uint8_t font_size;
+    uint8_t text[];
+} app_cdstd_text_display_t;
+
+typedef struct [[gnu::packed]] {
+    uint8_t pos;
+    uint8_t color;
+    uint8_t bitmap[];
+} app_cdstd_picture_display_t;
+
+// 回复帧结构定义
 typedef struct [[gnu::packed]] {
     uint16_t head;
     uint8_t ver;

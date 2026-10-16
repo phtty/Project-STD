@@ -832,7 +832,9 @@ $(TEST_BUILD)/test_cdstd: $(TEST_CDSTD_SRCS)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CDSTD_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_cdstd: Application/Src/CDSTD/app_cdstd.c \
-	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h
+	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h \
+	Application/Inc/CDSTD/app_cdstd_cfg.h Application/Inc/IAP/app_iap_cfg.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

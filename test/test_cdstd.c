@@ -1,7 +1,10 @@
 /**
  * @file    test_cdstd.c
  * @brief   CDSTD（折叠屏创迪标准协议）host 单测：探针四态 / 整帧等待 / CRC→FAKE、
- *          长度域与暂存区契约、跨协议互不毒化（IAP/CASC/RLS）、队列取帧与命令分派
+ *          长度域与暂存区契约、跨协议互不毒化（IAP/CASC/RLS）、队列取帧与分派、
+ *          命令层（A1 文字显示 / A3 全屏填充 / 0xA5 设置 IP / 0xA6 上报 IP）与上电应用配置
+ *
+ * 命令层用例的写法契约见 docs/测试约定.md（桩、越界矩阵、断言预算、登记与验证清单）。
  *
  * **为什么需要这个测试**：探针是帧同步的唯一入口（同 test_casc_frame 的论证），
  * 判错一个分支的症状是"某类帧被吞掉"或"缓冲区只进不出"，都极难从现场反推。
@@ -13,9 +16,9 @@
  * 另一重点是**互不毒化**：其它协议（IAP/CASC/RLS）的字节流不得被判成 CDSTD 帧；
  * （LDI 与 CDSTD 帧几何同构、帧层面不可区分，但两者不会同时启用，故不做该断言，见用例内注释。）
  *
- * 手法：用例 TU-include 生产 TU（探针是 non-static、任务与模块资源都是 static，
- * 外部够不着），**命令表整个换成记录桩**——生产表当前全是空桩，没有可观察行为；
- * 本套件要测的是任务侧的取帧与分派机制。任务经真实 pl_task_new 跑在 pthread 上
+ * 手法：用例 TU-include 生产 TU（探针、任务、模块资源与命令处理都是 static，外部够不着），
+ * 命令层直接跑**真的** app_cdstd_cmd.c；应答用"发送记录桩"（app_ccb_send/_to）观察 ——
+ * 命令表、拼帧、CRC 全是真的，测的就是它们本身。任务经真实 pl_task_new 跑在 pthread 上
  * （与 test_dispatch 同一手法）。
  *
  * 帧由用例独立构造（不复用探针的中间量），但按**帧结构体的字段布局**写入 ——
@@ -29,9 +32,15 @@
 #include <unistd.h>
 
 #include "app_cdstd.h"
+#include "app_cdstd_cfg.h"
 #include "app_cdstd_cmd.h"
 #include "app_dispatch.h"
+#include "app_iap_cfg.h"
+#include "app_render.h"
+#include "app_screen.h"
+#include "app_udp.h"
 #include "crc_utils.h"
+#include "pl_net.h"
 #include "ring_buffer.h"
 
 /* ================================================================
@@ -50,49 +59,217 @@ void app_dispatch_bind(app_pcb_t *pcb, app_ccb_t *ccb)
 app_ccb_t *app_udp_ccb(void) { return nullptr; }
 app_ccb_t *app_rs485_ccb(void) { return nullptr; }
 
-/* ================================================================
- *  命令表：记录桩
+/* ---- 桩："上电应用"路径（假配置 + 记录网络调用） ----
+ *  _cdstd_module_init 现在会读配置并应用 IP/端口（pl_net_set_ip 会触发 IAP 镜像）。
+ *  默认无有效配置（不改网络）；用例把 s_fake_cfg_valid 置位即可观察应用结果。 */
+static bool                s_fake_cfg_valid;
+static app_cdstd_net_cfg_t s_fake_cfg;
+static int                 s_net_set_calls;
+static uint8_t             s_net_ip[4];
+static uint8_t             s_net_mask[4];
+static uint8_t             s_net_gw[4];
+static int                 s_udp_port_calls;
+static uint16_t            s_udp_port_set;
+
+bool app_cdstd_load_config(app_cdstd_net_cfg_t *info)
+{
+    if (!s_fake_cfg_valid) return false;
+    memcpy(info, &s_fake_cfg, sizeof(*info));
+    return true;
+}
+
+void pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+{
+    s_net_set_calls++;
+    memcpy(s_net_ip, ip, 4);
+    memcpy(s_net_mask, mask, 4);
+    memcpy(s_net_gw, gw, 4);
+}
+
+void app_udp_set_port(uint16_t port)
+{
+    s_udp_port_calls++;
+    s_udp_port_set = port;
+}
+
+/** @brief 复位"上电应用"记录桩（docs/测试约定.md §4.4）：用例开头调用，避免用例间串味
  *
- *  生产表（app_cdstd_cmd.c）当前全是空处理桩，观察不到"分派发生了没有"；
- *  本套件换成记录型替身，验证任务把 msg->aux 当命令号、按帧内长度域取 data_len
- *  并原样传给处理函数。表长与枚举绑定（少一项就是任务越界索引）。
+ *  包括把参数记录也清零：只清计数的话，断言失败时打印出来的"上一次残留值"
+ *  会把现场指向错误的调用。 */
+static void net_stub_reset(void)
+{
+    s_net_set_calls  = 0;
+    s_udp_port_calls = 0;
+    s_udp_port_set   = 0;
+    memset(s_net_ip, 0, sizeof(s_net_ip));
+    memset(s_net_mask, 0, sizeof(s_net_mask));
+    memset(s_net_gw, 0, sizeof(s_net_gw));
+}
+
+/* ================================================================
+ *  桩：命令层的保存 / IAP 镜像 / 运行态读取 / 应答发送（全部记录型）
+ *
+ *  命令层（app_cdstd_cmd.c）直接用真的 —— 它的命令表、拼帧、CRC 都是被测对象；
+ *  这里替身的是它的外部依赖：
+ *    · app_cdstd_save_config / app_flash_iap_update_net_cfg：记录入参，便于断言；
+ *    · pl_net_get_ip / app_udp_get_port：提供"运行态"假值（0xA6 的回落分支用）；
+ *    · app_ccb_send / _send_to：把发出去的应答录下来（状态应答走 send、B6 走 send_to）。
  * ================================================================ */
 
-static int        s_calls[CDSTD_CMD_COUNT];
-static uint16_t   s_last_len[CDSTD_CMD_COUNT];
-static app_ccb_t *s_last_ccb[CDSTD_CMD_COUNT];
+static int32_t s_save_ret; /**< 用例控制：0=成功 / 负=失败 */
+static int     s_save_calls;
+static uint8_t s_save_buf[sizeof(app_cdstd_net_cfg_t)];
 
-#define CDSTD_REC_HANDLER(n)                                               \
-    static void _rec_##n(app_ccb_t *ccb, void *data, uint16_t data_len)    \
-    {                                                                      \
-        (void)data;                                                        \
-        s_calls[n]++;                                                      \
-        s_last_len[n] = data_len;                                          \
-        s_last_ccb[n] = ccb;                                               \
+int32_t app_cdstd_save_config(const app_cdstd_net_cfg_t *info)
+{
+    s_save_calls++;
+    memcpy(s_save_buf, info, sizeof(*info));
+    return s_save_ret;
+}
+
+static int      s_iap_calls;
+static uint8_t  s_iap_ip[4];
+static uint8_t  s_iap_mask[4];
+static uint8_t  s_iap_gw[4];
+static uint32_t s_iap_port;
+
+void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
+                                  uint32_t port)
+{
+    s_iap_calls++;
+    memcpy(s_iap_ip, ip, 4);
+    memcpy(s_iap_mask, mask, 4);
+    memcpy(s_iap_gw, gw, 4);
+    s_iap_port = port;
+}
+
+/** @brief 复位"保存 + IAP 镜像"记录桩（docs/测试约定.md §4.4）：用例开头调用
+ *
+ *  s_save_ret 一并归零：它带"失败注入"语义（-1 让 save 报错），
+ *  残留到下一条用例会让下一条的"正常路径"变成失败路径。 */
+static void cfg_stub_reset(void)
+{
+    s_save_ret   = 0;
+    s_save_calls = 0;
+    memset(s_save_buf, 0, sizeof(s_save_buf));
+    s_iap_calls = 0;
+    s_iap_port  = 0;
+    memset(s_iap_ip, 0, sizeof(s_iap_ip));
+    memset(s_iap_mask, 0, sizeof(s_iap_mask));
+    memset(s_iap_gw, 0, sizeof(s_iap_gw));
+}
+
+static uint8_t  s_rt_ip[4]   = {192, 168, 1, 100}; /**< 运行态假值（0xA6 回落路径用） */
+static uint8_t  s_rt_mask[4] = {255, 255, 255, 0};
+static uint8_t  s_rt_gw[4]   = {192, 168, 1, 1};
+static uint16_t s_rt_port    = 10011;
+
+void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
+{
+    memcpy(ip, s_rt_ip, 4);
+    memcpy(mask, s_rt_mask, 4);
+    memcpy(gw, s_rt_gw, 4);
+}
+
+uint16_t app_udp_get_port(void) { return s_rt_port; }
+
+static int      s_tx_calls;    /**< app_ccb_send（回源）次数 */
+static int      s_tx_to_calls; /**< app_ccb_send_to（广播）次数 */
+static uint16_t s_tx_len;
+static uint8_t  s_tx_buf[64];
+
+int32_t app_ccb_send(app_ccb_t *ccb, const uint8_t *data, uint16_t len)
+{
+    (void)ccb;
+    s_tx_calls++;
+    s_tx_len = len;
+    if (len <= sizeof(s_tx_buf)) memcpy(s_tx_buf, data, len);
+    return 0;
+}
+
+int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t *data, uint16_t len)
+{
+    (void)ccb;
+    (void)dst;
+    s_tx_to_calls++;
+    s_tx_len = len;
+    if (len <= sizeof(s_tx_buf)) memcpy(s_tx_buf, data, len);
+    return 0;
+}
+
+/* ================================================================
+ *  桩：渲染与整屏几何（命令层只"往逻辑屏画"，这里记录最后一次 cfg）
+ *
+ *  记录成散字段、不整结构拷贝 —— app_render_cfg_t 的成员带 const，C 里整结构赋值
+ *  等于给只读成员赋值，编不过。几何桩给折叠屏部署的逻辑屏 224×100。
+ * ================================================================ */
+
+#define TEST_LOGICAL_W (224U) /**< 假逻辑屏宽（= app_screen_rows()） */
+#define TEST_LOGICAL_H (100U) /**< 假逻辑屏高（= app_screen_cols()） */
+
+uint16_t app_screen_rows(void) { return TEST_LOGICAL_W; }
+uint16_t app_screen_cols(void) { return TEST_LOGICAL_H; }
+
+static int                 s_render_calls;
+static app_render_type_t   s_rc_type;
+static uint16_t            s_rc_x;
+static uint16_t            s_rc_y;
+static uint16_t            s_rc_w;
+static uint16_t            s_rc_h;
+static dev_display_color_t s_rc_color;
+static bool                s_rc_persist;
+
+/* TEXT 分支专属（union 里其它分支的字节不当作文本字段读，见 docs/测试约定.md §4） */
+static app_font_size_t  s_rc_font_size;
+static app_font_type_t  s_rc_font_type;
+static app_font_enc_t   s_rc_text_enc;
+static const char      *s_rc_text;
+static uint16_t         s_rc_len;
+static app_render_style_t s_rc_style;
+
+void app_render(const app_render_cfg_t *cfg)
+{
+    s_render_calls++;
+    s_rc_type    = cfg->type;
+    s_rc_x       = cfg->x;
+    s_rc_y       = cfg->y;
+    s_rc_w       = cfg->w;
+    s_rc_h       = cfg->h;
+    s_rc_color   = cfg->color;
+    s_rc_persist = cfg->persist;
+
+    if (cfg->type == APP_RENDER_TYPE_TEXT) {
+        s_rc_font_size = cfg->font_size;
+        s_rc_font_type = cfg->font_type;
+        s_rc_text_enc  = cfg->text_enc;
+        s_rc_text      = cfg->text;
+        s_rc_len       = cfg->len;
+        s_rc_style     = cfg->style ? *cfg->style : (app_render_style_t){0};
     }
+}
 
-CDSTD_REC_HANDLER(0)
-CDSTD_REC_HANDLER(1)
-CDSTD_REC_HANDLER(2)
-CDSTD_REC_HANDLER(3)
-CDSTD_REC_HANDLER(4)
-CDSTD_REC_HANDLER(5)
-CDSTD_REC_HANDLER(6)
-CDSTD_REC_HANDLER(7)
-CDSTD_REC_HANDLER(8)
+static void render_reset(void)
+{
+    s_render_calls = 0;
+    s_rc_type      = (app_render_type_t)0;
+    s_rc_x = s_rc_y = s_rc_w = s_rc_h = 0;
+    s_rc_color   = DEV_DISPLAY_COLOR_BLACK;
+    s_rc_persist = false;
 
-const app_cdstd_cmd_handler_fn_t g_cdstd_cmd_table[] = {
-    _rec_0, _rec_1, _rec_2, _rec_3, _rec_4, _rec_5, _rec_6, _rec_7, _rec_8,
-};
-
-static_assert(sizeof(g_cdstd_cmd_table) / sizeof(g_cdstd_cmd_table[0]) == CDSTD_CMD_COUNT,
-              "记录桩表必须与 CDSTD_CMD_COUNT 一一对应");
+    s_rc_font_size = APP_FONT_SIZE_SELF_ADAPT;
+    s_rc_font_type = APP_FONT_TYPE_ST;
+    s_rc_text_enc  = APP_FONT_ENC_ASCII;
+    s_rc_text      = NULL;
+    s_rc_len       = 0;
+    s_rc_style     = (app_render_style_t){0};
+}
 
 /* ================================================================ */
 /*  被测：生产源码本体（与 test_casc_frame 同一手法）               */
 /* ================================================================ */
 
 #include "../Application/Src/CDSTD/app_cdstd.c"
+#include "../Application/Src/CDSTD/app_cdstd_cmd.c" /* 命令层跑真的：表/拼帧/CRC 都是被测对象 */
 
 /* ================================================================ */
 /*  夹具                                                            */
@@ -496,69 +673,446 @@ static void case_split_across_rb_wrap(void)
 }
 
 /* ================================================================
- *  任务侧：取帧与分派
+ *  命令层：A3 全屏填充 + 上电应用 + 0xA5 设置 IP / 0xA6 上报 IP
  * ================================================================ */
 
-static int calls_total(void)
+static void tx_reset(void)
 {
-    int n = 0;
-    for (int i = 0; i < CDSTD_CMD_COUNT; i++) n += s_calls[i];
-    return n;
+    s_tx_calls    = 0;
+    s_tx_to_calls = 0;
+    s_tx_len      = 0;
+    memset(s_tx_buf, 0, sizeof(s_tx_buf));
 }
 
-static bool wait_calls(int idx, int want, int timeout_ms)
+static bool wait_tx(int want, int timeout_ms)
 {
     for (int waited = 0; waited < timeout_ms; waited += 5) {
-        if (s_calls[idx] >= want) return true;
+        if (s_tx_calls + s_tx_to_calls >= want) return true;
         usleep(5000);
     }
-    return s_calls[idx] >= want;
+    return s_tx_calls + s_tx_to_calls >= want;
 }
 
+/** @brief 造一条 A1 的 DATA（7 字节头 + text_len 字节文字），返回总字节数
+ *
+ *  头 7 字节的**偏移就是协议契约**（x 高/低、y 高/低、颜色、字体、字号），不随结构体漂移。 */
+static uint16_t a1_payload(uint8_t *out, uint8_t color, uint8_t font_type, uint8_t font_size, uint16_t x,
+                           uint16_t y, uint16_t text_len)
+{
+    const uint16_t hdr = (uint16_t)sizeof(app_cdstd_text_display_t);
+
+    out[0] = (uint8_t)(x >> 8); /* 协议：先高八位、后低八位 */
+    out[1] = (uint8_t)x;
+    out[2] = (uint8_t)(y >> 8);
+    out[3] = (uint8_t)y;
+    out[4] = color;
+    out[5] = font_type;
+    out[6] = font_size;
+    memset(out + hdr, 'A', text_len); /* 本层不做解码，填什么都可以 */
+    return (uint16_t)(hdr + text_len);
+}
+
+/** @brief A1 文字显示：字号/字体映射表逐档 + 区域"左上角口径"
+ *
+ *  **为什么需要这个用例**：协议码序与工程枚举序**两处都不一致** —— 协议 0x30 是黑体，
+ *  而本工程 `HT = 3`；协议字号是点阵数（16/24/32/48），也不是 0..3 的序号。
+ *  所以两张映射表本身就是被测对象：把 `code - 0x30` 当档位用会画错字体（黑/宋互换），
+ *  把 0x31 当"第二档"会画错字号。另一处是**区域口径**：x/y 是文字左上角，
+ *  若沿用"水平居中 + 满屏宽"，x 会形同虚设（见 docs/测试约定.md §3）。 */
+static void case_cmd_word_display(void)
+{
+    TEST_BEGIN("A1 文字显示：映射表逐档 / 区域左上角口径 / 文字指针与长度");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    uint8_t          payload[sizeof(app_cdstd_text_display_t) + 4];
+
+    /* 正例：x=10 / y=20（大端）、红、黑体、48 点阵、"中"（GBK 双字节） */
+    uint16_t n = a1_payload(payload, 0x31, 0x30, 0x33, 10, 20, 2);
+    payload[sizeof(app_cdstd_text_display_t)]     = 0xD6;
+    payload[sizeof(app_cdstd_text_display_t) + 1] = 0xD0;
+    tx_reset();
+    render_reset();
+    _cdstd_word_display(&chan, payload, n);
+
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x31,
+              "应回 0xB1/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT,
+              "应恰好调一次 TEXT 渲染（calls=%d type=%d）", s_render_calls, (int)s_rc_type);
+    /* 区域 = 剩余空间 [x,W)×[y,H)：w/h 是**尺寸**不是绝对右下边界 */
+    CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_w == TEST_LOGICAL_W - 10 &&
+                  s_rc_h == TEST_LOGICAL_H - 20,
+              "区域应为 (10,20,214,80)（得到 x=%u y=%u w=%u h=%u）", s_rc_x, s_rc_y, s_rc_w, s_rc_h);
+    CHECK_MSG(s_rc_style.h_align == APP_RENDER_ALIGN_LEFT_UP &&
+                  s_rc_style.v_align == APP_RENDER_ALIGN_LEFT_UP,
+              "对齐应为左上（得到 h=%d v=%d）", (int)s_rc_style.h_align, (int)s_rc_style.v_align);
+    /* 文字指针必须只指 DATA 尾部的文字（不含 7 字节头）；长度按字节给，不靠 \0 */
+    CHECK_MSG(s_rc_text == (const char *)payload + sizeof(app_cdstd_text_display_t) && s_rc_len == 2 &&
+                  (uint8_t)s_rc_text[0] == 0xD6 && (uint8_t)s_rc_text[1] == 0xD0,
+              "文字应指向 DATA 尾部 2 字节（实际偏移=%ld len=%u）",
+              (long)(s_rc_text - (const char *)payload), s_rc_len);
+    CHECK_MSG(s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_font_size == APP_FONT_SIZE_48 &&
+                  s_rc_font_type == APP_FONT_TYPE_HT && s_rc_text_enc == APP_FONT_ENC_GBK &&
+                  s_rc_persist == false,
+              "颜色/字号/字型/编码/persist 应为 RED/48/HT/GBK/0（得到 %u/%u/%u/%u/%d）",
+              (unsigned)s_rc_color, (unsigned)s_rc_font_size, (unsigned)s_rc_font_type,
+              (unsigned)s_rc_text_enc, (int)s_rc_persist);
+
+    /* 映射表逐档：字号 0x30..0x33 = 16/24/32/48；字体 0x30..0x33 = 黑/仿宋/楷/宋 */
+    static const struct {
+        uint8_t         size_code;
+        app_font_size_t size;
+        uint8_t         type_code;
+        app_font_type_t type;
+    } map[] = {
+        {0x30, APP_FONT_SIZE_16, 0x30, APP_FONT_TYPE_HT},
+        {0x31, APP_FONT_SIZE_24, 0x31, APP_FONT_TYPE_FS},
+        {0x32, APP_FONT_SIZE_32, 0x32, APP_FONT_TYPE_KT},
+        {0x33, APP_FONT_SIZE_48, 0x33, APP_FONT_TYPE_ST},
+    };
+    for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        n = a1_payload(payload, 0x31, map[i].type_code, map[i].size_code, 0, 0, 1);
+        tx_reset();
+        render_reset();
+        _cdstd_word_display(&chan, payload, n);
+        CHECK_MSG(s_render_calls == 1 && s_rc_font_size == map[i].size && s_rc_font_type == map[i].type,
+                  "字号码 %02X 应映射为 %u 点阵、字体码 %02X 应为 %u（得到 %u / %u）", map[i].size_code,
+                  (unsigned)map[i].size, map[i].type_code, (unsigned)map[i].type,
+                  (unsigned)s_rc_font_size, (unsigned)s_rc_font_type);
+    }
+}
+
+/** @brief A1 越界矩阵：字段低位/高位/边界一律 0xB1/0x30，且**零副作用**
+ *
+ *  **为什么需要**：低位（< 0x30）这个文件的历次缺陷都出在这里 —— 原版
+ *  `_table[code - 0x30]` 直接算负下标（数组越界读，ASan 可抓），颜色判据又写在"未转换的
+ *  表达式"上（负 int 不满足 `> WHITE` → 漏放行）。前两行留着当回归哨兵。 */
+static void case_cmd_word_display_bounds(void)
+{
+    TEST_BEGIN("A1 越界矩阵：映射越界 / 长度边界 / 坐标越界 → 0x30 且不渲染");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    uint8_t          payload[sizeof(app_cdstd_text_display_t) + 4];
+
+    /* 长度维度：比 7 字节头还少 1 字节（头部截断）→ 0xB1/0x30 且不调 render。
+       表里第一行钉的是"恰好头部"（只差文字）；少一字节时连尾部字段都不在
+       data_len 之内 —— 少了这条，`data_len - sizeof()` 类下溢会带着越界读通过。 */
+    tx_reset();
+    render_reset();
+    _cdstd_word_display(&chan, payload, (uint16_t)(sizeof(app_cdstd_text_display_t) - 1U));
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x30,
+              "头部少 1 字节应回 0xB1/0x30（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 0, "头部截断不得调 render（calls=%d）", s_render_calls);
+
+    static const struct {
+        uint8_t     color, type, size;
+        uint16_t    x, y, text_len;
+        const char *why;
+    } bad[] = {
+        {0x31, 0x30, 0x33, 10, 20, 0, "只有 7 字节头、没带文字"},
+        {0x29, 0x30, 0x33, 10, 20, 1, "颜色码低于 0x30（曾漏放行）"},
+        {0x38, 0x30, 0x33, 10, 20, 1, "颜色码高于 0x37"},
+        {0x31, 0x29, 0x33, 10, 20, 1, "字体码低于 0x30"},
+        {0x31, 0x38, 0x33, 10, 20, 1, "字体码高于 0x33"},
+        {0x31, 0x30, 0x29, 10, 20, 1, "字号码低于 0x30（曾是负下标越界读）"},
+        {0x31, 0x30, 0x38, 10, 20, 1, "字号码高于 0x33"},
+        {0x31, 0x30, 0x33, TEST_LOGICAL_W, 20, 1, "x 等于屏宽（区域宽为 0）"},
+        {0x31, 0x30, 0x33, 10, TEST_LOGICAL_H, 1, "y 等于屏高"},
+    };
+
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        uint16_t n = a1_payload(payload, bad[i].color, bad[i].type, bad[i].size, bad[i].x, bad[i].y,
+                                bad[i].text_len);
+        tx_reset();
+        render_reset();
+        _cdstd_word_display(&chan, payload, n);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x30,
+                  "越界（%s）应回 0xB1/0x30（得到 cmd=%02X status=%02X）", bad[i].why, s_tx_buf[8],
+                  s_tx_buf[9]);
+        CHECK_MSG(s_render_calls == 0, "越界（%s）不得调 render（calls=%d）", bad[i].why, s_render_calls);
+    }
+}
+
+/** @brief A1 大端边界：y 取"界内最后一位"（99 = 0x0063），验证高低字节没接反
+ *
+ *  **为什么需要**：x/y 按"先高八位、后低八位"合成为 `(hi << 8) | lo`。y 的高字节
+ *  0x00 / 低字节 0x63 若接反，y 会变成 0x6300 = 25344，被"y >= 屏高"立刻拦成 0x30；
+ *  取 y=20 这种小值时两种合成都在界内，接反测不出来。99 是 `y < 100` 的最后一位，
+ *  同时把"区域高 = 屏高 - y"逼到最薄的一格（h=1），区域口径错一位就红。 */
+static void case_cmd_word_display_endian(void)
+{
+    TEST_BEGIN("A1 大端边界：y=99（字节 0x00/0x63）→ y=99、区域高=1");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    uint8_t          payload[sizeof(app_cdstd_text_display_t) + 1];
+
+    uint16_t n = a1_payload(payload, 0x31, 0x30, 0x33, 10, TEST_LOGICAL_H - 1U, 1);
+    CHECK_MSG(payload[2] == 0x00 && payload[3] == (TEST_LOGICAL_H - 1U),
+              "构造前提：y 的大端字节应为 0x00/%02X（得到 %02X/%02X）", TEST_LOGICAL_H - 1U,
+              payload[2], payload[3]);
+
+    tx_reset();
+    render_reset();
+    _cdstd_word_display(&chan, payload, n);
+
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x31,
+              "界内最后一位应成功（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H - 1U,
+              "y 应为 99（字节序接反会得到 25344 并被拦下），得到 calls=%d y=%u", s_render_calls,
+              (unsigned)s_rc_y);
+    CHECK_MSG(s_rc_h == 1, "区域高应为 屏高-99 = 1（w/h 是尺寸不是右下边界），得到 %u",
+              (unsigned)s_rc_h);
+}
+
+/** @brief A3 全屏填充：颜色映射 / 覆盖整块逻辑屏 / 不持久化 / 越界拒绝
+ *
+ *  **两条断言先留空**（等落定后再补）：
+ *   · `data_len != 1` 的拒收 —— 见评审 #2，作者在补；
+ *   · `0x34..0x37` 是否接受 —— 口径待与协议方确认（现状是接受成 蓝/紫/青/白）。 */
+static void case_cmd_fill_screen(void)
+{
+    TEST_BEGIN("A3 全屏填充：颜色映射 / 逻辑屏满幅 / 不持久化 / 越界拒绝");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+
+    /* 0x31 红 → 一次 FILL，覆盖整块逻辑屏（224×100），且**不得**带 persist */
+    uint8_t v = 0x31;
+    tx_reset();
+    render_reset();
+    _cdstd_fill_screen(&chan, &v, 1);
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB3 && s_tx_buf[9] == 0x31,
+              "0x31 应回 0xB3/0x31（cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_FILL && s_rc_x == 0 &&
+                  s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H &&
+                  s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == false,
+              "应是 FILL(0,0,224,100,RED) 且 persist=false（calls=%d w=%u h=%u color=%u persist=%d）",
+              s_render_calls, (unsigned)s_rc_w, (unsigned)s_rc_h, (unsigned)s_rc_color,
+              (int)s_rc_persist);
+
+    /* 0x30 黑（清屏语义）→ 同样满幅 + 不持久化 */
+    v = 0x30;
+    tx_reset();
+    render_reset();
+    _cdstd_fill_screen(&chan, &v, 1);
+    CHECK_MSG(s_tx_buf[8] == 0xB3 && s_tx_buf[9] == 0x31, "0x30 应回 0xB3/0x31");
+    CHECK_MSG(s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_BLACK && s_rc_persist == false,
+              "0x30 应是 FILL(BLACK) 且 persist=false");
+
+    /* 越界：0x29（低于 0x30，按无符号回绕后被上界判断拦下）、0x38（高于文档上限 0x33）、
+       0xFF → 回 0xB3/0x30，且**一次都不许调 render** */
+    static const uint8_t bad[] = {0x29, 0x38, 0xFF};
+    for (unsigned i = 0; i < sizeof(bad); i++) {
+        tx_reset();
+        render_reset();
+        uint8_t b = bad[i];
+        _cdstd_fill_screen(&chan, &b, 1);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB3 && s_tx_buf[9] == 0x30,
+                  "颜色 %02X 应回 0xB3/0x30（cmd=%02X status=%02X）", bad[i], s_tx_buf[8],
+                  s_tx_buf[9]);
+        CHECK_MSG(s_render_calls == 0, "颜色 %02X 越界时不得调 render（calls=%d）", bad[i],
+                  s_render_calls);
+    }
+}
+
+/** @brief 上电应用：记录有效才改网络；无效不动；端口 0 不覆盖监听口 */
+static void case_boot_apply(void)
+{
+    TEST_BEGIN("上电应用：有效才改网络；无效不动；端口 0 不覆盖");
+
+    net_stub_reset();
+
+    /* 1) 无有效配置 → 一个字节都不碰 */
+    s_fake_cfg_valid = false;
+    _cdstd_apply_net_cfg();
+    CHECK_MSG(s_net_set_calls == 0 && s_udp_port_calls == 0,
+              "无有效配置时不得改网络（set_ip %d 次 / port %d 次）", s_net_set_calls,
+              s_udp_port_calls);
+
+    /* 2) 有效配置 → IP/掩码/网关原样应用；端口 大端字节对 → 数值（0x27/0x2C → 0x272C） */
+    s_fake_cfg_valid = true;
+    s_fake_cfg       = (app_cdstd_net_cfg_t){.ip   = {192, 168, 0, 220},
+                                             .mask = {255, 255, 255, 0},
+                                             .gw   = {192, 168, 0, 1},
+                                             .port = {0x27, 0x2C}};
+    _cdstd_apply_net_cfg();
+    CHECK_MSG(s_net_set_calls == 1 && memcmp(s_net_ip, s_fake_cfg.ip, 4) == 0 &&
+                  memcmp(s_net_mask, s_fake_cfg.mask, 4) == 0 &&
+                  memcmp(s_net_gw, s_fake_cfg.gw, 4) == 0,
+              "有效配置应原样应用到 pl_net（调用 %d 次）", s_net_set_calls);
+    CHECK_MSG(s_udp_port_calls == 1 && s_udp_port_set == 0x272C,
+              "端口应按大端字节对解码后应用（应 0x272C，得到 %d 次/%04X）", s_udp_port_calls,
+              (unsigned)s_udp_port_set);
+
+    /* 3) 配置里端口为 0 → 只改 IP，不把监听口设成 0（那是随机端口） */
+    s_fake_cfg.port[0] = 0;
+    s_fake_cfg.port[1] = 0;
+    _cdstd_apply_net_cfg();
+    CHECK_MSG(s_net_set_calls == 2 && s_udp_port_calls == 1,
+              "端口 0 不应覆盖监听口（set %d / port %d）", s_net_set_calls, s_udp_port_calls);
+}
+
+/** @brief 0xA5 设置 IP：长度校验 / 落盘入参 / IAP 镜像端口解码 / 状态字节与应答 CRC */
+static void case_cmd_set_ip(void)
+{
+    TEST_BEGIN("0xA5 设置 IP：长度校验、保存与 IAP 镜像、状态字节与应答 CRC");
+
+    static app_ccb_t    chan = {.name = "cdstd_cmd_ut"};
+    app_cdstd_net_cfg_t net  = {.ip   = {192, 168, 0, 220},
+                                .mask = {255, 255, 255, 0},
+                                .gw   = {192, 168, 0, 1},
+                                .port = {0x27, 0x2C}};
+
+    /* 1) 长度不对 → 回 0xB5/0x30，且不落盘、不镜像 */
+    tx_reset();
+    cfg_stub_reset();
+    _cdstd_set_ip(&chan, &net, (uint16_t)(sizeof(net) - 1));
+    CHECK_MSG(s_tx_calls == 1 && s_tx_len == sizeof(app_cdstd_reply_status_t) &&
+                  s_tx_buf[8] == 0xB5 && s_tx_buf[9] == 0x30,
+              "长度不对应回 0xB5/0x30（cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_save_calls == 0 && s_iap_calls == 0, "长度不对不得落盘/镜像");
+
+    /* 2) 正常 → 落盘入参 = 那 14 字节；IAP 镜像端口 = 解码后的 0x272C；回 0x31 */
+    tx_reset();
+    cfg_stub_reset();
+    _cdstd_set_ip(&chan, &net, (uint16_t)sizeof(net));
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB5 && s_tx_buf[9] == 0x31, "正常应回 0xB5/0x31");
+    CHECK_MSG(s_save_calls == 1 && memcmp(s_save_buf, &net, sizeof(net)) == 0,
+              "保存入参应为帧内那 14 字节");
+    CHECK_MSG(s_iap_calls == 1 && memcmp(s_iap_ip, net.ip, 4) == 0 &&
+                  memcmp(s_iap_mask, net.mask, 4) == 0 && memcmp(s_iap_gw, net.gw, 4) == 0 &&
+                  s_iap_port == 0x272C,
+              "IAP 镜像应带解码后的端口 0x272C（得到 %u）", (unsigned)s_iap_port);
+
+    /* 应答自洽：CRC 覆盖 VER~DATA、大端落在尾部 —— 用用例自己的 CRC 复算 */
+    uint16_t crc = crc16_xmodem(&s_tx_buf[2], (size_t)(s_tx_len - 4));
+    CHECK_MSG(s_tx_buf[s_tx_len - 2] == (uint8_t)(crc >> 8) &&
+                  s_tx_buf[s_tx_len - 1] == (uint8_t)crc,
+              "应答 CRC 应为 VER~DATA 的 crc16（大端）");
+
+    /* 3) 落盘失败 → 回 0x30，但 IAP 镜像照做（与 LDI 同语义，test_ldi_0ah 钉着） */
+    tx_reset();
+    cfg_stub_reset();
+    s_save_ret = -1;
+    _cdstd_set_ip(&chan, &net, (uint16_t)sizeof(net));
+    CHECK_MSG(s_tx_buf[8] == 0xB5 && s_tx_buf[9] == 0x30, "保存失败应回 0x30");
+    CHECK_MSG(s_iap_calls == 1, "保存失败也要更新 IAP 镜像（既有语义）");
+    s_save_ret = 0;
+}
+
+/** @brief 0xA6 上报 IP：记录优先；记录无效回落运行态（端口同样转大端字节对） */
+static void case_cmd_report_ip(void)
+{
+    TEST_BEGIN("0xA6 上报 IP：记录优先；无效回落运行态");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+
+    /* 1) 记录有效 → 广播 B6，带记录里的 14 字节（LEN=0x0F） */
+    tx_reset();
+    s_fake_cfg_valid = true;
+    s_fake_cfg       = (app_cdstd_net_cfg_t){.ip   = {192, 168, 0, 220},
+                                             .mask = {255, 255, 255, 0},
+                                             .gw   = {192, 168, 0, 1},
+                                             .port = {0x27, 0x2C}};
+    _cdstd_report_ip(&chan, nullptr, 0);
+    CHECK_MSG(s_tx_to_calls == 1 && s_tx_len == sizeof(app_cdstd_reply_ip_t),
+              "应广播一条 B6（%d 次 / %u 字节）", s_tx_to_calls, (unsigned)s_tx_len);
+    CHECK_MSG(s_tx_buf[6] == 0x00 && s_tx_buf[7] == 0x0F && s_tx_buf[8] == 0xB6,
+              "B6 的 LEN/CMD 应对（LEN=0x0F, cmd=%02X）", s_tx_buf[8]);
+    CHECK_MSG(memcmp(&s_tx_buf[9], &s_fake_cfg, sizeof(s_fake_cfg)) == 0,
+              "B6 的 14 字节应等于记录内容");
+    uint16_t crc = crc16_xmodem(&s_tx_buf[2], (size_t)(s_tx_len - 4));
+    CHECK_MSG(s_tx_buf[s_tx_len - 2] == (uint8_t)(crc >> 8) &&
+                  s_tx_buf[s_tx_len - 1] == (uint8_t)crc,
+              "B6 的 CRC 应为 VER~DATA 的 crc16（大端）");
+
+    /* 2) 记录无效 → 回落运行态（IP 取 pl_net_get_ip、端口取 UDP 通道口并转大端） */
+    tx_reset();
+    s_fake_cfg_valid = false;
+    s_rt_port        = 10011; /* 0x271B：与上一步的记录值不同，证明真的走了回落 */
+    _cdstd_report_ip(&chan, nullptr, 0);
+    CHECK_MSG(s_tx_to_calls == 1 && s_tx_len == sizeof(app_cdstd_reply_ip_t),
+              "无效记录也要回 B6（%d 次 / %u 字节）", s_tx_to_calls, (unsigned)s_tx_len);
+    CHECK_MSG(memcmp(&s_tx_buf[9], s_rt_ip, 4) == 0 && memcmp(&s_tx_buf[13], s_rt_mask, 4) == 0 &&
+                  memcmp(&s_tx_buf[17], s_rt_gw, 4) == 0,
+              "B6 应回落运行态 IP/掩码/网关");
+    CHECK_MSG(s_tx_buf[21] == 0x27 && s_tx_buf[22] == 0x1B, "运行态端口应转大端字节对（0x271B）");
+}
+
+/* ================================================================
+ *  任务侧：取帧与分派（命令层贯通）
+ * ================================================================ */
+
+/** @brief 任务贯通：空队列不误取、真帧经真命令表分派、越界命令丢弃
+ *
+ *  回归背景：队列取帧判断曾写反（超时分支拿未初始化的 msg 去查表），现场表现是
+ *  "收到点噪声就按命令 0 处理"。这里用真任务 + 真命令表 + 真处理函数把整条链路
+ *  走通，并钉住"越界 aux 直接丢、不产生任何应答"。 */
 static void case_task_dispatch(void)
 {
-    TEST_BEGIN("任务：空队列不误取、真帧按 aux 分派、越界命令丢弃");
+    TEST_BEGIN("任务：空队列不误取、真帧分派（含命令层贯通）、越界命令丢弃");
+
+    /* 上电应用的两条路径已由 case_boot_apply 直接覆盖；让 init 内那次应用走"无配置"分支 */
+    s_fake_cfg_valid = false;
 
     _cdstd_module_init();
     CHECK_MSG(s_bind_calls == 2, "应绑定 udp/rs485 两个通道（得到 %d）", s_bind_calls);
     CHECK_MSG(s_cdstd_msg_queue != nullptr, "帧队列应已建立");
 
     /* 空队列：任务反复超时也不能拿未初始化的 msg 去查表
-       **反向验证**：把取帧判断反过来（osOK == 时 continue），超时分支会拿零初始化
-       的 msg 去查表，下面这条"不得有分派"立刻红。 */
+       **反向验证**：把取帧判断反过来（osOK == 时 continue），超时分支会拿零初始化的 msg
+       去查表，下面这条"不得有任何应答"立刻红。 */
+    tx_reset();
     usleep(400 * 1000);
-    CHECK_MSG(calls_total() == 0, "空队列时不应有任何分派（得到 %d 次）", calls_total());
+    CHECK_MSG(s_tx_calls + s_tx_to_calls == 0, "空队列时不应发出任何应答（得到 %d 次）",
+              s_tx_calls + s_tx_to_calls);
 
-    /* 投一帧：aux=3，帧内长度域=100 */
     static uint8_t msg_buf[CDSTD_MSG_SIZE] __attribute__((aligned(4)));
-    app_dispatch_msg_t *m = (app_dispatch_msg_t *)msg_buf;
-    static app_ccb_t s_chan = {.name = "cdstd_ut_chan"};
+    app_dispatch_msg_t *m   = (app_dispatch_msg_t *)msg_buf;
+    static app_ccb_t    s_chan = {.name = "cdstd_ut_chan"};
+    uint8_t             frame[128];
 
-    uint8_t  frame[128];
-    uint16_t n = cdstd_build(frame, 0xA3, 100, nullptr);
-
-    m->ccb = &s_chan;
-    m->aux = 3;
+    /* 1) aux=3（0xA3 全屏）→ 贯通到底：任务取帧 → 真表 → 真处理函数 → FILL(RED) + 回 0xB3/0x31
+       （DATA 必须给合法颜色：A3 的处理函数会校验，全零的 dummy 会被判 0x30） */
+    const uint8_t fill_red = 0x31;
+    uint16_t      n        = cdstd_build(frame, 0xA3, 1, &fill_red);
+    m->ccb                 = &s_chan;
+    m->aux                 = 3;
     memcpy(m->data, frame, n);
+    tx_reset();
+    render_reset();
     CHECK_MSG(osMessageQueuePut(s_cdstd_msg_queue, m, 0, 0) == osOK, "投递失败");
-    CHECK_MSG(wait_calls(3, 1, 2000), "投递的帧未被分派（取帧判断或表查询仍有问题）");
-    CHECK_MSG(s_last_len[3] == 100, "处理函数收到的 data_len 应为帧内长度域 100，得到 %u",
-              (unsigned)s_last_len[3]);
-    CHECK_MSG(s_last_ccb[3] == &s_chan, "处理函数应收到投递时的 ccb");
+    CHECK_MSG(wait_tx(1, 2000), "投递的帧未被分派（取帧判断或表查询仍有问题）");
+    CHECK_MSG(s_tx_len == sizeof(app_cdstd_reply_status_t) && s_tx_buf[8] == 0xB3 &&
+                  s_tx_buf[9] == 0x31,
+              "aux=3 应回 0xB3/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_FILL &&
+                  s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_w == TEST_LOGICAL_W &&
+                  s_rc_persist == false,
+              "aux=3 的帧应被渲染成 FILL(RED, 整屏)（calls=%d color=%u）", s_render_calls,
+              (unsigned)s_rc_color);
 
-    /* 越界 aux（>= CDSTD_CMD_COUNT）：直接丢，不查表 */
+    /* 2) 越界 aux（>= CDSTD_CMD_COUNT）→ 直接丢，不产生任何应答 */
     m->aux = CDSTD_CMD_COUNT;
     CHECK_MSG(osMessageQueuePut(s_cdstd_msg_queue, m, 0, 0) == osOK, "投递失败");
     usleep(200 * 1000);
-    CHECK_MSG(calls_total() == 1, "越界命令不应产生分派（总数 %d）", calls_total());
+    CHECK_MSG(s_tx_calls + s_tx_to_calls == 1, "越界命令不应产生应答（总数 %d）",
+              s_tx_calls + s_tx_to_calls);
 
-    /* 其后的一条真帧不受影响 */
+    /* 3) aux=5（0xA5 设置 IP）→ 贯通到保存与 IAP 镜像：钉住"DATA 域指针 + LEN-1"的传参 */
+    static const app_cdstd_net_cfg_t net_in = {.ip   = {192, 168, 0, 220},
+                                               .mask = {255, 255, 255, 0},
+                                               .gw   = {192, 168, 0, 1},
+                                               .port = {0x27, 0x2C}};
+    n = cdstd_build(frame, 0xA5, (uint16_t)sizeof(net_in), &net_in);
     m->aux = 5;
+    memcpy(m->data, frame, n);
+    tx_reset();
+    cfg_stub_reset();
     CHECK_MSG(osMessageQueuePut(s_cdstd_msg_queue, m, 0, 0) == osOK, "投递失败");
-    CHECK_MSG(wait_calls(5, 1, 2000), "越界命令之后真帧未被分派");
-    CHECK_MSG(s_last_len[5] == 100, "处理函数收到的 data_len 应为 100，得到 %u",
-              (unsigned)s_last_len[5]);
-    CHECK_MSG(calls_total() == 2, "总派发次数应为 2，得到 %d", calls_total());
+    CHECK_MSG(wait_tx(1, 2000), "设置 IP 的帧未被分派");
+    CHECK_MSG(s_save_calls == 1 && memcmp(s_save_buf, &net_in, sizeof(net_in)) == 0,
+              "任务应把帧内 DATA 域（14 字节）原样交给保存");
+    CHECK_MSG(s_iap_calls == 1 && s_iap_port == 0x272C, "IAP 镜像应收到解码后的端口");
+    CHECK_MSG(s_tx_buf[8] == 0xB5 && s_tx_buf[9] == 0x31, "0xA5 应回 0xB5/0x31");
 }
 
 /* ================================================================ */
@@ -576,6 +1130,13 @@ int main(void)
     case_fake_must_not_copy_whole();
     case_no_cross_poison();
     case_split_across_rb_wrap();
+    case_cmd_word_display();
+    case_cmd_word_display_bounds();
+    case_cmd_word_display_endian();
+    case_cmd_fill_screen();
+    case_boot_apply();
+    case_cmd_set_ip();
+    case_cmd_report_ip();
     case_task_dispatch();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);

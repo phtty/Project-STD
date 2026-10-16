@@ -206,7 +206,7 @@ static void _edit_config_unlocked(app_flash_iap_sys_info_t *info)
  *  公开入口（各自持锁）
  * ================================================================ */
 
-/** @brief 初始化配置：设置 magic + 默认 IP(192.168.114.200:9529) + 空固件信息，写入 Flash */
+/** @brief 初始化配置：设置 magic + 默认 IP(192.168.114.200:9528) + 空固件信息，写入 Flash */
 void app_flash_iap_init_config(app_flash_iap_sys_info_t *info)
 {
     if (s_lock) osMutexAcquire(s_lock, osWaitForever);

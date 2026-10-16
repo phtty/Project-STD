@@ -60,8 +60,26 @@ static app_pcb_t s_cdstd_pcb           = {
 
 static_assert(CDSTD_FRAME_MAX <= FRAME_DATA_MAX_LEN, "CDSTD 最长帧超过框架暂存上限");
 
+/* 上电应用网络配置：记录有效才改，无效保持 pl_net 编译期默认。
+   · 只读不写：上电阶段落盘会暂停总线（擦除 1~2s）、损坏 LwIP 时序；
+   · 时机：本函数在 sw_post 的 initcall_run_sw 里跑，早于 app_boot 的 app_udp_start()，
+     端口才能赶在 UDP 首绑之前生效；
+   · 提成独立函数：host 套件可直调覆盖"有效 / 无效 / 端口 0"三条路径（见 test_cdstd）。 */
+static void _cdstd_apply_net_cfg(void)
+{
+    app_cdstd_net_cfg_t net = {0};
+    if (!app_cdstd_load_config(&net)) return;
+
+    pl_net_set_ip(net.ip, net.mask, net.gw);
+
+    uint16_t port = (uint16_t)((net.port[0] << 8) | net.port[1]);
+    if (0 != port) app_udp_set_port(port);
+}
+
 [[maybe_unused]] static void _cdstd_module_init(void)
 {
+    _cdstd_apply_net_cfg();
+
     rb_init(&s_cdstd_rb, "cdstd");
 
     s_cdstd_msg_queue = osMessageQueueNew(2, CDSTD_MSG_SIZE, &s_cdstd_queue_attr);

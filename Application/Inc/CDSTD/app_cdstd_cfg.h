@@ -8,7 +8,7 @@
 
 #include "stdint.h"
 
-typedef struct {
+typedef struct [[gnu::packed]] {
     uint8_t ip[4];
     uint8_t mask[4];
     uint8_t gw[4];
