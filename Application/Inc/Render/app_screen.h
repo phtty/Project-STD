@@ -331,22 +331,48 @@ void app_screen_set_color_override(uint8_t color);
  *  @return 输出颜色（dev_display_color_t）*/
 uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color);
 
-/** @brief 设置屏亮度等级（0~7）
+/** @brief 设置屏亮度等级（0~7）—— 记的是**期望值**，关屏时只缓存、不下发
  *
  *  级联下由主卡统一分发 —— 从卡若有自己的光传感器，两张卡会各调各的，屏上出现
- *  亮度接缝。故本函数是**唯一**的亮度入口，光传感器也走它。 */
+ *  亮度接缝。故本函数是**唯一**的亮度入口，光传感器也走它。
+ *
+ *  **开关与亮度分离**：屏已关时本函数只更新期望值（即"关屏缓存"本身），施加到硬件的
+ *  亮度恒为 0，不会把屏点亮；开屏后由 `app_screen_set_display_on(true)` 恢复到该值。 */
 void app_screen_set_brightness(uint8_t level);
 
-/** @brief 当前亮度等级
+/** @brief 当前亮度等级（读的是**硬件**值：关屏时为 0，与缓存的期望值不同）
  *  @return 亮度等级 (0~7) */
 uint8_t app_screen_get_brightness(void);
+
+/** @brief 开 / 关屏（**开关与亮度分离**：关屏时亮度期望值原样保留，开屏恢复它）
+ *
+ *  **关屏 ≠ 设亮度 0**：若用"设亮度 0"实现关屏，关屏前的档位就永久丢了。故开关与
+ *  亮度是两个独立状态：本函数只改开关，`app_screen_set_brightness()` 只改期望值；
+ *  实际施加到硬件的亮度 = 开屏 ? 期望值 : 0。协议层（CDSTD A0H）用本函数、A2H 用
+ *  亮度函数，二者互不覆盖。
+ *
+ *  **关屏期间**任何亮度来源（光敏 / 命令 / 级联）都只更新期望值，不会把屏点亮 ——
+ *  它们最终都走 `app_screen_set_brightness()`，那里统一门控。
+ *
+ *  **"冻结"由命令层完成**：关屏前先 `app_light_sensor_set_fixed(当前亮度)` 停掉光敏
+ *  跟随（否则光敏每秒仍会改期望值）；本模块只负责门控，不依赖光敏模块（分层不反）。
+ *
+ *  @param on true = 开屏（硬件恢复到当前期望亮度）；false = 关屏（硬件施加 0） */
+void app_screen_set_display_on(bool on);
+
+/** @brief 当前屏开关状态（与亮度期望值无关）
+ *  @return true = 屏是开的（上电默认）；false = 已关屏 */
+bool app_screen_is_display_on(void);
 
 /** @brief 取走"亮度已变、待下发"的标志 —— 级联协议用它把每秒可能变多次的亮度
  *         攒成一次广播。返回 true 时 *level 给出新等级。
  *
  *  为什么要有这个：光传感器每秒都可能改，而广播要走总线。攒成一次比每次改都发
  *  省得多，且亮度是渐变量、晚几十毫秒下发不可见。
- *  @param[out] level 取走标志时写入新亮度等级
+ *
+ *  **给出的是有效值（关屏时为 0），不是缓存的期望值** —— 级联靠它把"关屏"同步给
+ *  从卡；若广播期望值，从卡会照常点亮，主卡这边灭了、从卡还亮着。
+ *  @param[out] level 取走标志时写入新亮度等级（关屏时为 0）
  *  @return true = 有新的待下发亮度 */
 bool app_screen_brightness_take_pending(uint8_t *level);
 

@@ -574,6 +574,12 @@ TEST_SCREEN_CANVAS_SRCS = \
 	test/test_screen_canvas.c \
 	test/stubs/os_stub.c
 
+# 套件十九：整屏门面 · 亮度与屏开关（开关与亮度分离 / 关屏缓存 / 级联有效值）
+# 用例 TU-include app_screen_brightness.c（开关/期望值/待下发都是 file-static），
+# 并把 dev_display_set_brightness 换成记录桩 —— 生产 .c 不列进 SRCS，否则符号重复。
+TEST_SCREEN_BRIGHTNESS_SRCS = \
+	test/test_screen_brightness.c
+
 # 套件十二：切分表与抽带（画布上的矩形 → 1bpp 位图，必须与独立参考逐位相等）
 # 同套件九：用例 TU-include app_screen.c、app_screen_canvas.c 与 app_screen_status.c
 # （sink 与抽带都是 static，状态快照也在这里覆盖），并自带一套 1B/px 帧缓冲作为
@@ -686,6 +692,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_isr_preinit $(TEST_BUILD)/test_font_lib \
       $(TEST_BUILD)/test_screen_canvas $(TEST_BUILD)/test_crc \
       $(TEST_BUILD)/test_casc_frame $(TEST_BUILD)/test_screen_layout \
+      $(TEST_BUILD)/test_screen_brightness \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
       $(TEST_BUILD)/test_cdstd
@@ -715,6 +722,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── 整屏画布 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_canvas
+	@echo ""
+	@echo "──── 整屏亮度与屏开关 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_screen_brightness
 	@echo ""
 	@echo "──── 硬件 CRC32 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_crc
@@ -773,6 +783,13 @@ $(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) \
 	test/dev_display_ref.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 了 app_screen_brightness.c（不在 SRCS 里），必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_screen_brightness: $(TEST_SCREEN_BRIGHTNESS_SRCS) \
+	Application/Src/Render/app_screen_brightness.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_BRIGHTNESS_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_crc: $(TEST_CRC_SRCS)
 	@mkdir -p $(dir $@)
