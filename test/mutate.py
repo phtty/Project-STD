@@ -155,6 +155,26 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "D9  A1 长度守卫 <= 改 <（恰好头部漏过）",
          "        if (data_len <= sizeof(app_cdstd_text_display_t)) {",
          "        if (data_len < sizeof(app_cdstd_text_display_t)) {"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D10 A2 范围校验 || 改 &&（等于没校验）",
+         "        if ((code < 0x30) || (code > 0x38)) {",
+         "        if ((code < 0x30) && (code > 0x38)) {"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D11 A2 自动档判据 > 0x30 改 > 0（0x30 会去关屏）",
+         "        if (code > 0x30)", "        if (code > 0)"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D12 A2 档位映射偏一档（-0x30 改 -0x31）",
+         "app_light_sensor_set_fixed(code - 0x30);",
+         "app_light_sensor_set_fixed(code - 0x31);"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D13 A0 关屏顺带冻结亮度（回到旧口径）",
+         "        if ((app_screen_is_oe_enabled()) && (0x30 == code))\n            app_screen_oe_disable();",
+         "        if ((app_screen_is_oe_enabled()) && (0x30 == code)) {\n"
+         "            app_light_sensor_set_fixed(app_screen_get_brightness());\n"
+         "            app_screen_oe_disable();\n        }"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D14 A4 固化漏 persist（重启即丢）",
+         "            .persist   = true,", "            .persist   = false,"),
     ],
 }
 

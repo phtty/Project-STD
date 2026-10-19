@@ -2,7 +2,8 @@
  * @file    test_cdstd.c
  * @brief   CDSTD（折叠屏创迪标准协议）host 单测：探针四态 / 整帧等待 / CRC→FAKE、
  *          长度域与暂存区契约、跨协议互不毒化（IAP/CASC/RLS）、队列取帧与分派、
- *          命令层（A1 文字显示 / A3 全屏填充 / 0xA5 设置 IP / 0xA6 上报 IP）与上电应用配置
+ *          命令层（A0 屏开关 / A1 文字显示 / A2 亮度 / A3 全屏填充 / A4 固化显示 /
+ *          A5 设置 IP / A6 上报 IP）与上电应用配置
  *
  * 命令层用例的写法契约见 docs/测试约定.md（桩、越界矩阵、断言预算、登记与验证清单）。
  *
@@ -36,6 +37,7 @@
 #include "app_cdstd_cmd.h"
 #include "app_dispatch.h"
 #include "app_iap_cfg.h"
+#include "app_light_sensor.h"
 #include "app_render.h"
 #include "app_screen.h"
 #include "app_udp.h"
@@ -262,6 +264,60 @@ static void render_reset(void)
     s_rc_text      = NULL;
     s_rc_len       = 0;
     s_rc_style     = (app_render_style_t){0};
+}
+
+/* ================================================================
+ *  桩：屏开关（OE）与光敏 —— A0/A2 命令层只"请求"，这里记录调用次数
+ *
+ *  A0 的口径是**不冻结**：关/开屏都不得调用光敏接口（一旦调用就说明回到了
+ *  "冻结亮度"的旧口径，自动跟随状态下关屏会回不去），所以反例断言第一件事
+ *  就是"光敏调用计数为 0"。
+ * ================================================================ */
+
+static bool    s_oe_state = true; /**< 门面输出使能（上电默认开） */
+static uint8_t s_bright_hw = 7;   /**< app_screen_get_brightness() 的返回值（"当前有效亮度"） */
+static int     s_fixed_calls;
+static uint8_t s_fixed_level;
+static int     s_resume_calls;
+static int     s_oe_enable_calls;
+static int     s_oe_disable_calls;
+
+void app_screen_oe_enable(void)
+{
+    s_oe_enable_calls++;
+    s_oe_state = true;
+}
+
+void app_screen_oe_disable(void)
+{
+    s_oe_disable_calls++;
+    s_oe_state = false;
+}
+
+bool app_screen_is_oe_enabled(void) { return s_oe_state; }
+
+uint8_t app_screen_get_brightness(void) { return s_bright_hw; }
+
+void app_light_sensor_set_fixed(uint8_t level)
+{
+    s_fixed_calls++;
+    s_fixed_level = level;
+}
+
+void app_light_sensor_resume(void)
+{
+    s_resume_calls++;
+}
+
+static void oe_stub_reset(bool on, uint8_t hw_level)
+{
+    s_oe_state         = on;
+    s_bright_hw        = hw_level;
+    s_fixed_calls      = 0;
+    s_fixed_level      = 0;
+    s_resume_calls     = 0;
+    s_oe_enable_calls  = 0;
+    s_oe_disable_calls = 0;
 }
 
 /* ================================================================ */
@@ -863,6 +919,201 @@ static void case_cmd_word_display_endian(void)
               (unsigned)s_rc_h);
 }
 
+/** @brief A0 屏开关：**只管输出**（亮度期望值与光敏跟随都不动），且幂等
+ *
+ *  **为什么需要**：早先设计要求"关屏时冻结亮度"（先停光敏），但那样"自动跟随状态下
+ *  关屏、再开屏"就**再也回不到自动跟随**了。现行口径是**不冻结**：开关只切 OE 输出，
+ *  期望亮度继续由既有来源维护（自动跟随照常每秒更新），于是开屏恢复的是"当时的亮度
+ *  与当时的模式"。断言因此钉两件事：① 关/开屏都**不得调用光敏接口**（调了就回到冻结
+ *  口径）；② 重复关/开屏**幂等**（不产生多余的级联广播）。 */
+static void case_cmd_screen_switch(void)
+{
+    TEST_BEGIN("A0 屏开关：只切输出(不冻结亮度/不动光敏) / 幂等");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    uint8_t          v    = 0x30;
+
+    /* 关屏：撤输出，且不碰光敏（亮度期望值原样留着，自动跟随照常跑） */
+    tx_reset();
+    oe_stub_reset(true, 5);
+    _cdstd_screen_switch(&chan, &v, 1);
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB0 && s_tx_buf[9] == 0x31,
+              "应回 0xB0/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_oe_state == false && s_oe_disable_calls == 1, "应撤掉输出（oe_disable 一次）");
+    CHECK_MSG(s_fixed_calls == 0 && s_resume_calls == 0,
+              "关屏**不得动光敏**（否则自动跟随下关屏就回不去了）：fixed=%d resume=%d",
+              s_fixed_calls, s_resume_calls);
+
+    /* 重复关屏：幂等 —— 不得再调 oe_disable（每次都置"待下发"，重复就多一次广播） */
+    tx_reset();
+    _cdstd_screen_switch(&chan, &v, 1);
+    CHECK_MSG(s_tx_buf[8] == 0xB0 && s_tx_buf[9] == 0x31, "重复关屏应回 0xB0/0x31");
+    CHECK_MSG(s_oe_disable_calls == 1, "重复关屏不应再调 oe_disable（得到 %d 次）",
+              s_oe_disable_calls);
+
+    /* 开屏：使能输出，同样不碰光敏（模式由 A2 决定，开关不改它） */
+    tx_reset();
+    v = 0x31;
+    _cdstd_screen_switch(&chan, &v, 1);
+    CHECK_MSG(s_tx_buf[8] == 0xB0 && s_tx_buf[9] == 0x31, "开屏应回 0xB0/0x31");
+    CHECK_MSG(s_oe_state == true && s_oe_enable_calls == 1, "开屏应使能输出（oe_enable 一次）");
+    CHECK_MSG(s_fixed_calls == 0 && s_resume_calls == 0, "开屏也不得动光敏（模式由 A2 决定）");
+}
+
+/** @brief A0 越界矩阵：长度≠1 与非法取值一律 0xB0/0x30，且**零副作用**
+ *
+ *  **为什么需要**：这类"只回状态码"的路径最容易写成先动状态再校验；顺序一反，
+ *  一条坏帧也会把关屏冻结值搅坏。所以反例统一断言"三件事都没发生"。 */
+static void case_cmd_screen_switch_bounds(void)
+{
+    TEST_BEGIN("A0 越界矩阵：长度≠1 / 取值非法 → 0xB0/0x30 且零副作用");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static const struct {
+        uint16_t    len;
+        uint8_t     code;
+        const char *why;
+    } bad[] = {
+        {0, 0x30, "没有 DATA"},
+        {2, 0x30, "多一个字节"},
+        {1, 0x2F, "低于 0x30"},
+        {1, 0x32, "高于 0x31"},
+    };
+
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        uint8_t buf[2] = {bad[i].code, 0x00};
+        tx_reset();
+        oe_stub_reset(true, 5);
+        _cdstd_screen_switch(&chan, buf, bad[i].len);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB0 && s_tx_buf[9] == 0x30,
+                  "越界（%s）应回 0xB0/0x30（得到 cmd=%02X status=%02X）", bad[i].why, s_tx_buf[8],
+                  s_tx_buf[9]);
+        CHECK_MSG(s_fixed_calls == 0 && s_oe_enable_calls == 0 && s_oe_disable_calls == 0 &&
+                      s_oe_state == true,
+                  "越界（%s）不得产生任何副作用（fixed=%d oe_en=%d oe_off=%d state=%d）",
+                  bad[i].why, s_fixed_calls, s_oe_enable_calls, s_oe_disable_calls,
+                  (int)s_oe_state);
+    }
+}
+
+/** @brief A2 亮度：0x30 走自动跟随、0x31..0x38 落固定档（第 8 档由门面钳到 7）
+ *
+ *  **为什么需要**：两条分支只差一个边界（0x30 是"自动"、不是"0 档"），写错就会
+ *  **"发自动调光 → 屏黑掉"**。`0x38` 是协议第 8 档，命令层**原样**传 `code - 0x30`；
+ *  钳位归门面（`app_screen_set_brightness()` 的 `>7 → 7`），其行为由
+ *  `test_screen_brightness` 的钳位用例覆盖，本层不重复钳。 */
+static void case_cmd_light_adjust(void)
+{
+    TEST_BEGIN("A2 亮度：0x30=自动跟随 / 0x31..0x38 固定档（8 由门面钳到 7）");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static const struct {
+        uint8_t     code;
+        uint8_t     want;
+        const char *why;
+    } fixed[] = {
+        {0x31, 1, "最暗档"},
+        {0x34, 4, "中间档"},
+        {0x37, 7, "最亮档"},
+        {0x38, 8, "第 8 档（原样传 8，门面钳到 7）"},
+    };
+
+    for (unsigned i = 0; i < sizeof(fixed) / sizeof(fixed[0]); i++) {
+        uint8_t v = fixed[i].code;
+        tx_reset();
+        oe_stub_reset(true, 7);
+        _cdstd_light_adjust(&chan, &v, 1);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB2 && s_tx_buf[9] == 0x31,
+                  "%s（%02X）应回 0xB2/0x31（得到 %02X/%02X）", fixed[i].why, fixed[i].code,
+                  s_tx_buf[8], s_tx_buf[9]);
+        CHECK_MSG(s_fixed_calls == 1 && s_fixed_level == fixed[i].want && s_resume_calls == 0,
+                  "%s（%02X）应请求固定档 %u（得到 fixed=%d level=%u resume=%d）", fixed[i].why,
+                  fixed[i].code, (unsigned)fixed[i].want, s_fixed_calls,
+                  (unsigned)s_fixed_level, s_resume_calls);
+    }
+
+    /* 0x30 = 自动调光：必须走 resume()，**绝不能** set_fixed(0)（那等于关屏） */
+    uint8_t v = 0x30;
+    tx_reset();
+    oe_stub_reset(true, 7);
+    _cdstd_light_adjust(&chan, &v, 1);
+    CHECK_MSG(s_tx_buf[8] == 0xB2 && s_tx_buf[9] == 0x31, "0x30 应回 0xB2/0x31");
+    CHECK_MSG(s_resume_calls == 1 && s_fixed_calls == 0,
+              "0x30 必须恢复自动跟随（resume=1、set_fixed=0；set_fixed(0) 会把屏关掉）");
+}
+
+/** @brief A2 越界矩阵：长度≠1 与取值出界一律 0xB2/0x30 且零副作用
+ *
+ *  **为什么需要**：出界值若被放过，会经 `code - 0x30` 回绕成大数再被钳到最亮 ——
+ *  表现是"发乱码反而跳到最亮"，而且回的是成功。 */
+static void case_cmd_light_adjust_bounds(void)
+{
+    TEST_BEGIN("A2 越界矩阵：长度≠1 / 取值出界 → 0xB2/0x30 且零副作用");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static const struct {
+        uint16_t    len;
+        uint8_t     code;
+        const char *why;
+    } bad[] = {
+        {0, 0x31, "没有 DATA"},
+        {2, 0x31, "多一个字节"},
+        {1, 0x00, "取值 0"},
+        {1, 0x2F, "低于 0x30"},
+        {1, 0x39, "高于 0x38"},
+        {1, 0xFF, "0xFF"},
+    };
+
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        uint8_t buf[2] = {bad[i].code, 0x00};
+        tx_reset();
+        oe_stub_reset(true, 7);
+        _cdstd_light_adjust(&chan, buf, bad[i].len);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB2 && s_tx_buf[9] == 0x30,
+                  "越界（%s）应回 0xB2/0x30（得到 cmd=%02X status=%02X）", bad[i].why, s_tx_buf[8],
+                  s_tx_buf[9]);
+        CHECK_MSG(s_fixed_calls == 0 && s_resume_calls == 0,
+                  "越界（%s）不得碰亮度（fixed=%d resume=%d）", bad[i].why, s_fixed_calls,
+                  s_resume_calls);
+    }
+}
+
+/** @brief A4 上下屏固化显示：与 A1 同构，但**必须带 persist**（固化 = 落盘）
+ *
+ *  **为什么需要**：A4 的 DATA 与 A1 逐字节同构（协议 4.5 节：7+N），唯一区别是语义
+ *  "固化"——若实现里漏了 `persist = true`，命令会"成功"但重启即丢，现场只会觉得
+ *  "偶尔不保存"，极难反查。 */
+static void case_cmd_persistent_display(void)
+{
+    TEST_BEGIN("A4 固化显示：与 A1 同构 + persist=true");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    uint8_t          payload[sizeof(app_cdstd_text_display_t) + 2];
+
+    uint16_t n = a1_payload(payload, 0x31, 0x30, 0x33, 10, 20, 2);
+    tx_reset();
+    render_reset();
+    _cdstd_persistent_display(&chan, payload, n);
+
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB4 && s_tx_buf[9] == 0x31,
+              "应回 0xB4/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT && s_rc_persist == true,
+              "必须是 TEXT 且 **persist=true**（calls=%d persist=%d）", s_render_calls,
+              (int)s_rc_persist);
+    CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_color == DEV_DISPLAY_COLOR_RED &&
+                  s_rc_font_size == APP_FONT_SIZE_48 && s_rc_font_type == APP_FONT_TYPE_HT,
+              "区域/颜色/字号/字型应与 A1 同口径（得到 x=%u y=%u color=%u size=%u type=%u）",
+              s_rc_x, s_rc_y, (unsigned)s_rc_color, (unsigned)s_rc_font_size,
+              (unsigned)s_rc_font_type);
+
+    /* 反例：只有 7 字节头（无文字）→ 0xB4/0x30 且不渲染（A1 的口径，A4 必须一致） */
+    tx_reset();
+    render_reset();
+    _cdstd_persistent_display(&chan, payload, sizeof(app_cdstd_text_display_t));
+    CHECK_MSG(s_tx_buf[8] == 0xB4 && s_tx_buf[9] == 0x30, "无文字应回 0xB4/0x30");
+    CHECK_MSG(s_render_calls == 0, "无文字不得调 render");
+}
+
 /** @brief A3 全屏填充：颜色映射 / 覆盖整块逻辑屏 / 不持久化 / 越界拒绝
  *
  *  **两条断言先留空**（等落定后再补）：
@@ -1133,6 +1384,11 @@ int main(void)
     case_cmd_word_display();
     case_cmd_word_display_bounds();
     case_cmd_word_display_endian();
+    case_cmd_screen_switch();
+    case_cmd_screen_switch_bounds();
+    case_cmd_light_adjust();
+    case_cmd_light_adjust_bounds();
+    case_cmd_persistent_display();
     case_cmd_fill_screen();
     case_boot_apply();
     case_cmd_set_ip();
