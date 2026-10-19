@@ -3,7 +3,7 @@
  * @brief   CDSTD（折叠屏创迪标准协议）host 单测：探针四态 / 整帧等待 / CRC→FAKE、
  *          长度域与暂存区契约、跨协议互不毒化（IAP/CASC/RLS）、队列取帧与分派、
  *          命令层（A0 屏开关 / A1 文字显示 / A2 亮度 / A3 全屏填充 / A4 固化显示 /
- *          A5 设置 IP / A6 上报 IP）与上电应用配置
+ *          A7 图片显示 / A5 设置 IP / A6 上报 IP）与上电应用配置
  *
  * 命令层用例的写法契约见 docs/测试约定.md（桩、越界矩阵、断言预算、登记与验证清单）。
  *
@@ -229,6 +229,9 @@ static const char      *s_rc_text;
 static uint16_t         s_rc_len;
 static app_render_style_t s_rc_style;
 
+/* BITMAP 分支专属（A7 记录源指针，用来钉"位图数据从 DATA 第 3 字节开始"） */
+static const uint8_t   *s_rc_bitmap;
+
 void app_render(const app_render_cfg_t *cfg)
 {
     s_render_calls++;
@@ -247,6 +250,8 @@ void app_render(const app_render_cfg_t *cfg)
         s_rc_text      = cfg->text;
         s_rc_len       = cfg->len;
         s_rc_style     = cfg->style ? *cfg->style : (app_render_style_t){0};
+    } else if (cfg->type == APP_RENDER_TYPE_BITMAP) {
+        s_rc_bitmap = cfg->bitmap;
     }
 }
 
@@ -264,6 +269,7 @@ static void render_reset(void)
     s_rc_text      = NULL;
     s_rc_len       = 0;
     s_rc_style     = (app_render_style_t){0};
+    s_rc_bitmap    = NULL;
 }
 
 /* ================================================================
@@ -504,7 +510,7 @@ static void case_wait_whole_frame(void)
 /** @brief 长度域：0 / 512 边界 READY，513 / 0xFFFF 越界 FAKE */
 static void case_length_domain(void)
 {
-    TEST_BEGIN("长度域：0 / 512 边界 READY，513 / 0xFFFF 越界 FAKE");
+    TEST_BEGIN("长度域：0 / 1403 边界 READY，1404 / 0xFFFF 越界 FAKE");
 
     uint32_t tl = 0;
     uint8_t  ax = 0;
@@ -518,23 +524,23 @@ static void case_length_domain(void)
     CHECK_MSG(n == 11 && tl == 11, "最短帧应为 11 字节（构造 %u / 返回 %u）", (unsigned)n,
               (unsigned)tl);
 
-    /* 最长帧（DATA 域 512）→ READY，total = 523 */
-    static uint8_t big[512];
+    /* 最长帧（DATA 域 1403 = A8 的 3+1400）→ READY，total = 1414 */
+    static uint8_t big[1403];
     memset(big, 0x5A, sizeof(big));
     fixture_reset();
-    n = cdstd_build(s_frame, 0xA0, 512, big);
-    CHECK_MSG(n == 523, "最长帧应为 523 字节，得到 %u", (unsigned)n);
+    n = cdstd_build(s_frame, 0xA0, 1403, big);
+    CHECK_MSG(n == 1414, "最长帧应为 1414 字节，得到 %u", (unsigned)n);
     cdstd_feed(s_frame, n);
     CHECK_MSG(cdstd_probe(&tl, &ax, sizeof(s_scratch_buf)) == APP_PCB_PROBE_STATE_READY,
-              "512 长度帧应 READY");
-    CHECK_MSG(tl == 523, "total_len 应为 523，得到 %u", (unsigned)tl);
+              "1403 长度帧应 READY");
+    CHECK_MSG(tl == 1414, "total_len 应为 1414，得到 %u", (unsigned)tl);
 
-    /* 超上限：513 → FAKE（帧头 + 长度域即可判定，不必等整帧） */
+    /* 超上限：1404 → FAKE（帧头 + 长度域即可判定，不必等整帧） */
     fixture_reset();
-    n = cdstd_build(s_frame, 0xA0, 513, nullptr);
+    n = cdstd_build(s_frame, 0xA0, 1404, nullptr);
     cdstd_feed(s_frame, 16);
     CHECK_MSG(cdstd_probe(&tl, &ax, sizeof(s_scratch_buf)) == APP_PCB_PROBE_STATE_FAKE,
-              "DATA 域 513 超上限应 FAKE");
+              "DATA 域 1404 超上限应 FAKE");
 
     /* 长度域 0xFFFF → FAKE（ASan 下不得越界读） */
     fixture_reset();
@@ -1114,6 +1120,101 @@ static void case_cmd_persistent_display(void)
     CHECK_MSG(s_render_calls == 0, "无文字不得调 render");
 }
 
+/** @brief A7 图片显示：只接受 pos=1/2（全屏单帧装不下）、落半边、位图指针从 DATA 第 3 字节起
+ *
+ *  **为什么需要**：A7 的位图按 1bpp 逐行排（行字节 = ceil(w/8)），**半屏正好 1400 字节**；
+ *  pos=0（全屏）需要 2800 字节，超出本协议单帧上限（1403），必须明确拒绝而不是画半张；
+ *  pos≥3 非法。`persist=true` 是刻意行为（A7 与 A8 是两种来源的固化显示）。 */
+static void case_cmd_picture_display(void)
+{
+    TEST_BEGIN("A7 图片显示：上屏/下屏落位 + persist + 位图指针");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    /* 头部 2 字节 + 1401 字节位图：正常帧用 1402（半屏正好），最后一组用 1403 测"多带" */
+    static uint8_t payload[sizeof(app_cdstd_picture_display_t) + 1401];
+    const uint16_t exact = (uint16_t)(sizeof(app_cdstd_picture_display_t) + 1400);
+
+    memset(payload + sizeof(app_cdstd_picture_display_t), 0xA5, 1401);
+    payload[0] = 1;    /* pos = 上屏 */
+    payload[1] = 0x31; /* 红 */
+
+    tx_reset();
+    render_reset();
+    _cdstd_picture_display(&chan, payload, exact);
+    CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31,
+              "上屏应回 0xB7/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+                  s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
+                  s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
+              "上屏应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u color=%u persist=%d）",
+              (int)s_rc_type, s_rc_y, s_rc_h, (unsigned)s_rc_color, (int)s_rc_persist);
+    CHECK_MSG(s_rc_bitmap == payload + sizeof(app_cdstd_picture_display_t),
+              "位图指针必须指向 DATA 第 3 字节（偏移 %ld）", (long)(s_rc_bitmap - payload));
+
+    /* 下屏：pos=2 → 起点下移半屏，高度仍是半屏 */
+    payload[0] = 2;
+    tx_reset();
+    render_reset();
+    _cdstd_picture_display(&chan, payload, exact);
+    CHECK_MSG(s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31, "下屏应回 0xB7/0x31");
+    CHECK_MSG(s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2 && s_rc_h == TEST_LOGICAL_H / 2,
+              "下屏起点应为 y=%u、高 %u（得到 y=%u h=%u）", TEST_LOGICAL_H / 2, TEST_LOGICAL_H / 2,
+              s_rc_y, s_rc_h);
+
+    /* 多带 1 字节：口径取 ≥，多带不拒（多余字节不画） */
+    tx_reset();
+    render_reset();
+    _cdstd_picture_display(&chan, payload, (uint16_t)sizeof(payload));
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1, "多带 1 字节不应拒（口径 ≥）");
+}
+
+/** @brief A7 越界矩阵：短帧 / pos=0 或 ≥3 / 颜色非法 → 0xB7/0x30 且不渲染
+ *
+ *  **为什么需要**：短帧最危险 —— 位图按几何读，缺字节就是**越界读帧缓冲**（与 RLS
+ *  那条守卫同一类缺陷）。pos=0 是**能力边界**而非非法值：全屏 2800 字节单帧装不下，
+ *  必须拒绝并让上位机改发两包。 */
+static void case_cmd_picture_display_bounds(void)
+{
+    TEST_BEGIN("A7 越界矩阵：短帧 / pos=0 / pos≥3 / 颜色非法 → 0xB7/0x30 且不渲染");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static uint8_t   payload[sizeof(app_cdstd_picture_display_t) + 1400];
+
+    memset(payload + sizeof(app_cdstd_picture_display_t), 0xA5, 1400);
+    payload[1] = 0x31; /* 红 */
+
+    static const struct {
+        uint8_t     pos;
+        uint16_t    len;
+        const char *why;
+    } bad[] = {
+        {1, (uint16_t)(sizeof(app_cdstd_picture_display_t) + 1399), "半屏少 1 字节"},
+        {1, (uint16_t)sizeof(app_cdstd_picture_display_t), "只有头、没有位图"},
+        {0, (uint16_t)sizeof(payload), "pos=0 全屏（单帧装不下）"},
+        {3, (uint16_t)sizeof(payload), "pos=3 非法"},
+        {2, (uint16_t)(sizeof(app_cdstd_picture_display_t) + 700), "下半屏只有一半位图"},
+    };
+
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        payload[0] = bad[i].pos;
+        tx_reset();
+        render_reset();
+        _cdstd_picture_display(&chan, payload, bad[i].len);
+        CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x30,
+                  "越界（%s）应回 0xB7/0x30（得到 cmd=%02X status=%02X）", bad[i].why, s_tx_buf[8],
+                  s_tx_buf[9]);
+        CHECK_MSG(s_render_calls == 0, "越界（%s）不得调 render", bad[i].why);
+    }
+
+    /* 颜色非法：0x38（映射后 > WHITE）。0x34..0x37 的口径与 A1/A3 保持一致，待协议方 */
+    payload[0] = 1;
+    payload[1] = 0x38;
+    tx_reset();
+    render_reset();
+    _cdstd_picture_display(&chan, payload, (uint16_t)sizeof(payload));
+    CHECK_MSG(s_tx_buf[9] == 0x30 && s_render_calls == 0, "颜色 0x38 应拒绝（与 A1/A3 同口径）");
+}
+
 /** @brief A3 全屏填充：颜色映射 / 覆盖整块逻辑屏 / 不持久化 / 越界拒绝
  *
  *  **两条断言先留空**（等落定后再补）：
@@ -1389,6 +1490,8 @@ int main(void)
     case_cmd_light_adjust();
     case_cmd_light_adjust_bounds();
     case_cmd_persistent_display();
+    case_cmd_picture_display();
+    case_cmd_picture_display_bounds();
     case_cmd_fill_screen();
     case_boot_apply();
     case_cmd_set_ip();

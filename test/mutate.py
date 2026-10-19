@@ -175,6 +175,18 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Application/Src/CDSTD/app_cdstd_cmd.c",
          "D14 A4 固化漏 persist（重启即丢）",
          "            .persist   = true,", "            .persist   = false,"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D15 A7 上屏判据 1 改 0（上屏被当成全屏/被拒）",
+         "        if (1 == ctx->pos) {", "        if (0 == ctx->pos) {"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D16 A7 位图长度守卫去掉（短帧会越界读）",
+         "        if (have < need) {", "        if (0) {"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D17 A7 下屏起点不偏移（画到上屏去）",
+         "            y = (uint16_t)(app_screen_cols() / 2U);", "            y = 0;"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D18 A7 位图指针偏 1 字节（数据错位）",
+         "            .bitmap  = ctx->bitmap,", "            .bitmap  = ctx->bitmap + 1,"),
     ],
 }
 
