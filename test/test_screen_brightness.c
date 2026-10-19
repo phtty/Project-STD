@@ -62,11 +62,11 @@ static void stub_reset(void)
 
 /** @brief 复位到上电等价态：开屏、期望值 0、无待下发
  *
- *  **不能用于 case_power_on_display_is_on**：那条用例检查的是真实的 BSS 初值。 */
+ *  **不能用于 case_power_on_oe_enabled**：那条用例检查的是真实的 BSS 初值。 */
 static void brightness_reset(void)
 {
     stub_reset();
-    s_display_on          = true;
+    s_oe_enabled          = true;
     s_bright_level        = 0;
     s_bright_pending_flag = false;
 }
@@ -97,12 +97,12 @@ static int g_fail;
  *
  *  **必须是 main 的第一个用例，且此前不得调用任何复位夹具**：reset 会把开关强行
  *  写成 true，那样就测不出生产代码的初值了。 */
-static void case_power_on_display_is_on(void)
+static void case_power_on_oe_enabled(void)
 {
-    TEST_BEGIN("上电默认开屏（display_on == true）");
+    TEST_BEGIN("上电默认开屏（oe_enabled == true）");
 
-    CHECK_MSG(app_screen_is_display_on(),
-              "上电默认应为开屏（s_display_on 初值 true），实际为关屏");
+    CHECK_MSG(app_screen_is_oe_enabled(),
+              "上电默认应为开屏（s_oe_enabled 初值 true），实际为关屏");
 }
 
 /** @brief 设亮度：施加到硬件、开关状态不变、待下发给出新等级 */
@@ -116,7 +116,7 @@ static void case_set_brightness_applies_and_pends(void)
     CHECK_MSG(s_set_seen && s_set_level == 5,
               "亮度 5 应施加到硬件（调用 %d 次，最后施加 %u）",
               s_set_calls, (unsigned)s_set_level);
-    CHECK_MSG(app_screen_is_display_on(), "设亮度不应改变开关状态");
+    CHECK_MSG(app_screen_is_oe_enabled(), "设亮度不应改变开关状态");
     CHECK_MSG(app_screen_get_brightness() == 5,
               "硬件亮度应为 5，实际 %u", (unsigned)app_screen_get_brightness());
 
@@ -143,7 +143,7 @@ static void case_brightness_clamped(void)
 }
 
 /** @brief 关屏门控：硬件立即施加 0，且**待下发是有效值 0**（级联据此让从卡一起灭） */
-static void case_display_off_gates_hardware(void)
+static void case_oe_disable_gates_hardware(void)
 {
     TEST_BEGIN("关屏 → 硬件 0、待下发有效值 0");
 
@@ -151,9 +151,9 @@ static void case_display_off_gates_hardware(void)
     app_screen_set_brightness(5); /* 先有个非零期望值 */
     stub_reset();                 /* 只清记录，门面状态（含期望值 5）保留 */
 
-    app_screen_set_display_on(false);
+    app_screen_oe_disable();
 
-    CHECK_MSG(!app_screen_is_display_on(), "关屏后 is_display_on 应为 false");
+    CHECK_MSG(!app_screen_is_oe_enabled(), "关屏后 is_oe_enabled 应为 false");
     CHECK_MSG(s_set_calls == 1 && s_set_level == 0,
               "关屏应立即把硬件施加为 0（调用 %d 次，最后施加 %u）",
               s_set_calls, (unsigned)s_set_level);
@@ -172,7 +172,7 @@ static void case_cache_retained_while_off(void)
 
     brightness_reset();
     app_screen_set_brightness(5);
-    app_screen_set_display_on(false);
+    app_screen_oe_disable();
     stub_reset();
 
     app_screen_set_brightness(3);
@@ -191,19 +191,19 @@ static void case_cache_retained_while_off(void)
 }
 
 /** @brief 开屏恢复：恢复的是**关屏期间最后设置的期望值**（3），不是关屏前的值（5） */
-static void case_restore_on_display_on(void)
+static void case_restore_on_oe_enable(void)
 {
     TEST_BEGIN("开屏恢复关屏期间最后设置的期望值 3（不是关屏前的 5）");
 
     brightness_reset();
     app_screen_set_brightness(5); /* 关屏前的值 —— 若实现没缓存，开屏会错误地用它 */
-    app_screen_set_display_on(false);
+    app_screen_oe_disable();
     app_screen_set_brightness(3); /* 关屏期间改期望值（只缓存） */
 
     stub_reset();
-    app_screen_set_display_on(true);
+    app_screen_oe_enable();
 
-    CHECK_MSG(app_screen_is_display_on(), "开屏后 is_display_on 应为 true");
+    CHECK_MSG(app_screen_is_oe_enabled(), "开屏后 is_oe_enabled 应为 true");
     CHECK_MSG(s_set_seen && s_set_level == 3,
               "开屏应恢复到期望值 3（不是关屏前的 5），实际施加 %u", (unsigned)s_set_level);
     CHECK_MSG(app_screen_get_brightness() == 3,
@@ -221,12 +221,12 @@ static void case_repeat_off_idempotent(void)
 
     brightness_reset();
     app_screen_set_brightness(5);
-    app_screen_set_display_on(false);
+    app_screen_oe_disable();
     app_screen_set_brightness(3);
     stub_reset();
 
-    app_screen_set_display_on(false);
-    app_screen_set_display_on(false);
+    app_screen_oe_disable();
+    app_screen_oe_disable();
 
     CHECK_MSG(s_set_calls == 2,
               "重复关屏每次都应立即重新施加（2 次），实际 %d 次", s_set_calls);
@@ -237,7 +237,7 @@ static void case_repeat_off_idempotent(void)
               "重复关屏后硬件亮度应为 0，实际 %u", (unsigned)app_screen_get_brightness());
 
     stub_reset();
-    app_screen_set_display_on(true);
+    app_screen_oe_enable();
     CHECK_MSG(s_set_level == 3,
               "重复关屏后开屏仍应恢复缓存的 3，实际 %u", (unsigned)s_set_level);
 }
@@ -264,12 +264,12 @@ int main(void)
     printf("\n\033[36m整屏门面 · 亮度与屏开关\033[0m\n");
 
     /* 本条检查的是 BSS 初值，**必须最先跑**，之前不得调用任何夹具。 */
-    case_power_on_display_is_on();
+    case_power_on_oe_enabled();
     case_set_brightness_applies_and_pends();
     case_brightness_clamped();
-    case_display_off_gates_hardware();
+    case_oe_disable_gates_hardware();
     case_cache_retained_while_off();
-    case_restore_on_display_on();
+    case_restore_on_oe_enable();
     case_repeat_off_idempotent();
     case_take_pending_consumed_once();
 
