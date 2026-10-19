@@ -22,17 +22,19 @@ C23，FreeRTOS v10.3.1 + CMSIS-RTOS V2，LwIP，`arm-none-eabi-gcc`。
 ## 2. 构建 / 烧录 / 测试
 
 ```sh
-make -j8                       # 默认板 3833024，Debug（CONFIG 默认 Debug）
-make -j8 BOARD=5006048         # 换板
-make -j8 CONFIG=Release        # 另一套输出目录（注意：CFLAGS 恒为 -Og -g，Release 并不改优化）
-make -j8 TOOLCHAIN=clang       # 仅换编译器（链接仍走 arm-none-eabi-gcc）
+make -j$(nproc)                  # 默认板 3833024，Debug（CONFIG 默认 Debug）；按核数并行
+make -j$(nproc) BOARD=5006048    # 换板
+make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒为 -Og -g，Release 并不改优化）
+make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 18 个测试套件（见 §7）
+make test                      # host 侧 19 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
+make lint                      # 只跑结构规则闸（19 套件，秒级；规范见 docs/测试约定.md）
+make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
-bear --output build/3833024/Debug/compile_commands.json -- make -B -j8
+bear --output build/3833024/Debug/compile_commands.json -- make -B -j$(nproc)
 
 # 烧录（OpenOCD）
 openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/Debug/Project_STD.hex verify reset exit"
@@ -132,7 +134,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-18 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+19 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -146,6 +148,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_isr_preinit` | initcall 之前的 ISR 安全 |
 | `test_font_lib` | 板级字库偏移表 |
 | `test_screen_canvas` | 整屏画布 vs 直写的像素等价、越界裁剪 |
+| `test_screen_brightness` | 整屏亮度与屏开关（期望值 / OE 门控 / 钳位 / 级联待下发取有效值 / 不冻结口径） |
 | `test_screen_layout` | 切分表合成 + 按矩形抽带（逐位） |
 | `test_crc` | 硬件 CRC32（长度/对齐） |
 | `test_casc_frame` | 级联探针 4 态 / 地址 / 长度 |
@@ -153,7 +156,9 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
-| `test_cdstd` | CDSTD 协议探针（四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化）、队列取帧与命令分派 |
+| `test_cdstd` | CDSTD 协议：探针四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化、队列取帧与命令分派；命令层 A0 屏开关、A1 文字、A2 亮度、A3 全屏填充、A4 固化显示、A5/A6 IP（A7/A8 仍空壳） |
+
+**规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 
 **host 测试覆盖不到真实硬件时序**（TIM3/TIM4 扫描、BSRR、真实 SPI/DMA）——涉及显示路径或外设时序的改动，
 除 `make test` 外还应上机冒烟（两板、含级联显示与工厂逐色老化）。
