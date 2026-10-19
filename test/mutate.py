@@ -187,6 +187,13 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Application/Src/CDSTD/app_cdstd_cmd.c",
          "D18 A7 位图指针偏 1 字节（数据错位）",
          "            .bitmap  = ctx->bitmap,", "            .bitmap  = ctx->bitmap + 1,"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D19 A8 包序号退回错值 0x31（一帧都进不来）",
+         "        if (0x01 == ctx->seq) {", "        if (0x31 == ctx->seq) {"),
+        ("Application/Src/CDSTD/app_cdstd_cmd.c",
+         "D20 A8 长度守卫 <= 化（唯一合法长度被拒）",
+         "        if (data_len != sizeof(app_cdstd_release_box_t))",
+         "        if (data_len <= sizeof(app_cdstd_release_box_t))"),
     ],
 }
 

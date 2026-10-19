@@ -3,7 +3,7 @@
  * @brief   CDSTD（折叠屏创迪标准协议）host 单测：探针四态 / 整帧等待 / CRC→FAKE、
  *          长度域与暂存区契约、跨协议互不毒化（IAP/CASC/RLS）、队列取帧与分派、
  *          命令层（A0 屏开关 / A1 文字显示 / A2 亮度 / A3 全屏填充 / A4 固化显示 /
- *          A7 图片显示 / A5 设置 IP / A6 上报 IP）与上电应用配置
+ *          A7 图片显示 / A8 全屏固化显示 / A5 设置 IP / A6 上报 IP）与上电应用配置
  *
  * 命令层用例的写法契约见 docs/测试约定.md（桩、越界矩阵、断言预算、登记与验证清单）。
  *
@@ -841,6 +841,26 @@ static void case_cmd_word_display(void)
                   (unsigned)map[i].size, map[i].type_code, (unsigned)map[i].type,
                   (unsigned)s_rc_font_size, (unsigned)s_rc_font_type);
     }
+
+    /* 全彩（2026-10-19 已定）：颜色 0x30..0x37 逐档 —— 黑/红/绿/黄/蓝/紫/青/白 */
+    static const struct {
+        uint8_t             code;
+        dev_display_color_t want;
+    } colors[] = {
+        {0x30, DEV_DISPLAY_COLOR_BLACK}, {0x31, DEV_DISPLAY_COLOR_RED},
+        {0x32, DEV_DISPLAY_COLOR_GREEN}, {0x33, DEV_DISPLAY_COLOR_YELLOW},
+        {0x34, DEV_DISPLAY_COLOR_BLUE},  {0x35, DEV_DISPLAY_COLOR_PURPLE},
+        {0x36, DEV_DISPLAY_COLOR_CYAN},  {0x37, DEV_DISPLAY_COLOR_WHITE},
+    };
+    for (unsigned i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        n = a1_payload(payload, colors[i].code, 0x30, 0x30, 0, 0, 1);
+        tx_reset();
+        render_reset();
+        _cdstd_word_display(&chan, payload, n);
+        CHECK_MSG(s_render_calls == 1 && s_rc_color == colors[i].want,
+                  "颜色码 %02X 应映射为 %u（全彩；得到 %u）", colors[i].code,
+                  (unsigned)colors[i].want, (unsigned)s_rc_color);
+    }
 }
 
 /** @brief A1 越界矩阵：字段低位/高位/边界一律 0xB1/0x30，且**零副作用**
@@ -1161,6 +1181,16 @@ static void case_cmd_picture_display(void)
               "下屏起点应为 y=%u、高 %u（得到 y=%u h=%u）", TEST_LOGICAL_H / 2, TEST_LOGICAL_H / 2,
               s_rc_y, s_rc_h);
 
+    /* 全彩：0x35 紫 → 同样落半屏（颜色不限于红/绿/黄） */
+    payload[0] = 1;
+    payload[1] = 0x35;
+    tx_reset();
+    render_reset();
+    _cdstd_picture_display(&chan, payload, exact);
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1 &&
+                  s_rc_color == DEV_DISPLAY_COLOR_PURPLE,
+              "0x35 应映射为紫（全彩，得到 %u）", (unsigned)s_rc_color);
+
     /* 多带 1 字节：口径取 ≥，多带不拒（多余字节不画） */
     tx_reset();
     render_reset();
@@ -1206,7 +1236,7 @@ static void case_cmd_picture_display_bounds(void)
         CHECK_MSG(s_render_calls == 0, "越界（%s）不得调 render", bad[i].why);
     }
 
-    /* 颜色非法：0x38（映射后 > WHITE）。0x34..0x37 的口径与 A1/A3 保持一致，待协议方 */
+    /* 颜色非法：0x38（映射后 > WHITE）。0x30..0x37 是全彩口径（已定），0x38 起才越界 */
     payload[0] = 1;
     payload[1] = 0x38;
     tx_reset();
@@ -1215,11 +1245,96 @@ static void case_cmd_picture_display_bounds(void)
     CHECK_MSG(s_tx_buf[9] == 0x30 && s_render_calls == 0, "颜色 0x38 应拒绝（与 A1/A3 同口径）");
 }
 
+/** @brief A8 全屏固化显示：两包各落半屏、**无反馈**、定长 DATA
+ *
+ *  **为什么需要**：A8 与 A7 都是图片固化，但来源不同（A8 给发布盒），且协议 4.9 明确
+ *  **无反馈** —— 非法帧只能静默丢弃。所以断言必须同时钉"画了没有"和"发没发帧"。
+ *  seq 按协议是 0x01/0x02（1=上半屏、2=下半屏），DATA 定长 1403（3 + 1400）。 */
+static void case_cmd_release_display(void)
+{
+    TEST_BEGIN("A8 固化显示：0x01 上屏 / 0x02 下屏、persist、无反馈");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static uint8_t   payload[sizeof(app_cdstd_release_box_t)];
+
+    memset(payload, 0xA5, sizeof(payload));
+    payload[0] = 0x01; /* 包序号：上半屏 */
+    payload[1] = 0x01; /* 固化编号：保留不用（任意值都行） */
+    payload[2] = 0x31; /* 红 */
+
+    tx_reset();
+    render_reset();
+    _cdstd_release_display(&chan, payload, sizeof(payload));
+    CHECK_MSG(s_tx_calls == 0, "协议 4.9 无反馈：本命令不得发任何帧（实际 %d 次）", s_tx_calls);
+    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+                  s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
+                  s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
+              "上包应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u persist=%d）",
+              (int)s_rc_type, s_rc_y, s_rc_h, (int)s_rc_persist);
+    CHECK_MSG(s_rc_bitmap == payload + 3, "位图必须从 DATA 第 4 字节起（偏移 %ld）",
+              (long)(s_rc_bitmap - payload));
+
+    /* 下包：seq=0x02 → 起点下移半屏 */
+    payload[0] = 0x02;
+    tx_reset();
+    render_reset();
+    _cdstd_release_display(&chan, payload, sizeof(payload));
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2,
+              "下包应为 y=%u（得到 y=%u，tx=%d）", TEST_LOGICAL_H / 2, s_rc_y, s_tx_calls);
+
+    /* 全彩：0x34 蓝 */
+    payload[0] = 0x01;
+    payload[2] = 0x34;
+    tx_reset();
+    render_reset();
+    _cdstd_release_display(&chan, payload, sizeof(payload));
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_BLUE,
+              "0x34 应映射为蓝（全彩，得到 %u）", (unsigned)s_rc_color);
+}
+
+/** @brief A8 越界矩阵：长度、seq 非法、颜色非法 → **静默丢弃**（不画、不发帧）
+ *
+ *  **为什么需要**：协议无反馈，错误路径唯一的可观测量就是"什么都没发生"；长度尤其关键
+ *  —— 定长结构少一字节就说明帧不对，绝不能拿去画（会越界读）。 */
+static void case_cmd_release_display_bounds(void)
+{
+    TEST_BEGIN("A8 越界矩阵：长度/seq/颜色非法 → 静默丢弃（不画、不发帧）");
+
+    static app_ccb_t chan = {.name = "cdstd_cmd_ut"};
+    static uint8_t   payload[sizeof(app_cdstd_release_box_t) + 1];
+
+    memset(payload, 0xA5, sizeof(payload));
+    payload[2] = 0x31;
+
+    static const struct {
+        uint8_t     seq;
+        uint16_t    len;
+        uint8_t     color;
+        const char *why;
+    } bad[] = {
+        {0x01, (uint16_t)(sizeof(app_cdstd_release_box_t) - 1), 0x31, "少 1 字节"},
+        {0x01, (uint16_t)(sizeof(app_cdstd_release_box_t) + 1), 0x31, "多 1 字节"},
+        {0x00, (uint16_t)sizeof(app_cdstd_release_box_t), 0x31, "seq=0"},
+        {0x03, (uint16_t)sizeof(app_cdstd_release_box_t), 0x31, "seq=3"},
+        {0x31, (uint16_t)sizeof(app_cdstd_release_box_t), 0x31, "seq=0x31（旧错值）"},
+        {0x01, (uint16_t)sizeof(app_cdstd_release_box_t), 0x38, "颜色 0x38"},
+    };
+
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        payload[0] = bad[i].seq;
+        payload[2] = bad[i].color;
+        tx_reset();
+        render_reset();
+        _cdstd_release_display(&chan, payload, bad[i].len);
+        CHECK_MSG(s_render_calls == 0 && s_tx_calls == 0, "越界（%s）必须静默丢弃（render=%d tx=%d）",
+                  bad[i].why, s_render_calls, s_tx_calls);
+    }
+}
+
 /** @brief A3 全屏填充：颜色映射 / 覆盖整块逻辑屏 / 不持久化 / 越界拒绝
  *
- *  **两条断言先留空**（等落定后再补）：
- *   · `data_len != 1` 的拒收 —— 见评审 #2，作者在补；
- *   · `0x34..0x37` 是否接受 —— 口径待与协议方确认（现状是接受成 蓝/紫/青/白）。 */
+ *  **两条断言已在 2026-10-19 补齐**：`data_len != 1` 的拒收（作者补）与
+ *  `0x34..0x37`（蓝/紫/青/白）**全彩全放行**的口径（协议方确认支持全彩）。 */
 static void case_cmd_fill_screen(void)
 {
     TEST_BEGIN("A3 全屏填充：颜色映射 / 逻辑屏满幅 / 不持久化 / 越界拒绝");
@@ -1248,6 +1363,15 @@ static void case_cmd_fill_screen(void)
     CHECK_MSG(s_tx_buf[8] == 0xB3 && s_tx_buf[9] == 0x31, "0x30 应回 0xB3/0x31");
     CHECK_MSG(s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_BLACK && s_rc_persist == false,
               "0x30 应是 FILL(BLACK) 且 persist=false");
+
+    /* 全彩：0x36 青 → 同样满幅 + 不持久化（0x34..0x37 都已放行） */
+    v = 0x36;
+    tx_reset();
+    render_reset();
+    _cdstd_fill_screen(&chan, &v, 1);
+    CHECK_MSG(s_tx_buf[8] == 0xB3 && s_tx_buf[9] == 0x31, "0x36 应回 0xB3/0x31");
+    CHECK_MSG(s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_CYAN && s_rc_persist == false,
+              "0x36 应映射为青（全彩）且 persist=false");
 
     /* 越界：0x29（低于 0x30，按无符号回绕后被上界判断拦下）、0x38（高于文档上限 0x33）、
        0xFF → 回 0xB3/0x30，且**一次都不许调 render** */
@@ -1492,6 +1616,8 @@ int main(void)
     case_cmd_persistent_display();
     case_cmd_picture_display();
     case_cmd_picture_display_bounds();
+    case_cmd_release_display();
+    case_cmd_release_display_bounds();
     case_cmd_fill_screen();
     case_boot_apply();
     case_cmd_set_ip();
