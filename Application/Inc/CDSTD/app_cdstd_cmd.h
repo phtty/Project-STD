@@ -41,6 +41,10 @@ typedef enum {
     CDSTD_COLOR_RED    = 0x31, // 红色
     CDSTD_COLOR_GREEN  = 0x32, // 绿色
     CDSTD_COLOR_YELLOW = 0x33, // 黄色
+    CDSTD_COLOR_BLUE   = 0x34, // 蓝色
+    CDSTD_COLOR_PURPLE = 0x35, // 紫色
+    CDSTD_COLOR_CYAN   = 0x36, // 青色
+    CDSTD_COLOR_WHITE  = 0x37, // 白色
 } app_cdstd_color_t;
 
 typedef struct [[gnu::packed]] {
