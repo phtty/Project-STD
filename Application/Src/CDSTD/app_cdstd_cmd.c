@@ -15,6 +15,7 @@
 #include "app_rs485.h"
 #include "app_screen.h"
 #include "app_render.h"
+#include "app_light_sensor.h"
 
 // 命令实现和回复帧构造器前向声明
 static void _cdstd_screen_switch(app_ccb_t *ccb, void *data, uint16_t data_len);
@@ -42,9 +43,31 @@ const app_cdstd_cmd_handler_fn_t g_cdstd_cmd_table[] = {
 
 static void _cdstd_screen_switch(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
-    (void)data;
-    (void)data_len;
     uint8_t status = 0x31;
+    uint8_t code   = 0;
+
+    do {
+        if (1 != data_len) {
+            status = 0x30;
+            break;
+        }
+        code = *(uint8_t *)data;
+
+        if ((code != 0x30) && (code != 0x31)) {
+            status = 0x30;
+            break;
+        }
+
+        /* 幂等：已关再关 / 已开再开都不重复动作（每次都会置"待下发"，重复就多一次广播）。
+           **不碰光敏、不缓存档位**：开关只管输出 —— 关屏期间自动跟随照常更新期望值
+           （硬件仍是 0），开屏就用"当时的亮度与当时的模式"（自动还是自动、固定还是固定）。 */
+        if ((!app_screen_is_oe_enabled()) && (0x31 == code))
+            app_screen_oe_enable();
+
+        if ((app_screen_is_oe_enabled()) && (0x30 == code))
+            app_screen_oe_disable();
+
+    } while (false);
 
     _cdstd_build_reply(ccb, 0xB0, &status, sizeof(status));
 }
@@ -122,9 +145,27 @@ static void _cdstd_word_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 
 static void _cdstd_light_adjust(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
-    (void)data;
-    (void)data_len;
     uint8_t status = 0x31;
+    uint8_t code   = 0;
+
+    do {
+        if (1 != data_len) {
+            status = 0x30;
+            break;
+        }
+        code = *(uint8_t *)data;
+
+        if ((code < 0x30) || (code > 0x38)) {
+            status = 0x30;
+            break;
+        }
+
+        if (code > 0x30)
+            app_light_sensor_set_fixed(code - 0x30);
+        else
+            app_light_sensor_resume();
+
+    } while (false);
 
     _cdstd_build_reply(ccb, 0xB2, &status, sizeof(status));
 }
@@ -160,9 +201,65 @@ static void _cdstd_fill_screen(app_ccb_t *ccb, void *data, uint16_t data_len)
 
 static void _cdstd_persistent_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
-    (void)data;
-    (void)data_len;
-    uint8_t status = 0x31;
+    app_cdstd_text_display_t *ctx = data;
+    uint8_t status                = 0x31;
+
+    do {
+        if (data_len <= sizeof(app_cdstd_text_display_t)) { /* 文字数据至少 1 字节；清屏走 A3 */
+            status = 0x30;
+            break;
+        }
+
+        /* 协议码 0x30..0x33 → 表下标。低于 0x30 的码经 uint8_t 回绕成大数，同一句即可拦下 */
+        uint8_t size_i = (uint8_t)(ctx->font_size - 0x30);
+        if (size_i >= sizeof(s_size_map) / sizeof(s_size_map[0])) {
+            status = 0x30;
+            break;
+        }
+        uint8_t type_i = (uint8_t)(ctx->font_type - 0x30);
+        if (type_i >= sizeof(s_type_map) / sizeof(s_type_map[0])) {
+            status = 0x30;
+            break;
+        }
+
+        /* 颜色同 A3：先转换再判据。直接判 `ctx->color - 0x30 > WHITE` 会漏放低位
+           （负的 int 不满足 >），而回绕后的值一定 > WHITE。
+           注：0x34..0x37（蓝/紫/青/白）是否放行的口径待与协议方确认，此处与 A3 保持一致。 */
+        dev_display_color_t color = (dev_display_color_t)(ctx->color - 0x30);
+        if (color > DEV_DISPLAY_COLOR_WHITE) {
+            status = 0x30;
+            break;
+        }
+
+        uint16_t x = (uint16_t)((ctx->x[0] << 8) | ctx->x[1]);
+        uint16_t y = (uint16_t)((ctx->y[0] << 8) | ctx->y[1]);
+        uint16_t w = app_screen_rows(), h = app_screen_cols();
+        if ((x >= w) || (y >= h)) {
+            status = 0x30;
+            break;
+        }
+
+        /* x/y = 文字左上角（协议只写"坐标"）：区域取剩余 [x,W)×[y,H)，对齐放左上角，
+           否则"水平居中 + 满屏宽"会让 x 形同虚设 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_TEXT,
+            .x     = x,
+            .y     = y,
+            .w     = (uint16_t)(w - x),
+            .h     = (uint16_t)(h - y),
+            .style = &(app_render_style_t){
+                .h_align = APP_RENDER_ALIGN_LEFT_UP,
+                .v_align = APP_RENDER_ALIGN_LEFT_UP,
+            },
+            .color     = color,
+            .font_size = s_size_map[size_i],
+            .font_type = s_type_map[type_i],
+            .persist   = true,
+            .text_enc  = APP_FONT_ENC_GBK,
+            .text      = (char *)ctx->text,
+            .len       = (uint16_t)(data_len - sizeof(app_cdstd_text_display_t)),
+        });
+    } while (false);
 
     _cdstd_build_reply(ccb, 0xB4, &status, sizeof(status));
 }
