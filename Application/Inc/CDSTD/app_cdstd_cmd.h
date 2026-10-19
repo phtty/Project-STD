@@ -58,6 +58,13 @@ typedef struct [[gnu::packed]] {
     uint8_t bitmap[];
 } app_cdstd_picture_display_t;
 
+typedef struct [[gnu::packed]] {
+    uint8_t seq;
+    uint8_t pers_num;
+    uint8_t color;
+    uint8_t bitmap[1400];
+} app_cdstd_release_box_t;
+
 // 回复帧结构定义
 typedef struct [[gnu::packed]] {
     uint16_t head;

@@ -19,7 +19,10 @@
 #include "app_cdstd_cmd.h"
 
 /* ---- 队列和缓冲区资源静态分配 ---- */
-#define CDSTD_PAYLOAD_MAX (512U)
+/* 1403 = A8「全屏固化显示」的 3 + 1400 字节（本协议最大的 DATA）；A7 半屏是 2 + 1400 = 1402。
+   整帧 1414 仍 ≤ FRAME_DATA_MAX_LEN(1440)。A7 的"全屏"（2800 字节位图）单帧装不下，
+   由命令层明确拒绝，见 `_cdstd_picture_display`。 */
+#define CDSTD_PAYLOAD_MAX (1403U)
 #define CDSTD_FRAME_MAX   (sizeof(app_cdstd_frame_t) + CDSTD_PAYLOAD_MAX + 2U)
 #define CDSTD_MSG_SIZE    (sizeof(app_dispatch_msg_t) + CDSTD_FRAME_MAX)
 
@@ -48,7 +51,7 @@ void app_cdstd_task(void *argument);
 /*
  * 构造协议上下文资源，包括协议缓冲区、协议探针前向声明、协议控制块声明
  */
-RB_DEFINE_ATTR(s_cdstd_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 523, 单次最大写入 2048 + 1) */
+RB_DEFINE_ATTR(s_cdstd_rb, 2944, PL_CCMRAM); /**< max(2 × 最长帧 1414, 单次最大写入 2048 + 1) */
 app_pcb_probe_state_t app_cdstd_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src, uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len, uint8_t *aux);
 static const app_pcb_ops_t s_cdstd_ops = {.probe = app_cdstd_probe_frame};
 static app_pcb_t s_cdstd_pcb           = {

@@ -25,7 +25,7 @@ static void _cdstd_fill_screen(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _cdstd_persistent_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _cdstd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _cdstd_report_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
-static void _cdstd_pictrue_display(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _cdstd_picture_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _cdstd_release_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _cdstd_build_reply(app_ccb_t *ccb, uint8_t cmd, const uint8_t *data, uint16_t len);
 
@@ -37,7 +37,7 @@ const app_cdstd_cmd_handler_fn_t g_cdstd_cmd_table[] = {
     _cdstd_persistent_display, // A4H 半屏持久化显示
     _cdstd_set_ip,             // A5H 设置ip地址
     _cdstd_report_ip,          // A6H 上报ip地址
-    _cdstd_pictrue_display,    // A7H 图片
+    _cdstd_picture_display,    // A7H 图片显示
     _cdstd_release_display,    // A8H 发布盒显示
 };
 
@@ -300,11 +300,61 @@ static void _cdstd_report_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
     _cdstd_build_reply(ccb, 0xB6, (uint8_t *)&info, sizeof(info));
 }
 
-static void _cdstd_pictrue_display(app_ccb_t *ccb, void *data, uint16_t data_len)
+static void _cdstd_picture_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
-    (void)data;
-    (void)data_len;
-    uint8_t status = 0x31;
+    app_cdstd_picture_display_t *ctx = data;
+    uint8_t status                   = 0x31;
+
+    do {
+        if (data_len <= sizeof(app_cdstd_picture_display_t)) {
+            status = 0x30;
+            break;
+        }
+
+        dev_display_color_t color = (dev_display_color_t)(ctx->color - 0x30);
+        if (color > DEV_DISPLAY_COLOR_WHITE) {
+            status = 0x30;
+            break;
+        }
+
+        /* 位置：1=上屏、2=下屏。**0（全屏）明确拒绝**：全屏位图 2800 字节，单帧装不下
+           （本协议单帧上限 1403 字节 DATA）；要全屏请发两包（pos=1 + pos=2）。≥3 非法。 */
+        uint16_t w = app_screen_rows();
+        uint16_t h;
+        uint16_t y;
+        if (1 == ctx->pos) {
+            h = (uint16_t)(app_screen_cols() / 2U);
+            y = 0;
+        } else if (2 == ctx->pos) {
+            h = (uint16_t)(app_screen_cols() / 2U);
+            y = (uint16_t)(app_screen_cols() / 2U);
+        } else {
+            status = 0x30;
+            break;
+        }
+
+        /* 位图必须够铺满这一整个半边（1bpp、MSB 在前、行字节 = ceil(w/8)）：
+           短一个字节都会让 app_render 按几何越界读帧缓冲 —— 与 RLS 的位图守卫同一理由。
+           口径取 **≥**：多带的字节不用、也不拒。 */
+        const uint16_t need = (uint16_t)(((w + 7U) / 8U) * h);
+        const uint16_t have = (uint16_t)(data_len - sizeof(app_cdstd_picture_display_t));
+        if (have < need) {
+            status = 0x30;
+            break;
+        }
+
+        app_render(&(app_render_cfg_t){
+            .type    = APP_RENDER_TYPE_BITMAP,
+            .x       = 0,
+            .y       = y,
+            .w       = w,
+            .h       = h,
+            .color   = color,
+            .persist = true,
+            .bitmap  = ctx->bitmap,
+        });
+
+    } while (false);
 
     _cdstd_build_reply(ccb, 0xB7, &status, sizeof(status));
 }
