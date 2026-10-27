@@ -23,3 +23,16 @@ void app_test_render_text(void);
 
 /** @brief LED 灯序测试：逐通道逐像素点亮 hub75_buff，用于确认物理灯序映射 */
 void app_test_led_mapping(void);
+
+/** @brief 定点灯序测试：按固定顺序只亮几个关键移位位置，每个停 5 秒
+ *
+ *  比逐个走完 192 步快得多：用于核对"某一段/某一组的起点"到底落在屏幕哪里。
+ *  当前顺序为 16 → 32 → 64 → 96 → 128 → 160 → 191（ch0）。 */
+void app_test_led_points(void);
+
+/** @brief 映射校验图：黑底 + 绿色边框 + 十字线 + 四角彩色标记
+ *
+ *  用于肉眼验证 prepare 的行列映射是否搞对：
+ *    左上红、右上白、左下蓝、右下黄，边框与十字为绿。
+ *  出现镜像/行错位/段错位时，四角颜色位置会立刻对不上。 */
+void app_test_map_check(void);

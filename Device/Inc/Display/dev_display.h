@@ -84,6 +84,11 @@ struct dev_display {
     /** @brief 压制期间**真的写过实屏缓冲**没有 —— `frame_end` 据此决定要不要输出
      *  （画布路径整段都不碰实屏缓冲，那一段就不该触发 prepare） */
     bool frame_touched;
+    /** @brief 灯序测试点：>= 0 时模组的 `scan` 忽略 `hub75_buff`，
+     *  只在 (test_step, test_ch) 这个移位位置输出绿色。用于确认陌生模组的物理灯序。
+     *  -1 = 正常扫描。见 `dev_display_set_test_point()` */
+    int16_t test_step;
+    uint8_t test_ch;
 };
 
 /* ---- 通用 API ---- */
@@ -178,6 +183,21 @@ void dev_display_frame_begin(dev_display_t *dev);
 /** @brief 结束"当成一帧"的压制：按需置脏标记并让 _scan_task 输出
  *  @param[in,out] dev 目标显示设备 */
 void dev_display_frame_end(dev_display_t *dev);
+
+/** @brief 设置/清除灯序测试点（诊断用）
+ *
+ *  置位后模组的 `scan` 不再读 `hub75_buff`，只把 (step, ch) 这一个移位位置
+ *  输出成绿色；地址切换、LAT 时序、亮度 PWM 仍由显示引擎负责。
+ *  用于确认陌生模组的物理灯序：逐个 step 点亮，记录它在屏上的坐标。
+ *  @param[in,out] dev  目标显示设备
+ *  @param step 移位位置（0..scan_line_pixels-1）；传 -1 退出测试模式
+ *  @param ch   通道号（0 = R1G1B1，1 = R2G2B2…） */
+__STATIC_INLINE void dev_display_set_test_point(dev_display_t *dev, int16_t step, uint8_t ch)
+{
+    if (!dev) return;
+    dev->test_step = step;
+    dev->test_ch   = ch;
+}
 
 /** @brief 查询扫描节拍统计（诊断用）
  *

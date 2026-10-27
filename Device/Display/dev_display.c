@@ -33,7 +33,7 @@ static osThreadId_t s_scan_task_id;
  * 不必再上逻辑分析仪。 */
 static volatile uint32_t s_scan_max_gap_ms;
 static volatile uint32_t s_scan_overruns;
-static uint32_t          s_scan_last_tick;
+static uint32_t s_scan_last_tick;
 
 static dev_display_t *s_active_display;
 
@@ -167,8 +167,10 @@ void dev_display_set_pixel(dev_display_t *dev, uint16_t x, uint16_t y, dev_displ
 {
     if (!dev || x >= dev->screen_rows || y >= dev->screen_cols) return;
     dev->pixel_map[y * dev->screen_rows + x] = (uint8_t)color;
-    if (!dev->dirty_hold) dev->dirty = true;
-    else dev->frame_touched = true;
+    if (!dev->dirty_hold)
+        dev->dirty = true;
+    else
+        dev->frame_touched = true;
 }
 
 /* ---- 多步绘制当成一帧（见 dev_display.h 的说明）---- */
@@ -215,8 +217,10 @@ void dev_display_fill(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, ui
 
     for (uint16_t row = 0; row < h; row++)
         memset(&dev->pixel_map[(y + row) * dev->screen_rows + x], (uint8_t)color, w);
-    if (!dev->dirty_hold) dev->dirty = true;
-    else dev->frame_touched = true;
+    if (!dev->dirty_hold)
+        dev->dirty = true;
+    else
+        dev->frame_touched = true;
 }
 
 void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *bitmap, dev_display_color_t color)
@@ -240,8 +244,10 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
                 dev->pixel_map[(y + row) * dev->screen_rows + (x + col)] = (uint8_t)color;
         }
     }
-    if (!dev->dirty_hold) dev->dirty = true;
-    else dev->frame_touched = true;
+    if (!dev->dirty_hold)
+        dev->dirty = true;
+    else
+        dev->frame_touched = true;
 }
 
 /* ---- TIM 周期回调（通过 pl_tim_register_period_fn 注册到 Platform 层）---- */

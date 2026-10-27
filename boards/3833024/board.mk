@@ -18,7 +18,7 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_rs485.c \
 	$(BOARD_DIR)/Device/Src/dev_io_ctrl.c \
 	$(BOARD_DIR)/Device/Src/dev_key_board.c \
-	$(BOARD_DIR)/Device/Src/dev_p20_16x8_2200001667.c \
+	$(BOARD_DIR)/Device/Src/dev_p10_48x24_2200000581.c \
 	$(BOARD_DIR)/Application/Src/app_rs232.c \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
