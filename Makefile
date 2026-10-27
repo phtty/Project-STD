@@ -39,7 +39,12 @@ FLOAT-ABI = -mfloat-abi=hard
 MCU_FLAGS = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)
 
 # ---- Common Flags ----
+# bootloader 开关：1 = 带 IAP bootloader（应用从 0x08040000 起）；
+#                 0 = 直烧板（板上没有升级程序，应用从 0x08000000 起铺满整片）。
+# 同一份宏也决定 board.h 的向量表偏移，链接地址由下面的 --defsym 同步。
+BOOTLOADER ?= 1
 DEFINES = -DUSE_HAL_DRIVER -DSTM32F407xx
+DEFINES += -DBOARD_HAS_IAP_BOOTLOADER=$(BOOTLOADER)
 
 # 板级头按层分布，镜像主树：Platform/Inc、Device/Inc、Application/Inc 各管自己那层，
 # board.h（纯板级配置，不分层）放板根。原来的 -I $(BOARD_DIR)/Inc 已拆成这四条。
@@ -97,6 +102,12 @@ LDFLAGS += -Wl,--gc-sections
 LDFLAGS += $(SPECS)
 LDFLAGS += -u _printf_float
 LDFLAGS += -lm
+
+# 直烧板：把 FLASH 起始/长度同步给链接脚本（与 board.h 的 BOARD_HAS_IAP_BOOTLOADER 同源）
+ifeq ($(BOOTLOADER),0)
+LDFLAGS += -Wl,--defsym=APP_FLASH_ORIGIN=0x08000000
+LDFLAGS += -Wl,--defsym=APP_FLASH_LENGTH=0x100000
+endif
 
 # ---- Source Files ----
 # CubeMX 产物（属板级：外设集、引脚、时钟、中断向量都随板子变）

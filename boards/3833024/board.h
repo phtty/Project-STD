@@ -11,19 +11,31 @@
 
 #pragma once
 
-/* ---- IAP 配置记录是否存在 ----
- * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：应用从
- * 0x08040000 起，其前的 256KB（Sector 0~5）留给 bootloader，Sector 1 留作记录
- * （见 board.ld 的 FLASH 起始）。
- * 直烧的板子固件从 0x08000000 起铺满整片，**0x08004000 就在固件映像内部** ——
- * 那里没有记录，对它做任何擦写都是在抹自己的代码。详见 app_iap_cfg.c 的说明。 */
-#define BOARD_HAS_IAP_RECORD 1 /**< 1 = 本板带 IAP bootloader，0x08004000 处有配置记录 */
+/* ---- bootloader 开关 ----
+ * 1 = 本板带 IAP bootloader（默认）：应用从 0x08040000 起，前面 256KB 留给
+ *     bootloader，Sector 1 留作配置记录。
+ * 0 = 直烧板（板上没有升级程序）：应用从 0x08000000 起铺满整片。
+ *
+ * **必须在编译时定义，不能只改这里**：链接脚本的 FLASH_ORIGIN 也要跟着变。
+ *   make BOOTLOADER=0            ← Makefile 会自动加 -D 和 --defsym
+ *   EIDE：预定义宏加 BOARD_HAS_IAP_BOOTLOADER=0，
+ *         链接参数再加 -Wl,--defsym=APP_FLASH_ORIGIN=0x08000000
+ *                        -Wl,--defsym=APP_FLASH_LENGTH=0x100000
+ *
+ * 两处不一致的表现：任何中断都跳到错误地址，且不会有编译期报错。 */
+#ifndef BOARD_HAS_IAP_BOOTLOADER
+#define BOARD_HAS_IAP_BOOTLOADER 1
+#endif
 
-/* ---- 向量表偏移 ----
- * 必须与 boards/3833024/board.ld 的 FLASH_ORIGIN 保持一致：3833024 带 IAP bootloader，
- * 主固件从 0x08040000 起，偏移 0x40000；直烧的板子是 0。两处不一致的表现是任何
- * 中断都跳到错误的地方，且不会有编译期报错。 */
-#define BOARD_VECT_TAB_OFFSET 0x00040000UL /**< 向量表偏移，须与 board.ld 的 FLASH_ORIGIN 一致 */
+#if BOARD_HAS_IAP_BOOTLOADER
+/**< 1 = 本板带 IAP bootloader，0x08004000 处有配置记录 */
+#define BOARD_HAS_IAP_RECORD 1
+/**< 向量表偏移，须与 board.ld 的 FLASH_ORIGIN 一致 */
+#define BOARD_VECT_TAB_OFFSET 0x00040000UL
+#else
+#define BOARD_HAS_IAP_RECORD 0
+#define BOARD_VECT_TAB_OFFSET 0x00000000UL
+#endif
 
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
