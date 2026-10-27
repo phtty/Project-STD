@@ -178,3 +178,12 @@ void dev_display_frame_begin(dev_display_t *dev);
 /** @brief 结束"当成一帧"的压制：按需置脏标记并让 _scan_task 输出
  *  @param[in,out] dev 目标显示设备 */
 void dev_display_frame_end(dev_display_t *dev);
+
+/** @brief 查询扫描节拍统计（诊断用）
+ *
+ * 正常相邻两次扫描唤醒的间隔是 2~3 个内核 tick（TIM3 = 400 Hz，1 ms/tick）。
+ * 间隔被拉长意味着扫描任务没被及时唤醒 —— 现场表现就是闪一下或撕裂。
+ * 有了这两个数字，这类问题看 diag 输出即可发现，不必上逻辑分析仪。
+ * @param[out] max_gap_ms 自启动以来最大唤醒间隔（ms），可为 nullptr
+ * @param[out] overruns   间隔 >4 ms 的次数，可为 nullptr */
+void dev_display_scan_stats(uint32_t *max_gap_ms, uint32_t *overruns);

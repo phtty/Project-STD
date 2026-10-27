@@ -34,6 +34,7 @@
 #include "pl_task.h"
 #include "pl_mem.h"
 #include "app_udp.h"
+#include "dev_display.h"
 
 #define APP_DIAG_INTERVAL_S (30U) /**< 打印周期（秒）*/
 #define APP_DIAG_TASK_MAX   (24U) /**< 最多列出多少个任务 */
@@ -57,6 +58,15 @@ static void _diag_dump(void)
        日志会被后面的周期输出刷掉，计数不会。 */
     printf("[diag] udp rx=%lu tx=%lu\n", (unsigned long)app_udp_get_rx_count(),
            (unsigned long)app_udp_get_tx_count());
+
+    /* 扫描节拍：正常 max_gap 2~3 ms、overrun 0。overrun 非 0 就说明扫描
+       曾被拖长（屏上可能已经闪过），这是那类问题唯一的事后证据。 */
+    {
+        uint32_t scan_gap = 0, scan_over = 0;
+        dev_display_scan_stats(&scan_gap, &scan_over);
+        printf("[diag] scan max_gap=%lums overrun=%lu\n", (unsigned long)scan_gap,
+               (unsigned long)scan_over);
+    }
 
     for (UBaseType_t i = 0; i < n; i++) {
         if (s_task_table[i].pcTaskName == NULL) continue;

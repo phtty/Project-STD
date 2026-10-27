@@ -91,7 +91,15 @@ extern uint32_t SystemCoreClock;
 
 /* Software timer definitions. */
 #define configUSE_TIMERS             1
-#define configTIMER_TASK_PRIORITY    (2)
+/* 定时器服务任务（daemon）同时承担"ISR 延迟回调"的角色：
+ * osEventFlagsSet() 在中断里会走 xEventGroupSetBitsFromISR，命令排进这个任务的
+ * 队列后才真正置位。CubeMX 默认值 2 会让它被任何优先级 >2 的任务饿死 ——
+ * 曾经导致 HUB75 扫描每 10 s 冻结约 9 ms（A/B 与 LAT 停发，OE 不受影响，因为
+ * OE 是在 TIM4 中断里直接写引脚的）。
+ * 按 FreeRTOS 官方建议取最高档。**前提**：定时器回调必须短、不得阻塞 ——
+ * 高优先级 daemon 一旦在回调里等待，就会反过来抢占包括扫描在内的一切。
+ * 注意：本文件由 CubeMX 生成，重新生成后需要重新确认这一行。 */
+#define configTIMER_TASK_PRIORITY    (configMAX_PRIORITIES - 1)
 #define configTIMER_QUEUE_LENGTH     10
 #define configTIMER_TASK_STACK_DEPTH 256
 

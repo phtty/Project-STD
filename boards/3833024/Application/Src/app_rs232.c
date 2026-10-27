@@ -17,6 +17,7 @@
 
 #include "FreeRTOS.h"
 #include "pl_uart.h"
+#include "pl_mem.h"
 #include "dev_rs232.h"
 #include "app_dispatch.h"
 #include "pl_task.h"
@@ -40,6 +41,13 @@ static int32_t _rs232_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8
     /* state 置 UP 的唯一位置在任务里、UART 与 DMA 接收就绪之后，
        因此它同时表达了"uart 已绑定"，无需再单独判空 */
     if (self->base.state != APP_CCB_STATE_UP) return -1;
+
+    /* 与 RS485 同策略：能 DMA 就 DMA —— 轮询会把调用任务按在整帧的物理时间上
+       （115200 下 50 字节约 4.3 ms，期间同级任务全部上不来）。
+       缓冲落在 CCMRAM 时只能轮询：DMA 够不到 CCM 区（见 pl_mem.h），
+       在这里先判，免得 pl_uart 每次打一条拒绝日志、帧被静默丢弃。 */
+    if (pl_mem_is_dma_capable(data, len))
+        return pl_uart_send_dma(self->uart, data, len, 100);
     return pl_uart_send(self->uart, data, len, 100);
 }
 

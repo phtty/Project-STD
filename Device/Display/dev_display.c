@@ -16,8 +16,25 @@
 #include "pl_tim.h"
 #include "pl_task.h"
 
-/* ---- 扫描任务事件 ---- */
-static osEventFlagsId_t s_scan_evt;
+/* ---- 扫描任务唤醒 ----
+ *
+ * 用 **thread flag** 而不是 event flag：CMSIS 在中断里调 osEventFlagsSet() 会走
+ * xEventGroupSetBitsFromISR，命令要排进优先级最低档的 timer daemon 任务才真正
+ * 置位；任何优先级高于 daemon 且自旋超过一个扫描周期（2.5 ms）的任务都能把
+ * 扫描饿死 —— 现场表现是每 10 s 冻结约 9 ms，A/B 与 LAT 同时停发，而 OE 照常
+ * （OE 由 TIM4 中断直接写引脚）。osThreadFlagsSet() 在中断里走
+ * xTaskNotifyFromISR，是直给目标任务，不经过任何中间任务。 */
+static osThreadId_t s_scan_task_id;
+
+/* ---- 扫描节拍统计 ----
+ *
+ * 单位是内核 tick（1 ms）。正常运行相邻两次唤醒间隔 2~3 tick（TIM3 = 400 Hz），
+ * 超过 4 tick 记为一次"超期"。目的：下次再出这类问题，看 diag 输出就能发现，
+ * 不必再上逻辑分析仪。 */
+static volatile uint32_t s_scan_max_gap_ms;
+static volatile uint32_t s_scan_overruns;
+static uint32_t          s_scan_last_tick;
+
 static dev_display_t *s_active_display;
 
 /* ---- 实例注册（由派生模组的 hw_dev_initcall 调用）---- */
@@ -76,11 +93,25 @@ static void _scan_task(void *arg)
     dev_display_t *dev = (dev_display_t *)arg;
     static uint8_t s_scan_line;
 
+    /* 先登记自身句柄，再启动定时器：TIM3 中断里要用它做通知目标。 */
+    s_scan_task_id = osThreadGetId();
+
     pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_SCAN));
     pl_tim_start_it(pl_tim_get_handle(PL_TIM_DISPLAY_PWM));
 
     for (;;) {
-        osEventFlagsWait(s_scan_evt, 0x01, osFlagsWaitAny, osWaitForever);
+        osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
+
+        /* 节拍统计：正常 2~3 tick，>4 tick 说明这一拍被拖长了 */
+        {
+            const uint32_t now = osKernelGetTickCount();
+            if (s_scan_last_tick != 0U) {
+                const uint32_t gap = now - s_scan_last_tick;
+                if (gap > s_scan_max_gap_ms) s_scan_max_gap_ms = gap;
+                if (gap > 4U) s_scan_overruns++;
+            }
+            s_scan_last_tick = now;
+        }
 
         /* 脏标记 → 预计算（off critical path）
          *
@@ -94,14 +125,7 @@ static void _scan_task(void *arg)
         if (dev->dirty && s_scan_line == 0) {
             dev->dirty = false;
             if (dev->ops->prepare) {
-                /* **量一下它到底多久**：这段跑在 osPriorityRealtime 的 _scan_task 里，
-                   期间**所有 Normal 任务都上不来**（协议任务就在那一档）。
-                   估算过一次（~10ms）与实测差一个数量级，所以直接量，不再估。
-                   查完把这几行去掉。 */
-                const uint32_t t0 = osKernelGetTickCount();
                 dev->ops->prepare(dev);
-                printf("[display] prepare 耗时 %u ms\n",
-                       (unsigned)(osKernelGetTickCount() - t0));
             }
         }
 
@@ -122,11 +146,9 @@ static void _scan_task(void *arg)
     }
 }
 
-/* ---- 软件初始化（创建事件 + 扫描任务）---- */
+/* ---- 软件初始化（创建扫描任务）---- */
 void dev_display_start(void)
 {
-    s_scan_evt = osEventFlagsNew(NULL);
-
     dev_display_t *dev = s_active_display;
 
     dev->dirty = true;
@@ -226,7 +248,9 @@ void dev_display_draw_bitmap(dev_display_t *dev, uint16_t x, uint16_t y, uint16_
 
 static void _on_scan_period(void)
 {
-    osEventFlagsSet(s_scan_evt, 0x01);
+    /* 中断上下文：osThreadFlagsSet 内部走 xTaskNotifyFromISR，直给目标任务。
+       句柄未登记（任务尚未起来）时丢弃这一次节拍即可。 */
+    if (s_scan_task_id != NULL) osThreadFlagsSet(s_scan_task_id, 0x01);
 }
 
 static void _on_pwm_period(void)
@@ -236,4 +260,11 @@ static void _on_pwm_period(void)
 
     pl_hub75_oe_set(s_pwm_cnt >= dev->light_level);
     s_pwm_cnt = (s_pwm_cnt + 1) & 7;
+}
+
+/* ---- 扫描节拍统计查询（供 app_diag 使用）---- */
+void dev_display_scan_stats(uint32_t *max_gap_ms, uint32_t *overruns)
+{
+    if (max_gap_ms) *max_gap_ms = s_scan_max_gap_ms;
+    if (overruns) *overruns = s_scan_overruns;
 }
