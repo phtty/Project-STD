@@ -83,21 +83,17 @@ typedef struct {
 
 static dev_display_hub75_48x24_t s_dev = {
     .base = {
-        .ops                  = nullptr, /* 由 init 绑定 */
+        .ops = nullptr, /* 由 init 绑定 */
         /* 注意本工程的命名：module_rows/screen_rows 是**水平方向**（宽），
          * module_cols/screen_cols 是垂直方向（高）。P20 的 screen_rows=128 即宽。 */
-        .module_rows          = MOD_COLS,
-        .module_cols          = MOD_ROWS,
-        .channels_per_module  = MOD_CHANNELS,
-        .modules_per_row      = 1U,
-        .modules_per_col      = 1U,
-        .scan_lines           = MOD_SCAN_LINES,
+        .module_rows         = MOD_COLS,
+        .module_cols         = MOD_ROWS,
+        .channels_per_module = MOD_CHANNELS,
+        .modules_per_row     = 1U,
+        .modules_per_col     = 1U,
+        .scan_lines          = MOD_SCAN_LINES,
         /* 本模组只有红/绿两种灯珠：黑/红/绿/黄，不含蓝系 */
-        .supported_color_mask = DEV_DISPLAY_COLOR_ALL
-            & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
+        .supported_color_mask = DEV_DISPLAY_COLOR_ALL & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
         .screen_rows          = MOD_COLS,
         .screen_cols          = MOD_ROWS,
         .total_channels       = MOD_CHANNELS,
@@ -151,13 +147,13 @@ static void _prepare(dev_display_t *dev)
             const uint8_t block = (uint8_t)(x / 8U); /* 0..5，每块 8 列 */
             const uint8_t cw    = (uint8_t)(x % 8U); /* 块内列 0..7 */
 
-            uint8_t  line;
+            uint8_t line;
             uint16_t step;
-            uint8_t  ch;
+            uint8_t ch;
 
             if (y < CH0_ROWS) {
-                const uint8_t rg   = (uint8_t)(y / 4U);      /* 0..3 */
-                const uint8_t half = (rg >= 2U) ? 0U : 1U;   /* 先 2/3，再 0/1 */
+                const uint8_t rg   = (uint8_t)(y / 4U);    /* 0..3 */
+                const uint8_t half = (rg >= 2U) ? 0U : 1U; /* 先 2/3，再 0/1 */
                 const uint8_t c    = (uint8_t)(half * 12U + block * 2U + (rg & 1U));
                 /* 奇数行组（4-7、12-15）的 8 像素组内列序相反 */
                 const uint8_t cw_e = (rg & 1U) ? (uint8_t)(7U - cw) : cw;
@@ -172,11 +168,11 @@ static void _prepare(dev_display_t *dev)
                 const uint8_t cw_e = (rg & 1U) ? (uint8_t)(7U - cw) : cw;
                 line               = (uint8_t)(y_in % 4U);
                 /* ch1 只有 96 位，放在后 96 步，避免被 192 个时钟移出寄存器 */
-                step               = (uint16_t)(96U + c * 8U + cw_e);
-                ch                 = 1U;
+                step = (uint16_t)(96U + c * 8U + cw_e);
+                ch   = 1U;
             }
 
-            const uint32_t idx = ((uint32_t)line * STEPS_PER_LINE + step) * MOD_CHANNELS + ch;
+            const uint32_t idx   = ((uint32_t)line * STEPS_PER_LINE + step) * MOD_CHANNELS + ch;
             dev->hub75_buff[idx] = dev->pixel_map[(uint32_t)y * MOD_COLS + x];
         }
     }
@@ -192,13 +188,13 @@ static void _prepare(dev_display_t *dev)
  * 由 `_scan` 在测试点变化时自动登记，退出测试模式（test_step < 0）时清空。
  * 只由扫描任务读写，测试任务只改 test_step/test_ch，竞争最坏是丢一次登记。 */
 [[gnu::section(".ccmram")]] static uint8_t s_trail[STEPS_PER_LINE * MOD_CHANNELS];
-static int16_t                     s_trail_step = -1;
-static uint8_t                     s_trail_ch;
+static int16_t s_trail_step = -1;
+static uint8_t s_trail_ch;
 
 static void _scan(dev_display_t *dev, uint8_t line)
 {
     const uint16_t base   = (uint16_t)((uint16_t)line * STEPS_PER_LINE * MOD_CHANNELS);
-    const bool     test   = (dev->test_step >= 0);
+    const bool test       = (dev->test_step >= 0);
     const uint16_t t_step = (uint16_t)dev->test_step;
 
     if (test) {
@@ -209,6 +205,7 @@ static void _scan(dev_display_t *dev, uint8_t line)
         }
         s_trail_step = dev->test_step;
         s_trail_ch   = dev->test_ch;
+
     } else if (s_trail_step >= 0) {
         /* 退出测试模式：清轨迹，并复位状态 */
         memset(s_trail, 0, sizeof(s_trail));
@@ -222,14 +219,16 @@ static void _scan(dev_display_t *dev, uint8_t line)
             if (test) {
                 const uint32_t ti = (uint32_t)step * MOD_CHANNELS + ch;
                 if (step == t_step && ch == dev->test_ch)
-                    color = DEV_DISPLAY_COLOR_GREEN;           /* 当前点 */
+                    color = DEV_DISPLAY_COLOR_GREEN; /* 当前点 */
                 else if (s_trail[ti])
-                    color = DEV_DISPLAY_COLOR_RED;             /* 亮过的点 */
+                    color = DEV_DISPLAY_COLOR_RED; /* 亮过的点 */
                 else
                     color = DEV_DISPLAY_COLOR_BLACK;
+
             } else {
                 color = dev->hub75_buff[base + (uint16_t)step * MOD_CHANNELS + ch];
             }
+
             const hub75_bsrr_t *b = &s_bsrr[ch][color];
             pl_hub75_bsrr_flush(&b->r);
             pl_hub75_bsrr_flush(&b->g);
