@@ -34,18 +34,18 @@ static_assert(sizeof(dev_cfg_record_hdr_t) == 24, "dev_cfg_record_hdr_t must be 
 
 /** @brief 记录镜像（头 + 载荷）上限，用于两处静态缓冲的定长
  *
- * 取值由**本工程最大的一个载荷**决定，当前是渲染显存：
- *   app_render_persist_t(5B) + 最大模组位图 2560B（P10 320×64 的 1bpp 位图）
- *   = 2565B 载荷，+ 24B 头 = 2589B。
- * 取 2589 向上留余量到 2600，两处静态缓冲因此各占 2600B（合计约 5.1KB SRAM）。
+ * 取值由**本工程最大的一个载荷**决定。历史上最大的是渲染显存
+ * （`app_render_persist_t`(5B) + 最大模组位图 2560B = 2565B 载荷，+24B 头 = 2589B）；
+ * 现在更大的是外贸车道屏协议的**图片槽位**（槽位头 5B + 整屏 1bpp 2800B = 2805B 载荷，
+ * +24B 头 = 2829B），故按 2840 取整。
  *
  * 这不是可以随手调小的"缓冲大小"：调小于最大载荷时 save 会返回 -1，
- * 表现为"配置存不下去"而不是越界。上界由 app_cfg_sched.h 的 static_assert
- * 与渲染侧的运行期检查共同守住。
+ * 表现为"配置存不下去"而不是越界。上界由 app_cfg_sched.h 的 static_assert、
+ * 渲染侧与 LCSP 槽位侧的 static_assert 共同守住。
  *
  * 若以后要省这几 KB，可以改成"分块读回比对"（逐 256B 比较即可判定是否一致），
  * 那样只需一个小缓冲。当前按简单优先。 */
-#define DEV_CFG_RECORD_MAX_IMAGE (2600U)
+#define DEV_CFG_RECORD_MAX_IMAGE (2840U)
 
 /** @brief CRC 计算函数 (默认 crc32_calc, Kernel 纯软件; 可注入其他实现) */
 typedef uint32_t (*dev_cfg_record_crc_fn_t)(const uint8_t *data, size_t len);

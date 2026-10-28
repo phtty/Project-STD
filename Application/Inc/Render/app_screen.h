@@ -48,6 +48,24 @@
 /** @brief 切分表最多几张卡（4 卡横排是已知的最大部署规模） */
 #define APP_SCREEN_CARD_MAX (4U)
 
+/** @brief 板级自定义切分表的一项：一张卡在整屏里的矩形（逻辑坐标） */
+typedef struct {
+    uint16_t x; /**< 左上角 X */
+    uint16_t y; /**< 左上角 Y */
+    uint16_t w; /**< 宽（= 该卡自己的画面宽） */
+    uint16_t h; /**< 高 */
+} app_screen_cell_rect_t;
+
+/** @brief 板级自定义切分表（可选，弱符号）
+ *
+ *  等尺寸网格表达不了"主卡带 4 个模组、从卡带 2 个"这类不等宽拼法。
+ *  板级提供强定义（boards/<板>/Application/Src/app_screen_board.c），
+ *  共享代码里的弱定义返回 nullptr → 回落到 BOARD_CASC_COLS/ROWS 的等尺寸网格。
+ *
+ *  @param[out] count 表项个数
+ *  @return 表首地址；nullptr 表示本板不用自定义布局 */
+const app_screen_cell_rect_t *app_screen_board_cells(uint8_t *count);
+
 /** @brief 一张卡的**运行期**状态 —— 由枚举与轮次结果驱动
  *
  *  **MISSING 与 OFFLINE 必须分开**，因为现场处置完全不同：

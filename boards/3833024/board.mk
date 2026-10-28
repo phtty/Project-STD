@@ -20,6 +20,18 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_key_board.c \
 	$(BOARD_DIR)/Device/Src/dev_p10_48x24_2200000581.c \
 	$(BOARD_DIR)/Application/Src/app_rs232.c \
+	$(BOARD_DIR)/Application/Src/app_screen_board.c \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
+
+# ---- 本板不参与编译的共享源 ----
+# CDSTD（折叠屏创迪标准协议）是**折叠屏产品**的协议，本板没有折叠屏，且产品口径是
+# 一台设备只跑一种上位机协议（LCSP 与 CDSTD/RLS 不同时启用）。EIDE 的 3833024 目标
+# 早就把 `<virtual_root>/Application/protocol/cdstd` 排掉了，Makefile 这边一直漏着 ——
+# 两套构建因此产出**不同固件**（AGENTS.md §6 坑 1）。这里对齐，顺带把 CDSTD 占的
+# 5.8KB CCMRAM 还给整屏图像路径。
+BOARD_SRC_EXCLUDE = \
+	Application/Src/CDSTD/app_cdstd.c \
+	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Src/CDSTD/app_cdstd_cfg.c

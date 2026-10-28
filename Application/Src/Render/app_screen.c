@@ -237,8 +237,51 @@ static bool _layout_build_grid(uint8_t nx, uint8_t ny, uint8_t master_cell)
 }
 
 /** @brief 本期取板级网格参数（见 board.h 的 BOARD_CASC_COLS/ROWS/MASTER_CELL） */
+/* ---- 板级自定义切分表：弱定义回落 ---- */
+__attribute__((weak)) const app_screen_cell_rect_t *app_screen_board_cells(uint8_t *count)
+{
+    if (count) *count = 0U;
+    return nullptr;
+}
+
+/** @brief 用板级切分表建卡表（允许各卡不等宽） */
+static bool _layout_build_custom(const app_screen_cell_rect_t *tab, uint8_t n, uint8_t master_cell)
+{
+    if (!tab || n == 0U || n > APP_SCREEN_CARD_MAX || master_cell >= n) return false;
+
+    uint16_t max_w    = 0U;
+    uint16_t max_h    = 0U;
+    uint8_t  next_addr = 1U; /* 0 留给主卡 */
+
+    for (uint8_t i = 0; i < n; i++) {
+        const uint16_t right  = (uint16_t)(tab[i].x + tab[i].w);
+        const uint16_t bottom = (uint16_t)(tab[i].y + tab[i].h);
+        if (right > max_w) max_w = right;
+        if (bottom > max_h) max_h = bottom;
+
+        s_card_table[i] = (app_screen_card_t){
+            .addr  = (i == master_cell) ? 0U : next_addr++,
+            .color = BOARD_SCREEN_COLOR,
+            .x     = tab[i].x,
+            .y     = tab[i].y,
+            .w     = tab[i].w,
+            .h     = tab[i].h,
+            .state = APP_SCREEN_CARD_STATE_MISSING,
+        };
+    }
+
+    s_screen_layout.count = n;
+    s_screen_layout.rows  = max_w; /* 本结构里 rows 表示整屏宽 */
+    s_screen_layout.cols  = max_h;
+    return true;
+}
+
 static bool _layout_build(void)
 {
+    uint8_t                       n   = 0U;
+    const app_screen_cell_rect_t *tab = app_screen_board_cells(&n);
+    if (tab && n) return _layout_build_custom(tab, n, s_master_cell);
+
     return _layout_build_grid((uint8_t)BOARD_CASC_COLS, (uint8_t)BOARD_CASC_ROWS,
                               s_master_cell);
 }

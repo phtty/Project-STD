@@ -43,8 +43,14 @@ MCU_FLAGS = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)
 #                 0 = 直烧板（板上没有升级程序，应用从 0x08000000 起铺满整片）。
 # 同一份宏也决定 board.h 的向量表偏移，链接地址由下面的 --defsym 同步。
 BOOTLOADER ?= 1
+# 每卡显示模组数（列×行）。主卡 2×2=4、从卡 1×2=2；同一套代码靠这两个变量区分。
+# 本产品整屏 6 模组 = 2 行 3 列，两张卡分带 4 个 / 2 个。
+MODCOLS ?= 2
+MODROWS ?= 2
 DEFINES = -DUSE_HAL_DRIVER -DSTM32F407xx
 DEFINES += -DBOARD_HAS_IAP_BOOTLOADER=$(BOOTLOADER)
+DEFINES += -DBOARD_DISPLAY_MODULE_COLS=$(MODCOLS)
+DEFINES += -DBOARD_DISPLAY_MODULE_ROWS=$(MODROWS)
 
 # 板级头按层分布，镜像主树：Platform/Inc、Device/Inc、Application/Inc 各管自己那层，
 # board.h（纯板级配置，不分层）放板根。原来的 -I $(BOARD_DIR)/Inc 已拆成这四条。
@@ -63,6 +69,7 @@ INC_DIRS = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
+	-I Application/Inc/LCSP \
 	-I Device/Inc \
 	-I Device/Inc/Display \
 	-I Device/Inc/IO \
@@ -351,6 +358,10 @@ SRC_APPLICATION = \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
+	Application/Src/LCSP/app_lcsp.c \
+	Application/Src/LCSP/app_lcsp_cmd.c \
+	Application/Src/LCSP/app_lcsp_cfg.c \
+	Application/Src/LCSP/app_lcsp_slot.c \
 	Application/Src/AHMQ/app_ahmq.c \
 	Application/Src/AHMQ/app_ahmq_cmd.c \
 	Application/Src/Channel/app_udp.c \
@@ -469,6 +480,7 @@ TEST_INC     = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
+	-I Application/Inc/LCSP \
 	-I Kernel/Inc \
 	-I Platform/Inc \
 	-I Device/Inc \
@@ -676,6 +688,19 @@ TEST_CDSTD_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
+# 套件二十：外贸车道屏以太网协议（LCSP）
+# 探针/任务/组帧都在 app_lcsp.c 里（资源是 static），故用例 TU-include 它；
+# 命令层 app_lcsp_cmd.c 作为普通 TU 编译 —— 命令表、位序翻转、参数校验都是被测对象，
+# 其中命令表由生产代码定义，用例**不改写**它（与 CDSTD 套件相反：那边表是空桩，
+# 只能替换）。外部依赖（配置/槽位/渲染/屏幕/网络/通道）全部换成记录桩。
+TEST_LCSP_SRCS = \
+	test/test_lcsp.c \
+	test/stubs/os_stub.c \
+	Platform/Src/pl_task.c \
+	Application/Src/LCSP/app_lcsp_cmd.c \
+	Kernel/Src/ring_buffer.c \
+	Kernel/Src/crc_utils.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -706,7 +731,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_screen_brightness \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
-      $(TEST_BUILD)/test_cdstd
+      $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_lcsp
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -763,6 +788,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── CDSTD 协议 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cdstd
+	@echo ""
+	@echo "──── LCSP 协议 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_lcsp
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -883,6 +911,17 @@ $(TEST_BUILD)/test_cdstd: Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h \
 	Application/Inc/CDSTD/app_cdstd_cfg.h Application/Inc/IAP/app_iap_cfg.h
+
+# 用例 TU-include 了 app_lcsp.c（探针/任务/组帧是 static），必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。app_lcsp_cmd.c 在 SRCS 里，无需再挂。
+$(TEST_BUILD)/test_lcsp: $(TEST_LCSP_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_LCSP_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_lcsp: Application/Src/LCSP/app_lcsp.c Application/Src/LCSP/app_lcsp_cmd.c \
+	Application/Src/LCSP/app_lcsp_cfg.c Application/Src/LCSP/app_lcsp_slot.c \
+	Application/Inc/LCSP/app_lcsp.h Application/Inc/LCSP/app_lcsp_cmd.h \
+	Application/Inc/LCSP/app_lcsp_cfg.h Application/Inc/LCSP/app_lcsp_slot.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

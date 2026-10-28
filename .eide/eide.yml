@@ -61,6 +61,13 @@ virtualFolder:
                 - path: Application/Src/CDSTD/app_cdstd_cmd.c
                 - path: Application/Src/CDSTD/app_cdstd_cfg.c
               folders: []
+            - name: lcsp
+              files:
+                - path: Application/Src/LCSP/app_lcsp.c
+                - path: Application/Src/LCSP/app_lcsp_cfg.c
+                - path: Application/Src/LCSP/app_lcsp_cmd.c
+                - path: Application/Src/LCSP/app_lcsp_slot.c
+              folders: []
         - name: render
           files:
             - path: Application/Src/Render/app_render.c
@@ -433,6 +440,7 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
+        - Application/Inc/LCSP
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -459,6 +467,8 @@ targets:
       - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
       - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/protocol/cdstd
+      - <virtual_root>/Application/protocol/ldi
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -594,6 +604,7 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
+        - Application/Inc/LCSP
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -617,6 +628,7 @@ targets:
       - <virtual_root>/boards/3833024
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/Application/protocol/lcsp
     settings:
       debugger: cortex-debug
     toolchain: GCC

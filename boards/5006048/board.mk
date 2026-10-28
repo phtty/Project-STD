@@ -31,3 +31,16 @@ BOARD_SRC_EXCLUDE = \
 	Application/Src/LDI/app_fold.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c
+
+# ---- 外贸车道屏协议（LCSP）也不进本板：**本板产品不使用它**（外贸车道屏走 3833024）----
+# 顺带记一笔容量事实，免得将来有人"只删这四行"以为就能加进来：
+# 本板 CCMRAM 的 64KB 里：显示驱动 41.2KB + 级联 7.0KB + CDSTD 5.8KB + IAP 4.2KB
+# + 框架暂存 3.1KB ≈ 61.3KB，只剩 ~4.3KB。
+# 而 LCSP 是"一帧一幅整屏图"（整屏 224×100 1bpp = 2800 字节），至少需要
+#   收包环 2811 + 协议队列 2819 = 5.6KB（还要先排掉 CDSTD 才腾得出）。
+# 3833024 的整屏只有 256×32（1024 字节/帧），CCMRAM 也宽裕（剩 22.6KB），故只在那边编。
+BOARD_SRC_EXCLUDE += \
+	Application/Src/LCSP/app_lcsp.c \
+	Application/Src/LCSP/app_lcsp_cmd.c \
+	Application/Src/LCSP/app_lcsp_cfg.c \
+	Application/Src/LCSP/app_lcsp_slot.c

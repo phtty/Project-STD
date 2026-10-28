@@ -64,7 +64,7 @@
 #define BOARD_SCREEN_CANVAS_MAX (2048U) /**< 整屏逻辑画布上限（字节），按本板最大级联规模留 */
 #endif
 #ifndef BOARD_SCREEN_CANVAS
-#define BOARD_SCREEN_CANVAS (0) /**< 1 = 启用整屏逻辑画布；本板单卡默认关闭 */
+#define BOARD_SCREEN_CANVAS (1) /**< 1 = 启用整屏逻辑画布；本板单卡默认关闭 */
 #endif
 /* 本卡颜色（dev_display_color_t）。级联后由切分表逐卡给，这里只是单卡时的默认值。 */
 #define BOARD_SCREEN_COLOR (2) /**< 本卡默认颜色：DEV_DISPLAY_COLOR_GREEN */
@@ -74,7 +74,7 @@
  * 整屏 = 128×COLS 宽 × 32×ROWS 高，地址 = 网格下标（行优先，0 = 左上 = 主卡）。
  * 默认 1×1 = 单卡直显，行为与没有级联之前逐字节相同。 */
 #ifndef BOARD_CASC_COLS
-#define BOARD_CASC_COLS (1) /**< 级联网格列数（横排卡数） */
+#define BOARD_CASC_COLS (2) /**< 级联网格列数（横排卡数） */
 #endif
 #ifndef BOARD_CASC_ROWS
 #define BOARD_CASC_ROWS (1) /**< 级联网格行数（竖排卡数） */
@@ -83,8 +83,22 @@
 /* 主卡所在的**网格下标**（行优先：0 = 左上）。主卡不必在原点 —— 现场的拼法就有
  * "上面一块、下面一块，下面那块是主卡"，那是 1×2 网格里的格号 1。
  * 详见 5006048/board.h 的同名宏。 */
+/* ---- 一块卡带几个显示模组 ----
+ *
+ * 本产品整屏 6 模组（2 行 3 列，144×48）：主卡带右侧 2×2 = 4 个，从卡带左侧
+ * 2×1 = 2 个。两张卡同型号，只靠这两个宏配出不同数量；共享 CLK/LAT/OE/A-B，
+ * 每个模组占一对 RGB（模组 m 用 ch 2m/2m+1）。
+ *
+ * 接线顺序是**列优先**：m = 列*ROWS + 行（1行2列=#1、2行2列=#2、1行3列=#3…）。 */
+#ifndef BOARD_DISPLAY_MODULE_COLS
+#define BOARD_DISPLAY_MODULE_COLS (2) /**< 每卡横向模组数（从卡配 1） */
+#endif
+#ifndef BOARD_DISPLAY_MODULE_ROWS
+#define BOARD_DISPLAY_MODULE_ROWS (2) /**< 每卡纵向模组数 */
+#endif
+
 #ifndef BOARD_CASC_MASTER_CELL
-#define BOARD_CASC_MASTER_CELL (0) /**< 主卡所在网格下标（行优先，0 = 左上） */
+#define BOARD_CASC_MASTER_CELL (1) /**< 主卡所在网格下标（行优先，0 = 左上） */
 #endif
 
 /* ---- 本板跑不跑级联：**由网格形状推导**（单卡 = COLS×ROWS == 1 = 不跑）----
@@ -102,7 +116,7 @@
 /* ---- 单卡矩形位图的上限（字节）----
  * 1bpp、ceil(屏宽/8)×屏高：本板单卡 128×32 → 16×32 = **512**。
  * app_screen 的抽带缓冲与 app_casc 的从卡暂存都按它静态分配。 */
-#define BOARD_CASC_BAND_MAX (512U) /**< 单卡矩形位图上限（1bpp，字节） */
+#define BOARD_CASC_BAND_MAX (640U) /**< 单卡矩形位图上限（1bpp，字节） */
 
 /* ---- 级联总线地址（app_screen_self_addr）----
  * 0 = 主卡，1..0x1F = 从卡。
