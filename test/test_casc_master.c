@@ -46,19 +46,24 @@
 #include "dev_display.h"
 #include "ring_buffer.h"
 
-/* ---- 本板的单卡几何：位图长度就是 BOARD_CASC_BAND_MAX ----
- * 5006048 是 224×50 → 28×50 = 1400；3833024 是 128×32 → 16×32 = 512。 */
+/* ---- 本板的单卡几何（本套件按**最大那块卡**取）----
+ * 5006048 是 224×50 → 28×50 = 1400；3833024 是 96×48 → 12×48 = 576
+ * （该板 6 模组 2 卡不等宽：主卡 96×48、从卡 48×48，上限取大的那块）。
+ *
+ * `BOARD_CASC_BAND_MAX` 只是**编译期上限**（按最大卡留，允许有余量），
+ * 位图长度按本夹具的 CARD_W×CARD_H 实算 —— 生产侧同样是按运行期矩形
+ * 算 `app_screen_card_bm_len()`，不拿上限当长度。 */
 #if BOARD_CASC_BAND_MAX >= 1400
 #define CARD_W (224U)
 #define CARD_H (50U)
 #else
-#define CARD_W (128U)
-#define CARD_H (32U)
+#define CARD_W (96U)
+#define CARD_H (48U)
 #endif
-#define CARD_BM (BOARD_CASC_BAND_MAX)
+#define CARD_BM (((CARD_W + 7U) / 8U) * CARD_H)
 
-static_assert(((CARD_W + 7U) / 8U) * CARD_H == CARD_BM,
-              "本板的单卡几何与 BOARD_CASC_BAND_MAX 对不上 —— 新板要在这里补一行");
+static_assert(CARD_BM <= BOARD_CASC_BAND_MAX,
+              "本板的单卡几何装不进 BOARD_CASC_BAND_MAX —— 新板要在这里补一行");
 
 /* 一帧必须装得下整块位图 —— 这正是"一帧一轮"成立的前提，装不下就别谈删分片 */
 static_assert(CASC_FRAME_MAX >= CASC_OVERHEAD + sizeof(app_casc_image_t) + CARD_BM,
