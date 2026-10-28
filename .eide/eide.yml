@@ -345,6 +345,7 @@ virtualFolder:
                 - path: boards/3833024/Device/Src/dev_p20_16x16_1000001055.c
                 - path: boards/3833024/Device/Src/dev_rs232.c
                 - path: boards/3833024/Device/Src/dev_rs485.c
+                - path: boards/3833024/Device/Src/dev_p10_48x24_2200000581.c
               folders: []
             - name: Platform
               files:
@@ -406,6 +407,8 @@ targets:
       defineList:
         - USE_HAL_DRIVER
         - STM32F407xx
+        - BOARD_DISPLAY_MODULE_COLS=2
+        - BOARD_DISPLAY_MODULE_ROWS=2
       incList:
         - Drivers/CMSIS/Include
         - Drivers/CMSIS/Device/ST/STM32F4xx/Include
@@ -469,6 +472,7 @@ targets:
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/Application/protocol/cdstd
       - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

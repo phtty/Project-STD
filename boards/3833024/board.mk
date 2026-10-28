@@ -25,13 +25,33 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
 
-# ---- 本板不参与编译的共享源 ----
-# CDSTD（折叠屏创迪标准协议）是**折叠屏产品**的协议，本板没有折叠屏，且产品口径是
-# 一台设备只跑一种上位机协议（LCSP 与 CDSTD/RLS 不同时启用）。EIDE 的 3833024 目标
-# 早就把 `<virtual_root>/Application/protocol/cdstd` 排掉了，Makefile 这边一直漏着 ——
-# 两套构建因此产出**不同固件**（AGENTS.md §6 坑 1）。这里对齐，顺带把 CDSTD 占的
-# 5.8KB CCMRAM 还给整屏图像路径。
+# ---- 本板不参与编译的共享源：**本产品只跑 LCSP** ----
+#
+# 产品编码就是分支名后半截（`produc/2300001860`）：车道诱导屏，上位机走 LCSP
+# （以太网）。一台设备只跑一种上位机协议，所以其余三个协议整目录不进固件：
+#
+#   CDSTD  折叠屏创迪标准 —— 创迪平台的折叠屏产品才用
+#   LDI    车道诱导屏协议 —— 老的 VMS 平台，本产品不上
+#   RLS    车道屏远程上载/显示帧 —— 同上
+#
+# EIDE 的 3833024 目标一直是这么配的（`Application/protocol/{cdstd,ldi,rls}` 全排），
+# Makefile 这边以前只漏排了 CDSTD —— 两套构建因此产出**不同固件**（AGENTS.md §6 坑 1）。
+# 这里补齐，让两边编同一份源；省下的不只是 Flash，还有这三个协议各自的静态队列与暂存
+# （CCMRAM 本来就紧）。
+#
+# 两处**故意保留**：
+#   · `app_fold_preset_board.c`（SRC_BOARD 里）—— EIDE 也列着它。它只是 3 个空槽常量，
+#     几十字节；以后若加回折叠屏，不用再补这个符号。
+#   · `Application/Inc/LDI` 等头文件路径（INC_DIRS 里）—— 头不占固件，且板级文件仍
+#     include 它们的类型（如 app_fold.h 的 app_fold_preset_t）。
 BOARD_SRC_EXCLUDE = \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
-	Application/Src/CDSTD/app_cdstd_cfg.c
+	Application/Src/CDSTD/app_cdstd_cfg.c \
+	Application/Src/LDI/app_ldi.c \
+	Application/Src/LDI/app_ldi_cmd.c \
+	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/LDI/app_fold.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c
