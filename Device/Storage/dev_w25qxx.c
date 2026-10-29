@@ -10,6 +10,7 @@
 #include "cmsis_os2.h"
 #include "initcall.h"
 #include "pl_spi.h"
+#include "pl_mem.h"
 #include "pl_gpio.h"
 #include "pl_sys.h"
 
@@ -87,6 +88,19 @@ static inline void _cs_high(void)
 /* ---- DMA 同步（_read 懒初始化）---- */
 static osEventFlagsId_t s_evt;
 static volatile bool s_ok;
+
+/** 单次读的完成上限。4096 字节 @42MHz 约 0.8ms，200ms 是"完全没动"的判据。 */
+#define W25Q_READ_TIMEOUT_MS (200U)
+
+/** @brief 最近一次读失败现场（只在失败时写；调试器可直接读，printf 在
+ *         printf 走 RTT，现场未必接调试器） */
+static struct {
+    volatile uint32_t count; /**< 失败次数 */
+    volatile int32_t  stage; /**< 1=命令发送 2=DMA 启动 3=等完成超时 */
+    volatile int32_t  rc;    /**< 对应步骤的返回码 */
+    volatile uint32_t addr;  /**< 起始地址 */
+    volatile uint32_t len;   /**< 长度 */
+} s_last_read_err;
 
 static void _dma_cb(void *ctx)
 {
@@ -168,11 +182,41 @@ static int32_t _init(dev_storage_t *dev)
     return 0;
 }
 
-/** @brief 读扇区数据（调用者已持锁；_write 的读-改-写也走这里） */
+/** @brief 读扇区数据（调用者已持锁；_write 的读-改-写也走这里）
+ *
+ *  **完成必须有上限**：完成事件来自 DMA 中断。HAL 侧任何一次"没起来"
+ *  （`HAL_SPI_Receive_DMA` 因 State 不是 READY / DMA 流仍使能而返回非 OK，
+ *  或完成中断被漏掉）都只表现为"回调永远不来"。原来的 `while (!s_ok)` 会把
+ *  调用任务永久挂在这里，而它持着本驱动的访问锁 —— 此后所有 Flash 访问
+ *  （含配置读取）一起卡死，设备表现是"TCP 连得上、帧收得到、就是不回包"，
+ *  查起来像是协议/任务调度的问题，实际卡在读 Flash 上。
+ *
+ *  这里改成事件标志 + 超时：失败记现场、中止传输（把 SPI/DMA 状态机拉回
+ *  READY）、返回 -1，让上层按"这块读失败"处理，下一次访问还能正常发起。
+ */
 static int32_t _read_unlocked(dev_storage_t *dev, uint32_t addr, uint8_t *buf, uint32_t len)
 {
     dev_w25qxx_t *self = container_of(dev, dev_w25qxx_t, base);
     if (!buf || len == 0) return -1;
+
+    /* DMA 够不到 CCMRAM（见 pl_mem.h），而调用方的缓冲完全可能就在那儿 ——
+       LCSP 的槽位/图片缓冲为了不占 SRAM 常驻区就是放 CCMRAM 的。**这个限制
+       不能甩给调用方**：`pl_spi_receive_dma` 只是静默返回 -1，上层看到的是
+       "槽位读不出来"（表现为设备信息里槽位恒为空、0x06 永远失败）。这里分块
+       经 SRAM 中转，任何调用方缓冲都能读。 */
+    if (!pl_mem_is_dma_capable(buf, len)) {
+        static uint8_t s_bounce[512];
+        uint32_t done = 0;
+
+        while (done < len) {
+            uint32_t ch = len - done;
+            if (ch > sizeof(s_bounce)) ch = sizeof(s_bounce);
+            if (_read_unlocked(dev, addr + done, s_bounce, ch) != 0) return -1;
+            memcpy(&buf[done], s_bounce, ch);
+            done += ch;
+        }
+        return 0;
+    }
 
     if (!s_evt) {
         s_evt = osEventFlagsNew(NULL);
@@ -186,12 +230,33 @@ static int32_t _read_unlocked(dev_storage_t *dev, uint32_t addr, uint8_t *buf, u
     _put_addr(cmd + 1, addr, self);
 
     s_ok = false;
+    (void)osEventFlagsClear(s_evt, 0x01);
+
+    int32_t stage = 1;
+    int32_t rc    = 0;
+
     _cs_low();
-    pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
-    pl_spi_receive_dma(self->spi, buf, (uint16_t)len);
-    while (!s_ok)
-        osDelay(1);
+    rc = pl_spi_transmit(self->spi, cmd, (uint16_t)(al + 1));
+    if (rc == 0) {
+        stage = 2;
+        rc    = pl_spi_receive_dma(self->spi, buf, (uint16_t)len);
+    }
+    if (rc == 0) {
+        stage         = 3;
+        uint32_t flag = osEventFlagsWait(s_evt, 0x01, osFlagsWaitAny, W25Q_READ_TIMEOUT_MS);
+        if (flag != 0x01U) rc = -1;
+    }
     _cs_high();
+
+    if (rc != 0) {
+        s_last_read_err.count++;
+        s_last_read_err.stage = stage;
+        s_last_read_err.rc    = rc;
+        s_last_read_err.addr  = addr;
+        s_last_read_err.len   = len;
+        pl_spi_abort(self->spi); /* 回干净的 READY，别把下一次也拖死 */
+        return -1;
+    }
     return 0; /* 约定: 0 = 成功（不返回字节数） */
 }
 
@@ -216,10 +281,12 @@ static int32_t _wait_busy(dev_w25qxx_t *self, uint32_t timeout_ms)
 {
     for (uint32_t t = 0; t < timeout_ms; t++) {
         _cs_low();
-        uint8_t cmd = W25Q_READ_STATUS1, st;
-        pl_spi_transmit(self->spi, &cmd, 1);
-        pl_spi_receive(self->spi, &st, 1);
+        uint8_t cmd = W25Q_READ_STATUS1, st = 0xFFU;
+        int32_t r   = pl_spi_transmit(self->spi, &cmd, 1);
+        if (r == 0) r = pl_spi_receive(self->spi, &st, 1);
         _cs_high();
+        /* 状态没读到就别拿 st 当结论（未初始化值可能"看起来不忙"） */
+        if (r != 0) return -1;
         if (!(st & 0x01)) return 0;
         osDelay(1);
     }
@@ -271,7 +338,8 @@ static int32_t _write_unlocked(dev_storage_t *dev, uint32_t addr, const uint8_t 
         uint32_t ch  = 4096 - off;
         if (len - w < ch) ch = len - w;
 
-        _read_unlocked(dev, sa, s_sec, 4096);
+        /* 读-改-写：读失败时 s_sec 里是旧内容/垃圾，照着写回会把整扇区写坏 */
+        if (_read_unlocked(dev, sa, s_sec, 4096) != 0) return -1;
 
         bool need = false;
         for (uint16_t i = off; i < off + ch; i++)
