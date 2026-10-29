@@ -469,6 +469,79 @@ static void case_local_color_fill_still_mixed(void)
               (unsigned)app_screen_output_color(0, card));
 }
 
+/** @brief 文字帧换色：逐字形位图盖不满单元，必须由协议层声明新帧，否则旧色残留混色
+ *
+ *  现场症状（5006048，卡片色=绿）：绿字改红/黄/蓝都停在绿，其他色"切回绿"却正常 ——
+ *  根因不是没清屏，而是帧单元的颜色账只在"整单元纯色填充/整单元位图"时自动复位；
+ *  文字帧是逐字形小位图 → 新色与上一帧旧色判 mixed → 回落切分表卡片色（绿）。
+ *  `app_screen_color_frame_begin()` 是"这一帧替换这些区域"的声明。 */
+static void case_text_frame_color_change(void)
+{
+    TEST_BEGIN("文字帧换色：声明新帧后红→绿切得动，不回落卡片色");
+
+    const dev_display_color_t card  = DEV_DISPLAY_COLOR_YELLOW;
+    const uint8_t             glyph = 0xF0U; /* 8×1 字形块，盖不满半屏单元 */
+
+    canvas_reset_fold();
+
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_RED); /* 下半整单元填充定红 */
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_RED, "下半应为红");
+
+    /* 不声明新帧：绿字形叠在红帧上 → mixed → 回落卡片色（旧缺陷的现象本身） */
+    _sink_bitmap(nullptr, 0, H, 8, 1, &glyph, DEV_DISPLAY_COLOR_GREEN);
+    CHECK_MSG(app_screen_output_color(1, card) == card,
+              "未声明新帧时应判 mixed 回落卡片色，得到 %u",
+              (unsigned)app_screen_output_color(1, card));
+
+    /* 声明新帧后同一次换色：下半=绿，且不动上半 */
+    app_screen_color_frame_begin(0, H, W, H);
+    _sink_bitmap(nullptr, 0, H, 8, 1, &glyph, DEV_DISPLAY_COLOR_GREEN);
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "声明新帧后下半应为绿，得到 %u", (unsigned)app_screen_output_color(1, card));
+    CHECK_MSG(app_screen_output_color(0, card) == card, "下半换色不得动上半");
+}
+
+/** @brief 整单元纯色位图 = 该单元新一帧（与整单元填充同口径） */
+static void case_full_unit_bitmap_resets_frame_color(void)
+{
+    TEST_BEGIN("整单元位图 = 新一帧：旧色不再参与混色判定");
+
+    const dev_display_color_t card = DEV_DISPLAY_COLOR_YELLOW;
+    uint8_t                   bm[(W / 8) * H];
+    memset(bm, 0xFF, sizeof(bm));
+
+    canvas_reset_fold();
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_RED);        /* 下半红 */
+    _sink_bitmap(nullptr, 0, H, W, H, bm, DEV_DISPLAY_COLOR_GREEN); /* 整半屏绿图 → 新帧 */
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "整单元绿位图应定下半为绿（不回落卡片色），得到 %u",
+              (unsigned)app_screen_output_color(1, card));
+}
+
+/** @brief 上屏文字（y=0、16 号 = 正好一个单元高）只复位上半：下屏颜色不得被打回卡片色
+ *
+ *  若把渲染区域高（`H - y` = 整屏）当"文字实际范围"传给 color_frame_begin，上屏换色
+ *  会把下屏单元的颜色账一起作废 —— 下屏从本帧色掉回卡片色。 */
+static void case_text_frame_upper_does_not_touch_lower(void)
+{
+    TEST_BEGIN("上屏文字帧只复位上半：下屏颜色不被打回卡片色");
+
+    const dev_display_color_t card  = DEV_DISPLAY_COLOR_YELLOW;
+    const uint8_t             glyph = 0xF0U;
+
+    canvas_reset_fold();
+    _sink_fill(nullptr, 0, H, W, H, DEV_DISPLAY_COLOR_GREEN); /* 下半先定绿 */
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN, "下半应为绿");
+
+    /* 上屏文字：y=0、16 号（本夹具单元高 16）→ 竖直范围 [0,16)，只碰上半 */
+    app_screen_color_frame_begin(0, 0, W, APP_FONT_SIZE_16);
+    _sink_bitmap(nullptr, 0, 0, 8, 1, &glyph, DEV_DISPLAY_COLOR_RED);
+    CHECK_MSG(app_screen_output_color(0, card) == DEV_DISPLAY_COLOR_RED, "上半应为红");
+    CHECK_MSG(app_screen_output_color(1, card) == DEV_DISPLAY_COLOR_GREEN,
+              "上屏换色不得复位下屏颜色账（得到 %u，应为绿）",
+              (unsigned)app_screen_output_color(1, card));
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -487,6 +560,9 @@ int main(void)
     case_unit_mixed_isolated();
     case_full_color_fill_sets_frame_color();
     case_local_color_fill_still_mixed();
+    case_text_frame_color_change();
+    case_text_frame_upper_does_not_touch_lower();
+    case_full_unit_bitmap_resets_frame_color();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

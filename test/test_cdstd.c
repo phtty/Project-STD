@@ -212,6 +212,21 @@ int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t 
 uint16_t app_screen_rows(void) { return TEST_LOGICAL_W; }
 uint16_t app_screen_cols(void) { return TEST_LOGICAL_H; }
 
+/* ---- 帧单元颜色账的"新帧"声明 ----
+ * 命令层在渲染前必须按协议矩形调一次（换色不残留旧帧色）。本套件不跑真实画布，
+ * 只记录调用与矩形，验证"每条内容命令都声明、且矩形与渲染区域一致"。 */
+static int      s_begin_calls;
+static uint16_t s_begin_x, s_begin_y, s_begin_w, s_begin_h;
+
+void app_screen_color_frame_begin(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    s_begin_calls++;
+    s_begin_x = x;
+    s_begin_y = y;
+    s_begin_w = w;
+    s_begin_h = h;
+}
+
 static int                 s_render_calls;
 static app_render_type_t   s_rc_type;
 static uint16_t            s_rc_x;
@@ -258,6 +273,8 @@ void app_render(const app_render_cfg_t *cfg)
 static void render_reset(void)
 {
     s_render_calls = 0;
+    s_begin_calls  = 0;
+    s_begin_x = s_begin_y = s_begin_w = s_begin_h = 0;
     s_rc_type      = (app_render_type_t)0;
     s_rc_x = s_rc_y = s_rc_w = s_rc_h = 0;
     s_rc_color   = DEV_DISPLAY_COLOR_BLACK;
@@ -804,6 +821,10 @@ static void case_cmd_word_display(void)
     CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_w == TEST_LOGICAL_W - 10 &&
                   s_rc_h == TEST_LOGICAL_H - 20,
               "区域应为 (10,20,214,80)（得到 x=%u y=%u w=%u h=%u）", s_rc_x, s_rc_y, s_rc_w, s_rc_h);
+    CHECK_MSG(s_begin_calls == 1 && s_begin_x == 10 && s_begin_y == 20 &&
+                  s_begin_w == TEST_LOGICAL_W - 10 && s_begin_h == APP_FONT_SIZE_48,
+              "渲染前应声明新帧且矩形=文字实际范围（calls=%d x=%u y=%u w=%u h=%u）", s_begin_calls,
+              s_begin_x, s_begin_y, s_begin_w, s_begin_h);
     CHECK_MSG(s_rc_style.h_align == APP_RENDER_ALIGN_LEFT_UP &&
                   s_rc_style.v_align == APP_RENDER_ALIGN_LEFT_UP,
               "对齐应为左上（得到 h=%d v=%d）", (int)s_rc_style.h_align, (int)s_rc_style.v_align);
@@ -1131,6 +1152,10 @@ static void case_cmd_persistent_display(void)
               "区域/颜色/字号/字型应与 A1 同口径（得到 x=%u y=%u color=%u size=%u type=%u）",
               s_rc_x, s_rc_y, (unsigned)s_rc_color, (unsigned)s_rc_font_size,
               (unsigned)s_rc_font_type);
+    CHECK_MSG(s_begin_calls == 1 && s_begin_x == 10 && s_begin_y == 20 &&
+                  s_begin_w == TEST_LOGICAL_W - 10 && s_begin_h == APP_FONT_SIZE_48,
+              "A4 渲染前也应声明新帧（calls=%d x=%u y=%u w=%u h=%u）", s_begin_calls, s_begin_x,
+              s_begin_y, s_begin_w, s_begin_h);
 
     /* 反例：只有 7 字节头（无文字）→ 0xB4/0x30 且不渲染（A1 的口径，A4 必须一致） */
     tx_reset();
@@ -1168,6 +1193,10 @@ static void case_cmd_picture_display(void)
                   s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
               "上屏应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u color=%u persist=%d）",
               (int)s_rc_type, s_rc_y, s_rc_h, (unsigned)s_rc_color, (int)s_rc_persist);
+    CHECK_MSG(s_begin_calls == 1 && s_begin_x == 0 && s_begin_y == 0 &&
+                  s_begin_w == TEST_LOGICAL_W && s_begin_h == TEST_LOGICAL_H / 2,
+              "位图渲染前应声明新帧 (0,0,224,50)（calls=%d x=%u y=%u w=%u h=%u）", s_begin_calls,
+              s_begin_x, s_begin_y, s_begin_w, s_begin_h);
     CHECK_MSG(s_rc_bitmap == payload + sizeof(app_cdstd_picture_display_t),
               "位图指针必须指向 DATA 第 3 字节（偏移 %ld）", (long)(s_rc_bitmap - payload));
 

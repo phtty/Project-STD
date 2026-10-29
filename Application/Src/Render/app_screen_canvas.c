@@ -172,14 +172,24 @@ static void _account_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_di
     }
 }
 
-/** @brief 位图记账：位图不是"整帧清屏"，只按交叠累积（不清账） */
+/** @brief 位图记账：整单元纯色位图 = 该单元新一帧（复位再定色）；局部位图只累积
+ *
+ *  与 `_account_fill` 同一口径：**完整覆盖某个帧单元**的位图（A7/A8 的半屏图、折叠预置图、
+ *  RLS 整屏图）是"这一帧就是这一张图"，不该和上一帧的残留色判成混色。比单元小的位图
+ *  （文字逐字形、局部贴图）盖不满，仍按交叠累积。 */
 static void _account_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, dev_display_color_t c)
 {
     const uint8_t units = _unit_count();
     for (uint8_t u = 0; u < units; u++) {
         uint16_t ux = 0, uy = 0, uw = 0, uh = 0;
-        if (_unit_rect(u, &ux, &uy, &uw, &uh) && _rect_overlaps(x, y, w, h, ux, uy, uw, uh))
+        if (!_unit_rect(u, &ux, &uy, &uw, &uh)) continue;
+
+        if (_rect_covers(x, y, w, h, ux, uy, uw, uh)) {
+            _reset_unit_color(u);
             _note_unit_color(u, c);
+        } else if (_rect_overlaps(x, y, w, h, ux, uy, uw, uh)) {
+            _note_unit_color(u, c);
+        }
     }
 }
 
@@ -214,6 +224,18 @@ uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color)
     if (u >= 0 && !s_unit_mixed[u] && s_unit_color[u] <= (uint8_t)DEV_DISPLAY_COLOR_WHITE)
         return s_unit_color[u];
     return card_color;
+}
+
+void app_screen_color_frame_begin(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    if (!w || !h) return;
+
+    const uint8_t units = _unit_count();
+    for (uint8_t u = 0; u < units; u++) {
+        uint16_t ux = 0, uy = 0, uw = 0, uh = 0;
+        if (_unit_rect(u, &ux, &uy, &uw, &uh) && _rect_overlaps(x, y, w, h, ux, uy, uw, uh))
+            _reset_unit_color(u);
+    }
 }
 
 /** 本上电周期内画布**有没有被写过**（任何渲染）。
@@ -560,9 +582,10 @@ bool app_screen_take_pending_settled(void)
 
 #else /* !BOARD_SCREEN_CANVAS */
 
-/* 整 TU 仍产出下面两个符号，杜绝"被引用却未定义"：
-   app_factory_test.c 无条件调 set_color_override，且不分板编译。
-   两个函数是退化语义：不覆盖（谁调都当没调）、输出色原样返回卡片色。 */
+/* 整 TU 仍产出下面三个符号，杜绝"被引用却未定义"：
+   app_factory_test.c 无条件调 set_color_override，且不分板编译；CDSTD 命令层无条件调
+   color_frame_begin（协议源码不分板）。三个函数是退化语义：不覆盖（谁调都当没调）、
+   输出色原样返回卡片色、无颜色账可复位。 */
 void app_screen_set_color_override(uint8_t c)
 {
     (void)c;
@@ -572,6 +595,14 @@ uint8_t app_screen_output_color(uint8_t card_idx, uint8_t card_color)
 {
     (void)card_idx; /* 无画布：没有逐单元颜色账，退化就是切分表给的颜色 */
     return card_color;
+}
+
+void app_screen_color_frame_begin(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
 }
 
 #endif /* BOARD_SCREEN_CANVAS */
