@@ -1051,7 +1051,10 @@ static uint8_t _id_resolve(uint8_t *src, uint8_t *mc)
 
     if (_id_dip_present()) {
         *src = 2;
-        return _id_dip(); /* 每次现读：现场拨一下即生效 */
+        /* 现读、且**不落记录**（拨码板每次上电以拨码为准）。但本函数只在
+           `_casc_id_boot` 里调一次 —— 运行期拨码**不会**重装身份，要**复位/重上电**
+           才生效。运行期现读只出现在 `_id_set_local` 的"拒绝改址"判据里。 */
+        return _id_dip();
     }
 
     /* 记录体预置成"没读到"的样子：`app_cfg_sched_load` 的契约是"**仅 OK 时 payload

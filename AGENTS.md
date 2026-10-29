@@ -26,6 +26,7 @@ make -j$(nproc)                  # 默认板 3833024，Debug（CONFIG 默认 Deb
 make -j$(nproc) BOARD=5006048    # 换板
 make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒为 -Og -g，Release 并不改优化）
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
+make -j$(nproc) BOOTLOADER=0     # 直烧版：不要 IAP bootloader，应用从 0x08000000 起（换布局后必须 clean）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
 make test                      # host 侧 20 个测试套件（见 §7）；第一条自动跑结构规则闸
@@ -44,6 +45,7 @@ openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4
 
 产物在 `build/<板>/<配置>/`：`Project_STD.elf`（带符号，调试用）、`.hex`（烧录）、`.bin`（IAP 用）。
 **Makefile 没有烧录目标**——烧录走上面那条 OpenOCD，或 IDE（EIDE）。
+EIDE 里用**目标下拉**切布局：`3833024`（带 bootloader）/ `3833024-direct`（直烧，0x08000000）。
 
 ## 3. 目录地图
 
@@ -96,7 +98,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 1. **`.eide/eide.yml` 会被 EIDE 重写**：它由 IDE 维护，改了 `Makefile` 忘了它、或反过来，都会让另一套构建编不过。
    改它尽量在 EIDE 关闭时；提交前 `git diff .eide/eide.yml` 看一眼有没有被回退。
-2. **新增/搬动源文件要同步两套构建清单**：`Makefile`（固件 **和测试** 两处 `INC_DIRS`/源清单）+ `.eide/eide.yml`（**两个目标**）。
+2. **新增/搬动源文件要同步两套构建清单**：`Makefile`（固件 **和测试** 两处 `INC_DIRS`/源清单）+ `.eide/eide.yml`（**每个目标**：3833024 / 3833024-direct / 5006048）。
 3. **Doxygen 与 `__attribute__` 的两个错位**（见 `docs/命名约定.md` §12「Doxygen 已知行为」）：
    - **尾置**属性（`uint8_t x[] __attribute__((aligned(4)));`）会让 Doxygen 把**后续声明吞进前一条**、误报符号未声明 → 属性写**前置**
    - `typedef` 类型的文档要点必须放**尾部** `/**< */`
@@ -114,7 +116,7 @@ docs/                              命名约定.md（评审契约）、架构说
 9. **`test` 目标必须留在 `.PHONY` 里**：工程里存在同名的 `test/` 目录，不声明 `.PHONY` 会被 `make` 当成
    "已存在的目标"而**跳过测试配方**（`Makefile` 里有注释说明）。
 10. **AHMQ 目前被排除在所有板之外**：根 `Makefile` 的 `SRC_EXCLUDE` 把 `Application/Src/AHMQ/*.c` 排除
-    （`app_ahmq.c` / `app_ahmq_cmd.c`），EIDE 两个目标也加了对应 exclude。要启用必须**两处同时改**——
+    （`app_ahmq.c` / `app_ahmq_cmd.c`），EIDE 各目标也加了对应 exclude。要启用必须**两处同时改**——
     注释里写明"不排的话同一份源码在两套构建下会产出不同固件"。
 11. **host 与 ARM 的 `char` 符号性相反**：host（x86）默认 signed、ARM 默认 unsigned。任何"字节值 ≥ 0x80
     的比较/移位"在 host 上会走**另一条路** —— `Kernel/Src/text_cvt.c` 的 UTF-8 解析曾因此在 host 上

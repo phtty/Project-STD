@@ -14,15 +14,15 @@
 /* ---- bootloader 开关 ----
  * 1 = 本板带 IAP bootloader（默认）：应用从 0x08040000 起，前面 256KB 留给
  *     bootloader，Sector 1 留作配置记录。
- * 0 = 直烧板（板上没有升级程序）：应用从 0x08000000 起铺满整片。
+ * 0 = 直烧板（板上没有升级程序）：应用从 0x08000000 起铺满整片，记录区不存在。
  *
- * **必须在编译时定义，不能只改这里**：链接脚本的 FLASH_ORIGIN 也要跟着变。
- *   make BOOTLOADER=0            ← Makefile 会自动加 -D 和 --defsym
- *   EIDE：预定义宏加 BOARD_HAS_IAP_BOOTLOADER=0，
- *         链接参数再加 -Wl,--defsym=APP_FLASH_ORIGIN=0x08000000
- *                        -Wl,--defsym=APP_FLASH_LENGTH=0x100000
- *
- * 两处不一致的表现：任何中断都跳到错误地址，且不会有编译期报错。 */
+ * **布局是"一个开关、两半联动"**：本宏决定向量表偏移与记录区，链接脚本决定
+ * 实际烧录地址。两半不一致的表现是任何中断都跳到错误地址，且不会有编译期报错。
+ * 两个入口都已经把两半接好了，不要去手改其中一半：
+ *   make BOOTLOADER=0                      ← 自动加 -D 并换直烧版链接脚本
+ *   EIDE：目标下拉选 "3833024-direct"       ← 该目标的宏与链接脚本都已配好
+ * 手工等价（只在临时验证时用）：预定义宏 BOARD_HAS_IAP_BOOTLOADER=0 +
+ * 链接脚本 boards/3833024/STM32F407XX_FLASH_direct.ld。 */
 #ifndef BOARD_HAS_IAP_BOOTLOADER
 #define BOARD_HAS_IAP_BOOTLOADER 1
 #endif
