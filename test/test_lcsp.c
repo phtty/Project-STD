@@ -364,8 +364,25 @@ static const uint8_t      *s_rc_bitmap;
 static uint16_t            s_rc_bitmap_len;
 static uint8_t             s_rc_bitmap_buf[LCSP_BITMAP_MAX_BYTES];
 
+/* 第一次调用的现场：0x05/0x06 现在是"先清整屏、再贴图"两次调用，
+   只记最后一次的 s_rc_* 看不到那条清屏。 */
+static app_render_type_t   s_rc0_type;
+static uint16_t            s_rc0_x;
+static uint16_t            s_rc0_y;
+static uint16_t            s_rc0_w;
+static uint16_t            s_rc0_h;
+static dev_display_color_t s_rc0_color;
+
 void app_render(const app_render_cfg_t *cfg)
 {
+    if (0 == s_render_calls) {
+        s_rc0_type  = cfg->type;
+        s_rc0_x     = cfg->x;
+        s_rc0_y     = cfg->y;
+        s_rc0_w     = cfg->w;
+        s_rc0_h     = cfg->h;
+        s_rc0_color = cfg->color;
+    }
     s_render_calls++;
     s_rc_type    = cfg->type;
     s_rc_x       = cfg->x;
@@ -399,6 +416,9 @@ static void render_reset(void)
     s_rc_bitmap     = nullptr;
     s_rc_bitmap_len = 0;
     memset(s_rc_bitmap_buf, 0, sizeof(s_rc_bitmap_buf));
+    s_rc0_type  = (app_render_type_t)0;
+    s_rc0_x = s_rc0_y = s_rc0_w = s_rc0_h = 0;
+    s_rc0_color = DEV_DISPLAY_COLOR_BLACK;
 }
 
 static bool    s_oe_state = true;
@@ -1513,11 +1533,16 @@ static void case_cmd_show_image(void)
 
     CHECK_MSG(reply_is_status(APP_LCSP_REPLY_SHOW_IMAGE, APP_LCSP_STATUS_OK),
               "0x05 应回 0x50/状态 0（得到 cmd=%02X status=%02X）", s_reply[4], s_reply[7]);
-    CHECK_MSG((s_render_calls == 1) && (s_rc_type == APP_RENDER_TYPE_BITMAP) && (s_rc_x == 0) &&
-                  (s_rc_y == 0) && (s_rc_w == 8U) && (s_rc_h == 2U) &&
+    /* 两次调用：先 FILL 黑把这一整块清掉（位图渲染只写 bit=1，bit=0 不动），
+       再贴 BITMAP。只贴不清的话上一幅图的亮点会原样留着 —— 现场就是"发新图没反应"。 */
+    CHECK_MSG((s_render_calls == 2) && (s_rc0_type == APP_RENDER_TYPE_FILL) &&
+                  (s_rc0_x == 0) && (s_rc0_y == 0) && (s_rc0_w == 8U) && (s_rc0_h == 2U) &&
+                  (s_rc0_color == DEV_DISPLAY_COLOR_BLACK) && (s_rc_type == APP_RENDER_TYPE_BITMAP) &&
+                  (s_rc_x == 0) && (s_rc_y == 0) && (s_rc_w == 8U) && (s_rc_h == 2U) &&
                   (s_rc_color == DEV_DISPLAY_COLOR_RED) && (!s_rc_persist),
-              "应为 BITMAP(0,0,8,2,RED) 且 persist=false（calls=%d w=%u h=%u persist=%d）",
-              s_render_calls, s_rc_w, s_rc_h, (int)s_rc_persist);
+              "应为 FILL(0,0,8,2,黑) + BITMAP(0,0,8,2,RED) 且 persist=false"
+              "（calls=%d 首调 type=%d w=%u h=%u）",
+              s_render_calls, (int)s_rc0_type, s_rc0_w, s_rc0_h);
     CHECK_MSG((s_rc_bitmap_len == 2U) && (s_rc_bitmap_buf[0] == 0x80) &&
                   (s_rc_bitmap_buf[1] == 0x00),
               "位序必须翻转：0x01 → 0x80（得到 %02X %02X）", s_rc_bitmap_buf[0],
@@ -1550,7 +1575,7 @@ static void case_cmd_show_image(void)
     n = cmd_run(APP_LCSP_CMD_SHOW_IMAGE, 0x0D03, payload1, (uint16_t)sizeof(payload1));
     CHECK_MSG(reply_is_status(APP_LCSP_REPLY_SHOW_IMAGE, APP_LCSP_STATUS_FAIL),
               "槽位保存失败应回 0x50/状态 01（得到 status=%02X）", s_reply[7]);
-    CHECK_MSG((s_render_calls == 1) && (s_slot_save_calls == 1),
+    CHECK_MSG((s_render_calls == 2) && (s_slot_save_calls == 1),
               "落盘失败也必须先显示（render=%d save=%d）", s_render_calls, s_slot_save_calls);
 }
 
@@ -1623,11 +1648,14 @@ static void case_cmd_show_slot(void)
 
     CHECK_MSG(reply_is_status(APP_LCSP_REPLY_SHOW_SLOT, APP_LCSP_STATUS_OK),
               "0x06 应回 0x60/状态 0（得到 cmd=%02X status=%02X）", s_reply[4], s_reply[7]);
-    CHECK_MSG((s_render_calls == 1) && (s_rc_type == APP_RENDER_TYPE_BITMAP) && (s_rc_x == 0) &&
+    CHECK_MSG((s_render_calls == 2) && (s_rc0_type == APP_RENDER_TYPE_FILL) &&
+                  (s_rc0_color == DEV_DISPLAY_COLOR_BLACK) && (s_rc0_w == 8U) &&
+                  (s_rc0_h == 2U) && (s_rc_type == APP_RENDER_TYPE_BITMAP) && (s_rc_x == 0) &&
                   (s_rc_y == 0) && (s_rc_w == 8U) && (s_rc_h == 2U) &&
                   (s_rc_color == DEV_DISPLAY_COLOR_YELLOW) && s_rc_persist,
-              "应为 BITMAP(0,0,8,2,YELLOW) 且 persist=true（calls=%d color=%u persist=%d）",
-              s_render_calls, (unsigned)s_rc_color, (int)s_rc_persist);
+              "应为 FILL(0,0,8,2,黑) + BITMAP(0,0,8,2,YELLOW) 且 persist=true"
+              "（calls=%d 首调 type=%d color=%u persist=%d）",
+              s_render_calls, (int)s_rc0_type, (unsigned)s_rc_color, (int)s_rc_persist);
     CHECK_MSG((s_rc_bitmap_len == 2U) && (s_rc_bitmap_buf[0] == 0x81) &&
                   (s_rc_bitmap_buf[1] == 0x42),
               "槽位点阵必须**原样**喂画布，不得再翻位序（得到 %02X %02X）",

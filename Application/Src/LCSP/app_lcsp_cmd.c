@@ -346,6 +346,19 @@ static void _lcsp_show_image(app_lcsp_req_t *req)
         img->color                 = color;
         _lcsp_bitmap_to_msb(&req->payload[2], (uint16_t)need, img->bitmap);
 
+        /* **先清整屏再贴图**：位图渲染只写 bit=1 的像素（bit=0 不动，见 `_sink_bitmap`
+           的注释）。不清的话上一幅图的亮点会原样留着 —— 现场表现就是"发新图没反应、
+           屏还是全亮"（第一幅图铺满之后，之后所有黑底图都盖不回去）。
+           清屏走 FILL 黑色（画布上就是清零），与贴图在同一个命令里、同一帧内完成。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = rows,
+            .h     = cols,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
+
         /* 槽位 0 = 只显示不保存；槽位 1..N = 掉落盘（走槽位记录，不是显存记录） */
         app_render(&(app_render_cfg_t){
             .type    = APP_RENDER_TYPE_BITMAP,
@@ -402,6 +415,19 @@ static void _lcsp_show_slot(app_lcsp_req_t *req)
             break;
         if (img->color > (uint8_t)DEV_DISPLAY_COLOR_WHITE)
             break;
+
+        /* **先清整屏再贴图**：位图渲染只写 bit=1 的像素（bit=0 不动，见 `_sink_bitmap`
+           的注释）。不清的话上一幅图的亮点会原样留着 —— 现场表现就是"发新图没反应、
+           屏还是全亮"（第一幅图铺满之后，之后所有黑底图都盖不回去）。
+           清屏走 FILL 黑色（画布上就是清零），与贴图在同一个命令里、同一帧内完成。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = rows,
+            .h     = cols,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
 
         /* 存下来的就是 MSB-first，直接喂画布，不必再翻位序 */
         app_render(&(app_render_cfg_t){
