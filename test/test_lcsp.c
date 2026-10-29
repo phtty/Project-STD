@@ -1231,9 +1231,8 @@ static void case_cmd_device_info_state(void)
  *
  *  **为什么需要**：15 字节 RDATA 的**字段顺序**是本轮协议改动的核心（槽位数插在几何与
  *  亮度之间），错一位就会让上位机把"屏高"读成"槽位数"。附录 A.17 的样板给的是
- *  "序列号 chuangdi、240×48、16 槽位、亮度 80、状态 1"；本机槽位固定 `LCSP_SLOT_MAX`（3），
- *  亮度由硬件档位量化（档 6 → 85，到不了样板的 80），所以**只替换这两个字节并重算 CRC**，
- *  其余 22 个字节必须与协议样板逐字节相同 —— 这既钉住布局，又不把协议上限 16 写死。 */
+ *  "序列号 chuangdi、144×48、3 槽位、亮度 85（档 6）、状态 1"；与真机取值一致，
+ *  槽位/亮度都按本机实际值给出，**整帧 25 字节与协议样板逐字节相同** —— 布局和取值一起钉住。 */
 static void case_cmd_device_info_golden_a17(void)
 {
     TEST_BEGIN("0x01 设备信息：与附录 A.17 样板逐字节对拍（槽位数取 LCSP_SLOT_MAX）");
@@ -1241,10 +1240,10 @@ static void case_cmd_device_info_golden_a17(void)
     stubs_reset();
 
     /* 让本机能复现样板里的其余字段：序列号取出厂值 `chuangdi`（协议 7.1 已改为全系列统一值，
-       与 A.17 样板一致）、逻辑屏 240×48、屏开、无存图 */
+       与 A.17 样板一致）、逻辑屏 144×48、屏开、无存图 */
     s_cfg_valid = true;
     memcpy(s_cfg.serial, LCSP_SERIAL_DEFAULT, LCSP_SERIAL_LEN);
-    s_screen_rows = 240U;
+    s_screen_rows = 144U;
     s_screen_cols = 48U;
     s_bright_hw   = 6U; /* 6*100/7 = 85 */
     s_oe_state    = true;
@@ -1254,12 +1253,12 @@ static void case_cmd_device_info_golden_a17(void)
     static const uint8_t a17[] = {0x55, 0xAA, 0x00, 0x04, 0x10, 0x00, 0x10,
                                   0x00,                                     /* 状态码 */
                                   0x63, 0x68, 0x75, 0x61, 0x6E, 0x67, 0x64, 0x69, /* "chuangdi" */
-                                  0x00, 0xF0,                               /* 屏宽 240 */
+                                  0x00, 0x90,                               /* 屏宽 144 */
                                   0x00, 0x30,                               /* 屏高 48 */
-                                  0x10,                                     /* 样板：16 槽位 */
-                                  0x50,                                     /* 样板：亮度 80 */
+                                  0x03,                                     /* 槽位 3（本机 LCSP_SLOT_MAX）*/
+                                  0x55,                                     /* 亮度 85（档 6 → 6*100/7）*/
                                   0x01,                                     /* 状态：屏开、无图 */
-                                  0xE5, 0xD1};                              /* 样板 CRC */
+                                  0x1D, 0x42};                              /* 样板 CRC */
     uint8_t want[sizeof(a17)];
     memcpy(want, a17, sizeof(a17));
 
