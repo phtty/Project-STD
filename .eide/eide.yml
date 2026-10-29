@@ -332,6 +332,7 @@ virtualFolder:
             - name: App
               files:
                 - path: boards/3833024/Application/Src/app_rs232.c
+                - path: boards/3833024/Application/Src/app_screen_board.c
                 - path: boards/3833024/Application/Src/app_test_board.c
                 - path: boards/3833024/Application/Src/app_font_lib_board.c
                 - path: boards/3833024/Application/Src/app_fold_preset_board.c
@@ -547,6 +548,176 @@ targets:
       Custom:
         bin: ""
         commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/${workspaceFolderBasename}.hex verify reset exit"
+        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: STM32F407ZG
+          vendor: ST
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+      OpenOCD:
+        baseAddr: "0x08000000"
+        bin: ""
+        interface: cmsis-dap
+        target: stm32f4x
+      probe-rs:
+        allowEraseAll: false
+        baseAddr: "0x08000000"
+        bin: ""
+        otherOptions: ""
+        protocol: swd
+        speed: 10000
+        target: STM32F407ZG
+    uploader: Custom
+  3833024-direct:
+    cppPreprocessAttrs:
+      defineList:
+        - USE_HAL_DRIVER
+        - STM32F407xx
+        - BOARD_DISPLAY_MODULE_COLS=2
+        - BOARD_DISPLAY_MODULE_ROWS=2
+        - BOARD_HAS_IAP_BOOTLOADER=0
+      incList:
+        - Drivers/CMSIS/Include
+        - Drivers/CMSIS/Device/ST/STM32F4xx/Include
+        - Drivers/STM32F4xx_HAL_Driver/Inc
+        - Middlewares/Third_Party/LwIP/src/include
+        - Middlewares/Third_Party/LwIP/system
+        - Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+        - Middlewares/Third_Party/FreeRTOS/Source/include
+        - Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
+        - Compiler
+        - Application/Inc
+        - Device/Inc
+        - Device/Inc/Display
+        - Device/Inc/IO
+        - Device/Inc/Network
+        - Device/Inc/Storage
+        - Kernel/Inc
+        - Platform/Inc
+        - Middlewares/Third_Party/SEGGER_RTT
+        - Application/Inc/Channel
+        - Application/Inc/IAP
+        - Application/Inc/LDI
+        - Application/Inc/AHMQ
+        - Application/Inc/RLS
+        - Application/Inc/CQ_P10
+        - boards/3833024/Core/Inc
+        - boards/3833024
+        - boards/3833024/Application/Inc
+        - boards/3833024/Device/Inc
+        - boards/3833024/Platform/Inc
+        - Application/Inc/CASC
+        - Application/Inc/Render
+        - Application/Inc/BIST
+        - Application/Inc/CDSTD
+        - Application/Inc/LCSP
+      libList: []
+    excludeList:
+      - <virtual_root>/Drivers/BSP/Key/key.c
+      - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
+      - <virtual_root>/Drivers/BSP/Display/scan.c
+      - <virtual_root>/Application/protocol/ah
+      - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/Display/dev_p10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p10_32x16_2200001703.c
+      - <virtual_root>/board/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Device/IO/dev_io_ctrl.c
+      - <virtual_root>/Device/Comm/dev_rs232.c
+      - <virtual_root>/Device/Comm/dev_rs485.c
+      - <virtual_root>/Device/Display/dev_p20_16x8_2200001667.c
+      - <virtual_root>/Application/channel/app_rs232.c
+      - <virtual_root>/Core
+      - <virtual_root>/board/3833024/dev_p20_16x16_1000001055.c
+      - <virtual_root>/board/3833024/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
+      - <virtual_root>/boards/dev_p20_16x16_1000001055.c
+      - <virtual_root>/boards/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/5006048
+      - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
+      - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/protocol/cdstd
+      - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
+    settings:
+      debugger: cortex-debug
+    toolchain: GCC
+    toolchainConfigMap:
+      GCC:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 5
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            language-c: c23
+            language-cpp: c++23
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-debug
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            arm-thumb-mode: thumb
+            callgraph-info: true
+            not-use-syscalls: true
+            output-debug-info: enable
+            stack-usage: true
+            use-newlib-nano: true
+          linker:
+            $toolName: auto
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
+            use-float-printf: true
+        scatterFilePath: boards/3833024/STM32F407XX_FLASH_direct.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
+      LLVM_ARM:
+        archExtensions: ""
+        cpuType: Cortex-M4
+        floatingPointHardware: single
+        options:
+          version: 1
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            C_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums
+            language-c: c23
+            language-cpp: c++23
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-debug
+            warnings: all-warnings
+          global:
+            $float-abi-type: hard
+            output-debug-info: enable
+          linker:
+            $toolName: clang
+            LD_FLAGS: --sysroot=/usr/arm-none-eabi --gcc-toolchain=/usr -fshort-enums -Wl,--specs=nano.specs -Wl,--specs=nosys.specs
+            LIB_FLAGS: -lm
+            output-format: elf
+            remove-unused-input-sections: true
+        scatterFilePath: Compiler/STM32F407XX_FLASH.ld
+        storageLayout:
+          RAM: []
+          ROM: []
+        useCustomScatterFile: true
+    uploadConfigMap:
+      Custom:
+        bin: ""
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024-direct/${workspaceFolderBasename}.hex verify reset exit"
         eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""

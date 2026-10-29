@@ -110,10 +110,15 @@ LDFLAGS += $(SPECS)
 LDFLAGS += -u _printf_float
 LDFLAGS += -lm
 
-# 直烧板：把 FLASH 起始/长度同步给链接脚本（与 board.h 的 BOARD_HAS_IAP_BOOTLOADER 同源）
+# 直烧板：换成直烧版链接脚本（0x08000000 / 1024K）。与 board.h 的
+# BOARD_HAS_IAP_BOOTLOADER 同源 —— 布局只认这一个开关，别只改一边。
+# （EIDE 里等价物是目标 "3833024-direct"，它把宏和脚本都配好了。）
+# 只有 3833024 有"两种布局"；5006048 本来就是直烧，没有 *_direct.ld。
 ifeq ($(BOOTLOADER),0)
-LDFLAGS += -Wl,--defsym=APP_FLASH_ORIGIN=0x08000000
-LDFLAGS += -Wl,--defsym=APP_FLASH_LENGTH=0x100000
+LDSCRIPT = $(BOARD_DIR)/STM32F407XX_FLASH_direct.ld
+ifeq ($(wildcard $(LDSCRIPT)),)
+$(error BOARD=$(BOARD) 没有 STM32F407XX_FLASH_direct.ld：本板本来就是直烧，去掉 BOOTLOADER=0 即可)
+endif
 endif
 
 # ---- Source Files ----
