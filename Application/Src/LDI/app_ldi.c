@@ -58,10 +58,10 @@ static const app_ldi_cmd_type_t cmd_index_table[] = {
 app_ldi_ctx_t g_ldi_ctx = {
     .state = APP_LDI_STATE_UNINIT,
     .cfg   = {
-        .module_count = 2,
+        .module_count = 1,
         .modules      = {
             {.device_type = APP_LDI_DEVICE_VMS, .device_index = 1},
-            {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 1},
+            // {.device_type = APP_LDI_DEVICE_CANOPY_LIGHT, .device_index = 1},
         },
     },
 };

@@ -906,7 +906,8 @@ static void seed_ldi_cfg(const app_flash_ldi_module_cfg_t *mods, uint8_t count)
 static void case_ctx_init_syncs_same_type(void)
 {
     TEST_BEGIN("Flash 同类型：同步 index+vendor，编译期表条数/类型不变");
-    env_setup(); /* 编译期默认表 = {VMS, EA} */
+    env_setup();
+    declare_ea_module(); /* 用例自带编译期表 {VMS, EA}，不依赖产品默认配置 */
 
     const uint8_t count_before = g_ldi_ctx.cfg.module_count;
     app_flash_ldi_module_cfg_t mods[2] = {
@@ -940,7 +941,10 @@ static void case_ctx_init_syncs_same_type(void)
 static void case_ctx_init_ignores_extra_type(void)
 {
     TEST_BEGIN("Flash 额外类型：忽略（类型集合由编译期决定）");
-    env_setup(); /* 编译期默认表 = {VMS, EA} */
+    env_setup();
+    declare_ea_module(); /* 用例自带编译期表 {VMS, EA} */
+
+    const uint8_t count_before = g_ldi_ctx.cfg.module_count;
 
     app_flash_ldi_module_cfg_t mods[2] = {
         {.device_type = APP_LDI_DEVICE_VMS, .device_index = 7},
@@ -955,25 +959,35 @@ static void case_ctx_init_ignores_extra_type(void)
               "记录里的额外类型不得进入本机表");
     CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) != 0xFF,
               "编译期表里的 EA 不该因记录没写它而消失");
-    CHECK_MSG(g_ldi_ctx.cfg.module_count == 2, "module_count 保持编译期的 2，得到 %u",
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == count_before,
+              "module_count 应保持编译期的 %u，得到 %u", (unsigned)count_before,
               (unsigned)g_ldi_ctx.cfg.module_count);
 }
 
-/** @brief 无有效配置：保持编译期默认模块表（默认含 EA —— 用户已定的默认配置） */
+/** @brief 无有效配置：保持编译期默认模块表（用例自带 {VMS, EA}） */
 static void case_ctx_init_no_cfg_keeps_default(void)
 {
-    TEST_BEGIN("无有效配置：保持编译期默认模块表（默认含 EA）");
+    TEST_BEGIN("无有效配置：保持编译期默认模块表");
     env_setup(); /* W25Qxx 为空 → cfg_ok=false，走 else 分支 */
+    declare_ea_module();
 
-    const uint8_t before = app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT);
+    const uint8_t before_count = g_ldi_ctx.cfg.module_count;
+    const uint8_t before_vms   = app_ldi_get_device_idx(APP_LDI_DEVICE_VMS);
+    const uint8_t before_ea    = app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT);
 
     app_ldi_ctx_init(&g_ldi_ctx);
 
     CHECK_MSG(g_ldi_ctx.cfg_valid, "cfg_valid 应为 true");
-    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == before,
-              "无有效配置时应保持编译期默认表（EA index %u → %u）", (unsigned)before,
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == before_count,
+              "无有效配置时应保持编译期默认表的条数 %u，得到 %u", (unsigned)before_count,
+              (unsigned)g_ldi_ctx.cfg.module_count);
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == before_vms,
+              "无有效配置时 VMS 的 index 应保持 %u，得到 %u", (unsigned)before_vms,
+              (unsigned)app_ldi_get_device_idx(APP_LDI_DEVICE_VMS));
+    CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == before_ea,
+              "无有效配置时 EA 的 index 应保持 %u，得到 %u", (unsigned)before_ea,
               (unsigned)app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT));
-    CHECK_MSG(before != 0xFF, "当前编译期默认应声明 EA（用户默认配置调整）");
+    CHECK_MSG(before_ea != 0xFF, "用例自带的编译期表应声明 EA");
 }
 
 /* ================================================================
@@ -985,6 +999,7 @@ static void case_init_seven_modules(void)
 {
     TEST_BEGIN("1AH 正常路径：7 个模块逐个回 status，全注册 → READY");
     env_setup();
+    declare_ea_module();
 
     const uint8_t types[7] = {
         APP_LDI_DEVICE_VMS,          APP_LDI_DEVICE_CANOPY_LIGHT, APP_LDI_DEVICE_VMS,
@@ -1007,7 +1022,9 @@ static void case_init_device_num_overflow(void)
 {
     TEST_BEGIN("1AH device_num 超出实际数据：夹到帧内容纳数（2），响应自洽");
     env_setup();
+    declare_ea_module();
 
+    /* 两个都必须在本机注册表里，判的才是"夹取"而不是"类型不存在" */
     const uint8_t types[2] = {APP_LDI_DEVICE_VMS, APP_LDI_DEVICE_CANOPY_LIGHT};
     make_init(200, types, 2); /* 声称 200，实际只写 2 个 → DATA 长度按 2 个算 */
     s_tx_count = 0;
@@ -1272,7 +1289,10 @@ static uint16_t make_0bh(const uint8_t *types, const uint8_t *indices, uint8_t n
 static void case_set_config_incremental_upsert(void)
 {
     TEST_BEGIN("0BH 增量 upsert：先配 E9 再配 EA → 两者都在，序号各自更新");
-    env_setup(); /* 编译期表 = {VMS, EA} */
+    env_setup();
+    declare_ea_module(); /* 用例自带编译期表 {VMS, EA} */
+
+    const uint8_t count_before = g_ldi_ctx.cfg.module_count;
 
     /* ① 配 E9（index=3） */
     uint8_t types[1] = {APP_LDI_DEVICE_VMS};
@@ -1294,13 +1314,14 @@ static void case_set_config_incremental_upsert(void)
     CHECK_MSG(rsp_status() == 0x00, "配 EA 应成功，status=0x%02X", rsp_status());
     CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == 4, "EA index 应为 4");
     CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == 3, "先配的 E9 应仍在且 index=3");
-    CHECK_MSG(g_ldi_ctx.cfg.module_count == 2, "条数不变（编译期 2），得到 %u",
-              (unsigned)g_ldi_ctx.cfg.module_count);
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == count_before, "条数不变（编译期 %u），得到 %u",
+              (unsigned)count_before, (unsigned)g_ldi_ctx.cfg.module_count);
 
     /* RAM 与 Flash 一致 */
     app_flash_ldi_cfg_info_t got = {0};
     CHECK_MSG(app_flash_ldi_load_config(&got), "应能读回记录");
-    CHECK_MSG(got.module_count == 2, "记录条数应为 2，得到 %u", (unsigned)got.module_count);
+    CHECK_MSG(got.module_count == count_before, "记录条数应为 %u，得到 %u",
+              (unsigned)count_before, (unsigned)got.module_count);
     CHECK_MSG(got.lane_hex[0] == 0x12 && got.cert[0] == 0x34, "lane/cert 应落盘");
 }
 
@@ -1309,9 +1330,11 @@ static void case_set_config_unknown_type_rejected(void)
 {
     TEST_BEGIN("0BH 未知编码：不采纳、status=01H、表不变");
     env_setup();
+    declare_ea_module();
 
-    const uint8_t before_vms = app_ldi_get_device_idx(APP_LDI_DEVICE_VMS);
-    const uint8_t before_ea  = app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT);
+    const uint8_t before_vms   = app_ldi_get_device_idx(APP_LDI_DEVICE_VMS);
+    const uint8_t before_ea    = app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT);
+    const uint8_t count_before = g_ldi_ctx.cfg.module_count;
 
     uint8_t types[1] = {APP_LDI_DEVICE_DISPLAY}; /* 本机编译期表里没有 */
     uint8_t idxs[1]  = {1};
@@ -1324,7 +1347,7 @@ static void case_set_config_unknown_type_rejected(void)
     CHECK_MSG(app_ldi_get_device_idx(APP_LDI_DEVICE_VMS) == before_vms &&
                   app_ldi_get_device_idx(APP_LDI_DEVICE_CANOPY_LIGHT) == before_ea,
               "表应保持不变");
-    CHECK_MSG(g_ldi_ctx.cfg.module_count == 2, "条数不变");
+    CHECK_MSG(g_ldi_ctx.cfg.module_count == count_before, "条数不变");
 }
 
 /** @brief 覆盖 0BH 请求头里的 lane/cert 首字节（用于检测"被拒还改了 RAM"） */
