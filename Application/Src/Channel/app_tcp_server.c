@@ -121,6 +121,26 @@ void app_tcp_server_task(void *argument)
 }
 
 /* ================================================================
+ *  连接的 keepalive
+ *
+ *  **必须开**：对端消失（拔网线/关机/进程被 kill）不会发 FIN，`netconn_recv`
+ *  会一直阻塞；而监听用的 PCB 在 accept 之后就已经关掉了 —— 于是既没有监听、
+ *  也等不到断开，现场表现就是"UDP 还能搜到设备、TCP 怎么都连不上"，只能断电。
+ *
+ *  10s 空闲 + 2s×3 次探测：活着的空闲连接由协议栈自动回 ACK，不受影响
+ *  （上位机放着不动也不会被踢）；死连接约 16s 内被回收，manage 任务随即重新
+ *  listen。与 `app_tcp_client.c` 的同名逻辑保持一致。
+ * ================================================================ */
+static void _tcp_server_keepalive(struct netconn *conn)
+{
+    if (conn == NULL || conn->pcb.tcp == NULL) return;
+    ip_set_option(conn->pcb.tcp, SOF_KEEPALIVE);
+    conn->pcb.tcp->keep_idle  = 10000;
+    conn->pcb.tcp->keep_intvl = 2000;
+    conn->pcb.tcp->keep_cnt   = 3;
+}
+
+/* ================================================================
  *  conn 任务: netconn_recv → dispatch，断开时释放信号量
  *
  *  manage 任务在 accept 下一个连接前会等待断开信号量，因此同一时刻
@@ -135,6 +155,7 @@ void app_tcp_server_conn_task(void *argument)
     app_tcp_ccb_t *tcp         = &s_tcp_server_ccb;
     tcp->conn              = conn;
     tcp->base.state        = APP_CCB_STATE_UP;
+    _tcp_server_keepalive(conn);
 
     struct netbuf *buf;
     void *data;
