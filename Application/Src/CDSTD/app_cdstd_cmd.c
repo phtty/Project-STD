@@ -92,6 +92,39 @@ static uint16_t _text_frame_height(const char *text, uint16_t len, app_font_size
     return h;
 }
 
+/** @brief 文字显示前清掉 y 所在的那半屏（折叠布局）；非折叠布局清整屏
+ *
+ *  CDSTD 的"文字显示"是**替换内容**，不要求上位机先发 A3 清屏 —— 不清就会和旧字叠在
+ *  一起（现场：换一条更短的字，尾巴还留在屏上）。**不能清渲染区域 `[x,W)×[y,H)`**：
+ *  `y = 0` 时区域高是整个逻辑屏，会把下屏一起清掉；按 y 落在上半/下半取半屏
+ *  （与 A7/A8 的"上屏/下屏"同一几何口径）。
+ */
+static void _clear_text_target(uint16_t y)
+{
+    if (app_screen_fold_count() == 2U) {
+        const uint8_t half = (y >= (uint16_t)(app_screen_cols() / 2U)) ? 1U : 0U;
+        uint16_t      x = 0, cy = 0, w = 0, h = 0;
+        if (!app_screen_fold_rect(half, &x, &cy, &w, &h)) return;
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = x,
+            .y     = cy,
+            .w     = w,
+            .h     = h,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
+    } else {
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = 0,
+            .w     = app_screen_rows(),
+            .h     = app_screen_cols(),
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
+    }
+}
+
 static void _cdstd_word_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     app_cdstd_text_display_t *ctx = data;
@@ -135,6 +168,11 @@ static void _cdstd_word_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 
         /* x/y = 文字左上角（协议只写"坐标"）：区域取剩余 [x,W)×[y,H)，对齐放左上角，
            否则"水平居中 + 满屏宽"会让 x 形同虚设 */
+        /* 文字显示自带清屏：上位机不发 A3 时旧字不得和新字叠在一起。只清 y 所在的那半屏；
+           首行都放不下时一个字都不会画，别清 —— 一条无效命令不该擦掉旧内容。 */
+        if ((uint32_t)y + (uint16_t)s_size_map[size_i] <= h)
+            _clear_text_target(y);
+
         /* 新一帧：先作废**文字实际覆盖到的**帧单元的颜色账。文字是逐字形小位图、永远盖
            不满单元，不声明新帧的话上一帧颜色会残留 —— 异色被判 mixed 后回落到卡片色
            （现场 5006048 卡片是绿，于是绿色改红/黄/蓝都停在绿）。竖直范围按字号算，
@@ -265,6 +303,11 @@ static void _cdstd_persistent_display(app_ccb_t *ccb, void *data, uint16_t data_
 
         /* x/y = 文字左上角（协议只写"坐标"）：区域取剩余 [x,W)×[y,H)，对齐放左上角，
            否则"水平居中 + 满屏宽"会让 x 形同虚设 */
+        /* 文字显示自带清屏：上位机不发 A3 时旧字不得和新字叠在一起。只清 y 所在的那半屏；
+           首行都放不下时一个字都不会画，别清 —— 一条无效命令不该擦掉旧内容。 */
+        if ((uint32_t)y + (uint16_t)s_size_map[size_i] <= h)
+            _clear_text_target(y);
+
         /* 新一帧：先作废**文字实际覆盖到的**帧单元的颜色账。文字是逐字形小位图、永远盖
            不满单元，不声明新帧的话上一帧颜色会残留 —— 异色被判 mixed 后回落到卡片色
            （现场 5006048 卡片是绿，于是绿色改红/黄/蓝都停在绿）。竖直范围按字号算，
@@ -376,6 +419,16 @@ static void _cdstd_picture_display(app_ccb_t *ccb, void *data, uint16_t data_len
             break;
         }
 
+        /* 位图 bit=1 才写（bit=0 不动），旧内容会从图片的暗像素里透出来 ——
+           先清这块半屏再贴图（与 A1/A4 的"文字显示自带清屏"同一口径）。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = y,
+            .w     = w,
+            .h     = h,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
         /* 新一帧：整半屏位图替换该单元内容，先复位它的颜色账（换色不残留旧色） */
         app_screen_color_frame_begin(0, y, w, h);
         app_render(&(app_render_cfg_t){
@@ -426,6 +479,16 @@ static void _cdstd_release_display(app_ccb_t *ccb, void *data, uint16_t data_len
             break;
         }
 
+        /* 位图 bit=1 才写（bit=0 不动），旧内容会从图片的暗像素里透出来 ——
+           先清这块半屏再贴图（与 A1/A4 的"文字显示自带清屏"同一口径）。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = y,
+            .w     = w,
+            .h     = h,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
         /* 新一帧：整半屏位图替换该单元内容，先复位它的颜色账（换色不残留旧色） */
         app_screen_color_frame_begin(0, y, w, h);
         app_render(&(app_render_cfg_t){

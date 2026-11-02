@@ -212,6 +212,24 @@ int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t 
 uint16_t app_screen_rows(void) { return TEST_LOGICAL_W; }
 uint16_t app_screen_cols(void) { return TEST_LOGICAL_H; }
 
+/* 折叠几何桩：本协议只用于 5006048（1×2 上下两块），A1/A4 的清屏按半屏取矩形 */
+uint8_t app_screen_fold_count(void) { return 2; }
+
+bool app_screen_fold_rect(uint8_t half, uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
+{
+    if (half > 1U) return false;
+    if (x) *x = 0;
+    if (y) *y = (half == 0U) ? 0U : (uint16_t)(TEST_LOGICAL_H / 2U);
+    if (w) *w = TEST_LOGICAL_W;
+    if (h) *h = (uint16_t)(TEST_LOGICAL_H / 2U);
+    return true;
+}
+
+/* 文字/图片命令的"先清屏"记录：FILL 与其它分支分开计数（最后一次调用仍是 TEXT/BITMAP） */
+static int                 s_fill_calls;
+static uint16_t            s_fill_x, s_fill_y, s_fill_w, s_fill_h;
+static dev_display_color_t s_fill_color;
+
 /* ---- 帧单元颜色账的"新帧"声明 ----
  * 命令层在渲染前必须按协议矩形调一次（换色不残留旧帧色）。本套件不跑真实画布，
  * 只记录调用与矩形，验证"每条内容命令都声明、且矩形与渲染区域一致"。 */
@@ -258,7 +276,14 @@ void app_render(const app_render_cfg_t *cfg)
     s_rc_color   = cfg->color;
     s_rc_persist = cfg->persist;
 
-    if (cfg->type == APP_RENDER_TYPE_TEXT) {
+    if (cfg->type == APP_RENDER_TYPE_FILL) {
+        s_fill_calls++;
+        s_fill_x     = cfg->x;
+        s_fill_y     = cfg->y;
+        s_fill_w     = cfg->w;
+        s_fill_h     = cfg->h;
+        s_fill_color = cfg->color;
+    } else if (cfg->type == APP_RENDER_TYPE_TEXT) {
         s_rc_font_size = cfg->font_size;
         s_rc_font_type = cfg->font_type;
         s_rc_text_enc  = cfg->text_enc;
@@ -275,6 +300,9 @@ static void render_reset(void)
     s_render_calls = 0;
     s_begin_calls  = 0;
     s_begin_x = s_begin_y = s_begin_w = s_begin_h = 0;
+    s_fill_calls = 0;
+    s_fill_x = s_fill_y = s_fill_w = s_fill_h = 0;
+    s_fill_color   = DEV_DISPLAY_COLOR_BLACK;
     s_rc_type      = (app_render_type_t)0;
     s_rc_x = s_rc_y = s_rc_w = s_rc_h = 0;
     s_rc_color   = DEV_DISPLAY_COLOR_BLACK;
@@ -815,8 +843,12 @@ static void case_cmd_word_display(void)
 
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x31,
               "应回 0xB1/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT,
-              "应恰好调一次 TEXT 渲染（calls=%d type=%d）", s_render_calls, (int)s_rc_type);
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_TEXT,
+              "应先清屏再调一次 TEXT（calls=%d type=%d）", s_render_calls, (int)s_rc_type);
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "渲染文字前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
     /* 区域 = 剩余空间 [x,W)×[y,H)：w/h 是**尺寸**不是绝对右下边界 */
     CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_w == TEST_LOGICAL_W - 10 &&
                   s_rc_h == TEST_LOGICAL_H - 20,
@@ -857,7 +889,7 @@ static void case_cmd_word_display(void)
         tx_reset();
         render_reset();
         _cdstd_word_display(&chan, payload, n);
-        CHECK_MSG(s_render_calls == 1 && s_rc_font_size == map[i].size && s_rc_font_type == map[i].type,
+        CHECK_MSG(s_render_calls == 2 && s_rc_font_size == map[i].size && s_rc_font_type == map[i].type,
                   "字号码 %02X 应映射为 %u 点阵、字体码 %02X 应为 %u（得到 %u / %u）", map[i].size_code,
                   (unsigned)map[i].size, map[i].type_code, (unsigned)map[i].type,
                   (unsigned)s_rc_font_size, (unsigned)s_rc_font_type);
@@ -878,7 +910,7 @@ static void case_cmd_word_display(void)
         tx_reset();
         render_reset();
         _cdstd_word_display(&chan, payload, n);
-        CHECK_MSG(s_render_calls == 1 && s_rc_color == colors[i].want,
+        CHECK_MSG(s_render_calls == 2 && s_rc_color == colors[i].want,
                   "颜色码 %02X 应映射为 %u（全彩；得到 %u）", colors[i].code,
                   (unsigned)colors[i].want, (unsigned)s_rc_color);
     }
@@ -964,6 +996,7 @@ static void case_cmd_word_display_endian(void)
               (unsigned)s_rc_y);
     CHECK_MSG(s_rc_h == 1, "区域高应为 屏高-99 = 1（w/h 是尺寸不是右下边界），得到 %u",
               (unsigned)s_rc_h);
+    CHECK_MSG(s_fill_calls == 0, "首行放不下（y=99、48 号）时不得清屏，否则无效命令会擦掉旧内容");
 }
 
 /** @brief A0 屏开关：**只管输出**（亮度期望值与光敏跟随都不动），且幂等
@@ -1144,9 +1177,13 @@ static void case_cmd_persistent_display(void)
 
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB4 && s_tx_buf[9] == 0x31,
               "应回 0xB4/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT && s_rc_persist == true,
-              "必须是 TEXT 且 **persist=true**（calls=%d persist=%d）", s_render_calls,
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_TEXT && s_rc_persist == true,
+              "必须**先清屏再** TEXT 且 persist=true（calls=%d persist=%d）", s_render_calls,
               (int)s_rc_persist);
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "A4 渲染文字前也应清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
     CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_color == DEV_DISPLAY_COLOR_RED &&
                   s_rc_font_size == APP_FONT_SIZE_48 && s_rc_font_type == APP_FONT_TYPE_HT,
               "区域/颜色/字号/字型应与 A1 同口径（得到 x=%u y=%u color=%u size=%u type=%u）",
@@ -1188,7 +1225,7 @@ static void case_cmd_picture_display(void)
     _cdstd_picture_display(&chan, payload, exact);
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31,
               "上屏应回 0xB7/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
                   s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
               "上屏应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u color=%u persist=%d）",
@@ -1197,6 +1234,10 @@ static void case_cmd_picture_display(void)
                   s_begin_w == TEST_LOGICAL_W && s_begin_h == TEST_LOGICAL_H / 2,
               "位图渲染前应声明新帧 (0,0,224,50)（calls=%d x=%u y=%u w=%u h=%u）", s_begin_calls,
               s_begin_x, s_begin_y, s_begin_w, s_begin_h);
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "贴图前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
     CHECK_MSG(s_rc_bitmap == payload + sizeof(app_cdstd_picture_display_t),
               "位图指针必须指向 DATA 第 3 字节（偏移 %ld）", (long)(s_rc_bitmap - payload));
 
@@ -1206,7 +1247,7 @@ static void case_cmd_picture_display(void)
     render_reset();
     _cdstd_picture_display(&chan, payload, exact);
     CHECK_MSG(s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31, "下屏应回 0xB7/0x31");
-    CHECK_MSG(s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2 && s_rc_h == TEST_LOGICAL_H / 2,
+    CHECK_MSG(s_render_calls == 2 && s_rc_y == TEST_LOGICAL_H / 2 && s_rc_h == TEST_LOGICAL_H / 2,
               "下屏起点应为 y=%u、高 %u（得到 y=%u h=%u）", TEST_LOGICAL_H / 2, TEST_LOGICAL_H / 2,
               s_rc_y, s_rc_h);
 
@@ -1216,7 +1257,7 @@ static void case_cmd_picture_display(void)
     tx_reset();
     render_reset();
     _cdstd_picture_display(&chan, payload, exact);
-    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1 &&
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_PURPLE,
               "0x35 应映射为紫（全彩，得到 %u）", (unsigned)s_rc_color);
 
@@ -1224,7 +1265,7 @@ static void case_cmd_picture_display(void)
     tx_reset();
     render_reset();
     _cdstd_picture_display(&chan, payload, (uint16_t)sizeof(payload));
-    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1, "多带 1 字节不应拒（口径 ≥）");
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 2, "多带 1 字节不应拒（口径 ≥）");
 }
 
 /** @brief A7 越界矩阵：短帧 / pos=0 或 ≥3 / 颜色非法 → 0xB7/0x30 且不渲染
@@ -1295,20 +1336,24 @@ static void case_cmd_release_display(void)
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
     CHECK_MSG(s_tx_calls == 0, "协议 4.9 无反馈：本命令不得发任何帧（实际 %d 次）", s_tx_calls);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
                   s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
               "上包应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u persist=%d）",
               (int)s_rc_type, s_rc_y, s_rc_h, (int)s_rc_persist);
     CHECK_MSG(s_rc_bitmap == payload + 3, "位图必须从 DATA 第 4 字节起（偏移 %ld）",
               (long)(s_rc_bitmap - payload));
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "贴图前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
 
     /* 下包：seq=0x02 → 起点下移半屏 */
     payload[0] = 0x02;
     tx_reset();
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
-    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2,
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 2 && s_rc_y == TEST_LOGICAL_H / 2,
               "下包应为 y=%u（得到 y=%u，tx=%d）", TEST_LOGICAL_H / 2, s_rc_y, s_tx_calls);
 
     /* 全彩：0x34 蓝 */
@@ -1317,7 +1362,7 @@ static void case_cmd_release_display(void)
     tx_reset();
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
-    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_BLUE,
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 2 && s_rc_color == DEV_DISPLAY_COLOR_BLUE,
               "0x34 应映射为蓝（全彩，得到 %u）", (unsigned)s_rc_color);
 }
 
