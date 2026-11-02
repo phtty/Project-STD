@@ -212,6 +212,24 @@ int32_t app_ccb_send_to(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t 
 uint16_t app_screen_rows(void) { return TEST_LOGICAL_W; }
 uint16_t app_screen_cols(void) { return TEST_LOGICAL_H; }
 
+/* 折叠几何桩：本协议只用于 5006048（1×2 上下两块），A1/A4 的清屏按半屏取矩形 */
+uint8_t app_screen_fold_count(void) { return 2; }
+
+bool app_screen_fold_rect(uint8_t half, uint16_t *x, uint16_t *y, uint16_t *w, uint16_t *h)
+{
+    if (half > 1U) return false;
+    if (x) *x = 0;
+    if (y) *y = (half == 0U) ? 0U : (uint16_t)(TEST_LOGICAL_H / 2U);
+    if (w) *w = TEST_LOGICAL_W;
+    if (h) *h = (uint16_t)(TEST_LOGICAL_H / 2U);
+    return true;
+}
+
+/* 文字命令的"先清屏"记录：FILL 与 TEXT 分开计数（TEXT 仍是最后一次调用） */
+static int                 s_fill_calls;
+static uint16_t            s_fill_x, s_fill_y, s_fill_w, s_fill_h;
+static dev_display_color_t s_fill_color;
+
 static int                 s_render_calls;
 static app_render_type_t   s_rc_type;
 static uint16_t            s_rc_x;
@@ -243,7 +261,14 @@ void app_render(const app_render_cfg_t *cfg)
     s_rc_color   = cfg->color;
     s_rc_persist = cfg->persist;
 
-    if (cfg->type == APP_RENDER_TYPE_TEXT) {
+    if (cfg->type == APP_RENDER_TYPE_FILL) {
+        s_fill_calls++;
+        s_fill_x     = cfg->x;
+        s_fill_y     = cfg->y;
+        s_fill_w     = cfg->w;
+        s_fill_h     = cfg->h;
+        s_fill_color = cfg->color;
+    } else if (cfg->type == APP_RENDER_TYPE_TEXT) {
         s_rc_font_size = cfg->font_size;
         s_rc_font_type = cfg->font_type;
         s_rc_text_enc  = cfg->text_enc;
@@ -258,6 +283,9 @@ void app_render(const app_render_cfg_t *cfg)
 static void render_reset(void)
 {
     s_render_calls = 0;
+    s_fill_calls   = 0;
+    s_fill_x = s_fill_y = s_fill_w = s_fill_h = 0;
+    s_fill_color   = DEV_DISPLAY_COLOR_BLACK;
     s_rc_type      = (app_render_type_t)0;
     s_rc_x = s_rc_y = s_rc_w = s_rc_h = 0;
     s_rc_color   = DEV_DISPLAY_COLOR_BLACK;
@@ -798,8 +826,12 @@ static void case_cmd_word_display(void)
 
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB1 && s_tx_buf[9] == 0x31,
               "应回 0xB1/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT,
-              "应恰好调一次 TEXT 渲染（calls=%d type=%d）", s_render_calls, (int)s_rc_type);
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_TEXT,
+              "应先清屏再调一次 TEXT（calls=%d type=%d）", s_render_calls, (int)s_rc_type);
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "渲染文字前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
     /* 区域 = 剩余空间 [x,W)×[y,H)：w/h 是**尺寸**不是绝对右下边界 */
     CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_w == TEST_LOGICAL_W - 10 &&
                   s_rc_h == TEST_LOGICAL_H - 20,
@@ -836,7 +868,7 @@ static void case_cmd_word_display(void)
         tx_reset();
         render_reset();
         _cdstd_word_display(&chan, payload, n);
-        CHECK_MSG(s_render_calls == 1 && s_rc_font_size == map[i].size && s_rc_font_type == map[i].type,
+        CHECK_MSG(s_render_calls == 2 && s_rc_font_size == map[i].size && s_rc_font_type == map[i].type,
                   "字号码 %02X 应映射为 %u 点阵、字体码 %02X 应为 %u（得到 %u / %u）", map[i].size_code,
                   (unsigned)map[i].size, map[i].type_code, (unsigned)map[i].type,
                   (unsigned)s_rc_font_size, (unsigned)s_rc_font_type);
@@ -857,7 +889,7 @@ static void case_cmd_word_display(void)
         tx_reset();
         render_reset();
         _cdstd_word_display(&chan, payload, n);
-        CHECK_MSG(s_render_calls == 1 && s_rc_color == colors[i].want,
+        CHECK_MSG(s_render_calls == 2 && s_rc_color == colors[i].want,
                   "颜色码 %02X 应映射为 %u（全彩；得到 %u）", colors[i].code,
                   (unsigned)colors[i].want, (unsigned)s_rc_color);
     }
@@ -941,6 +973,7 @@ static void case_cmd_word_display_endian(void)
     CHECK_MSG(s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H - 1U,
               "y 应为 99（字节序接反会得到 25344 并被拦下），得到 calls=%d y=%u", s_render_calls,
               (unsigned)s_rc_y);
+    CHECK_MSG(s_fill_calls == 0, "首行放不下（y=99、48 号）时不得清屏，否则无效命令会擦掉旧内容");
     CHECK_MSG(s_rc_h == 1, "区域高应为 屏高-99 = 1（w/h 是尺寸不是右下边界），得到 %u",
               (unsigned)s_rc_h);
 }
@@ -1123,9 +1156,13 @@ static void case_cmd_persistent_display(void)
 
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB4 && s_tx_buf[9] == 0x31,
               "应回 0xB4/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_TEXT && s_rc_persist == true,
-              "必须是 TEXT 且 **persist=true**（calls=%d persist=%d）", s_render_calls,
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_TEXT && s_rc_persist == true,
+              "必须**先清屏再** TEXT 且 persist=true（calls=%d persist=%d）", s_render_calls,
               (int)s_rc_persist);
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "A4 渲染文字前也应清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
     CHECK_MSG(s_rc_x == 10 && s_rc_y == 20 && s_rc_color == DEV_DISPLAY_COLOR_RED &&
                   s_rc_font_size == APP_FONT_SIZE_48 && s_rc_font_type == APP_FONT_TYPE_HT,
               "区域/颜色/字号/字型应与 A1 同口径（得到 x=%u y=%u color=%u size=%u type=%u）",
