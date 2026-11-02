@@ -126,9 +126,9 @@ void Error_Handler(void);
 #define LDR_GPIO_Port         GPIOA
 #define W25QXX_CS_Pin         GPIO_PIN_1
 #define W25QXX_CS_GPIO_Port   GPIOB
-#define DIP_SW1_Pin           GPIO_PIN_7
+#define DIP_SW1_Pin           GPIO_PIN_8
 #define DIP_SW1_GPIO_Port     GPIOE
-#define DIP_SW2_Pin           GPIO_PIN_8
+#define DIP_SW2_Pin           GPIO_PIN_9
 #define DIP_SW2_GPIO_Port     GPIOE
 #define SW3_Pin               GPIO_PIN_10
 #define SW3_GPIO_Port         GPIOE
