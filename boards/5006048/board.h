@@ -126,6 +126,13 @@
 #define BOARD_HAS_ADDR_DIP (0) /**< 0 = 本板无拨码，地址靠 TEST 键认领 + W25Qxx 记录 */
 #endif
 
+/* ---- 干接点选图（SW1~SW3 → 预存画面槽位 1~3）----
+ * 本板没有 SW1~SW3（见 dev_key_board.c），不编选图任务；这同时避免了引用 LCSP 的
+ * 槽位读取（本板不编 LCSP）和 ~2.8KB 的 CCMRAM 槽位图缓冲。 */
+#ifndef BOARD_HAS_CONTACT_SLOTS
+#define BOARD_HAS_CONTACT_SLOTS (0) /**< 0 = 本板无干接点，不编选图任务 */
+#endif
+
 /* ---- 出厂默认身份：**主卡**（0 = 主卡）----
  *
  * 出厂（还没有记录）时，板子认为自己在**主卡格**（见 BOARD_CASC_MASTER_CELL）。

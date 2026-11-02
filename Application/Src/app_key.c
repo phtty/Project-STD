@@ -5,20 +5,24 @@
  * 两种用法：
  *   · DIP1/DIP2   上电读一次即可（级联地址）
  *   · SW1/SW2/SW3 干接点；本产品里它们选"预存画面"：SW1→槽位 1、SW2→2、SW3→3
+ *                  （仅 BOARD_HAS_CONTACT_SLOTS 的板子编；5006048 没有这三个接点）
  */
 
 #include "app_key.h"
 
 #include <stdio.h>
 
+#include "board.h" /* BOARD_HAS_CONTACT_SLOTS */
 #include "initcall.h"
 #include "pl_mem.h"
 #include "pl_task.h"
 
+#if BOARD_HAS_CONTACT_SLOTS
 #include "app_lcsp_slot.h"
 #include "app_render.h"
 #include "app_screen.h"
 #include "dev_display.h"
+#endif
 
 static bool s_dip1_state;
 static bool s_dip2_state;
@@ -39,6 +43,8 @@ static void _app_key_init(void)
     s_dip2_state = dev_key_get_state(DEV_KEY_DIP2);
 }
 sw_app_initcall(_app_key_init);
+
+#if BOARD_HAS_CONTACT_SLOTS
 
 /* ================================================================
  *  干接点选图：SW1/SW2/SW3 → 槽位 1/2/3
@@ -165,3 +171,5 @@ static void _app_key_contact_init(void)
     (void)pl_task_new(_app_key_contact_task, nullptr, &attr);
 }
 sw_app_initcall(_app_key_contact_init);
+
+#endif /* BOARD_HAS_CONTACT_SLOTS */

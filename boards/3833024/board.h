@@ -154,6 +154,14 @@
 #define BOARD_HAS_ADDR_DIP (1) /**< 1 = 本板地址由拨码决定（拨码优先于记录） */
 #endif
 
+/* ---- 干接点选图（SW1~SW3 → 预存画面槽位 1~3）----
+ * 有 SW1~SW3、且产品要"按一下切一张预存画面"的板子才编。5006048 没有这三个干接点，
+ * 编进来不但白占 CCMRAM（槽位图缓冲 ~2.8KB），还会引用 LCSP 的槽位读取 —— 而 5006048
+ * 按容量约束不编 LCSP，链接会直接报未定义。 */
+#ifndef BOARD_HAS_CONTACT_SLOTS
+#define BOARD_HAS_CONTACT_SLOTS (1) /**< 1 = 本板有 SW1~SW3 干接点，编入选图任务 */
+#endif
+
 #ifndef BOARD_CASC_ADDR
 #define BOARD_CASC_ADDR (0) /**< 出厂默认总线地址（0 = 主卡） */
 #endif
