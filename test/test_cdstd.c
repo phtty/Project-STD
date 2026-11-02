@@ -1200,13 +1200,17 @@ static void case_cmd_picture_display(void)
     _cdstd_picture_display(&chan, payload, exact);
     CHECK_MSG(s_tx_calls == 1 && s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31,
               "上屏应回 0xB7/0x31（得到 cmd=%02X status=%02X）", s_tx_buf[8], s_tx_buf[9]);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
                   s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
               "上屏应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u color=%u persist=%d）",
               (int)s_rc_type, s_rc_y, s_rc_h, (unsigned)s_rc_color, (int)s_rc_persist);
     CHECK_MSG(s_rc_bitmap == payload + sizeof(app_cdstd_picture_display_t),
               "位图指针必须指向 DATA 第 3 字节（偏移 %ld）", (long)(s_rc_bitmap - payload));
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "贴图前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
 
     /* 下屏：pos=2 → 起点下移半屏，高度仍是半屏 */
     payload[0] = 2;
@@ -1214,7 +1218,7 @@ static void case_cmd_picture_display(void)
     render_reset();
     _cdstd_picture_display(&chan, payload, exact);
     CHECK_MSG(s_tx_buf[8] == 0xB7 && s_tx_buf[9] == 0x31, "下屏应回 0xB7/0x31");
-    CHECK_MSG(s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2 && s_rc_h == TEST_LOGICAL_H / 2,
+    CHECK_MSG(s_render_calls == 2 && s_rc_y == TEST_LOGICAL_H / 2 && s_rc_h == TEST_LOGICAL_H / 2,
               "下屏起点应为 y=%u、高 %u（得到 y=%u h=%u）", TEST_LOGICAL_H / 2, TEST_LOGICAL_H / 2,
               s_rc_y, s_rc_h);
 
@@ -1224,7 +1228,7 @@ static void case_cmd_picture_display(void)
     tx_reset();
     render_reset();
     _cdstd_picture_display(&chan, payload, exact);
-    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1 &&
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_PURPLE,
               "0x35 应映射为紫（全彩，得到 %u）", (unsigned)s_rc_color);
 
@@ -1232,7 +1236,7 @@ static void case_cmd_picture_display(void)
     tx_reset();
     render_reset();
     _cdstd_picture_display(&chan, payload, (uint16_t)sizeof(payload));
-    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 1, "多带 1 字节不应拒（口径 ≥）");
+    CHECK_MSG(s_tx_buf[9] == 0x31 && s_render_calls == 2, "多带 1 字节不应拒（口径 ≥）");
 }
 
 /** @brief A7 越界矩阵：短帧 / pos=0 或 ≥3 / 颜色非法 → 0xB7/0x30 且不渲染
@@ -1303,20 +1307,24 @@ static void case_cmd_release_display(void)
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
     CHECK_MSG(s_tx_calls == 0, "协议 4.9 无反馈：本命令不得发任何帧（实际 %d 次）", s_tx_calls);
-    CHECK_MSG(s_render_calls == 1 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
+    CHECK_MSG(s_render_calls == 2 && s_rc_type == APP_RENDER_TYPE_BITMAP && s_rc_x == 0 &&
                   s_rc_y == 0 && s_rc_w == TEST_LOGICAL_W && s_rc_h == TEST_LOGICAL_H / 2 &&
                   s_rc_color == DEV_DISPLAY_COLOR_RED && s_rc_persist == true,
               "上包应为 BITMAP(0,0,224,50) 红且 persist（type=%d y=%u h=%u persist=%d）",
               (int)s_rc_type, s_rc_y, s_rc_h, (int)s_rc_persist);
     CHECK_MSG(s_rc_bitmap == payload + 3, "位图必须从 DATA 第 4 字节起（偏移 %ld）",
               (long)(s_rc_bitmap - payload));
+    CHECK_MSG(s_fill_calls == 1 && s_fill_color == DEV_DISPLAY_COLOR_BLACK && s_fill_x == 0 &&
+                  s_fill_y == 0 && s_fill_w == TEST_LOGICAL_W && s_fill_h == TEST_LOGICAL_H / 2,
+              "贴图前应先清上屏半屏（fill=%d x=%u y=%u w=%u h=%u color=%u）", s_fill_calls,
+              s_fill_x, s_fill_y, s_fill_w, s_fill_h, (unsigned)s_fill_color);
 
     /* 下包：seq=0x02 → 起点下移半屏 */
     payload[0] = 0x02;
     tx_reset();
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
-    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_y == TEST_LOGICAL_H / 2,
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 2 && s_rc_y == TEST_LOGICAL_H / 2,
               "下包应为 y=%u（得到 y=%u，tx=%d）", TEST_LOGICAL_H / 2, s_rc_y, s_tx_calls);
 
     /* 全彩：0x34 蓝 */
@@ -1325,7 +1333,7 @@ static void case_cmd_release_display(void)
     tx_reset();
     render_reset();
     _cdstd_release_display(&chan, payload, sizeof(payload));
-    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 1 && s_rc_color == DEV_DISPLAY_COLOR_BLUE,
+    CHECK_MSG(s_tx_calls == 0 && s_render_calls == 2 && s_rc_color == DEV_DISPLAY_COLOR_BLUE,
               "0x34 应映射为蓝（全彩，得到 %u）", (unsigned)s_rc_color);
 }
 

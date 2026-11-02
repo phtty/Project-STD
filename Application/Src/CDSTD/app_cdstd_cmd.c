@@ -386,6 +386,16 @@ static void _cdstd_picture_display(app_ccb_t *ccb, void *data, uint16_t data_len
             break;
         }
 
+        /* 位图 bit=1 才写（bit=0 不动），旧内容会从图片的暗像素里透出来 ——
+           先清这块半屏再贴图（与 A1/A4 的"文字显示自带清屏"同一口径）。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = y,
+            .w     = w,
+            .h     = h,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
         app_render(&(app_render_cfg_t){
             .type    = APP_RENDER_TYPE_BITMAP,
             .x       = 0,
@@ -434,6 +444,16 @@ static void _cdstd_release_display(app_ccb_t *ccb, void *data, uint16_t data_len
             break;
         }
 
+        /* 位图 bit=1 才写（bit=0 不动），旧内容会从图片的暗像素里透出来 ——
+           先清这块半屏再贴图（与 A1/A4 的"文字显示自带清屏"同一口径）。 */
+        app_render(&(app_render_cfg_t){
+            .type  = APP_RENDER_TYPE_FILL,
+            .x     = 0,
+            .y     = y,
+            .w     = w,
+            .h     = h,
+            .color = DEV_DISPLAY_COLOR_BLACK,
+        });
         app_render(&(app_render_cfg_t){
             .type    = APP_RENDER_TYPE_BITMAP,
             .x       = 0,
