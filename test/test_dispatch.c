@@ -450,8 +450,10 @@ static void test_bind_idempotent(void)
 
 static int s_listener_calls;
 
-static void rx_listener(void)
+static void rx_listener(const char *proto, uint32_t cmd)
 {
+    (void)proto;
+    (void)cmd;
     s_listener_calls++;
 }
 

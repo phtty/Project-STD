@@ -21,6 +21,7 @@
 
 /** @brief IAP 返回命令码（回执帧的 cmd 字段取值） */
 typedef enum {
+    APP_IAP_RTN_CMD_00 = (uint32_t)0x0000b400U, /**< 查询模式/能力应答 */
     APP_IAP_RTN_CMD_01 = (uint32_t)0x0000b401U, /**< 报告当前 IP 配置 */
     APP_IAP_RTN_CMD_02 = (uint32_t)0x0000b402U, /**< 强制改 IP（main app 中留桩，仅回执） */
     APP_IAP_RTN_CMD_03 = (uint32_t)0x0000b403U, /**< 报告固件版本、大小、CRC32 与更新状态 */
@@ -28,6 +29,7 @@ typedef enum {
     APP_IAP_RTN_CMD_05 = (uint32_t)0x0000b405U, /**< 固件升级包下发应答 */
     APP_IAP_RTN_CMD_06 = (uint32_t)0x0000b406U, /**< 进入 Recovery 模式应答 */
     APP_IAP_RTN_CMD_07 = (uint32_t)0x0000b407U, /**< 软复位应答 */
+    APP_IAP_RTN_CMD_0C = (uint32_t)0x0000b40CU, /**< 触发 TEST 键应答 */
 } app_iap_rtn_cmd_t;
 
 /** @brief IAP 命令处理函数指针
@@ -36,6 +38,6 @@ typedef void (*app_iap_cmd_handler_fn_t)(app_ccb_t *, app_iap_frame_t *);
 
 /** @brief 命令表条目数。写成显式长度而非 []：调用方要按它做范围检查，
  *  而不完整数组类型不能 sizeof。改动命令数量时这里和表定义要同步。 */
-#define IAP_CMD_COUNT (8U)
+#define IAP_CMD_COUNT (13U)
 
 extern const app_iap_cmd_handler_fn_t g_iap_cmd_table[IAP_CMD_COUNT]; /**< IAP 命令处理表，按命令码索引 */

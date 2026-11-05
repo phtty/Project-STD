@@ -257,7 +257,10 @@ void app_dispatch_task(void *argument)
                          测试反复打断：按第一下之后再也推不动）。
                         · 到了这一步说明**一整帧已经收齐并通过了本协议的帧头校验** ——
                          半帧、伪帧、别人的帧都不算"上位机下发了指令"。 */
-                    if (s_rx_listener_fn && !p->internal_bus) s_rx_listener_fn();
+                    if (s_rx_listener_fn && !p->internal_bus) {
+                        uint32_t rx_cmd = (p->ops->cmd_of != nullptr) ? p->ops->cmd_of(msg->data, msg->data_len) : 0U;
+                        s_rx_listener_fn(p->name, rx_cmd);
+                    }
                     goto account;
                 }
 

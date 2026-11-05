@@ -108,6 +108,15 @@ bool pl_rtc_bkup_write(pl_rtc_handle_t h, uint32_t reg, uint32_t value)
 pl_iwdg_handle_t pl_iwdg_get_handle(void) { return NULL; }
 void pl_iwdg_refresh(pl_iwdg_handle_t h) { (void)h; }
 void pl_system_reset(void) {}
+void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint32_t *data)
+{
+    (void)cmd;
+    (void)seq;
+    (void)len;
+    (void)data;
+}
+void app_factory_test_trigger(void) {}
+void app_screen_status(app_screen_status_t *out) { memset(out, 0, sizeof(*out)); }
 
 /* ---- 极简断言 ---- */
 static int g_failures;

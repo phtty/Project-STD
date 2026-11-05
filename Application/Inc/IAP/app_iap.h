@@ -51,3 +51,12 @@ void app_iap_task(void *argument);
 app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb, const app_ccb_src_t *src,
                                           uint8_t *scratch, uint16_t scratch_size, uint32_t *total_len,
                                           uint8_t *aux);
+
+/** @brief 取一帧的完整命令码（给分发的接收监听识别 0x4Bxx/0x4Cxx/0xBCxx）
+ *  @param frame 完整帧字节
+ *  @param len   帧字节数
+ *  @return 命令码；帧太短返回 0 */
+uint32_t app_iap_frame_cmd(const uint8_t *frame, uint16_t len);
+
+/** @brief 往内部 485 发一帧（主卡→从卡；从卡应答也走这里） */
+void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint32_t *data);

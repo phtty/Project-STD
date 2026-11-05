@@ -57,6 +57,12 @@ static volatile bool s_factory_active;
  *  由 `_factory_cleanup` 在收尾的最后一步清零。 */
 static volatile bool s_factory_abort_req;
 
+/** @brief 远程注入的一次 TEST 事件（0x0C 置位，按键等待处消费）
+ *
+ *  **不能复用 dev_key 的信号量**：`_settle_test_key()` 会主动排空残留令牌，远程
+ *  事件会被静默丢掉。这里单独一个标志，`_wait_press_or_abort` 优先消费它。 */
+static volatile bool s_remote_press_pending;
+
 /* ---- 老化辅助 ---- */
 /** @brief 清屏（走**逻辑屏**：多卡时是整台设备，单卡时就是本卡）
  *
@@ -154,6 +160,10 @@ static bool _wait_press_or_abort(uint32_t timeout_ms)
     const uint32_t t0 = osKernelGetTickCount();
     for (;;) {
         if (s_factory_abort_req) return false;
+        if (s_remote_press_pending) {
+            s_remote_press_pending = false;
+            return true;
+        }
         if (dev_key_wait_press(DEV_KEY_TST, FACTORY_POLL_STEP_MS)) return true;
         if (timeout_ms != osWaitForever && (osKernelGetTickCount() - t0) >= timeout_ms) return false;
     }
@@ -472,7 +482,7 @@ static void _factory_module_init(void)
 {
     /* 框架不再直接认识本模块 —— 收到数据就退出工厂模式这件事，
        由本模块自己注册监听（见 app_dispatch_register_rx_listener）。 */
-    app_dispatch_register_rx_listener(app_factory_mode_interrupt);
+    app_dispatch_register_rx_listener(app_factory_mode_rx_notify);
     _factory_test_init();
 }
 sw_app_initcall(_factory_module_init);
@@ -504,4 +514,21 @@ void app_factory_mode_interrupt(void)
        路径复位。**响应上界 = 一个 `FACTORY_POLL_STEP_MS`**（settle 段也查该标志）。
        这里也不做屏幕复位：收尾由工厂任务自己完成，避免"中断方与任务方"两处改同一状态。 */
     s_factory_abort_req = true;
+}
+
+/** @brief 远程注入一次 TEST 事件：只置待处理标志，不阻塞协议任务 */
+void app_factory_test_trigger(void)
+{
+    s_remote_press_pending = true;
+}
+
+/** @brief 接收事件监听：只有 IAP 的 0x00004B0C 不算“上位机让工厂测试退出”
+ *
+ *  0x0C 是远程按 TEST，本来就是工厂流程的一部分；其余任何有效帧仍维持原语义
+ *  （协作式自退），否则每发一次 0x0C 都会把刚推进的测试打断。 */
+void app_factory_mode_rx_notify(const char *proto, uint32_t cmd)
+{
+    if (proto != NULL && strcmp(proto, "iap") == 0 && cmd == 0x00004B0CU)
+        return;
+    app_factory_mode_interrupt();
 }
