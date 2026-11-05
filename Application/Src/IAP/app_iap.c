@@ -286,14 +286,11 @@ app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
 
     uint32_t full_bytes = (payload_len + FRAME_MIN_LEN) * 4;
 
-    /* consecutive header check: if insufficient data but another 0x5A in range, skip */
+    /* 半帧只等待，不能扫描“下一帧头”：合法帧的 seq 也可能让头部出现连续 0x5A。
+       例如 seq=0x5A 时前 5 字节是 5A 5A 5A 5A 5A，偏移 1 处仍像帧头；
+       旧逻辑会在这里返回 FAKE 并 skip 1，导致该 seq 的帧永远收不全。
+       残包/伪头交给 CRC 校验：收满长度后校验不过再 skip 1 重扫。 */
     if (available < full_bytes) {
-        for (uint32_t i = 1; i <= available - 4; i++) {
-            uint32_t next_head = 0;
-            rb_peek(buff, i, (uint8_t *)&next_head, 4, nullptr);
-            if (next_head == FRAME_HEAD)
-                return APP_PCB_PROBE_STATE_FAKE;
-        }
         return APP_PCB_PROBE_STATE_WAIT;
     }
 
