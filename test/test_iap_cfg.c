@@ -488,7 +488,7 @@ static void case_crc_covers_every_field(void)
     CHECK_FIELD_COVERED("update_status",    REC->update_status = APP_FLASH_IAP_FAILED);
     CHECK_FIELD_COVERED("app_info.size", REC->app_info.size ^= 1U);
     CHECK_FIELD_COVERED("app_info.crc32", REC->app_info.crc32 ^= 1U);
-    CHECK_FIELD_COVERED("app_info.version", REC->app_info.version[0] ^= 1U);
+    CHECK_FIELD_COVERED("role",          REC->role ^= 1U);
     CHECK_FIELD_COVERED("net_cfg.ip",    REC->net_cfg.ip[0] ^= 1U);
     CHECK_FIELD_COVERED("net_cfg.mask",  REC->net_cfg.mask[0] ^= 1U);
     CHECK_FIELD_COVERED("net_cfg.gw",    REC->net_cfg.gw[0] ^= 1U);

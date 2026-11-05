@@ -138,11 +138,11 @@ static void _iap_cmd_report_fw_status(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
 {
     app_flash_iap_sys_info_t config_info = *((app_flash_iap_sys_info_t *)ADDR_CONFIG_SECTOR);
 
-    uint32_t ReData[11] = {0};
+    /* TODO(P4): 改为协议规定的 8 word 主卡+从卡状态；当前先保证配置结构去掉 version 后能编译 */
+    uint32_t ReData[3] = {0};
     ReData[0]           = config_info.app_info.size;
     ReData[1]           = config_info.app_info.crc32;
-    memcpy(ReData + 2, config_info.app_info.version, sizeof(config_info.app_info.version));
-    ReData[10] = config_info.update_status;
+    ReData[2]           = config_info.update_status;
 
     _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_03, U32_LEN(sizeof(ReData)), ReData);
 }

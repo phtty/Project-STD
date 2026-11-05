@@ -2,8 +2,9 @@
  * @file    app_iap_cfg.c
  * @brief   IAP 系统配置 Flash 存储（Sector 1, 0x08004000）
  *
- * app_flash_iap_sys_info_t 记录 = magic(4B) | update_status(4B) | FWInfo(40B) | NetConfig(16B) | CRC32(4B)
- * 总长 68B（17 words），按 word 写入 Flash。
+ * app_flash_iap_sys_info_t 记录 = magic(4B) | update_status(4B) | FWInfo(8B) | NetConfig(16B)
+ *                                 | role(4B) | CRC32(4B)
+ * 总长 40B（10 words），按 word 写入 Flash。
  *
  * 操作流程：
  *   init/edit → 填充结构体 → 计算 CRC32 → erase → write
@@ -28,6 +29,7 @@
    记录长度是 A/B 两侧的接口契约：本地 .c 改了结构体而 Bootloader 侧未同步，
    唯一的表现是上电读不出配置。把这条钉在编译期。 */
 static_assert(sizeof(app_flash_iap_sys_info_t) <= 16U * 1024U, "IAP ABI record exceeds sector 1");
+static_assert(sizeof(app_flash_iap_sys_info_t) == 40U, "IAP ABI record must be 40 bytes");
 
 /* 记录扇区**必须落在固件映像之外**。固件起点 = FLASH_BASE + BOARD_VECT_TAB_OFFSET，
    与 boards/&lt;板&gt;/STM32F407XX_FLASH.ld 的 FLASH_ORIGIN 同源（两处由这条断言间接钉住）。
@@ -222,6 +224,9 @@ void app_flash_iap_init_config(app_flash_iap_sys_info_t *info)
         .port = 0x2538,
     };
     memcpy(&(info->net_cfg), &net_info, sizeof(app_flash_iap_net_cfg_t));
+
+    /* 默认主卡；从卡在进入 Recovery 前由 0x06/内部 0x14 路径改写 */
+    info->role = APP_FLASH_IAP_ROLE_MASTER;
 
     /* 不必在这里算 CRC：_edit_config_unlocked 会算好再写 */
     _edit_config_unlocked(info);

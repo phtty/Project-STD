@@ -24,11 +24,10 @@ __attribute__((aligned(4))) typedef struct {
     uint32_t port;         /**< 设备端口号 */
 } app_flash_iap_net_cfg_t; /**< 网络配置类型 */
 
-/** @brief main app 固件信息（字节长度 / CRC32 / 版本） */
+/** @brief main app 固件信息（字节长度 / CRC32） */
 __attribute__((aligned(4))) typedef struct {
     uint32_t size;         /**< Main App 字节长度 */
     uint32_t crc32;        /**< Main App CRC32 值 */
-    char version[32];      /**< 版本字符串 */
 } app_flash_iap_fw_info_t; /**< main app 固件信息类型 */
 
 /** @brief 升级状态机 */
@@ -38,12 +37,19 @@ typedef enum {
     APP_FLASH_IAP_FAILED   = 2, /**< 更新失败 */
 } app_flash_iap_update_status_t;
 
+/** @brief 卡角色（进 Recovery 前写入 IAP 记录，Recovery 据此决定跑主卡还是从卡逻辑） */
+typedef enum {
+    APP_FLASH_IAP_ROLE_MASTER = 0, /**< 主卡：接网口，收主机固件并转发从卡 */
+    APP_FLASH_IAP_ROLE_SLAVE  = 1, /**< 从卡：只应答内部 485 */
+} app_flash_iap_role_t;
+
 /** @brief IAP 系统信息记录（固化于 0x08004000） */
 __attribute__((aligned(4))) typedef struct {
     uint32_t magic;                   /**< 魔数，判断配置区是否有效 */
     uint32_t update_status;           /**< 升级状态机 */
-    app_flash_iap_fw_info_t app_info; /**< main_app 状态 */
-    app_flash_iap_net_cfg_t net_cfg;  /**< 网络配置 */
+    app_flash_iap_fw_info_t app_info; /**< main_app 状态（8 字节） */
+    app_flash_iap_net_cfg_t net_cfg;  /**< 网络配置（16 字节） */
+    uint32_t role;                    /**< 卡角色，取值见 app_flash_iap_role_t */
     uint32_t config_crc;              /**< 本结构体自身的 CRC32 校验 */
 } app_flash_iap_sys_info_t;           /**< IAP 系统信息记录类型 */
 
