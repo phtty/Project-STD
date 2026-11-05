@@ -214,14 +214,14 @@ void app_iap_task(void *argument)
          *   0x00004Bxx 上位机 → 命令表（低字节索引，必须先做范围检查）
          *   0x00014Cxx 主卡→从卡 → 内部请求（0x10/0x14 在 main app 也要应答）
          *   其余（含 0x0000BCxx）忽略 */
-        if ((frame_data->cmd & 0xFFFF0000U) != 0U) continue;
+        uint32_t dir  = (frame_data->cmd >> 8) & 0xFFU;
+        uint32_t addr = (frame_data->cmd >> 16) & 0xFFFFU;
 
-        uint32_t dir = (frame_data->cmd >> 8) & 0xFFU;
-        if (dir == 0x4BU) {
+        if (dir == 0x4BU && addr == 0U) {
             uint8_t cmd = (uint8_t)(frame_data->cmd & 0xFFU);
             if (cmd >= IAP_CMD_COUNT) continue;
             g_iap_cmd_table[cmd](msg->ccb, frame_data);
-        } else if (dir == 0x4CU) {
+        } else if (dir == 0x4CU && addr == 1U) {
             /* 内部命令只认 RS485 通道：网口上来的 0x4C 一律当伪造，避免被一条
                UDP 包骗去改角色/复位 */
             if (msg->ccb == app_rs485_ccb())
