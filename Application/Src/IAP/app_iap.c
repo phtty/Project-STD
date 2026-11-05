@@ -152,6 +152,23 @@ void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint3
                     sizeof(app_iap_frame_t) + len * sizeof(uint32_t) + sizeof(uint32_t));
 }
 
+bool app_iap_wait_internal_ack(uint32_t expect_cmd, uint32_t timeout_ms)
+{
+    static uint8_t msg_buf[IAP_MSG_SIZE];
+    app_dispatch_msg_t *m = (app_dispatch_msg_t *)msg_buf;
+    uint32_t t0           = osKernelGetTickCount();
+
+    while ((osKernelGetTickCount() - t0) < timeout_ms) {
+        if (osMessageQueueGet(s_iap_msg_queue, m, NULL, 10) != osOK)
+            continue;
+
+        app_iap_frame_t *f = (app_iap_frame_t *)m->data;
+        if (f->cmd == expect_cmd)
+            return true;
+    }
+    return false;
+}
+
 /** @brief 内部 485 请求（0x4Cxx）：main app 只支持 0x10 查询与 0x14 进 Recovery */
 static void _iap_handle_internal(app_iap_frame_t *f)
 {

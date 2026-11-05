@@ -115,6 +115,12 @@ void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint3
     (void)len;
     (void)data;
 }
+bool app_iap_wait_internal_ack(uint32_t expect_cmd, uint32_t timeout_ms)
+{
+    (void)expect_cmd;
+    (void)timeout_ms;
+    return false;
+}
 void app_factory_test_trigger(void) {}
 void app_screen_status(app_screen_status_t *out) { memset(out, 0, sizeof(*out)); }
 

@@ -60,3 +60,12 @@ uint32_t app_iap_frame_cmd(const uint8_t *frame, uint16_t len);
 
 /** @brief 往内部 485 发一帧（主卡→从卡；从卡应答也走这里） */
 void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint32_t *data);
+
+/** @brief 在当前 IAP 任务里等一帧内部应答（0x06 等 0x14 ACK 用）
+ *
+ *  只应在 IAP 任务上下文中调用：会直接消费本协议队列，等不到就超时返回。
+ *  等待期间收到的非目标帧会被丢弃（0x06 是一次性命令，不存在需要保留的会话）。
+ *  @param expect_cmd 期望的完整应答命令码（如 0x0000BC14）
+ *  @param timeout_ms 超时
+ *  @return true = 收到期望应答 */
+bool app_iap_wait_internal_ack(uint32_t expect_cmd, uint32_t timeout_ms);

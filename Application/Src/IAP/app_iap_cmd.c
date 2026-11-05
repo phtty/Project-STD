@@ -205,7 +205,8 @@ static void _iap_cmd_enter_recovery(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
        没有应答时主卡仍可自己复位，必要时主机重发 0x06（Recovery 里会补发）。 */
     if ((BOARD_IAP_CAPS & 0x01U) != 0U) {
         app_iap_send_internal(0x00014C14U, 0, 0, NULL);
-        osDelay(50);
+        /* 等从卡 ACK（协议 4.7）；超时也继续复位，主机在 Recovery 里还能补发 */
+        (void)app_iap_wait_internal_ack(0x0000BC14U, 300U);
     }
 
     /* 复位进 Recovery 前强制对账一次镜像：保证 Recovery 读到的 net_cfg 就是
