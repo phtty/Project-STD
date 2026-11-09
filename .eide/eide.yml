@@ -338,6 +338,7 @@ virtualFolder:
                 - path: boards/3833024/Device/Src/dev_p20_16x16_1000001055.c
                 - path: boards/3833024/Device/Src/dev_rs232.c
                 - path: boards/3833024/Device/Src/dev_rs485.c
+                - path: boards/3833024/Device/Src/dev_p5_64x32_.c
               folders: []
             - name: Platform
               files:
@@ -458,8 +459,11 @@ targets:
       - <virtual_root>/boards/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
       - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
-      - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
       - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Application/protocol/cdstd
+      - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -533,7 +537,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/${workspaceFolderBasename}.hex verify reset exit"
+        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/Project_STD.hex verify reset exit"
         eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""
