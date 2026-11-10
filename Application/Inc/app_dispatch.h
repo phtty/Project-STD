@@ -114,9 +114,16 @@ typedef app_pcb_probe_state_t (*app_pcb_probe_fn_t)(app_pcb_t *self, const app_c
                                               uint16_t scratch_size, uint32_t *total_len,
                                               uint8_t *aux);
 
+/** @brief 从完整帧里取"业务命令码"（给接收事件监听做精细过滤）
+ *
+ *  框架不解析任何协议帧，只在 READY 之后把整帧交给这个回调。返回 0 表示本协议
+ *  不提供（监听方按"有指令"处理即可）。 */
+typedef uint32_t (*app_pcb_rx_cmd_fn_t)(const uint8_t *frame, uint16_t len);
+
 /** @brief 协议虚表 —— 追加新方法时不影响已有协议 */
 typedef struct app_pcb_ops {
     app_pcb_probe_fn_t probe; /**< 探测并分类一帧 */
+    app_pcb_rx_cmd_fn_t cmd_of; /**< 可选：从完整帧取业务命令码；nullptr = 不提供 */
 } app_pcb_ops_t;
 
 /** @brief 协议控制块（基类）— 协议模块静态持有 */
@@ -182,8 +189,14 @@ typedef struct {
 
 /* ---- 接收事件监听：框架以注册方式通知，不直接依赖任何业务模块 ---- */
 
-/** @brief 接收事件监听回调 —— 收到一条有效帧时触发一次 */
-typedef void (*app_dispatch_rx_listener_fn_t)(void);
+/** @brief 接收事件监听回调 —— 收到一条有效帧时触发一次
+ *
+ *  @param proto 帧所属协议名（如 "iap"）
+ *  @param cmd   该协议给出的完整命令码；协议未提供时为 0
+ *
+ *  带 protocol + cmd 是为了让监听方能把"远程注入 TEST"这类命令放行，其余仍按
+ *  “上位机来指令”处理。 */
+typedef void (*app_dispatch_rx_listener_fn_t)(const char *proto, uint32_t cmd);
 
 /* ---- 调度上下文 ---- */
 

@@ -20,6 +20,13 @@
 #include "app_iap_cfg.h"
 #include "app_iap_cmd.h"
 
+#include "app_screen.h"
+#include "pl_rtc.h"
+#include "pl_sys.h"
+#include "pl_iwdg.h"
+
+#include <string.h>
+
 /* ---- IAP 记录镜像同步 ----
  * IAP 记录里的 net_cfg 唯一职责 = 镜像 main app 当前使用的网络参数（供 Recovery 上报）。
  * 触发有两条：pl_net 的 IP 变更监听（任何协议调 pl_net_set_ip 都会走到），
@@ -76,7 +83,7 @@ static const osThreadAttr_t s_iap_task_attr = {
  * 本协议承载 RS485/RS232（DMA 单次可达 2048）与 UDP，故取 2112 = 2048 + 余量。 */
 RB_DEFINE_ATTR(s_iap_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 1044, 单次最大写入 2048 + 1) */
 
-static const app_pcb_ops_t s_iap_ops = {.probe = app_iap_probe_frame};
+static const app_pcb_ops_t s_iap_ops = {.probe = app_iap_probe_frame, .cmd_of = app_iap_frame_cmd};
 
 static app_pcb_t s_iap_pcb = {
     .name        = "iap",
@@ -122,6 +129,84 @@ sw_post_initcall(_iap_module_init);
  *  任务实现
  * ================================================================ */
 
+uint32_t app_iap_frame_cmd(const uint8_t *frame, uint16_t len)
+{
+    if (len < sizeof(app_iap_frame_t)) return 0U;
+    return ((const app_iap_frame_t *)frame)->cmd;
+}
+
+void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint32_t *data)
+{
+    static uint32_t tx[FRAME_MAX_LEN] = {0};
+
+    app_iap_frame_t *f = (app_iap_frame_t *)tx;
+    f->head            = 0x5A5A5A5A;
+    f->seq             = seq;
+    f->cmd             = cmd;
+    f->len             = len;
+    if (len != 0U && data != NULL)
+        memcpy(f->data_crc, data, len * sizeof(uint32_t));
+    f->data_crc[len] = pl_crc32_calc(pl_crc_get_handle(), (uint8_t *)tx, sizeof(app_iap_frame_t) + len * sizeof(uint32_t));
+
+    app_ccb_send_to(app_rs485_ccb(), NULL, (uint8_t *)tx,
+                    sizeof(app_iap_frame_t) + len * sizeof(uint32_t) + sizeof(uint32_t));
+}
+
+bool app_iap_wait_internal_ack(uint32_t expect_cmd, uint32_t timeout_ms)
+{
+    static uint8_t msg_buf[IAP_MSG_SIZE];
+    app_dispatch_msg_t *m = (app_dispatch_msg_t *)msg_buf;
+    uint32_t t0           = osKernelGetTickCount();
+
+    while ((osKernelGetTickCount() - t0) < timeout_ms) {
+        if (osMessageQueueGet(s_iap_msg_queue, m, NULL, 10) != osOK)
+            continue;
+
+        app_iap_frame_t *f = (app_iap_frame_t *)m->data;
+        if (f->cmd == expect_cmd)
+            return true;
+    }
+    return false;
+}
+
+/** @brief 内部 485 请求（0x4Cxx）：main app 只支持 0x10 查询与 0x14 进 Recovery */
+static void _iap_handle_internal(app_iap_frame_t *f)
+{
+    app_flash_iap_sys_info_t cfg = *g_iap_sys_info;
+    uint32_t id                  = f->cmd & 0xFFU;
+
+    switch (id) {
+    case 0x10U: {
+        /* 主卡不由本机应答：避免主/从两张卡都回 0x10 */
+        if (app_screen_is_master()) return;
+        uint32_t out[4] = {0U /* main app */, cfg.app_info.size, cfg.app_info.crc32, cfg.update_status};
+        app_iap_send_internal(0x0000BC10U, f->seq, 4U, out);
+        break;
+    }
+    case 0x14U: {
+        if (app_screen_is_master()) {
+            uint32_t st = 2U;
+            app_iap_send_internal(0x0000BC14U, f->seq, 1U, &st);
+            return;
+        }
+        cfg.role = APP_FLASH_IAP_ROLE_SLAVE;
+        app_flash_iap_edit_config(&cfg);
+        pl_rtc_bkup_write(pl_rtc_get_handle(), 0, FLAG_FORCE_UPDATE);
+        uint32_t st = 0U;
+        app_iap_send_internal(0x0000BC14U, f->seq, 1U, &st);
+        osDelay(50);
+        pl_iwdg_refresh(pl_iwdg_get_handle());
+        pl_system_reset();
+        break;
+    }
+    default: {
+        uint32_t st = 2U;
+        app_iap_send_internal(0x0000BC00U | id, f->seq, 1U, &st);
+        break;
+    }
+    }
+}
+
 /** @brief IAP 协议处理任务：阻塞等待帧队列 → 按 cmd 字段查表分派到命令处理函数 */
 void app_iap_task(void *argument)
 {
@@ -142,15 +227,23 @@ void app_iap_task(void *argument)
 
         app_iap_frame_t *frame_data = (app_iap_frame_t *)msg->data;
 
-        /* 命令码由探针在投递当下从帧头解出并经 aux 带来，此处不必再解析一遍。
-         *
-         * **必须做范围检查**：cmd 是帧内的 & 0xFF 值（0~255），而命令表只有
-         * IAP_CMD_COUNT 项。少了这一句就是拿帧里的值去索引函数指针表——
-         * 帧过了 CRC32 就能构造，等于给出一条可控的越界函数调用。 */
-        uint8_t cmd = msg->aux;
-        if (cmd >= IAP_CMD_COUNT) continue;
+        /* 按完整命令码的方向字节路由：
+         *   0x00004Bxx 上位机 → 命令表（低字节索引，必须先做范围检查）
+         *   0x00014Cxx 主卡→从卡 → 内部请求（0x10/0x14 在 main app 也要应答）
+         *   其余（含 0x0000BCxx）忽略 */
+        uint32_t dir  = (frame_data->cmd >> 8) & 0xFFU;
+        uint32_t addr = (frame_data->cmd >> 16) & 0xFFFFU;
 
-        g_iap_cmd_table[cmd](msg->ccb, frame_data);
+        if (dir == 0x4BU && addr == 0U) {
+            uint8_t cmd = (uint8_t)(frame_data->cmd & 0xFFU);
+            if (cmd >= IAP_CMD_COUNT) continue;
+            g_iap_cmd_table[cmd](msg->ccb, frame_data);
+        } else if (dir == 0x4CU && addr == 1U) {
+            /* 内部命令只认 RS485 通道：网口上来的 0x4C 一律当伪造，避免被一条
+               UDP 包骗去改角色/复位 */
+            if (msg->ccb == app_rs485_ccb())
+                _iap_handle_internal(frame_data);
+        }
     }
 }
 
@@ -193,14 +286,11 @@ app_pcb_probe_state_t app_iap_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
 
     uint32_t full_bytes = (payload_len + FRAME_MIN_LEN) * 4;
 
-    /* consecutive header check: if insufficient data but another 0x5A in range, skip */
+    /* 半帧只等待，不能扫描“下一帧头”：合法帧的 seq 也可能让头部出现连续 0x5A。
+       例如 seq=0x5A 时前 5 字节是 5A 5A 5A 5A 5A，偏移 1 处仍像帧头；
+       旧逻辑会在这里返回 FAKE 并 skip 1，导致该 seq 的帧永远收不全。
+       残包/伪头交给 CRC 校验：收满长度后校验不过再 skip 1 重扫。 */
     if (available < full_bytes) {
-        for (uint32_t i = 1; i <= available - 4; i++) {
-            uint32_t next_head = 0;
-            rb_peek(buff, i, (uint8_t *)&next_head, 4, nullptr);
-            if (next_head == FRAME_HEAD)
-                return APP_PCB_PROBE_STATE_FAKE;
-        }
         return APP_PCB_PROBE_STATE_WAIT;
     }
 

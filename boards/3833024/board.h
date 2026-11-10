@@ -25,6 +25,12 @@
  * 中断都跳到错误的地方，且不会有编译期报错。 */
 #define BOARD_VECT_TAB_OFFSET 0x00040000UL /**< 向量表偏移，须与 board.ld 的 FLASH_ORIGIN 一致 */
 
+/* ---- IAP 协议身份 ----
+ * hw_id 与 caps 由上位机在 0x00 里识别；caps.bit0=1 表示本板带从卡（主卡要转发
+ * 固件并查询从卡状态），bit1=1 表示有显示/支持远程 TEST。 */
+#define BOARD_IAP_HW_ID 0x03833024U
+#define BOARD_IAP_CAPS  0x00000002U
+
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
  * （见 app_cfg_sched.h 的 static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。
