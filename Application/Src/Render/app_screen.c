@@ -340,7 +340,16 @@ static bool _apply_identity(void)
        `_apply_layout` 同时会定位本卡、并在尺寸合格后**清画布**。 */
     if (!_apply_layout()) return false;
 
-    /* board.h 的 BOARD_CASC_BAND_MAX 只是编译期上限，这里按**运行期**几何核一次 */
+#if BOARD_SCREEN_CANVAS
+    /* board.h 的 BOARD_CASC_BAND_MAX 是**抽带缓冲**（app_screen_canvas.c 的
+       s_band_buf）的字节数，那个缓冲只在画布打开时存在 —— 所以这条运行期检查
+       也必须跟着画布开关走。
+
+       反例（本产品踩过）：单卡 320×64、BOARD_SCREEN_CANVAS=0 时根本没有抽带缓冲，
+       但本卡位图是 40×64 = 2560 字节 > 512（P20 时代的容量），于是上电就报
+       "整屏门面停用" 并把渲染目标撤掉（app_render_set_target(nullptr)）。
+
+       级联一帧装不装得下一块卡位图由 app_casc.h 的 static_assert 管，不靠这里。 */
     const uint16_t band = app_screen_card_bm_len(s_self_idx);
     if (band > BOARD_CASC_BAND_MAX) {
         printf("[screen] 本卡矩形位图 %u > BOARD_CASC_BAND_MAX %u，整屏门面停用\n",
@@ -348,7 +357,6 @@ static bool _apply_identity(void)
         return false;
     }
 
-#if BOARD_SCREEN_CANVAS
     /* 只有主卡有"整屏"这个概念。**从卡不注册画布**：它的屏是整屏的一块窗口，
        内容由主卡下发；本地渲染没有意义（下一轮就被覆盖），回落到直写实屏才不会
        与下发的内容打架。

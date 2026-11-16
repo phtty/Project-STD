@@ -28,9 +28,9 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 19 个测试套件（见 §7）；第一条自动跑结构规则闸
+make test                      # host 侧 21 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（19 套件，秒级；规范见 docs/测试约定.md）
+make lint                      # 只跑结构规则闸（21 套件，秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
@@ -134,7 +134,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-19 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+21 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -157,6 +157,8 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
 | `test_cdstd` | CDSTD 协议：探针四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化、队列取帧与命令分派；命令层 A0 屏开关、A1 文字、A2 亮度、A3 全屏填充、A4 固化显示、A5/A6 IP（A7/A8 仍空壳） |
+| `test_cq_p10` | CQ_P10 协议（JSON over UDP，本产品 2300001735 唯一业务协议）：探针花括号切帧（字符串/转义/12~1408 字节门禁）、手写 JSON 解析器（整词键/整数范围/IPv4/320 元段值）、picset 分段偏移与 8 段齐落盘+指纹去重+写失败重试、nu=3 点亮、setip 原帧回显与网配记录、记录装载/损坏回退、上电网络应用、干接点显示 |
+| `test_display_p10` | P10 32×16 模组驱动（320×64 / 8 通道 / 1/4 扫）：几何自洽（缓冲 = 通道×通道像素）、`_prepare` 双射（无空穴/无覆盖）、行配对（IC 16 输出 = 8 列 × 2 行，r 先 r+4 后）、4 步扫描覆盖 64 行零重叠、整帧经假面板还原 = 原图、颜色位序 bit0/1/2 → R/G/B |
 
 **规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 

@@ -10,6 +10,10 @@
  *
  * 本产品无 IAP/升级，固件从 0x08000000 起：固化图与 setip 的网络配置都存
  * W25Qxx（capacity-16384 起 8KB），不再使用内部 Flash Sector1。
+ *
+ * 出厂网配：**192.168.1.10 / 255.255.255.0 / 网关 192.168.1.1，UDP 20102**。
+ * 优先级：W25Qxx 里有效的 setip 记录 > 本模块的出厂值 > dev_eth 的板级默认值(1.100)。
+ * 见 app_cq_p10.c 的 s_cq_default_ip / cq_net_apply。
  */
 
 #pragma once

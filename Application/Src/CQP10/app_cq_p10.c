@@ -122,6 +122,16 @@ static uint8_t s_cq_msg_buf[CQ_MSG_SIZE] PL_CCMRAM;
  *  JSON 极简解析器 — 关键字字符串匹配, 零动态内存
  * ====================================================================== */
 
+/** JSON 空白：规范只认 空格 / TAB / CR / LF 四种。
+ *
+ *  只认前两种是**实测故障**：上位机是 Windows，JSON 被 CRLF 排版（键之间换行、
+ *  320 元数组每几十个值折一次行）时，整包会被判非法并**静默丢弃** —— 现场表现是
+ *  "抓包看到完全合法的 JSON，设备一声不吭"，picset 少一条就是那 8 行永远黑。 */
+static inline bool cq_is_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
 /** 定位 '"key":' 后的值区起始; 返回 NULL 表示键不存在 */
 static const char *cq_json_value(const char *js, uint32_t len, const char *key, uint32_t *avail)
 {
@@ -131,11 +141,11 @@ static const char *cq_json_value(const char *js, uint32_t len, const char *key, 
         /* 键匹配: '"'+key+'"' 三连, 防 "c"/"cmd" 混淆 */
         if (js[i] == '"' && i + 1 + klen < len && memcmp(js + i + 1, key, klen) == 0 && js[i + 1 + klen] == '"') {
             uint32_t p = i + 1 + klen + 1;
-            while (p < len && (js[p] == ' ' || js[p] == '\t'))
+            while (p < len && cq_is_ws(js[p]))
                 p++;
             if (p < len && js[p] == ':') {
                 p++;
-                while (p < len && (js[p] == ' ' || js[p] == '\t'))
+                while (p < len && cq_is_ws(js[p]))
                     p++;
                 if (p < len) {
                     *avail = len - p;
@@ -190,7 +200,7 @@ static bool cq_json_int(const char *js, uint32_t len, const char *key, uint32_t 
     }
     if (n < avail) {
         char c = v[n];
-        if (c != ',' && c != '}' && c != ']' && c != ' ' && c != '\t')
+        if (c != ',' && c != '}' && c != ']' && !cq_is_ws(c))
             return false;
     }
     if (val < min || val > max)
@@ -261,8 +271,8 @@ static bool cq_parse_t_value(const char *js, uint32_t len, const char *key,
             val = val * 10 + (uint32_t)(c - '0');
             if (val > 255)
                 return false;
-        } else if (c == ' ' || c == '\t') {
-            continue; /* 宽容数字间空白 */
+        } else if (cq_is_ws(c)) {
+            continue; /* 宽容数字间空白（含上位机的 CRLF 折行） */
         } else if (c == ',' || c == term) {
             if (digits == 0 || idx >= CQ_PACKET_PAYLOAD)
                 return false; /* 空段/超数/尾逗号 */
@@ -629,22 +639,41 @@ static void cq_handle_task(void *argument)
     }
 }
 
-/** 启动时应用保存的 IP/端口(重启后 setip 生效的载体); 无效记录 → 默认 192.168.1.10:20102 */
+/* 本产品的**出厂网配**：192.168.1.10/24，网关 192.168.1.1。
+ *
+ * 为什么不直接改 `dev_eth.c` 的 `s_default_ip`：那是**共享 Device 驱动**里的板级默认值
+ *  （1.100），别的产品/分支还在用；本产品的差异放在本模块，改一行不影响别人。
+ *
+ * 优先级：**W25Qxx 里有效的 setip 记录 > 这里的出厂值 > dev_eth 的板级默认值**。
+ * 没有记录时由本函数把网卡改成 1.10（`pl_net_set_ip` 会触发 IP 变更回调，
+ * 所以只在"与运行态不同"时才下发）。 */
+static const uint8_t s_cq_default_ip[4]   = {192, 168, 1, 10};
+static const uint8_t s_cq_default_mask[4] = {255, 255, 255, 0};
+static const uint8_t s_cq_default_gw[4]   = {192, 168, 1, 1};
+
+/** 启动时套用网配（重启后 setip 生效的载体）并定端口；须早于 UDP 首绑 */
 static void cq_net_apply(void)
 {
-    uint16_t port = CQ_UDP_PORT_DEFAULT;
+    uint16_t        port = CQ_UDP_PORT_DEFAULT;
+    const uint8_t  *ip   = s_cq_default_ip;
+    const uint8_t  *mask = s_cq_default_mask;
+    const uint8_t  *gw   = s_cq_default_gw;
 
     cq_netcfg_load();
-    if (s_netcfg_valid) {
-        uint8_t cur_ip[4], cur_mask[4], cur_gw[4];
-        pl_net_get_ip(cur_ip, cur_mask, cur_gw);
-        if (memcmp(s_cq.netcfg.ip, cur_ip, 4) || memcmp(s_cq.netcfg.mask, cur_mask, 4) ||
-            memcmp(s_cq.netcfg.gw, cur_gw, 4))
-            pl_net_set_ip(s_cq.netcfg.ip, s_cq.netcfg.mask, s_cq.netcfg.gw);
+    if (s_netcfg_valid) { /* setip 记录优先：写过就听记录的，别被出厂值盖回去 */
+        ip   = s_cq.netcfg.ip;
+        mask = s_cq.netcfg.mask;
+        gw   = s_cq.netcfg.gw;
 
         if (s_cq.netcfg.port >= 1 && s_cq.netcfg.port <= 65535)
             port = (uint16_t)s_cq.netcfg.port;
     }
+
+    uint8_t cur_ip[4], cur_mask[4], cur_gw[4];
+    pl_net_get_ip(cur_ip, cur_mask, cur_gw);
+    if (memcmp(ip, cur_ip, 4) || memcmp(mask, cur_mask, 4) || memcmp(gw, cur_gw, 4))
+        pl_net_set_ip(ip, mask, gw);
+
     /* 应答目的端口 = 本机监听端口（协议规定上位机收发异端口）；须早于 UDP 首绑 */
     s_cq_port = port;
     app_udp_set_port(port);

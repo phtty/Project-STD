@@ -668,6 +668,24 @@ TEST_CDSTD_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
+# 套件十九：CQ_P10 协议（重庆 P10 状态屏固化，JSON over UDP —— 本产品唯一业务协议）
+# 用例 TU-include app_cq_p10.c（解析器/探针/命令层/持久化全是 static）；
+# 显示与 W25Qxx 的记录桩在测试文件里，OS 原语走 os_stub（pthread 互斥量），
+# CRC 走与硬件单元同语义的 pl_crc_stub。pl_task_new / dev_key_get 也由用例给桩
+# —— cq_module_init 被 initcall 段引用而保留，它摸到的外部符号必须齐。
+TEST_CQ_P10_SRCS = \
+	test/test_cq_p10.c \
+	test/stubs/os_stub.c \
+	test/stubs/pl_crc_stub.c \
+	Kernel/Src/ring_buffer.c
+
+# 套件二十一：P10 32×16 模组驱动（像素→发送缓冲双射 / 行配对 / 4 步扫描覆盖 / 整帧还原）
+# 用例 TU-include 板级驱动；pl_hub75 与 dev_display 走 test/stubs 的影子头，
+# 控制访问器（BSRR/CLK/LATCH/行地址）由用例给记录桩，引脚表是"一通道一位"的假表，
+# 于是能把每一拍推出去的像素反解回物理 LED 坐标，和原图对拍。
+TEST_DISPLAY_P10_SRCS = \
+	test/test_display_p10.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -698,7 +716,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_screen_brightness \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
-      $(TEST_BUILD)/test_cdstd
+      $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_cq_p10 $(TEST_BUILD)/test_display_p10
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -755,6 +773,12 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── CDSTD 协议 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cdstd
+	@echo ""
+	@echo "──── CQ_P10 协议 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cq_p10
+	@echo ""
+	@echo "──── P10 模组驱动（假面板）────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_display_p10
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -875,6 +899,24 @@ $(TEST_BUILD)/test_cdstd: Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h \
 	Application/Inc/CDSTD/app_cdstd_cfg.h Application/Inc/IAP/app_iap_cfg.h
+
+# 用例 TU-include 了 app_cq_p10.c（它不在 SRCS 里），必须单独挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制（"反向验证"会得到假的绿）。
+$(TEST_BUILD)/test_cq_p10: $(TEST_CQ_P10_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_CQ_P10_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_cq_p10: Application/Src/CQP10/app_cq_p10.c \
+	Application/Inc/CQP10/app_cq_p10.h Application/Inc/app_dispatch.h \
+	Application/Inc/Channel/app_udp.h Device/Inc/IO/dev_key.h
+
+# 用例 TU-include 了板级显示驱动（它不在 SRCS 里），依赖行单独挂。
+$(TEST_BUILD)/test_display_p10: $(TEST_DISPLAY_P10_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_DISPLAY_P10_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_display_p10: boards/3833024/Device/Src/dev_p10_32x16_2200001703.c \
+	test/stubs/dev_display.h test/stubs/pl_hub75.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

@@ -250,7 +250,13 @@ static void test_iap(void)
     feed(s_frame, n);
     CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 
-    /* 数据不足但后面又出现一个新帧头 → 提前判定 FAKE（不等数据到齐）*/
+    /* 半帧里出现"下一个帧头"也不得提前判 FAKE —— 只能等数据到齐（991ba1c 的口径）。
+       合法帧的 seq 低字节也可能是 0x5A：seq=0x5A 时前 5 字节全 5A，偏移 1 处看着就是
+       帧头，旧逻辑据此 skip 1，该 seq 的帧永远收不全（现场表现："某些帧永远丢失，
+       重发多少次都一样"，且只有特定 seq 复现）。代价：长度域被噪声抬高的残包会把
+       流按住到 full_bytes 才收尾（上界 1044 字节），CRC 不过随即 FAKE，能自愈。
+       **现状哨兵**：若将来改成"按 0x5A 间距重新同步"或给半帧加超时，本组的
+       两条断言（半帧 WAIT + 收满后 FAKE）要一并改。 */
     n = iap_build(0x05, 8); /* 需要 52 字节，只喂 40 */
     feed(s_frame, 40);
     CHECK(iap_probe() == APP_PCB_PROBE_STATE_WAIT);
@@ -258,7 +264,13 @@ static void test_iap(void)
     iap_build(0x05, 8);
     memcpy(s_frame + 20, &(uint32_t){FRAME_HEAD}, 4); /* 半路插入帧头 */
     feed(s_frame, 40);
-    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
+    CHECK_MSG(iap_probe() == APP_PCB_PROBE_STATE_WAIT, "半帧里的 0x5A 不得触发 skip 1");
+
+    /* 收满声明长度后 CRC 不过 → FAKE：残包最终仍要被跳掉，不能把流永久卡住 */
+    iap_build(0x05, 8);
+    memcpy(s_frame + 20, &(uint32_t){FRAME_HEAD}, 4); /* 插入的帧头破坏了 DATA→CRC 必失配 */
+    feed(s_frame, n);
+    CHECK_MSG(iap_probe() == APP_PCB_PROBE_STATE_FAKE, "收满长度后 CRC 失配应 FAKE（自愈出口）");
 }
 
 /* ================================================================

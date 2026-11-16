@@ -5,9 +5,12 @@
 # CubeMX 产物在 Core/Src，由顶层 Makefile 的 SRC_CORE 收，不在这里。
 #
 # 显示模组只列一个：每个驱动自带一份 CCMRAM 帧缓冲（pixel_map + hub75_buff），
-# 多编一份直接把 CCMRAM 顶爆（实测多两份超 588B）。同目录下的
-# dev_p10_32x16_2200001703.c / dev_p20_16x16_1000001055.c 是可替换的面板选项，
-# 换屏时换掉这一行，而不是追加。
+# 多编一份直接顶爆 CCMRAM（P10 32x16 一份就是 2×20KB）。同目录下的
+# dev_p20_16x8_2200001667.c（128×32）/ dev_p20_16x16_1000001055.c /
+# dev_p5_64x32_.c 是可替换的面板选项，换屏时换掉这一行，而不是追加。
+#
+# 本产品（2300001735）是重庆 P10 状态屏：320×64，与 CQ_P10 协议的位图约定
+# 一致（整屏 2560B = 320/8 × 64，每包 320B = 8 行 × 40B）。
 SRC_BOARD = \
 	$(BOARD_DIR)/Platform/Src/pl_tim_board.c \
 	$(BOARD_DIR)/Platform/Src/pl_uart_board.c \
@@ -18,7 +21,7 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_rs485.c \
 	$(BOARD_DIR)/Device/Src/dev_io_ctrl.c \
 	$(BOARD_DIR)/Device/Src/dev_key_board.c \
-	$(BOARD_DIR)/Device/Src/dev_p20_16x8_2200001667.c \
+	$(BOARD_DIR)/Device/Src/dev_p10_32x16_2200001703.c \
 	$(BOARD_DIR)/Application/Src/app_rs232.c \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
