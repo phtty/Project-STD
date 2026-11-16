@@ -23,7 +23,7 @@
 #include "pl_task.h"
 
 #define AGING_TEXT   "重庆创迪科技发展有限公司设备老化测试"
-#define PROGRAM_CODE "9210209C41"
+#define PROGRAM_CODE "921002BA00"
 
 static const app_font_size_t s_aging_sizes[] = {
     APP_FONT_SIZE_16,
@@ -127,8 +127,8 @@ static void _settle_test_key(void)
 {
     _drain_test_tokens(); /* ① 先丢弃调用点之前已累积的令牌 */
 
-    const uint32_t t0          = osKernelGetTickCount();
-    uint32_t       quiet_since = t0; /* "最近一次读到按下"的时刻；未按下则一直是 t0 */
+    const uint32_t t0    = osKernelGetTickCount();
+    uint32_t quiet_since = t0; /* "最近一次读到按下"的时刻；未按下则一直是 t0 */
 
     while (osKernelGetTickCount() - t0 < TEST_SETTLE_MAX_MS) {
         if (s_factory_abort_req) break; /* 被要求中止：不再等静默窗，尽早让出 */
@@ -290,11 +290,11 @@ static void _aging_fill_screen(app_font_size_t size, app_font_type_t type, const
     }
 
     app_render(&(app_render_cfg_t){
-        .type      = APP_RENDER_TYPE_TEXT,
-        .x         = 0,
-        .y         = 0,
-        .w         = sw,
-        .h         = sh,
+        .type = APP_RENDER_TYPE_TEXT,
+        .x    = 0,
+        .y    = 0,
+        .w    = sw,
+        .h    = sh,
         /* 老化文字用白：全彩模组是三通道全亮；只有 R/G 灯珠的模组（P20）上
            B 位没有灯珠，物理呈现就是黄 —— 位与即物理现实，不必按能力特判。 */
         .color     = DEV_DISPLAY_COLOR_WHITE,
@@ -460,7 +460,7 @@ static void _factory_monitor_task(void *argument)
             if (aging_exit) break;
         }
 
-factory_done:
+    factory_done:
         /* 统一收尾：正常退出（老化里按 TEST）与 abort 退出共用一条路径，
            `aborted` 只决定是否清屏 —— 见 _factory_cleanup。 */
         _factory_cleanup(aborted);
