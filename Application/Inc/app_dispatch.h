@@ -157,6 +157,11 @@ struct app_pcb {
 typedef struct {
     bool        broadcast; /**< 请求组播/广播投递（UDP 支持；RS485/TCP 忽略）*/
     const char *topic;     /**< 目的字符串地址，如 MQTT 主题（MQTT 支持；其余忽略）*/
+    uint16_t    port;      /**< 目的端口；0 = 通道默认（UDP = 本帧来源端口）。
+                            *
+                            *  有些上位机收发异端口（如 CQ_P10：发送源端口随机、接收固定
+                            *  监听端口），协议据此把"回哪个端口"表达出来，通道只做翻译。
+                            *  其余通道忽略本字段。 */
 } app_ccb_dst_t;
 
 /** @brief 通道虚表 —— 追加新方法时不影响已有通道 */

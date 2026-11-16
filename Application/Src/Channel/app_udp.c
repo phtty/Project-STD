@@ -88,14 +88,17 @@ static int32_t _udp_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t
     struct netconn *conn = (struct netconn *)udp->conn;
     ip_addr_t addr;
     /* 寻址意图由协议给出，通道负责翻译：
-     *   dst == nullptr      → 回复到本帧来源（源地址在接收路径上刷新）；
+     *   dst == nullptr      → 回复到本帧来源（源地址/端口在接收路径上刷新）；
      *   dst->broadcast      → 255.255.255.255（如 IAP 的 cmd01/cmd02 应答）；
+     *   dst->port != 0      → 显式目的端口（如 CQ_P10 的上位机收/发异端口）；
      *   其余                → 退化为回复本帧来源。 */
     if (dst != nullptr && dst->broadcast)
         IP4_ADDR(&addr, 255, 255, 255, 255);
     else
         IP4_ADDR(&addr, udp->src_ip[0], udp->src_ip[1], udp->src_ip[2], udp->src_ip[3]);
-    err_t err = netconn_sendto(conn, nb, &addr, udp->src_port);
+
+    uint16_t dst_port = (dst != nullptr && dst->port != 0U) ? dst->port : udp->src_port;
+    err_t err = netconn_sendto(conn, nb, &addr, dst_port);
     if (err == ERR_OK) s_tx_count++;
     PL_NET_DIAG("TX  -> %s len=%u err=%s", (dst != nullptr && dst->broadcast) ? "广播" : "本帧来源",
              (unsigned)len, err == ERR_OK ? "ok" : lwip_strerr(err));

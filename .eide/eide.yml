@@ -61,6 +61,10 @@ virtualFolder:
                 - path: Application/Src/CDSTD/app_cdstd_cmd.c
                 - path: Application/Src/CDSTD/app_cdstd_cfg.c
               folders: []
+            - name: cqp10
+              files:
+                - path: Application/Src/CQP10/app_cq_p10.c
+              folders: []
         - name: render
           files:
             - path: Application/Src/Render/app_render.c
@@ -425,7 +429,6 @@ targets:
         - Application/Inc/LDI
         - Application/Inc/AHMQ
         - Application/Inc/RLS
-        - Application/Inc/CQ_P10
         - boards/3833024/Core/Inc
         - boards/3833024
         - boards/3833024/Application/Inc
@@ -435,6 +438,7 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
+        - Application/Inc/CQP10
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -458,12 +462,12 @@ targets:
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
-      - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
-      - <virtual_root>/Application/protocol/cdstd
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
+      - <virtual_root>/boards/3833024/Device/dev_p5_64x32_.c
+      - <virtual_root>/Application/protocol/cdstd
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -623,6 +627,7 @@ targets:
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000661.c
       - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/Application/protocol/cqp10
     settings:
       debugger: cortex-debug
     toolchain: GCC
