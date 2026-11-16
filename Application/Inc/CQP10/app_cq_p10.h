@@ -4,8 +4,12 @@
  *
  * 仅实现协议文档 5.6 图片固化(picset) 与 5.7 修改IP(setip) 两条指令。
  * 协议模块自注册于 sw_post_initcall，接入 app_dispatch 调度框架。
- * 构建中与其他协议（IAP/LDI/AH_MQTT/RLS）互斥：它们共用同一个 UDP 通道与
- * 内部 Flash Sector1，本模块可从构建整体剔除（5006048 已剔除）。
+ * 构建中与其他协议（IAP/LDI/AH_MQTT/RLS/CDSTD）互斥：它们共用同一个 UDP
+ * 通道与 W25Qxx 尾部配置区。本产品分支（2300001735）直接把这几项从 3833024
+ * 的构建中排除；本模块本身也可从构建整体剔除（5006048 已剔除）。
+ *
+ * 本产品无 IAP/升级，固件从 0x08000000 起：固化图与 setip 的网络配置都存
+ * W25Qxx（capacity-16384 起 8KB），不再使用内部 Flash Sector1。
  */
 
 #pragma once

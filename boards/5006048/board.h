@@ -32,6 +32,12 @@
 #define BOARD_IAP_HW_ID 0x05006048U
 #define BOARD_IAP_CAPS  0x00000003U
 
+/* ---- 上电兜底显示（app_boot.c 的 app_default_display）----
+ * 本板没有 CQ 固化图，保留 render 恢复/兜底文案。 */
+#ifndef BOARD_DEFAULT_DISPLAY_FALLBACK
+#define BOARD_DEFAULT_DISPLAY_FALLBACK 1
+#endif
+
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
  * （见 app_cfg_sched.h 的 static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。

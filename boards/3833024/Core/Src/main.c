@@ -16,9 +16,9 @@ void app_boot(void);
 
 int main(void)
 {
-    /* 向量表偏移是板级事实（直烧 vs 带 IAP bootloader），必须与
-       boards/<板>/board.ld 的 FLASH_ORIGIN 一致，故从板级头取。 */
-    SCB->VTOR = FLASH_BASE | BOARD_VECT_TAB_OFFSET;
+    /* 本产品（2300001735）直烧：无 bootloader、无升级，向量表固定在 0x08000000。
+       带 IAP bootloader 的通用固件才需要 | BOARD_VECT_TAB_OFFSET。 */
+    SCB->VTOR = FLASH_BASE;
     __enable_irq();
 
     HAL_Init();

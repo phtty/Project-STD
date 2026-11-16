@@ -12,7 +12,6 @@
 
 #include "app_rs232.h"
 #include "initcall.h"
-#include "app_iap.h"
 #include "app_dispatch.h"
 
 #include "FreeRTOS.h"
@@ -167,18 +166,10 @@ osThreadId_t app_rs232_1_start(void)
  * 对照：RS485 的 app_rs485_start() 仍由 app_boot.c 直接调用 —— 它在两块板上
  * 都有（app_rs485.c 是共享通道），不属于板级差异。
  *
- * 同层顺序说明：本函数与 _iap_module_init 同在 sw_post(4)，而两者先后取决于链接
- * 顺序（实测本函数排在前）。这里恰好安全，但**不是**因为顺序对：本函数只负责
- * 建任务，而 _rs232_task 是 Normal 优先级、_init_task 是 High，新建的下级任务不会
- * 抢占 _init_task，因此整个 initcall_run_sw（含 _iap_module_init 的 app_dispatch_bind）
- * 必定先跑完，_rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
+ * 本产品（2300001735）无 IAP/升级，RS232 端点**不再绑 IAP 协议**；通道本身
+ * 照常启动（板级硬件仍在），将来换协议时绑定点加回这里即可。 */
 static void _rs232_channels_start(void)
 {
-    /* 本板的 RS232 端点承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
-       RS232 只有 3833024 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
-    app_dispatch_bind(app_iap_pcb(), app_rs232_0_ccb());
-    app_dispatch_bind(app_iap_pcb(), app_rs232_1_ccb());
-
     app_rs232_start();
     app_rs232_1_start();
 }

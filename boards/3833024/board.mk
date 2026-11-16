@@ -23,3 +23,25 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
+
+# ---- 本产品（2300001735）不参与编译的共享源 ----
+# 本产物是 CQ_P10 状态屏的直烧固件：无 IAP（升级链路整体去掉），也不跑
+# LDI/RLS/CDSTD（它们与 CQ 争同一个 UDP 口/相同持久化区，且 LDI/CDSTD 还依赖
+# IAP 的网配记录 API）。保留 render/screen/key/channel 与 CQ_P10。
+#
+# 与 EIDE 的 3833024 target excludeList 对齐（protocol/{iap,ldi,rls,cdstd}）：
+# 两份清单不一致 = 同一份源码在两套构建下产出不同固件（Makefile 顶部那段的约定）。
+BOARD_SRC_EXCLUDE = \
+	Application/Src/IAP/app_iap.c \
+	Application/Src/IAP/app_iap_cmd.c \
+	Application/Src/IAP/app_iap_cfg.c \
+	Application/Src/LDI/app_ldi.c \
+	Application/Src/LDI/app_ldi_cmd.c \
+	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/LDI/app_fold.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c \
+	Application/Src/CDSTD/app_cdstd.c \
+	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Src/CDSTD/app_cdstd_cfg.c

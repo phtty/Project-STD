@@ -12,10 +12,11 @@
  * 设计要点:
  * - RAM 不足以运行 cJSON → 手写关键字字符串匹配解析(零动态内存)
  * - 协议接入 app_dispatch 框架: 协议控制块静态持有, probe 按 JSON 顶层花括号平衡切帧
- * - 固化记录存 W25Qxx capacity-16384 起 8KB, 与渲染持久化/LDI/CDSTD 配置区隔离
+ * - 固化图与网络配置(setip)同存 W25Qxx capacity-16384 起 8KB：本产品无 IAP，
+ *   内部 Flash Sector1（0x08004000）已是固件代码，不能当记录区
  * - 落盘按槽位 CRC 指纹去重, 防重复擦写磨损
  * - 大块 RAM（固化缓存/队列/环形缓冲）放 CCMRAM: W25Qxx 驱动对 CCMRAM 缓冲
- *   经 SRAM 中转（见 dev_w25qxx.c 的 _read_unlocked），SRAM 只剩 ~6.5KB 余量
+ *   经 SRAM 中转（见 dev_w25qxx.c 的 _read_unlocked）；本产物 SRAM 余量有限
  */
 
 #include "app_cq_p10.h"
@@ -31,7 +32,6 @@
 #include "app_udp.h"
 #include "pl_net.h"
 #include "pl_crc.h"
-#include "pl_flash.h"
 #include "pl_mem.h"
 #include "pl_task.h"
 
@@ -41,34 +41,21 @@
 
 #define CQ_MSG_SIZE      (sizeof(app_dispatch_msg_t) + CQ_FRAME_MAX) /* 1416B */
 
-/* 固化记录起点 = capacity - 16384，占 W25Qxx 尾部配置区（最后 32KB = 8 块）的块 3、4。
- * 配置块由 app_cfg_sched 按记录名动态落位：3833024 上只有 render/ldi/cdstd 三个所有者
- * （块 0..2），本记录与它们互不重叠。**若某块板的配置所有者增至 ≥4 个，两者会重叠** ——
- * 届时把本宏前移到配置区之前，或把固化图改成 app_cfg_sched 记录。 */
-#define CQ_PERSIST_BASE  (16384U)                                   /* capacity - 16384 */
-#define CQ_PERSIST_MAGIC (0x43515031U)                              /* "CQP1" */
+/* 固化/网配记录起点 = capacity - 16384，占 W25Qxx 尾部配置区的块 3 和块 2
+ * （块从尾部往前编号：块 0 = capacity-4K，块 2 = capacity-12K）。
+ * 本产物只编 render 一个配置所有者（块 0），故不冲突；**若以后加回 LDI/CDSTD，
+ * 它们会占到块 1/2，必须把本记录前移到配置区之前或改走 app_cfg_sched**。 */
+#define CQ_PERSIST_BASE  (16384U)  /* capacity - 16384 */
+#define CQ_PERSIST_MAGIC (0x43515032U) /* "CQP2"（布局含 netcfg，旧 CQP1 不兼容） */
 
 /* picset 固定应答。注意: 必须放 SRAM(.data) 而非 Flash —— udp_ch_send 用 netbuf_ref
  * 引用不拷贝, ETH DMA 只能访问 SRAM, 读 Flash 地址会触发总线错误(FBES)导致
  * HAL 关闭全部 ETH 中断 (项目既有回复缓冲均为 SRAM static) */
 static uint8_t s_cq_ok[] = "{\"cmd\":\"picset\",\"t\":\"OK\"}";
 
-/* ---- 固化记录 (W25Qxx): magic + 3×(color+2560B位图) + crc32 ---- */
-typedef struct {
-    uint8_t color; /* dev_display_color_t; 0xFF = 未固化 */
-    uint8_t bitmap[CQ_BITMAP_SIZE];
-} cq_pic_slot_t; /* 2561B */
-
-typedef struct {
-    uint32_t magic;
-    cq_pic_slot_t slot[CQ_PIC_COUNT];
-    uint32_t crc32; /* 覆盖 [0, sizeof-4) */
-} cq_persist_t; /* 7692B */
-
-/* ---- 网络配置记录 (内部 Flash Sector1 @0x08004000, 24B, 6 words)
- *  自包含: 不依赖 app_iap_cfg/IAP 模块, CQ 模块可从构建中整体剔除
- *  布局独立于既有 IAP 配置格式 (本产品分支已排除 IAP) */
-#define CQ_NETCFG_ADDR  (0x08004000u)
+/* ---- 网络配置记录（随固化图一起存 W25Qxx，24B）
+ *  自包含：不依赖 app_iap_cfg/IAP 模块，CQ 模块可从构建整体剔除。
+ *  本产品无 IAP，内部 Flash Sector1 已是固件代码，网络配置不能放那里。 */
 #define CQ_NETCFG_MAGIC (0x43514E31u) /* "CQN1" */
 
 typedef struct {
@@ -80,15 +67,27 @@ typedef struct {
     uint32_t crc32; /* 覆盖前 20B */
 } cq_netcfg_t; /* 24B */
 
+/* ---- 固化记录 (W25Qxx): magic + 3×(color+2560B位图) + netcfg + crc32 ---- */
+typedef struct {
+    uint8_t color; /* dev_display_color_t; 0xFF = 未固化 */
+    uint8_t bitmap[CQ_BITMAP_SIZE];
+} cq_pic_slot_t; /* 2561B */
+
+typedef struct {
+    uint32_t magic;
+    cq_pic_slot_t slot[CQ_PIC_COUNT];
+    cq_netcfg_t netcfg; /* 内层自带 magic+crc；外层 crc32 覆盖整体 */
+    uint32_t crc32;     /* 覆盖 [0, sizeof-4) */
+} cq_persist_t; /* 7716B */
+
 /* ======================================================================
  *  静态分配
  * ====================================================================== */
 
-static cq_persist_t s_cq PL_CCMRAM;           /**< 固化记录 RAM 缓存 */
+static cq_persist_t s_cq PL_CCMRAM;           /**< 固化图+网络配置的 RAM 缓存 */
 static uint8_t s_seg[CQ_PIC_COUNT];           /**< 每图已收段位图 bit(t-1) */
 static uint32_t s_flushed_crc[CQ_PIC_COUNT];  /**< 每槽上次落盘指纹 */
 static uint32_t s_persist_addr;
-static cq_netcfg_t s_netcfg;                  /**< 网络配置缓存 */
 static bool s_netcfg_valid;
 static uint16_t s_cq_port = CQ_UDP_PORT_DEFAULT; /**< 本机监听端口，也是应答目的端口 */
 static osMutexId_t s_cq_mutex;                /**< 保护固化缓存: 协议段写 vs 按键显示 */
@@ -328,17 +327,23 @@ static void cq_persist_load(void)
             pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq.slot[i], sizeof(s_cq.slot[i]));
 }
 
-/** 槽位落盘: 内容未变(指纹相同)则跳过, 防擦写磨损 */
+/** 整条记录写回 W25Qxx（固化图 + 网络配置共用一条记录/一个 CRC）。
+ *  调用者须持 s_cq_mutex。 */
+static bool cq_persist_write(void)
+{
+    s_cq.crc32 = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq, sizeof(s_cq) - 4);
+    return dev_storage_write(dev_w25qxx_get(), s_persist_addr, (const uint8_t *)&s_cq,
+                             sizeof(s_cq)) >= 0;
+}
+
+/** 槽位落盘: 内容未变(指纹相同)则跳过, 防擦写磨损。调用者须持 s_cq_mutex。 */
 static void cq_persist_flush(uint8_t nu)
 {
     uint32_t slot_crc = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq.slot[nu], sizeof(s_cq.slot[nu]));
     if (slot_crc == s_flushed_crc[nu])
         return;
 
-    s_cq.crc32 = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq, sizeof(s_cq) - 4);
-    int32_t rc = dev_storage_write(dev_w25qxx_get(), s_persist_addr, (const uint8_t *)&s_cq,
-                                   sizeof(s_cq));
-    if (rc >= 0)
+    if (cq_persist_write())
         s_flushed_crc[nu] = slot_crc; /* 写失败保留旧指纹, 下次重试 */
 }
 
@@ -362,7 +367,7 @@ static void cq_reply_ok(const app_dispatch_msg_t *msg)
     cq_reply(msg, s_cq_ok, (uint16_t)(sizeof(s_cq_ok) - 1U));
 }
 
-/** setip: ip/mask/wg/port 全合法才写内部 Flash net_cfg(重启生效), 原帧回显 */
+/** setip: ip/mask/wg/port 全合法才写 W25Qxx net_cfg(重启生效), 原帧回显 */
 static void cq_handle_setip(const app_dispatch_msg_t *msg)
 {
     const char *js = (const char *)msg->data;
@@ -385,48 +390,38 @@ static void cq_handle_setip(const app_dispatch_msg_t *msg)
 }
 
 /* ======================================================================
- *  网络配置持久化 — 内部 Flash Sector1, 自包含(pl_flash), 重启后 cq_net_apply 应用
+ *  网络配置 — 与固化图同存 W25Qxx 记录；重启后 cq_net_apply 应用
  * ====================================================================== */
 
 static void cq_netcfg_load(void)
 {
-    memcpy(&s_netcfg, (const void *)CQ_NETCFG_ADDR, sizeof(s_netcfg)); /* 内存映射读 */
-
-    if (s_netcfg.magic != CQ_NETCFG_MAGIC)
-        return; /* 空记录(擦除态全 0xFF)或旧 IAP 布局 → 无效 */
-    uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_netcfg, 20);
-    if (s_netcfg.crc32 != crc)
+    if (s_cq.netcfg.magic != CQ_NETCFG_MAGIC)
+        return; /* 空记录(擦除态全 0xFF)或旧布局 → 无效 */
+    uint32_t crc = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq.netcfg, 20);
+    if (s_cq.netcfg.crc32 != crc)
         return; /* CRC 不符 → 无效, 不应用不覆盖(由下次 setip 重写) */
     s_netcfg_valid = true;
 }
 
-/** 写内部 Flash Sector1 记录: 整扇区擦除 + 6 word 编程。setip 低频, 擦写寿命无忧 */
+/** 更新网络配置并落盘。setip 低频，整条记录重写（W25Qxx 的读-改-写按扇区走） */
 static bool cq_netcfg_save(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
                            uint32_t port)
 {
-    s_netcfg.magic = CQ_NETCFG_MAGIC;
-    memcpy(s_netcfg.ip, ip, 4);
-    memcpy(s_netcfg.mask, mask, 4);
-    memcpy(s_netcfg.gw, gw, 4);
-    s_netcfg.port  = port;
-    s_netcfg.crc32 = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_netcfg, 20);
+    osMutexAcquire(s_cq_mutex, osWaitForever);
 
-    pl_flash_unlock();
-    pl_flash_clear_errors();
-    if (pl_flash_erase_sector(PL_FLASH_SECTOR_1, PL_FLASH_VOLTAGE_3) != 0) {
-        pl_flash_lock();
-        return false;
-    }
-    const uint32_t *w = (const uint32_t *)&s_netcfg;
-    for (uint32_t i = 0; i < sizeof(s_netcfg) / 4; i++) {
-        if (pl_flash_program_word(CQ_NETCFG_ADDR + i * 4, w[i]) != 0) {
-            pl_flash_lock();
-            return false;
-        }
-    }
-    pl_flash_lock();
-    s_netcfg_valid = true;
-    return true;
+    s_cq.netcfg.magic = CQ_NETCFG_MAGIC;
+    memcpy(s_cq.netcfg.ip, ip, 4);
+    memcpy(s_cq.netcfg.mask, mask, 4);
+    memcpy(s_cq.netcfg.gw, gw, 4);
+    s_cq.netcfg.port  = port;
+    s_cq.netcfg.crc32 = pl_crc32_calc(pl_crc_get_handle(), (const uint8_t *)&s_cq.netcfg, 20);
+
+    bool ok = cq_persist_write();
+    osMutexRelease(s_cq_mutex);
+
+    if (ok)
+        s_netcfg_valid = true;
+    return ok;
 }
 
 /** picset: nu=3 整屏点亮; nu=0..2 固化段直写 + 满 8 段落盘; 合法包回 OK */
@@ -643,11 +638,12 @@ static void cq_net_apply(void)
     if (s_netcfg_valid) {
         uint8_t cur_ip[4], cur_mask[4], cur_gw[4];
         pl_net_get_ip(cur_ip, cur_mask, cur_gw);
-        if (memcmp(s_netcfg.ip, cur_ip, 4) || memcmp(s_netcfg.mask, cur_mask, 4) || memcmp(s_netcfg.gw, cur_gw, 4))
-            pl_net_set_ip(s_netcfg.ip, s_netcfg.mask, s_netcfg.gw);
+        if (memcmp(s_cq.netcfg.ip, cur_ip, 4) || memcmp(s_cq.netcfg.mask, cur_mask, 4) ||
+            memcmp(s_cq.netcfg.gw, cur_gw, 4))
+            pl_net_set_ip(s_cq.netcfg.ip, s_cq.netcfg.mask, s_cq.netcfg.gw);
 
-        if (s_netcfg.port >= 1 && s_netcfg.port <= 65535)
-            port = (uint16_t)s_netcfg.port;
+        if (s_cq.netcfg.port >= 1 && s_cq.netcfg.port <= 65535)
+            port = (uint16_t)s_cq.netcfg.port;
     }
     /* 应答目的端口 = 本机监听端口（协议规定上位机收发异端口）；须早于 UDP 首绑 */
     s_cq_port = port;

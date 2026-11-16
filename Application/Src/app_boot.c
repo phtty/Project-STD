@@ -24,6 +24,7 @@
 #include "app_key.h"
 #include "app_render.h"
 #include "pl_task.h"
+#include "board.h"
 
 static void _init_task(void *argument);
 
@@ -63,6 +64,7 @@ void app_boot(void)
     osKernelStart();
 }
 
+#if BOARD_DEFAULT_DISPLAY_FALLBACK
 [[maybe_unused]] static void app_default_display(void)
 {
     /* **多卡的从卡**：它要照常恢复自己那一块（各卡各存各的），但**不能画兜底文案** ——
@@ -91,6 +93,7 @@ void app_boot(void)
         });
     }
 }
+#endif /* BOARD_DEFAULT_DISPLAY_FALLBACK */
 
 static void _init_task(void *argument)
 {
@@ -115,7 +118,11 @@ static void _init_task(void *argument)
        不在这里点名——否则共享文件要认识每块板的外设。 */
 
     // app_test_run();
+    /* CQ 产品（BOARD_DEFAULT_DISPLAY_FALLBACK=0）的上电画面由 app_cq_p10 按固化图
+       恢复；render 的"车道关闭"兜底会在 initcall 之后把它盖掉，故不调用。 */
+#if BOARD_DEFAULT_DISPLAY_FALLBACK
     app_default_display();
+#endif
 
     printf("\n[init] Init Task Done\n");
 

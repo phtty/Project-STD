@@ -11,25 +11,30 @@
 
 #pragma once
 
-/* ---- IAP 配置记录是否存在 ----
- * 只有带 IAP bootloader 的板子才有"0x08004000 处的配置记录"这回事：应用从
- * 0x08040000 起，其前的 256KB（Sector 0~5）留给 bootloader，Sector 1 留作记录
- * （见 board.ld 的 FLASH 起始）。
- * 直烧的板子固件从 0x08000000 起铺满整片，**0x08004000 就在固件映像内部** ——
- * 那里没有记录，对它做任何擦写都是在抹自己的代码。详见 app_iap_cfg.c 的说明。 */
-#define BOARD_HAS_IAP_RECORD 1 /**< 1 = 本板带 IAP bootloader，0x08004000 处有配置记录 */
+/* ---- 本产品（2300001735）直烧：无 IAP bootloader、无升级 ----
+ * 固件从 0x08000000 起铺满整片（见 boards/3833024/STM32F407XX_FLASH.ld），
+ * 因此 **0x08004000 落在固件映像内部**，不能当任何记录区使用；对它做擦写
+ * 就是抹自己的代码。
+ *
+ * 网络配置不再写内部 Flash：CQ_P10 的 setip 记录改存 W25Qxx（与固化图同一条
+ * 记录，见 app_cq_p10.c）。带 IAP 的通用固件在 wyh 主线，本分支不编 IAP。 */
+#define BOARD_HAS_IAP_RECORD 0 /**< 0 = 直烧产品，无 0x08004000 配置记录 */
 
 /* ---- 向量表偏移 ----
- * 必须与 boards/3833024/board.ld 的 FLASH_ORIGIN 保持一致：3833024 带 IAP bootloader，
- * 主固件从 0x08040000 起，偏移 0x40000；直烧的板子是 0。两处不一致的表现是任何
- * 中断都跳到错误的地方，且不会有编译期报错。 */
-#define BOARD_VECT_TAB_OFFSET 0x00040000UL /**< 向量表偏移，须与 board.ld 的 FLASH_ORIGIN 一致 */
+ * 直烧产品固定 0，须与 boards/3833024/STM32F407XX_FLASH.ld 的 FLASH_ORIGIN
+ * 一致（两者都是 0x08000000）。带 IAP bootloader 的固件用 0x40000。 */
+#define BOARD_VECT_TAB_OFFSET 0x00000000UL /**< 向量表偏移，本产品固定 0 */
 
-/* ---- IAP 协议身份 ----
- * hw_id 与 caps 由上位机在 0x00 里识别；caps.bit0=1 表示本板带从卡（主卡要转发
- * 固件并查询从卡状态），bit1=1 表示有显示/支持远程 TEST。 */
+/* ---- IAP 协议身份（历史保留：host 测试仍编 app_iap_cmd.c）----
+ * 本产品固件不编 IAP，这两个值只在测试/Host 构建里被引用；主线 wyh 的 IAP
+ * 协议仍按这里识别板型。 */
 #define BOARD_IAP_HW_ID 0x03833024U
 #define BOARD_IAP_CAPS  0x00000002U
+
+/* ---- 上电兜底显示（app_boot.c 的 app_default_display）----
+ * 本产品由 CQ_P10 按 W25Qxx 固化图恢复上电画面；render 的"车道关闭"兜底
+ * 会在 initcall 之后把它盖掉，故关闭。 */
+#define BOARD_DEFAULT_DISPLAY_FALLBACK 0
 
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
