@@ -58,7 +58,6 @@ INC_DIRS = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
-	-I Application/Inc/CQP10 \
 	-I Device/Inc \
 	-I Device/Inc/Display \
 	-I Device/Inc/IO \
@@ -341,7 +340,6 @@ SRC_APPLICATION = \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
-	Application/Src/CQP10/app_cq_p10.c \
 	Application/Src/AHMQ/app_ahmq.c \
 	Application/Src/AHMQ/app_ahmq_cmd.c \
 	Application/Src/Channel/app_udp.c \
@@ -460,7 +458,6 @@ TEST_INC     = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
-	-I Application/Inc/CQP10 \
 	-I Kernel/Inc \
 	-I Platform/Inc \
 	-I Device/Inc \

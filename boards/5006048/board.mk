@@ -19,14 +19,9 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
 
 # ---- 本板不参与编译的共享源 ----
-# 与 EIDE 的 5006048 target excludeList 对齐（<virtual_root>/Application/protocol/{ldi,rls,cqp10}）：
+# 与 EIDE 的 5006048 target excludeList 对齐（<virtual_root>/Application/protocol/{ldi,rls}）：
 # 两份清单不一致 = 同一份源码在两套构建下产出不同固件（Makefile 顶部那段的约定）。
 # 本板走 CDSTD（折叠屏创迪标准协议）；LDI/RLS 随整目录排除。
-#
-# CQP10（重庆 P10 状态屏固化协议）也排除，两条理由：
-#   1. 协议按 320×64 整屏定长（2560B 位图），本板实屏/逻辑屏是 224×100，几何对不上；
-#   2. 它要把固化缓存(7.7KB)+队列(2.8KB)+环形缓冲(2.8KB)常驻，本板 CCMRAM 只剩
-#      ~5.9KB、SRAM 只剩 ~5.6KB，放不下（3833024 的 CCMRAM 仍有 36KB 余量，故只在那块板编）。
 BOARD_SRC_EXCLUDE = \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/LDI/app_ldi_cmd.c \
@@ -34,5 +29,4 @@ BOARD_SRC_EXCLUDE = \
 	Application/Src/LDI/app_vms_ctrl.c \
 	Application/Src/LDI/app_fold.c \
 	Application/Src/RLS/app_rls.c \
-	Application/Src/RLS/app_rls_cmd.c \
-	Application/Src/CQP10/app_cq_p10.c
+	Application/Src/RLS/app_rls_cmd.c

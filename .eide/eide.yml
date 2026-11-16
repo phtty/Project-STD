@@ -61,10 +61,6 @@ virtualFolder:
                 - path: Application/Src/CDSTD/app_cdstd_cmd.c
                 - path: Application/Src/CDSTD/app_cdstd_cfg.c
               folders: []
-            - name: cqp10
-              files:
-                - path: Application/Src/CQP10/app_cq_p10.c
-              folders: []
         - name: render
           files:
             - path: Application/Src/Render/app_render.c
@@ -438,7 +434,6 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
-        - Application/Inc/CQP10
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -627,7 +622,6 @@ targets:
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000661.c
       - <virtual_root>/Application/protocol/ldi
-      - <virtual_root>/Application/protocol/cqp10
     settings:
       debugger: cortex-debug
     toolchain: GCC
