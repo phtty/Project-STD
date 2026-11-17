@@ -52,7 +52,7 @@ INC_DIRS = \
 	-I Application/Inc/IAP \
 	-I Application/Inc/LDI \
 	-I Application/Inc/RLS \
-	-I Application/Inc/AHMQ \
+	-I Application/Inc/AH \
 	-I Application/Inc/Channel \
 	-I Application/Inc/CASC \
 	-I Application/Inc/Render \
@@ -340,8 +340,10 @@ SRC_APPLICATION = \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
-	Application/Src/AHMQ/app_ahmq.c \
-	Application/Src/AHMQ/app_ahmq_cmd.c \
+	Application/Src/AH/app_ah.c \
+	Application/Src/AH/app_ah_cfg.c \
+	Application/Src/AH/app_ah_mqtt.c \
+	Application/Src/AH/app_ah_mqtt_cmd.c \
 	Application/Src/Channel/app_udp.c \
 	Application/Src/Channel/app_tcp_server.c \
 	Application/Src/Channel/app_tcp_client.c \
@@ -363,12 +365,10 @@ SRC_ALL = \
 	$(SRC_STARTUP)
 
 # ---- Object Files ----
-# 工程级排除：AHMQ 暂未启用，所有板都不编。
-# **必须与 eIDE 保持一致** —— 两个 target 的 excludeList 里都有
-# <virtual_root>/Application/protocol/ah，这里不排的话，同一份源码在
-# Makefile 与 eIDE 下会产出不同的固件。
-SRC_EXCLUDE = Application/Src/AHMQ/app_ahmq.c
-SRC_EXCLUDE += Application/Src/AHMQ/app_ahmq_cmd.c
+# 工程级排除（当前为空）：AH 协议族已接入构建，但链路未激活（initcall 仍注释）。
+# 若以后要整体排除，**必须与 eIDE 两个 target 的 excludeList 保持一致**，
+# 否则同一份源码在两套构建下会产出不同的固件。
+SRC_EXCLUDE =
 
 # 板级排除由 boards/<板>/board.mk 追加到 BOARD_SRC_EXCLUDE，在这里并入。
 # **别让 board.mk 直接往 SRC_EXCLUDE 里 +=** —— board.mk 在 300 行就被 include，
@@ -458,6 +458,7 @@ TEST_INC     = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
+	-I Application/Inc/AH \
 	-I Kernel/Inc \
 	-I Platform/Inc \
 	-I Device/Inc \
@@ -665,6 +666,18 @@ TEST_CDSTD_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
+# 套件：AH 纯函数（主题前缀 / Client ID / 通知号）
+# 只链生产 TU app_ah.c；输入是手工构造的 cfg，不碰 Flash/任务。
+TEST_AH_SRCS = \
+	test/test_ah.c \
+	Application/Src/AH/app_ah.c
+
+# 套件：AH 参数配置（默认值 / 校验 / ah_cfg 记录读写）
+# 用例 TU-include app_ah_cfg.c（static 加载回调与 RAM 镜像要从外部够到），
+# 故实现 TU **不列进 SRCS**，只在下面单挂依赖行。
+TEST_AH_CFG_SRCS = \
+	test/test_ah_cfg.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -695,7 +708,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_screen_brightness \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
-      $(TEST_BUILD)/test_cdstd
+      $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -752,6 +765,12 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── CDSTD 协议 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_cdstd
+	@echo ""
+	@echo "──── AH 纯函数 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah
+	@echo ""
+	@echo "──── AH 参数配置 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_cfg
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -872,6 +891,21 @@ $(TEST_BUILD)/test_cdstd: Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Inc/CDSTD/app_cdstd.h Application/Inc/CDSTD/app_cdstd_cmd.h \
 	Application/Inc/CDSTD/app_cdstd_cfg.h Application/Inc/IAP/app_iap_cfg.h
+
+$(TEST_BUILD)/test_ah: $(TEST_AH_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_ah: Application/Src/AH/app_ah.c Application/Inc/AH/app_ah.h \
+	Application/Inc/AH/app_ah_cfg.h
+
+$(TEST_BUILD)/test_ah_cfg: $(TEST_AH_CFG_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_AH_CFG_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 实现 TU：不参与编译，但必须挂依赖（否则改源码不重编，跑旧二进制）
+$(TEST_BUILD)/test_ah_cfg: Application/Src/AH/app_ah_cfg.c Application/Inc/AH/app_ah.h \
+	Application/Inc/AH/app_ah_cfg.h Application/Inc/app_cfg_sched.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

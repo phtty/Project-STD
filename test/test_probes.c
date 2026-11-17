@@ -13,8 +13,8 @@
  * 帧构造用与探针相同的 CRC 函数，因此校验路径必然通过；这样测的是探针的
  * **结构判定与边界处理**，而不是 CRC 算法本身是否与硬件一致。
  *
- * 来源：从参考工程 Project_STD_B/test/test_probes.c 移植。本工程没有 AHMQ 的
- * pcb（该模块改造中），故参考工程里对应的部分不存在，这里也没有。
+ * 来源：从参考工程 Project_STD_B/test/test_probes.c 移植。AH/MQTT 的 pcb 虽已存在但链路
+ * 未激活（initcall 注释），本套件不覆盖它。
  */
 
 #include <stdio.h>
@@ -250,7 +250,9 @@ static void test_iap(void)
     feed(s_frame, n);
     CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
 
-    /* 数据不足但后面又出现一个新帧头 → 提前判定 FAKE（不等数据到齐）*/
+    /* 数据不足时，即使半路出现“新帧头”也仍然 WAIT：探针**不再**在半帧里扫描下一帧头
+       （合法帧的 seq=0x5A 会让头部出现连续 0x5A，扫描会误判，见 app_iap.c 的说明）；
+       残包/伪头交给收满长度后的 CRC 校验。 */
     n = iap_build(0x05, 8); /* 需要 52 字节，只喂 40 */
     feed(s_frame, 40);
     CHECK(iap_probe() == APP_PCB_PROBE_STATE_WAIT);
@@ -258,7 +260,7 @@ static void test_iap(void)
     iap_build(0x05, 8);
     memcpy(s_frame + 20, &(uint32_t){FRAME_HEAD}, 4); /* 半路插入帧头 */
     feed(s_frame, 40);
-    CHECK(iap_probe() == APP_PCB_PROBE_STATE_FAKE);
+    CHECK(iap_probe() == APP_PCB_PROBE_STATE_WAIT);
 }
 
 /* ================================================================

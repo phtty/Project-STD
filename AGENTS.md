@@ -10,7 +10,7 @@ STM32F407ZGTx（Cortex-M4F @168MHz，1MB Flash / 128KB SRAM / 64KB CCMRAM）**�
 C23，FreeRTOS v10.3.1 + CMSIS-RTOS V2，LwIP，`arm-none-eabi-gcc`。
 
 业务：**车道诱导屏 / VMS 情报板控制器** —— HUB75 LED 屏驱动 + 多协议通信
-（RS485 / RS232 / 以太网上的 IAP、LDI、RLS、AHMQ）+ **多控制卡级联显示**。
+（RS485 / RS232 / 以太网上的 IAP、LDI、RLS、CDSTD、AH）+ **多控制卡级联显示**。
 
 两块硬件（`boards/`）：
 
@@ -28,9 +28,9 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 19 个测试套件（见 §7）；第一条自动跑结构规则闸
+make test                      # host 侧 21 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（19 套件，秒级；规范见 docs/测试约定.md）
+make lint                      # 只跑结构规则闸（21 套件，秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
@@ -52,7 +52,7 @@ Application/{Inc,Src}/              业务层（app_*）
 ├── Render/     app_render.*（字库渲染引擎）+ app_screen.*（整屏门面）
 │               └ app_screen_canvas.c / _status.c / _brightness.c（同模块的按职责拆分 TU）
 ├── BIST/       app_test.*（硬件冒烟用例）、app_factory_test.*（出厂检测模式）、app_diag.c（运行时健康诊断）
-├── IAP/ LDI/ RLS/ CASC/ AHMQ/      五个协议（各有自己的目录）
+├── IAP/ LDI/ RLS/ CASC/ CDSTD/ AH/ 六个协议（各有自己的目录；AH = AH/MQTT + AH/TCP）
 ├── Channel/    UDP / TCP server / TCP client / MQTT / RS485 传输通道
 └── 根          app_boot.c（RTOS 编排）、app_dispatch.c（分发引擎）、app_cfg_sched.c、app_key.c、app_light_sensor.c
 Device/                            设备层（dev_*）。**源按类别分目录** Display/ IO/ Network/ Storage/，
@@ -113,9 +113,11 @@ docs/                              命名约定.md（评审契约）、架构说
    且拆 TU 时要给它们补 include（否则链接未定义）。
 9. **`test` 目标必须留在 `.PHONY` 里**：工程里存在同名的 `test/` 目录，不声明 `.PHONY` 会被 `make` 当成
    "已存在的目标"而**跳过测试配方**（`Makefile` 里有注释说明）。
-10. **AHMQ 目前被排除在所有板之外**：根 `Makefile` 的 `SRC_EXCLUDE` 把 `Application/Src/AHMQ/*.c` 排除
-    （`app_ahmq.c` / `app_ahmq_cmd.c`），EIDE 两个目标也加了对应 exclude。要启用必须**两处同时改**——
-    注释里写明"不排的话同一份源码在两套构建下会产出不同固件"。
+10. **AH 协议族已接入构建，但链路仍未激活**：`Application/Src/AH/` 下是 AH/MQTT（`app_ah_mqtt*`）
+    与规划中的 AH/TCP；两块板都编译，但 `app_ah_mqtt.c` 末尾的 `sw_post_initcall` 仍注释，
+    `app_mqtt_start()` 也没有调用者。要真正启用，先按 `docs/AH-协议族与参数配置-设计方案.md`
+    补配置层、参数口和 MQTT 注入；只翻 initcall 会跑在一个“主题表/凭据/重连都有缺陷”的链路上。
+    改 `Makefile` 或 EIDE 的 AH 源清单时两处必须同步（否则同一份源码会产出不同固件）。
 11. **host 与 ARM 的 `char` 符号性相反**：host（x86）默认 signed、ARM 默认 unsigned。任何"字节值 ≥ 0x80
     的比较/移位"在 host 上会走**另一条路** —— `Kernel/Src/text_cvt.c` 的 UTF-8 解析曾因此在 host 上
     完整假绿（`out=0`，什么都不做），只有 ARM 上才暴露。处理字节一律**显式 `uint8_t`**；给这类函数
@@ -134,7 +136,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-19 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+21 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -157,6 +159,8 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、RLS 显示帧位图长度校验、`app_render` 锁配对 |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
 | `test_cdstd` | CDSTD 协议：探针四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化、队列取帧与命令分派；命令层 A0 屏开关、A1 文字、A2 亮度、A3 全屏填充、A4 固化显示、A5/A6 IP（A7/A8 仍空壳） |
+| `test_ah` | AH 纯函数：hex 编码、主题前缀（站8/道2/型2/号2）、Client ID、20 字符通知号（时间/计数回卷） |
+| `test_ah_cfg` | AH 参数配置：默认值来源（IAP 镜像/netif）、校验矩阵、`ah_cfg` v1 记录加载/保存、无效记录与 IO_ERR 回落 |
 
 **规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 

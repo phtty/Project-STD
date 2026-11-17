@@ -29,8 +29,10 @@ virtualFolder:
           folders:
             - name: ah
               files:
-                - path: Application/Src/AHMQ/app_ahmq_cmd.c
-                - path: Application/Src/AHMQ/app_ahmq.c
+                - path: Application/Src/AH/app_ah.c
+                - path: Application/Src/AH/app_ah_cfg.c
+                - path: Application/Src/AH/app_ah_mqtt_cmd.c
+                - path: Application/Src/AH/app_ah_mqtt.c
               folders: []
             - name: iap
               files:
@@ -439,7 +441,6 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
       - <virtual_root>/Device/Display/dev_p10_32x16_2200001703.c
       - <virtual_root>/board/dev_p10_32x16_2200001703.c
@@ -463,6 +464,7 @@ targets:
       - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
       - <virtual_root>/boards/3833024/Device/dev_p5_64x32_.c
       - <virtual_root>/Application/protocol/cdstd
+      - <virtual_root>/Application/protocol/ah
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -588,7 +590,7 @@ targets:
         - Application/Inc/Channel
         - Application/Inc/IAP
         - Application/Inc/LDI
-        - Application/Inc/AHMQ
+        - Application/Inc/AH
         - Application/Inc/RLS
         - boards/5006048/Core/Inc
         - boards/5006048/Device/Inc
@@ -603,7 +605,6 @@ targets:
       - <virtual_root>/Drivers/BSP/Key/key.c
       - <virtual_root>/Drivers/BSP/RingBuff/Ringbuffer.c
       - <virtual_root>/Drivers/BSP/Display/scan.c
-      - <virtual_root>/Application/protocol/ah
       - <virtual_root>/Device/Display/dev_p20_16x16_1000001055.c
       - <virtual_root>/Device/Display/dev_p10_32x16_2200001703.c
       - <virtual_root>/board/dev_p10_32x16_2200001703.c

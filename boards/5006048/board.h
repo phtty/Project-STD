@@ -32,6 +32,12 @@
 #define BOARD_IAP_HW_ID 0x05006048U
 #define BOARD_IAP_CAPS  0x00000003U
 
+/* ---- AH 协议族：本机显示模块类型 ----
+ * 0x31 = 费额显示屏、0x32 = LED 情报板（《IP 化设备通讯协议》§1.3）。
+ * 共享代码用它做 ah_cfg 的出厂默认类型与 0AH 模块表过滤，**不写死 32H**；
+ * 换产品型号时只改这一处（0AH 里出现别的类型会被整帧丢弃）。 */
+#define BOARD_AH_DISPLAY_TYPE 0x32U
+
 /* ---- 外部字库总量 ----
  * 字库在 W25Qxx 上从地址 0 起线性连续排列，排在它之后的配置区要靠这个值算地址
  * （见 app_cfg_sched.h 的 static_assert 与 app_cfg_sched.c 的 s_ready 门槛）。

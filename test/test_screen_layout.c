@@ -647,7 +647,7 @@ static void case_restore_color(void)
  *
  *  现场症状：LDI 发红字显示成绿、RLS 的位图颜色同样被吃掉 —— 因为开画布之后
  *  "颜色由像素属于哪张卡决定"，渲染传下来的颜色整段丢了。
- *  RLS / VMS / AHMQ 走的是同一条路（都是 app_render），所以**一起修**。
+ *  RLS / VMS / AH/MQTT 走的是同一条路（都是 app_render），所以**一起修**。
  *
  *  反向验证：把 `app_screen_output_color` 里的内容色那一条去掉（退回只看卡片色），
  *  本用例第一条立刻红。 */
