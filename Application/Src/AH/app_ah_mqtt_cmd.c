@@ -62,17 +62,24 @@ const app_ah_mqtt_cmd_entry_t g_ah_mqtt_cmd_table[AH_MQTT_CMD_COUNT] = {
     {"ASK/op/checktime", _cmd_checktime},
 };
 
-static const dev_display_color_t disp_color[] = {DEV_DISPLAY_COLOR_BLACK, DEV_DISPLAY_COLOR_GREEN,
-                                                 DEV_DISPLAY_COLOR_RED, DEV_DISPLAY_COLOR_YELLOW};
-static const app_font_size_t disp_size[]      = {0,
-                                                 0,
-                                                 APP_FONT_SIZE_16,
-                                                 APP_FONT_SIZE_24,
-                                                 APP_FONT_SIZE_32,
-                                                 0,
-                                                 0,
-                                                 0,
-                                                 APP_FONT_SIZE_32};
+static const dev_display_color_t disp_color[] = {
+    DEV_DISPLAY_COLOR_BLACK,
+    DEV_DISPLAY_COLOR_GREEN,
+    DEV_DISPLAY_COLOR_RED,
+    DEV_DISPLAY_COLOR_YELLOW,
+};
+
+static const app_font_size_t disp_size[] = {
+    0,
+    0,
+    APP_FONT_SIZE_16,
+    APP_FONT_SIZE_24,
+    APP_FONT_SIZE_32,
+    0,
+    0,
+    0,
+    APP_FONT_SIZE_32,
+};
 
 /** @brief 32H 情报板显示：NotifyID + OpenClose + FontColor + FontSize + Text */
 static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32_t text_len,
