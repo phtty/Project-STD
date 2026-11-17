@@ -21,13 +21,15 @@
 #include "app_tcp_server.h"
 #include "crc_utils.h"
 #include "initcall.h"
+#include "pl_mem.h"
 #include "pl_net.h"
 #include "pl_rtc.h"
 #include "pl_task.h"
 #include "ring_buffer.h"
 
 /* ---- 协议控制块：自有缓冲与队列 ---- */
-RB_DEFINE(s_ah_tcp_rb, 2048);
+/* 5006048 的 SRAM 余量只有个位数 KB，参数口缓冲与 MQTT/其它协议一致放 CCMRAM */
+RB_DEFINE_ATTR(s_ah_tcp_rb, 2048, PL_CCMRAM);
 
 static const app_pcb_ops_t s_ah_tcp_ops = {.probe = app_ah_tcp_probe_frame};
 
