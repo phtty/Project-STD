@@ -19,9 +19,12 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
 
 # ---- 本板不参与编译的共享源 ----
-# 与 EIDE 的 5006048 target excludeList 对齐（<virtual_root>/Application/protocol/{ldi,rls}）：
+# 与 EIDE 的 5006048 target excludeList 对齐（<virtual_root>/Application/protocol/{ldi,rls,cdstd}）：
 # 两份清单不一致 = 同一份源码在两套构建下产出不同固件（Makefile 顶部那段的约定）。
-# 本板走 CDSTD（折叠屏创迪标准协议）；LDI/RLS 随整目录排除。
+# 本板走 AH 协议族；LDI/RLS/CDSTD 随整目录排除。
+#
+# CDSTD 与 AH 是互斥的产品协议：同时开会多一个帧协议任务（1.5KB 栈 + TCB）
+# 和一份协议缓冲，5006048 的 32KB FreeRTOS heap / 128KB SRAM 都吃紧。
 BOARD_SRC_EXCLUDE = \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/LDI/app_ldi_cmd.c \
@@ -29,4 +32,7 @@ BOARD_SRC_EXCLUDE = \
 	Application/Src/LDI/app_vms_ctrl.c \
 	Application/Src/LDI/app_fold.c \
 	Application/Src/RLS/app_rls.c \
-	Application/Src/RLS/app_rls_cmd.c
+	Application/Src/RLS/app_rls_cmd.c \
+	Application/Src/CDSTD/app_cdstd.c \
+	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Src/CDSTD/app_cdstd_cfg.c

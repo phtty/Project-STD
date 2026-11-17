@@ -624,6 +624,7 @@ targets:
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000661.c
       - <virtual_root>/Application/protocol/ldi
+      - <virtual_root>/Application/protocol/cdstd
     settings:
       debugger: cortex-debug
     toolchain: GCC

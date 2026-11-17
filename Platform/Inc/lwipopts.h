@@ -53,11 +53,6 @@
 #define MEM_SIZE 12*1024
 /*----- Default Value for MEMP_NUM_SYS_TIMEOUT: 3 ---*/
 #define MEMP_NUM_SYS_TIMEOUT 20
-/* 并发 netconn：UDP 监听 + 两个 TCP 监听（9528/6001）+ TCP client + 接受连接 + 余量。
-   默认 4 不够：第 5 个 accept 会 ERR_MEM，表现为“能连上但立刻被复位”。 */
-#define MEMP_NUM_NETCONN 8
-/* TCP PCB：两个监听 + client + 接受连接 + 重连余量 */
-#define MEMP_NUM_TCP_PCB 8
 /*----- Value in opt.h for LWIP_ETHERNET: LWIP_ARP || PPPOE_SUPPORT -*/
 #define LWIP_ETHERNET 1
 /*----- Value in opt.h for LWIP_DNS_SECURE: (LWIP_DNS_SECURE_RAND_XID | LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING | LWIP_DNS_SECURE_RAND_SRC_PORT) -*/

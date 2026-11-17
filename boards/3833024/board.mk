@@ -23,3 +23,11 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_test_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
+
+# ---- 本板不参与编译的共享源 ----
+# CDSTD 与 AH 是互斥的产品协议；本板走 AH+LDI，不跑 CDSTD 帧协议任务。
+# 与 EIDE 3833024 target 的 excludeList（Application/protocol/cdstd）保持一致。
+BOARD_SRC_EXCLUDE = \
+	Application/Src/CDSTD/app_cdstd.c \
+	Application/Src/CDSTD/app_cdstd_cmd.c \
+	Application/Src/CDSTD/app_cdstd_cfg.c

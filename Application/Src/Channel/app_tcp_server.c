@@ -148,7 +148,15 @@ osThreadId_t app_tcp_server_start_instance(app_tcp_server_t *srv)
 
 osThreadId_t app_tcp_server_start(void)
 {
-    return app_tcp_server_start_instance(_default_server());
+    app_tcp_server_t *srv = _default_server();
+
+    /* 本板没有任何协议绑定默认实例（如 5006048 走 AH/UDP，不跑 LDI）：
+       不要空开一个监听任务 + netconn + 1KB 栈。 */
+    if (srv->ccb.base.proto_cnt == 0U) {
+        printf("[tcp_svr] 默认实例未绑定协议，不启动 :%u\n", (unsigned)srv->port);
+        return nullptr;
+    }
+    return app_tcp_server_start_instance(srv);
 }
 
 /* ================================================================
