@@ -213,7 +213,7 @@ static void _ah_mqtt_sign_up_task(void *argument)
         .work_status  = '0',
         .soft_ver     = "SoftV1.0.0",
         .hard_ver     = "FirmwareV1",
-        .protocol_ver = "LEDV1.00",
+        .protocol_ver = "LEDV1.0.00",
         .company      = "CQChuangDi",
         .device       = "LEDScreen1",
         .reserved     = "00000000000000000000",

@@ -1,6 +1,7 @@
 # AH 协议族改造与 TCP 参数配置接口 —— 设计方案（v6）
 
-> **状态**：已定稿（2026-11-17），实施中：P0（改名/接构建/显示安全）与 P1（配置层）已落地；后续按 §7 推进
+> **状态**：已定稿（2026-11-17）。P0（改名/接构建/显示安全）、P1（配置层）、P2（TCP 参数口）、
+> P3（MQTT 接通）已落地并双板构建/host 测试全绿；P4 的双板构建与文档已完成，**上机冒烟待硬件**。
 > **协议依据**：《IP 化设备通讯协议》V1.0（2023-07-06，22 页）——
 > 第二章 TCP 参数配置（0AH/0BH）、第三章各设备 MQTT 控制、第四章监控接口。
 > **历史依据**：旧《费显、情报板 TCP》V1.6、《MQTT 协议_费显、情报板》V1.4（均已被新文档取代）。
@@ -651,16 +652,20 @@ default:
 - AH 参数口 6001 起来；可用 `nc`/Python 脚本读写参数。
 - 验收：`test_ah_tcp` 绿；上板 0BH 回读与默认值一致；0AH 写入 → 断电重启 → 0BH 一致；
   改 IP 后重启，设备在新 IP 上仍能应答。
+- 状态：**已落地**（双板构建 + `test_ah_tcp` 80 条断言）；上机验收待硬件。
 
 ### P3 —— MQTT 业务接通（1 天）
 
 - 修主题表/通知号/显示越界；上电配置注入（含 10 B 用户名/密码）；`app_mqtt_start()`；AHMQ 任务启用。
 - 验收：设备连上 broker（MQTT 3.1.1）；平台下发 `ASK/board/NULL` 能显示、回复主题正确；
   10 s 状态、5 min 签到在 `Push/...` 上可见；对时后通知号时间正确。
+- 状态：**已落地**（`test_ah_mqtt` 36 条 + `test_ah_mqtt_cmd` 54 条断言）；上机验收待硬件。
 
 ### P4 —— 双板 + 上机冒烟 + 文档（1 天）
 
 - 两块板都烧；级联/折叠屏不受影响；文档与 AGENTS 同步。
+- 状态：双板构建、`make test`/`make lint` 与文档已完成；**烧板/上机冒烟未执行**（当前无 ST-Link）。
+  上机时按 §8.3 跑 `test/tools/ah_param.py get/set`，并回归 9528 的 LDI/IAP 与级联显示。
 
 合计约 **5.5 人日**（另留 1 人日缓冲，合计 6.5，见 §11；不含甲方确认与现场联调）。
 
@@ -671,7 +676,7 @@ default:
 ### 8.1 host
 
 ```
-make test && make BOARD=5006048 test      # 22 套件双绿
+make test && make BOARD=5006048 test      # 24 套件双绿
 make lint
 make mutate MUT_ARGS="--suite test_ah_tcp --fail-on-alive"   # 可选
 ```
@@ -684,7 +689,9 @@ make -j$(nproc) && make BOARD=5006048 -j$(nproc)
 检查 `.map`/size：新增静态 RAM 约 1.8 KB（配置 80 B + 主题表 ~1 KB + 通知队列 +384 B + 实例池 ~100 B），
 另加 1 个监听任务 + 1 个连接任务的栈（各 1 KB，堆分配）；Flash 约 6~8 KB。两块板都要看余量。
 
-### 8.3 上机（建议脚本化，放 `test/tools/ah_param.py`）
+### 8.3 上机（脚本：`test/tools/ah_param.py`）
+
+先跑 `test/tools/ah_param.py self-test` 验证组帧/CRC/解析；连设备时用 `get` / `set`。
 
 1. **0BH 读默认**：连 6001，发 20 B 请求（UnixTm + LaneHex + Cert + Rsv），校验 CRC 与 86 B 应答字段；
 2. **0AH 写**：改 LaneHex、MQTT IP/端口/用户名/密码、模块 `[{32H, 01}]`，读应答 21 B 的 ErrCode=00；
