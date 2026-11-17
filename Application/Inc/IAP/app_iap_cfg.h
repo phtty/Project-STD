@@ -63,7 +63,7 @@ bool app_flash_iap_is_config_empty(volatile const app_flash_iap_sys_info_t *info
  *  @return true 表示记录完整可用 */
 bool app_flash_iap_is_config_valid(volatile const app_flash_iap_sys_info_t *info);
 
-/** @brief 初始化配置：置 magic + 默认网络参数(192.168.114.200:9528) + 空固件信息，写入 Flash
+/** @brief 初始化配置：置 magic + 默认网络参数(192.168.1.100:9528) + 空固件信息，写入 Flash
  *  @param[out] info 待填充并落盘的记录
  *  @note 本板无 IAP 记录区时写路径整体短路，函数变为无操作 */
 void app_flash_iap_init_config(app_flash_iap_sys_info_t *info);
