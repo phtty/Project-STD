@@ -409,6 +409,25 @@ static void case_load_ioerr_retries(void)
     CHECK_MSG(s_load_calls == 2, "第二次 get 应重试，实际 %d 次", s_load_calls);
 }
 
+/** @brief 记录 CRC 对但语义非法（端口 0）：回落默认值，不能拿坏参数上电 */
+static void case_load_bad_fields_falls_back(void)
+{
+    TEST_BEGIN("加载：记录语义非法回落默认值");
+
+    _reset();
+    _ah_cfg_register();
+    s_load_state         = DEV_CFG_RECORD_STATE_OK;
+    s_load_cfg           = _valid_cfg();
+    s_load_cfg.client_port = 0U; /* 参数服务必须有端口 */
+    s_load_len           = (uint16_t)sizeof(s_load_cfg);
+
+    app_ah_cfg_t out;
+    app_ah_cfg_get(&out);
+
+    CHECK_MSG(out.client_port == 6001U, "非法记录应回落默认参数口 6001");
+    CHECK_MSG(out.lane_hex[0] == 0x32U, "非法记录应回落默认车道");
+}
+
 /** @brief 记录来自别的型号：类型强制回本板，避免用错显示载荷 */
 static void case_load_wrong_type(void)
 {
@@ -493,6 +512,7 @@ int main(void)
     case_load_ok();
     case_load_invalid_falls_back();
     case_load_ioerr_retries();
+    case_load_bad_fields_falls_back();
     case_load_wrong_type();
     case_save();
     case_save_unregistered();

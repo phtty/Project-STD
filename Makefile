@@ -342,6 +342,7 @@ SRC_APPLICATION = \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
 	Application/Src/AH/app_ah.c \
 	Application/Src/AH/app_ah_cfg.c \
+	Application/Src/AH/app_ah_tcp.c \
 	Application/Src/AH/app_ah_mqtt.c \
 	Application/Src/AH/app_ah_mqtt_cmd.c \
 	Application/Src/Channel/app_udp.c \
@@ -678,6 +679,16 @@ TEST_AH_SRCS = \
 TEST_AH_CFG_SRCS = \
 	test/test_ah_cfg.c
 
+# 套件：AH/TCP 参数口（探针四态 / 0AH 设置 / 0BH 采集）
+# 用例 TU-include app_ah_tcp.c（0AH/0BH 处理函数与组帧是 static），
+# 故实现 TU **不列进 SRCS**，只在下面单挂依赖行。
+# 发送、配置层、RTC、网络、TCP 实例全部是桩；探针走真实 rb_*。
+TEST_AH_TCP_SRCS = \
+	test/test_ah_tcp.c \
+	test/stubs/os_stub.c \
+	Kernel/Src/ring_buffer.c \
+	Kernel/Src/crc_utils.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -708,7 +719,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_screen_brightness \
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
-      $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg
+      $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
+      $(TEST_BUILD)/test_ah_tcp
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -771,6 +783,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── AH 参数配置 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_cfg
+	@echo ""
+	@echo "──── AH/TCP 参数口 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_tcp
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -906,6 +921,15 @@ $(TEST_BUILD)/test_ah_cfg: $(TEST_AH_CFG_SRCS)
 # 用例 TU-include 实现 TU：不参与编译，但必须挂依赖（否则改源码不重编，跑旧二进制）
 $(TEST_BUILD)/test_ah_cfg: Application/Src/AH/app_ah_cfg.c Application/Inc/AH/app_ah.h \
 	Application/Inc/AH/app_ah_cfg.h Application/Inc/app_cfg_sched.h
+
+$(TEST_BUILD)/test_ah_tcp: $(TEST_AH_TCP_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_AH_TCP_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 了 app_ah_tcp.c（它不在 SRCS 里），必须挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_ah_tcp: Application/Src/AH/app_ah_tcp.c Application/Inc/AH/app_ah_tcp.h \
+	Application/Inc/AH/app_ah_cfg.h Application/Inc/AH/app_ah.h $(BOARD_DIR)/board.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

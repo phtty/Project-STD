@@ -191,6 +191,12 @@ static void _ah_cfg_load(void)
             s_ah_cfg.font_line = 0U;
         }
 
+        /* CRC 对不代表语义对（旧固件/别的板写进来的记录）：语义非法同样回落默认值 */
+        if (!app_ah_cfg_validate(&s_ah_cfg, nullptr)) {
+            printf("[ah/cfg] 记录参数非法，回落默认值\n");
+            app_ah_cfg_defaults(&s_ah_cfg);
+        }
+
         s_ah_cfg_loaded    = true;
         s_ah_cfg_load_done = true;
         return;

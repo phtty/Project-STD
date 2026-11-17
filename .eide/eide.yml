@@ -31,6 +31,7 @@ virtualFolder:
               files:
                 - path: Application/Src/AH/app_ah.c
                 - path: Application/Src/AH/app_ah_cfg.c
+                - path: Application/Src/AH/app_ah_tcp.c
                 - path: Application/Src/AH/app_ah_mqtt_cmd.c
                 - path: Application/Src/AH/app_ah_mqtt.c
               folders: []
