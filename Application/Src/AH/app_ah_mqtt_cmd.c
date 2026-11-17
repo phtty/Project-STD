@@ -31,6 +31,20 @@ static app_ah_mqtt_proto_t *_ah_mqtt_proto_of(app_pcb_t *self)
 
 static void _ah_mqtt_reply_send(app_pcb_t *self, const char *suffix);
 
+/** @brief 把请求里的通知号抄进协议对象；载荷过短时只抄实际有的字节，其余补 0
+ *
+ *  MQTT 通道只保证“以 NUL 结尾”，不保证业务载荷长度；短帧不能越界读，
+ *  也不能拿上一帧的旧号回复。
+ */
+static void _ah_mqtt_notify_capture(app_ah_mqtt_proto_t *p, const char *buff, size_t len)
+{
+    memset(&p->notify_in, 0, sizeof(p->notify_in));
+    if (len > sizeof(p->notify_in))
+        len = sizeof(p->notify_in);
+    if (len > 0U)
+        memcpy(&p->notify_in, buff, len);
+}
+
 static void _ah_mqtt_send_data(app_pcb_t *self, app_ccb_t *ccb, uint32_t ReturnLen,
                                const char *ReturnData);
 
@@ -50,19 +64,19 @@ const app_ah_mqtt_cmd_entry_t g_ah_mqtt_cmd_table[AH_MQTT_CMD_COUNT] = {
 
 static const dev_display_color_t disp_color[] = {DEV_DISPLAY_COLOR_BLACK, DEV_DISPLAY_COLOR_GREEN,
                                                  DEV_DISPLAY_COLOR_RED, DEV_DISPLAY_COLOR_YELLOW};
-static const app_font_size_t disp_size[] = {0,
-                                            0,
-                                            APP_FONT_SIZE_16,
-                                            APP_FONT_SIZE_24,
-                                            APP_FONT_SIZE_32,
-                                            0,
-                                            0,
-                                            0,
-                                            APP_FONT_SIZE_32};
+static const app_font_size_t disp_size[]      = {0,
+                                                 0,
+                                                 APP_FONT_SIZE_16,
+                                                 APP_FONT_SIZE_24,
+                                                 APP_FONT_SIZE_32,
+                                                 0,
+                                                 0,
+                                                 0,
+                                                 APP_FONT_SIZE_32};
 
 /** @brief 32H 情报板显示：NotifyID + OpenClose + FontColor + FontSize + Text */
 static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32_t text_len,
-                           uint8_t color_idx, uint8_t size_idx)
+                                   uint8_t color_idx, uint8_t size_idx)
 {
     char gbk_txt[128] = {0};
     uint32_t gbk_len  = 0U;
@@ -99,18 +113,25 @@ static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32
  */
 static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 {
-    app_ah_mqtt_proto_t        *p    = _ah_mqtt_proto_of(self);
+    app_ah_mqtt_proto_t *p          = _ah_mqtt_proto_of(self);
     app_ah_mqtt_cmd_display_t *para = (app_ah_mqtt_cmd_display_t *)buff;
 
-    uint32_t length = strlen(buff);
-    uint32_t text_len =
-        (length > sizeof(*para)) ? (length - (uint32_t)sizeof(*para)) : 0U;
+    size_t length = strlen(buff);
+    _ah_mqtt_notify_capture(p, buff, length);
+
+    if (length < sizeof(*para)) { /* 连 OpenClose/颜色/字号都不齐：不解析、不渲染 */
+        _ah_mqtt_reply_send(self, "Reply/board/NULL");
+        _ah_mqtt_send_data(self, ccb, 1U, "1");
+        return;
+    }
+
+    uint32_t text_len = (uint32_t)(length - sizeof(*para));
 
     /* 颜色/字号是 ASCII 编码，先验范围再查表：网络来的字节不能直接当下标 */
     uint8_t color_idx = (uint8_t)para->color - (uint8_t)'0';
     uint8_t size_idx  = (uint8_t)para->size - (uint8_t)'0';
-    bool    range_ok  = color_idx < sizeof(disp_color) / sizeof(disp_color[0]) &&
-                     size_idx < sizeof(disp_size) / sizeof(disp_size[0]);
+    bool range_ok     = color_idx < sizeof(disp_color) / sizeof(disp_color[0]) &&
+                        size_idx < sizeof(disp_size) / sizeof(disp_size[0]);
 
     bool ok = false;
     if (!range_ok) {
@@ -118,20 +139,17 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
                (unsigned)(uint8_t)para->color, (unsigned)(uint8_t)para->size);
     } else {
         switch (p->cfg.device_id) {
-        case AH_DEV_LED_BOARD: /* 32H：本期实现 */
-            ok = _ah_mqtt_display_board(para, text_len, color_idx, size_idx);
-            break;
-        case AH_DEV_FEE_DISPLAY: /* 31H：载荷格式不同，后续增量 */
-            printf("[ah/mqtt] 31H 费显业务载荷未实现，忽略显示命令\n");
-            break;
-        default:
-            printf("[ah/mqtt] 未知设备类型 0x%02X，忽略显示命令\n", (unsigned)p->cfg.device_id);
-            break;
+            case AH_DEV_LED_BOARD: /* 32H：本期实现 */
+                ok = _ah_mqtt_display_board(para, text_len, color_idx, size_idx);
+                break;
+            case AH_DEV_FEE_DISPLAY: /* 31H：载荷格式不同，后续增量 */
+                printf("[ah/mqtt] 31H 费显业务载荷未实现，忽略显示命令\n");
+                break;
+            default:
+                printf("[ah/mqtt] 未知设备类型 0x%02X，忽略显示命令\n", (unsigned)p->cfg.device_id);
+                break;
         }
     }
-
-    /* 无论成败都要用请求里的通知号回复，平台才能把应答和请求对上 */
-    memcpy(&p->notify_in, &para->notify, sizeof(app_ah_notify_id_t));
 
     _ah_mqtt_reply_send(self, "Reply/board/NULL");
     _ah_mqtt_send_data(self, ccb, 1U, ok ? "0" : "1");
@@ -146,10 +164,17 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
  */
 static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 {
-    app_ah_mqtt_proto_t     *p    = _ah_mqtt_proto_of(self);
-    app_ah_mqtt_cmd_fill_t  *para = (app_ah_mqtt_cmd_fill_t *)buff;
+    app_ah_mqtt_proto_t *p       = _ah_mqtt_proto_of(self);
+    app_ah_mqtt_cmd_fill_t *para = (app_ah_mqtt_cmd_fill_t *)buff;
 
-    memcpy(&p->notify_in, &para->notify, sizeof(app_ah_notify_id_t));
+    size_t length = strlen(buff);
+    _ah_mqtt_notify_capture(p, buff, length);
+
+    if (length < sizeof(*para)) {
+        _ah_mqtt_reply_send(self, "Reply/display/clean");
+        _ah_mqtt_send_data(self, ccb, 1U, "1");
+        return;
+    }
 
     /* 同 display：颜色字节先验范围，别拿网络来的值直接当下标 */
     uint8_t color_idx = (uint8_t)para->color - (uint8_t)'0';
@@ -175,12 +200,16 @@ static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 static void _cmd_restart(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 {
     app_ah_mqtt_proto_t *p = _ah_mqtt_proto_of(self);
+    size_t length          = strlen(buff);
+    _ah_mqtt_notify_capture(p, buff, length);
 
-    /* 载荷首部就是通知号；旧实现丢弃 buff，回复会带上一帧的旧号 */
-    if (buff != nullptr)
-        memcpy(&p->notify_in, buff, sizeof(app_ah_notify_id_t));
-
+    /* 通知号都不齐的帧不能触发复位 */
     _ah_mqtt_reply_send(self, "Reply/op/restart");
+    if (length < sizeof(app_ah_notify_id_t)) {
+        _ah_mqtt_send_data(self, ccb, 1U, "1");
+        return;
+    }
+
     _ah_mqtt_send_data(self, ccb, 1U, "0");
 
     /* 给 lwIP 一点时间把应答发出去，再复位；否则平台只看到连接被掐断 */
@@ -197,10 +226,17 @@ static void _cmd_restart(app_pcb_t *self, app_ccb_t *ccb, char *buff)
  */
 static void _cmd_checktime(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 {
-    app_ah_mqtt_proto_t        *p    = _ah_mqtt_proto_of(self);
+    app_ah_mqtt_proto_t *p            = _ah_mqtt_proto_of(self);
     app_ah_mqtt_cmd_checktime_t *para = (app_ah_mqtt_cmd_checktime_t *)buff;
 
-    memcpy(&p->notify_in, &para->notify, sizeof(app_ah_notify_id_t));
+    size_t length = strlen(buff);
+    _ah_mqtt_notify_capture(p, buff, length);
+
+    if (length < sizeof(*para)) { /* 14 字节时间串不齐：不校时 */
+        _ah_mqtt_reply_send(self, "Reply/op/checktime");
+        _ah_mqtt_send_data(self, ccb, 1U, "1");
+        return;
+    }
 
     bool ok = true;
     if (para->type == '1') {

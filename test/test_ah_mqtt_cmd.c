@@ -302,9 +302,10 @@ static void case_clean(void)
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        char buff[APP_AH_NOTIFY_ID_LEN + 1U];
+        char buff[APP_AH_NOTIFY_ID_LEN + 2U];
         memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
-        buff[APP_AH_NOTIFY_ID_LEN] = cases[i].code;
+        buff[APP_AH_NOTIFY_ID_LEN]      = cases[i].code;
+        buff[APP_AH_NOTIFY_ID_LEN + 1U] = '\0';
 
         g_ah_mqtt_cmd_table[1].handler(&s_proto.base, &s_ccb, buff);
 
@@ -324,14 +325,57 @@ static void case_clean_bad(void)
     TEST_BEGIN("清屏：颜色越界 → 不渲染，回 '1'");
     _reset((uint8_t)AH_DEV_LED_BOARD);
 
-    char buff[APP_AH_NOTIFY_ID_LEN + 1U];
+    char buff[APP_AH_NOTIFY_ID_LEN + 2U];
     memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
-    buff[APP_AH_NOTIFY_ID_LEN] = '9';
+    buff[APP_AH_NOTIFY_ID_LEN]      = '9';
+    buff[APP_AH_NOTIFY_ID_LEN + 1U] = '\0';
 
     g_ah_mqtt_cmd_table[1].handler(&s_proto.base, &s_ccb, buff);
 
     CHECK_MSG(s_render.calls == 0, "越界颜色不应渲染");
     CHECK_MSG(_reply_is("1", "Reply/display/clean"), "越界应回 '1'");
+}
+
+/* ================================================================
+ *  短帧防护
+ * ================================================================ */
+
+/** @brief 载荷短于命令头：不解析、不产生副作用，统一回 '1' */
+static void case_short_payload(void)
+{
+    TEST_BEGIN("短帧：缺命令头 → 不渲染/不校时/不复位，回 '1'");
+    _reset((uint8_t)AH_DEV_LED_BOARD);
+
+    /* 显示：只有通知号，缺 OpenClose/颜色/字号 */
+    char buff[APP_AH_NOTIFY_ID_LEN + 1U] = {0};
+    memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
+    g_ah_mqtt_cmd_table[0].handler(&s_proto.base, &s_ccb, buff);
+    CHECK_MSG(s_render.calls == 0, "显示短帧不应渲染");
+    CHECK_MSG(s_tx_calls == 1 && s_tx[s_tx_len - 1U] == '1', "显示短帧应回 '1'");
+
+    /* 清屏：缺颜色 */
+    s_tx_calls = 0;
+    g_ah_mqtt_cmd_table[1].handler(&s_proto.base, &s_ccb, buff);
+    CHECK_MSG(s_render.calls == 0, "清屏短帧不应渲染");
+    CHECK_MSG(s_tx_calls == 1 && s_tx[s_tx_len - 1U] == '1', "清屏短帧应回 '1'");
+
+    /* 重启：通知号都不齐，不能复位 */
+    s_tx_calls = 0;
+    g_ah_mqtt_cmd_table[2].handler(&s_proto.base, &s_ccb, "0123456789");
+    CHECK_MSG(s_reset_calls == 0, "短帧不应触发复位");
+    CHECK_MSG(s_tx_calls == 1 && s_tx[s_tx_len - 1U] == '1', "短帧重启应回 '1'");
+    CHECK_MSG(s_proto.notify_in.device_type[0] == 0 && s_proto.notify_in.send_count[0] == 0,
+              "短通知号应补 0，不能带上一帧旧号");
+
+    /* 对时：时间串只有 13 字节 */
+    s_tx_calls = 0;
+    char ct[APP_AH_NOTIFY_ID_LEN + 1U + 14U] = {0};
+    memcpy(ct, k_notify, APP_AH_NOTIFY_ID_LEN);
+    ct[APP_AH_NOTIFY_ID_LEN] = '1';
+    memcpy(ct + APP_AH_NOTIFY_ID_LEN + 1U, "2025030514320", 13); /* 只给 13 字节 */
+    g_ah_mqtt_cmd_table[3].handler(&s_proto.base, &s_ccb, ct);
+    CHECK_MSG(s_rtc_calls == 0, "短时间串不应写 RTC");
+    CHECK_MSG(s_tx_calls == 1 && s_tx[s_tx_len - 1U] == '1', "短对时帧应回 '1'");
 }
 
 /* ================================================================
@@ -361,7 +405,7 @@ static void case_checktime_ok(void)
     TEST_BEGIN("对时：type=1 解析并写 RTC");
     _reset((uint8_t)AH_DEV_LED_BOARD);
 
-    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U];
+    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U + 1U] = {0};
     memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
     buff[APP_AH_NOTIFY_ID_LEN] = '1';
     memcpy(buff + APP_AH_NOTIFY_ID_LEN + 1U, "20250305143200", 14);
@@ -379,7 +423,7 @@ static void case_checktime_skip(void)
     TEST_BEGIN("对时：type=0 不写 RTC");
     _reset((uint8_t)AH_DEV_LED_BOARD);
 
-    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U];
+    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U + 1U] = {0};
     memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
     buff[APP_AH_NOTIFY_ID_LEN] = '0';
     memcpy(buff + APP_AH_NOTIFY_ID_LEN + 1U, "20250305143200", 14);
@@ -396,7 +440,7 @@ static void case_checktime_bad(void)
     TEST_BEGIN("对时：时间串非法 → 不写 RTC，回 '1'");
     _reset((uint8_t)AH_DEV_LED_BOARD);
 
-    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U];
+    char buff[APP_AH_NOTIFY_ID_LEN + 1U + 14U + 1U] = {0};
     memcpy(buff, k_notify, APP_AH_NOTIFY_ID_LEN);
     buff[APP_AH_NOTIFY_ID_LEN] = '1';
     memcpy(buff + APP_AH_NOTIFY_ID_LEN + 1U, "20250230000000", 14); /* 2 月没有 30 日 */
@@ -417,6 +461,7 @@ int main(void)
     case_display_too_long();
     case_clean();
     case_clean_bad();
+    case_short_payload();
     case_restart();
     case_checktime_ok();
     case_checktime_skip();

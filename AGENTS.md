@@ -164,7 +164,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_ah_cfg` | AH 参数配置：默认值来源（IAP 镜像/netif）、校验矩阵、`ah_cfg` v1 记录加载/保存、无效记录与 IO_ERR 回落 |
 | `test_ah_tcp` | AH/TCP 参数口：探针四态（WAIT/FAKE/SKIP/READY）、0AH 字段合并/校验/落盘/RTC/静默丢弃、0BH 采集应答（31H/32H 模块长度） |
 | `test_ah_mqtt` | AH/MQTT 上电装配：主题前缀/4 条订阅/2 条上报主题、Client ID、Broker/凭据注入（空密码→NULL）、订阅登记失败不启动、探针按完整主题分类 |
-| `test_ah_mqtt_cmd` | AH/MQTT 命令层：32H 文字显示与 31H/未知类型分派、颜色/字号越界、超长文本、清屏 0/1/2/3、重启、对时（写 RTC/跳过/非法）与应答通知号回显 |
+| `test_ah_mqtt_cmd` | AH/MQTT 命令层：32H 文字显示与 31H/未知类型分派、颜色/字号越界、超长/短帧防护、清屏 0/1/2/3、重启、对时（写 RTC/跳过/非法）与应答通知号回显 |
 
 **规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 
