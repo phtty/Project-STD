@@ -14,6 +14,7 @@
  */
 
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "app_tcp_server.h"
 
@@ -174,12 +175,21 @@ void app_tcp_server_task(void *argument)
 
         err_t err = netconn_bind(conn, IP_ADDR_ANY, srv->port);
         if (err != ERR_OK) {
+            printf("[tcp_svr] %s bind :%u 失败（err=%d）\n", srv->ccb.base.name,
+                   (unsigned)srv->port, (int)err);
             netconn_delete(conn);
             osDelay(500);
             continue;
         }
 
-        netconn_listen(conn);
+        err = netconn_listen(conn);
+        if (err != ERR_OK) {
+            printf("[tcp_svr] %s listen :%u 失败（err=%d）\n", srv->ccb.base.name,
+                   (unsigned)srv->port, (int)err);
+            netconn_delete(conn);
+            osDelay(500);
+            continue;
+        }
 
         /* accept 一个连接 */
         struct netconn *newconn = nullptr;
@@ -199,6 +209,7 @@ void app_tcp_server_task(void *argument)
         if (tid != nullptr) {
             osSemaphoreAcquire(srv->disconnect_sem, osWaitForever);
         } else {
+            printf("[tcp_svr] %s conn 任务创建失败\n", srv->ccb.base.name);
             srv->ccb.conn = nullptr;
             netconn_close(newconn);
             netconn_delete(newconn);
@@ -236,12 +247,15 @@ void app_tcp_server_conn_task(void *argument)
 {
     app_tcp_server_t *srv = (app_tcp_server_t *)argument;
     if (srv == nullptr || srv->ccb.conn == nullptr) {
+        /* 早退也必须放信号量：否则 manage 任务会永远等在这个连接上，监听口死掉 */
+        if (srv != nullptr && srv->disconnect_sem != nullptr)
+            osSemaphoreRelease(srv->disconnect_sem);
         osThreadExit();
         return;
     }
 
-    struct netconn *conn   = (struct netconn *)srv->ccb.conn;
-    srv->ccb.base.state    = APP_CCB_STATE_UP;
+    struct netconn *conn = (struct netconn *)srv->ccb.conn;
+    srv->ccb.base.state  = APP_CCB_STATE_UP;
     _tcp_server_keepalive(conn);
 
     /* 空闲超时：只有显式配置了才设（默认实例保持无限等待 + keepalive） */

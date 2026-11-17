@@ -78,13 +78,6 @@ const osThreadAttr_t g_ah_mqtt_task_attr = {
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
-static osThreadId_t s_sign_up_task_handle;
-static const osThreadAttr_t s_sign_up_task_attr = {
-    .name       = "_ah_mqtt_sign_up_task",
-    .stack_size = 256 * 4,
-    .priority   = (osPriority_t)osPriorityLow,
-};
-
 static osThreadId_t s_report_task_handle;
 static const osThreadAttr_t s_report_task_attr = {
     .name       = "_ah_mqtt_report_task",
@@ -92,7 +85,6 @@ static const osThreadAttr_t s_report_task_attr = {
     .priority   = (osPriority_t)osPriorityLow,
 };
 
-static void _ah_mqtt_sign_up_task(void *argument);
 static void _ah_mqtt_report_task(void *argument);
 
 /** @brief 在完整订阅主题里查找来源主题；命中则给出命令号（即表索引） */
@@ -120,8 +112,7 @@ void app_ah_mqtt_task(void *argument)
     while (g_mqtt_ccb.state != APP_MQTT_STATE_READY) {
         osDelay(100);
     }
-    s_sign_up_task_handle = pl_task_new(_ah_mqtt_sign_up_task, nullptr, &s_sign_up_task_attr);
-    s_report_task_handle  = pl_task_new(_ah_mqtt_report_task, nullptr, &s_report_task_attr);
+    s_report_task_handle = pl_task_new(_ah_mqtt_report_task, nullptr, &s_report_task_attr);
 
     for (;;) {
         if (osOK != osMessageQueueGet(g_ah_mqtt_msg_queue, msg, nullptr, osWaitForever))
@@ -182,6 +173,7 @@ static void _ah_mqtt_notify_for_report(app_ah_mqtt_proto_t *p, app_ah_notify_id_
         memset(out, 0, sizeof(*out));
 }
 
+/** @brief 上报任务：10 s 状态 + 5 min 签到，两条周期合成一个任务（省一份任务栈） */
 static void _ah_mqtt_report_task(void *argument)
 {
     (void)argument;
@@ -192,22 +184,6 @@ static void _ah_mqtt_report_task(void *argument)
         .work_status = '0',
         .reserved    = "00000000",
     };
-
-    for (;;) {
-        _ah_mqtt_notify_for_report(p, &report.notify);
-        report.run_status = dev_display_get()->light_level ? '1' : '0';
-        /* 长度显式给出：保持原有 strlen 语义（结构体内含 NUL 时按字符串截断） */
-        app_mqtt_send(p->push_status_topic, &report, (uint16_t)strlen((char *)&report));
-        osDelay(10 * 1000); // 10秒上报1次
-    }
-}
-
-static void _ah_mqtt_sign_up_task(void *argument)
-{
-    (void)argument;
-
-    app_ah_mqtt_proto_t *p = &s_ah_mqtt_proto;
-
     static app_ah_mqtt_sign_up_t sign_up = {
         .type         = '1',
         .work_status  = '0',
@@ -219,14 +195,24 @@ static void _ah_mqtt_sign_up_task(void *argument)
         .reserved     = "00000000000000000000",
     };
 
+    /* 上电先签到一次（type=1），之后每 5 min 发 type=0 的周期签到 */
     _ah_mqtt_notify_for_report(p, &sign_up.notify);
     app_mqtt_send(p->push_sign_topic, &sign_up, (uint16_t)strlen((char *)&sign_up));
     sign_up.type = '0';
 
+    uint32_t tick = 0U;
     for (;;) {
-        osDelay(5 * 60 * 1000); // 5分钟签到1次
-        _ah_mqtt_notify_for_report(p, &sign_up.notify);
-        app_mqtt_send(p->push_sign_topic, &sign_up, (uint16_t)strlen((char *)&sign_up));
+        osDelay(10 * 1000);
+
+        _ah_mqtt_notify_for_report(p, &report.notify);
+        report.run_status = dev_display_get()->light_level ? '1' : '0';
+        /* 长度显式给出：保持原有 strlen 语义（结构体内含 NUL 时按字符串截断） */
+        app_mqtt_send(p->push_status_topic, &report, (uint16_t)strlen((char *)&report));
+
+        if (++tick % 30U == 0U) { /* 30 × 10 s = 5 min */
+            _ah_mqtt_notify_for_report(p, &sign_up.notify);
+            app_mqtt_send(p->push_sign_topic, &sign_up, (uint16_t)strlen((char *)&sign_up));
+        }
     }
 }
 

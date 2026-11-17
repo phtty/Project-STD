@@ -56,7 +56,7 @@ static const osMessageQueueAttr_t s_ah_tcp_queue_attr = {
 
 static const osThreadAttr_t s_ah_tcp_task_attr = {
     .name       = "app_ah_tcp_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
@@ -465,7 +465,10 @@ static void _ah_tcp_init(void)
         return;
     }
 
-    app_tcp_server_start_instance(srv);
+    if (app_tcp_server_start_instance(srv) == nullptr) {
+        printf("[ah/tcp] 监听任务创建失败（端口 %u），参数口不启动\n", (unsigned)port);
+        return;
+    }
     printf("[ah/tcp] 参数口已启动：端口 %u\n", (unsigned)port);
 }
 sw_post_initcall(_ah_tcp_init);

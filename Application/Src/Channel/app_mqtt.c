@@ -46,7 +46,7 @@ app_ccb_t *app_mqtt_ccb(void)
 osThreadId_t g_mqtt_task_handle;
 const osThreadAttr_t g_mqtt_task_attr = {
     .name       = "app_mqtt_task",
-    .stack_size = 512 * 4,
+    .stack_size = 384 * 4,
     .priority   = osPriorityNormal,
 };
 
