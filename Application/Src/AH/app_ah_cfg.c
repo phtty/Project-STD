@@ -12,7 +12,6 @@
 #include <string.h>
 
 #include "app_cfg_sched.h"
-#include "app_iap_cfg.h"
 #include "board.h"
 #include "initcall.h"
 #include "pl_net.h"
@@ -102,15 +101,9 @@ void app_ah_cfg_defaults(app_ah_cfg_t *out)
 
     out->client_port = 6001U;
 
-    /* 网络默认值：优先上一上电周期实际用过的地址（IAP 记录镜像），否则当前 netif */
-    app_flash_iap_net_cfg_t iap_net;
-    if (app_iap_get_net_cfg(&iap_net) && !_ah_cfg_ip_is_zero(iap_net.ip)) {
-        memcpy(out->client_ip, iap_net.ip, sizeof(out->client_ip));
-        memcpy(out->netmask, iap_net.mask, sizeof(out->netmask));
-        memcpy(out->gateway, iap_net.gw, sizeof(out->gateway));
-    } else {
-        pl_net_get_ip(out->client_ip, out->netmask, out->gateway);
-    }
+    /* 主应用默认网络跟随板级 netif 默认（dev_eth：192.168.1.100/24，gw 1.1）。
+       IAP 记录的 192.168.114.200 是 Recovery/升级约定地址，不作为主应用默认。 */
+    pl_net_get_ip(out->client_ip, out->netmask, out->gateway);
 }
 
 /* ================================================================

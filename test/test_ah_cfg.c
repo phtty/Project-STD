@@ -187,12 +187,13 @@ static app_ah_cfg_t _valid_cfg(void)
  *  默认值
  * ================================================================ */
 
-/** @brief 默认值优先取 IAP 记录镜像（上一上电周期实际用过的地址） */
-static void case_defaults_iap_priority(void)
+/** @brief 主应用默认网络取板级 netif（1.100），不受 IAP 记录 114.200 影响 */
+static void case_defaults_netif_default(void)
 {
-    TEST_BEGIN("默认值：网络地址优先取 IAP 记录镜像");
+    TEST_BEGIN("默认值：主应用默认取 netif，IAP 记录不参与");
 
     _reset();
+    /* IAP 记录即使有效，也不能把主应用默认拉到 114.200 */
     s_iap_valid = true;
     const uint8_t iap_ip[4]   = {10U, 11U, 12U, 13U};
     const uint8_t iap_mask[4] = {255U, 255U, 255U, 0U};
@@ -202,18 +203,25 @@ static void case_defaults_iap_priority(void)
     memcpy(s_iap_net.gw, iap_gw, 4);
     s_iap_net.port = 9528U;
 
-    /* netif 的当前值必须被忽略 */
     s_net_ip[0] = 192U;
     s_net_ip[1] = 168U;
     s_net_ip[2] = 1U;
-    s_net_ip[3] = 2U;
+    s_net_ip[3] = 100U;
+    s_net_mask[0] = 255U;
+    s_net_mask[1] = 255U;
+    s_net_mask[2] = 255U;
+    s_net_mask[3] = 0U;
+    s_net_gw[0] = 192U;
+    s_net_gw[1] = 168U;
+    s_net_gw[2] = 1U;
+    s_net_gw[3] = 1U;
 
     app_ah_cfg_t cfg;
     app_ah_cfg_defaults(&cfg);
 
-    CHECK_MSG(memcmp(cfg.client_ip, iap_ip, 4) == 0, "设备 IP 应取 IAP 镜像");
-    CHECK_MSG(memcmp(cfg.netmask, iap_mask, 4) == 0, "掩码应取 IAP 镜像");
-    CHECK_MSG(memcmp(cfg.gateway, iap_gw, 4) == 0, "网关应取 IAP 镜像");
+    CHECK_MSG(memcmp(cfg.client_ip, s_net_ip, 4) == 0, "设备 IP 应取 netif（1.100）");
+    CHECK_MSG(memcmp(cfg.netmask, s_net_mask, 4) == 0, "掩码应取 netif");
+    CHECK_MSG(memcmp(cfg.gateway, s_net_gw, 4) == 0, "网关应取 netif（1.1）");
     CHECK_MSG(cfg.device_id == (uint8_t)BOARD_AH_DISPLAY_TYPE, "类型应取板级默认");
     CHECK_MSG(cfg.device_no == 0x01U, "序号默认 1");
     CHECK_MSG(cfg.client_port == 6001U, "参数口默认 6001");
@@ -503,7 +511,7 @@ static void case_save_unregistered(void)
 
 int main(void)
 {
-    case_defaults_iap_priority();
+    case_defaults_netif_default();
     case_defaults_netif_fallback();
     case_validate_ok();
     case_validate_rejects_identity();

@@ -346,7 +346,7 @@ typedef struct [[gnu::packed]] {
 | `mqtt_ip/port` | `120.46.136.199` / `6000` | 沿用现值 |
 | `mqtt_user/pwd` | `"pxh"` / 空 | 沿用现值 |
 | `mqtt_qos` | 0 | |
-| `client_ip/mask/gw` | 优先取 IAP 记录镜像（`app_iap_get_net_cfg`），否则 `pl_net_get_ip()` | 与现网一致 |
+| `client_ip/mask/gw` | 取板级 netif 默认 `pl_net_get_ip()`（dev_eth：192.168.1.100/24、gw 1.1）；IAP 记录的 192.168.114.200 是 Recovery/升级约定地址，不参与主应用默认 | 与板级默认一致 |
 | `client_port` | 6001 | 参数口 |
 | `device_id/device_no/font_line` | `BOARD_AH_DISPLAY_TYPE` / `0x01` / `0` | 类型来自板级宏，不是共享代码里的字面量 |
 
