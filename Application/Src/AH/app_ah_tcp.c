@@ -43,7 +43,7 @@ static app_pcb_t s_ah_tcp_pcb = {
 static osMessageQueueId_t s_ah_tcp_queue;
 
 static StaticQueue_t s_ah_tcp_queue_cb;
-static uint8_t       s_ah_tcp_queue_buf[2U * AH_TCP_MSG_SIZE];
+static uint8_t s_ah_tcp_queue_buf[2U * AH_TCP_MSG_SIZE];
 static const osMessageQueueAttr_t s_ah_tcp_queue_attr = {
     .name    = "s_ah_tcp_queue",
     .cb_mem  = &s_ah_tcp_queue_cb,
@@ -122,7 +122,7 @@ static void _ah_tcp_send(app_ccb_t *ccb, uint8_t seq, const uint8_t *data, uint1
     if (ccb == nullptr || data == nullptr || len > AH_TCP_DATA_MAX)
         return;
 
-    uint8_t  frame[AH_TCP_FRAME_MAX];
+    uint8_t frame[AH_TCP_FRAME_MAX];
     uint16_t total = (uint16_t)(AH_TCP_FRAME_OVERHEAD + len);
 
     frame[0] = (uint8_t)(AH_TCP_STX >> 8);
@@ -135,7 +135,7 @@ static void _ah_tcp_send(app_ccb_t *ccb, uint8_t seq, const uint8_t *data, uint1
     frame[7] = (uint8_t)len;
     memcpy(frame + 8U, data, len);
 
-    uint16_t crc = crc16_xmodem(frame + 2U, (size_t)(6U + len));
+    uint16_t crc    = crc16_xmodem(frame + 2U, (size_t)(6U + len));
     frame[8U + len] = (uint8_t)(crc >> 8);
     frame[9U + len] = (uint8_t)crc;
 
@@ -369,7 +369,7 @@ void app_ah_tcp_task(void *argument)
 {
     (void)argument;
 
-    static uint8_t     msg_buf[AH_TCP_MSG_SIZE];
+    static uint8_t msg_buf[AH_TCP_MSG_SIZE];
     app_dispatch_msg_t *msg = (app_dispatch_msg_t *)msg_buf;
 
     for (;;) {
@@ -379,20 +379,20 @@ void app_ah_tcp_task(void *argument)
             continue;
 
         const uint8_t *frame = msg->data;
-        uint16_t       len   = (uint16_t)(msg->data_len - AH_TCP_FRAME_OVERHEAD);
+        uint16_t len         = (uint16_t)(msg->data_len - AH_TCP_FRAME_OVERHEAD);
         const uint8_t *data  = frame + 8U;
-        uint8_t        seq   = frame[3];
+        uint8_t seq          = frame[3];
 
         switch (msg->aux) {
-        case AH_TCP_CMD_SET:
-            _ah_tcp_cmd_set(msg->ccb, seq, data, len);
-            break;
-        case AH_TCP_CMD_GET:
-            _ah_tcp_cmd_get(msg->ccb, seq, data, len);
-            break;
-        default:
-            printf("[ah/tcp] 未支持的命令 0x%02X（丢帧）\n", msg->aux);
-            break;
+            case AH_TCP_CMD_SET:
+                _ah_tcp_cmd_set(msg->ccb, seq, data, len);
+                break;
+            case AH_TCP_CMD_GET:
+                _ah_tcp_cmd_get(msg->ccb, seq, data, len);
+                break;
+            default:
+                printf("[ah/tcp] 未支持的命令 0x%02X（丢帧）\n", msg->aux);
+                break;
         }
     }
 }
@@ -449,7 +449,7 @@ static void _ah_tcp_init(void)
     }
     s_ah_tcp_pcb.queue = s_ah_tcp_queue;
 
-    uint16_t port = cfg.client_port != 0U ? cfg.client_port : 6001U;
+    uint16_t port         = cfg.client_port != 0U ? cfg.client_port : 6001U;
     app_tcp_server_t *srv = app_tcp_server_open("ah_param", port, 30000U);
     if (srv == nullptr) {
         printf("[ah/tcp] 参数口实例创建失败（端口 %u），参数口不启动\n", (unsigned)port);
