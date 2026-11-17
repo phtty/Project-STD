@@ -47,17 +47,18 @@ typedef struct [[gnu::packed]] app_ah_mqtt_cmd_checktime {
 typedef void (*app_ah_mqtt_cmd_handler_fn_t)(app_pcb_t *self, app_ccb_t *ccb, char *data);
 
 /**
- * 一条命令 = 订阅主题 + 处理函数。
+ * 一条命令 = 层级后缀 + 处理函数。
  *
- * 主题与处理函数放在同一张表里，**索引即命令号**：通道按它订阅、探针按它分类、
- * 任务按它分派。此前主题在通道与协议里各写一份（订阅 "ASK/x" 却按 "/ASK/x" 分类），
- * 改一条命令要动两处、不一致时还会静默失配；合并成一张表后不可能再漂移。
+ * 表里只存**与设备身份无关的后缀**（`ASK/board/NULL` 等），完整主题在
+ * `app_ah_mqtt` 的 sw_post initcall 里用配置拼出来：
+ * `前缀/后缀`。索引即命令号：探针按完整主题分类、任务按它分派。
+ *
+ * 此前表里存完整主题、探针却拿另一份字符串比较，订阅和分类各写一份，
+ * 不一致时静默失配；现在只有一处后缀来源。
  */
 typedef struct {
-    const char               *topic; /**< 订阅主题；由通道负责订阅 */
+    const char                   *suffix; /**< 层级后缀（如 "ASK/board/NULL"） */
     app_ah_mqtt_cmd_handler_fn_t  handler; /**< 命令处理函数 */
 } app_ah_mqtt_cmd_entry_t;
-
-#define AH_MQTT_CMD_COUNT (4U) /**< 命令表项数 */
 
 extern const app_ah_mqtt_cmd_entry_t g_ah_mqtt_cmd_table[AH_MQTT_CMD_COUNT]; /**< 命令表：索引即命令号 */

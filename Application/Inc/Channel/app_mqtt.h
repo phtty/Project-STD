@@ -3,7 +3,7 @@
  * @brief   MQTT 客户端通道（Application 层）
  *
  * 连接 MQTT Broker，订阅协议登记的主题，接收数据通过 app_ccb_dispatch 写入调度框架。
- * 默认 Broker: 120.46.136.199:6000, Client ID: "CD_ZTP"
+ * Broker/Client ID/凭据由调用方注入（AH 用 `ah_cfg` 派生）；未注入时保留内置默认值。
  *
  * 容器约定：
  *   - app_mqtt_ccb_t 为静态对象，base 是第一个成员（偏移 0），container_of 零开销还原；
@@ -12,7 +12,7 @@
  *   - 协议侧通过 app_mqtt_ccb() 取控制块（绑定用）；g_mqtt_ccb 仍对外可见，
  *     AH 协议侧据其 state 判断何时可以签到/上报。
  *
- * 当前状态：app_mqtt_start() 无调用者，链路未激活。
+ * 启动方式：`app_boot` 的 `_init_task` 调 `app_mqtt_start()`；连接/重连由本通道任务负责。
  */
 
 #pragma once
@@ -100,7 +100,8 @@ void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port);
  *  @param client_id Client ID（只读，内部有界拷贝）
  *  @param user      用户名（只读，内部有界拷贝）
  *  @param pass      密码（只读，内部有界拷贝）
- *  @note 需在调用 app_mqtt_connect() 之前设置 */
+ *  @note `user`/`pass` 允许 NULL，表示不带该字段（lwIP 对“非 NULL 但长度 0”返回 ERR_VAL）；
+ *        需在调用 app_mqtt_connect() 之前设置 */
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass);
 
 /** @brief 暴露本通道控制块（协议绑定时使用）*/

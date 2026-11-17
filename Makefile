@@ -689,6 +689,22 @@ TEST_AH_TCP_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
+# 套件：AH/MQTT 上电装配（主题/ClientID/凭据/订阅/探针）
+# 用例 TU-include app_ah_mqtt.c（装配函数是 static）；通道、任务、RTC 是桩，
+# 主题纯函数走真实 app_ah.c，探针走真实 rb_*。
+TEST_AH_MQTT_SRCS = \
+	test/test_ah_mqtt.c \
+	test/stubs/os_stub.c \
+	Application/Src/AH/app_ah.c \
+	Kernel/Src/ring_buffer.c
+
+# 套件：AH/MQTT 命令层（显示分派/清屏/重启/对时）
+# 用例 TU-include app_ah_mqtt_cmd.c；渲染/屏幕/RTC/复位/发送是桩。
+TEST_AH_MQTT_CMD_SRCS = \
+	test/test_ah_mqtt_cmd.c \
+	test/stubs/os_stub.c \
+	Application/Src/AH/app_ah.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -720,7 +736,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
-      $(TEST_BUILD)/test_ah_tcp
+      $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -786,6 +802,12 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── AH/TCP 参数口 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_tcp
+	@echo ""
+	@echo "──── AH/MQTT 装配 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_mqtt
+	@echo ""
+	@echo "──── AH/MQTT 命令层 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_mqtt_cmd
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -930,6 +952,24 @@ $(TEST_BUILD)/test_ah_tcp: $(TEST_AH_TCP_SRCS)
 # 否则改了被测源码测试不重编、跑的是旧二进制。
 $(TEST_BUILD)/test_ah_tcp: Application/Src/AH/app_ah_tcp.c Application/Inc/AH/app_ah_tcp.h \
 	Application/Inc/AH/app_ah_cfg.h Application/Inc/AH/app_ah.h $(BOARD_DIR)/board.h
+
+$(TEST_BUILD)/test_ah_mqtt: $(TEST_AH_MQTT_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_AH_MQTT_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 了 app_ah_mqtt.c（它不在 SRCS 里），必须挂依赖 ——
+# 否则改了被测源码测试不重编、跑的是旧二进制。
+$(TEST_BUILD)/test_ah_mqtt: Application/Src/AH/app_ah_mqtt.c Application/Inc/AH/app_ah_mqtt.h \
+	Application/Inc/AH/app_ah_mqtt_cmd.h Application/Inc/AH/app_ah_cfg.h \
+	Application/Inc/Channel/app_mqtt.h
+
+$(TEST_BUILD)/test_ah_mqtt_cmd: $(TEST_AH_MQTT_CMD_SRCS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_AH_MQTT_CMD_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_ah_mqtt_cmd: Application/Src/AH/app_ah_mqtt_cmd.c \
+	Application/Inc/AH/app_ah_mqtt.h Application/Inc/AH/app_ah_mqtt_cmd.h \
+	Application/Inc/Render/app_render.h Application/Inc/Render/app_screen.h
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

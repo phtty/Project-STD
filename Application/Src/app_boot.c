@@ -19,6 +19,7 @@
 #include "app_udp.h"
 #include "app_tcp_server.h"
 #include "app_tcp_client.h"
+#include "app_mqtt.h"
 #include "app_rs485.h"
 #include "app_test.h"
 #include "app_key.h"
@@ -110,6 +111,7 @@ static void _init_task(void *argument)
     app_tcp_server_start();
     app_tcp_client_start();
     app_udp_start();
+    app_mqtt_start();
     app_rs485_start();
     /* 板级特有的通道由各板自己用 initcall 启动（如 3833024 的两路 RS232），
        不在这里点名——否则共享文件要认识每块板的外设。 */

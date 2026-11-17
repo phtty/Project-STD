@@ -30,6 +30,8 @@
 #define APP_AH_TOPIC_PREFIX_MAX (24U)
 /** @brief MQTT Client ID 缓冲上限（"CD" + 8 + 2 + 2 + 2 共 16 字符 + NUL，留余量） */
 #define APP_AH_CLIENT_ID_MAX (24U)
+/** @brief 完整 MQTT 主题缓冲上限（前缀 17 + '/' + 最长后缀 22 + NUL，留余量） */
+#define APP_AH_TOPIC_MAX (64U)
 
 typedef struct app_ah_cfg app_ah_cfg_t; /**< AH 参数配置（定义见 app_ah_cfg.h） */
 
@@ -97,3 +99,13 @@ bool app_ah_client_id_build(const app_ah_cfg_t *cfg, char *out, size_t cap);
  */
 bool app_ah_notify_build(app_ah_notify_id_t *id, uint32_t unix_ts, const app_ah_cfg_t *cfg,
                          uint32_t send_seq);
+
+/**
+ * @brief 把 `YYYYMMDDhhmmss` 解析成 Unix 时间戳（UTC）
+ * @param text 14 位数字字符串（只读，不要求 NUL 结尾）
+ * @param len  字符数，必须恰为 14
+ * @param[out] out 输出 Unix 秒（1970-01-01 00:00:00 起）
+ * @return true 解析成功；false 长度/数字/年月日时分秒越界
+ * @note MQTT 对时命令（`ASK/op/checktime`）用它；0AH 的 UnixTm 是二进制大端，不走这里。
+ */
+bool app_ah_unix_from_datetime(const char *text, size_t len, uint32_t *out);

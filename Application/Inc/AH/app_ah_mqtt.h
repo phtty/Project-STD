@@ -11,18 +11,14 @@
 #include "ring_buffer.h"
 
 #include "app_ah.h"
+#include "app_ah_cfg.h"
 #include "app_dispatch.h"
 
 #define MQTT_FRAME_MIN_LEN (21U)        /**< 最短 MQTT 帧字节数 */
 #define MQTT_FRAME_MAX_LEN (21U + 512U) /**< 最长 MQTT 帧字节数 */
 
-/** @brief MQTT 主题四段标识（站点/车道/设备类型/设备号） */
-typedef struct [[gnu::packed]] app_ah_mqtt_topic_info {
-    __attribute__((nonstring)) char station_hex[8]; /**< 站点编号（HEX 字符串，定长无 NUL） */
-    __attribute__((nonstring)) char lane_hex[2];    /**< 车道编号（定长无 NUL） */
-    __attribute__((nonstring)) char device_type[2]; /**< 设备类型（定长无 NUL） */
-    __attribute__((nonstring)) char device_no[2];   /**< 设备序号（定长无 NUL） */
-} app_ah_mqtt_topic_info_t;
+/** @brief 命令表项数（订阅主题数 = 4：显示/清屏/重启/对时） */
+#define AH_MQTT_CMD_COUNT (4U)
 
 // 设备状态
 /** @brief 设备状态上报载荷 */
@@ -52,12 +48,20 @@ typedef struct [[gnu::packed]] app_ah_mqtt_sign_up {
  *
  * base 必须是第一个成员（container_of 偏移 0）。协议自有状态收在这里，不再散落成
  * 文件级全局 —— 探针、任务与命令处理都经 base 取回，多实例也因此成为可能。
+ *
+ * 配置只在上电时读一次快照：0AH 改参数要重启才生效，运行期不重建主题，
+ * 上报任务与探针因此不需要锁。
  */
 typedef struct {
-    app_pcb_t        base;                 /**< 协议基类，必须为首成员（container_of 前提） */
-    app_ah_mqtt_topic_info_t topic_info;      /**< 设备标识，用于拼接主题 */
-    app_ah_notify_id_t notify;                /**< 上报帧携带的通知号（对时命令会更新） */
-    char         reply_topic[64]; /**< 本次回复的目的主题，随消息交给通道 */
+    app_pcb_t    base;                      /**< 协议基类，必须为首成员（container_of 前提） */
+    app_ah_cfg_t cfg;                       /**< 上电配置快照（身份/主题/显示类型） */
+    char         prefix[APP_AH_TOPIC_PREFIX_MAX]; /**< 主题前缀：站8/道2/型2/号2 */
+    char         sub_topics[AH_MQTT_CMD_COUNT][APP_AH_TOPIC_MAX]; /**< 完整订阅主题 */
+    char         push_status_topic[APP_AH_TOPIC_MAX]; /**< 状态上报主题 */
+    char         push_sign_topic[APP_AH_TOPIC_MAX];   /**< 签到主题 */
+    char         reply_topic[APP_AH_TOPIC_MAX];       /**< 本次回复的目的主题 */
+    app_ah_notify_id_t notify_in;            /**< 最近一条命令的通知号（回复时回显） */
+    uint32_t     send_seq;                   /**< 上报通知号自增计数 */
 } app_ah_mqtt_proto_t;
 
 extern osMessageQueueId_t g_ah_mqtt_msg_queue;   /**< AH/MQTT 帧队列 */

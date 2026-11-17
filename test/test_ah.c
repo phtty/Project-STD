@@ -147,6 +147,33 @@ static void case_notify(void)
     CHECK_MSG(!app_ah_notify_build(nullptr, 0U, &cfg, 0U), "id 为空应失败");
 }
 
+/** @brief `YYYYMMDDhhmmss` → Unix：合法值、闰年、边界与非法串 */
+static void case_unix_from_datetime(void)
+{
+    TEST_BEGIN("对时字符串：UTC 解析、闰年、非法输入");
+
+    uint32_t ts = 0U;
+    CHECK_MSG(app_ah_unix_from_datetime("20250305143200", 14U, &ts), "合法时间应成功");
+    CHECK_MSG(ts == 1741185120U, "2025-03-05 14:32:00 应为 1741185120，实际 %u", (unsigned)ts);
+
+    CHECK_MSG(app_ah_unix_from_datetime("19700101000000", 14U, &ts), "Unix 原点应成功");
+    CHECK_MSG(ts == 0U, "1970-01-01 00:00:00 应为 0");
+
+    /* 2024 是闰年：2 月 29 日合法 */
+    CHECK_MSG(app_ah_unix_from_datetime("20240229000000", 14U, &ts), "闰年 2 月 29 日应成功");
+    CHECK_MSG(ts == 1709164800U, "2024-02-29 00:00:00 应为 1709164800，实际 %u", (unsigned)ts);
+
+    /* 2023 不是闰年：2 月 29 日非法 */
+    CHECK_MSG(!app_ah_unix_from_datetime("20230229000000", 14U, &ts), "平年 2 月 29 日应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("20251301000000", 14U, &ts), "月份 13 应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("20250101240000", 14U, &ts), "小时 24 应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("20250101235960", 14U, &ts), "秒 60 应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("2025O101000000", 14U, &ts), "非数字应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("2025010100000", 14U, &ts), "长度 13 应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime("20250101000000", 13U, &ts), "len=13 应失败");
+    CHECK_MSG(!app_ah_unix_from_datetime(nullptr, 14U, &ts), "空指针应失败");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -155,6 +182,7 @@ int main(void)
     case_topic_prefix();
     case_client_id();
     case_notify();
+    case_unix_from_datetime();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

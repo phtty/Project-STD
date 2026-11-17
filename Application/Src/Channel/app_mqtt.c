@@ -3,13 +3,14 @@
  * @brief   MQTT 客户端通道（Application 层）
  *
  * 连接 MQTT Broker，订阅配置主题，接收数据通过 app_ccb_dispatch 写入调度框架。
- * 默认 Broker: 120.46.136.199:6000, Client ID: "CD_ZTP"
- * 当前状态：app_mqtt_start() 无调用者，链路未激活。
+ * Broker/Client ID/凭据由调用方注入（AH 用 `ah_cfg` 派生）；未注入时保留内置默认值。
+ * 启动方式：`app_boot` 的 `_init_task` 调 `app_mqtt_start()`；连接/重连由本通道任务负责。
  */
 
 #include "app_mqtt.h"
 #include "app_dispatch.h"
 #include "pl_net_adapt.h"
+#include <stdio.h>
 #include <string.h>
 
 /* ---- MQTT 通道 ops ---- */
@@ -96,7 +97,8 @@ static void _mqtt_incoming_publish_fn(void *arg, const char *topic, uint32_t tot
 static void _mqtt_sub_request_fn(void *arg, err_t result)
 {
     (void)arg;
-    (void)result;
+    if (result != ERR_OK)
+        printf("[mqtt] 订阅失败（result=%d），重连后会重订\n", (int)result);
 }
 
 static void _mqtt_connection_fn(mqtt_client_t *client, void *arg, mqtt_connection_status_t status)
@@ -148,9 +150,11 @@ void app_mqtt_connect(void)
     ip_addr_t broker_ip;
     IP4_ADDR(&broker_ip, ctx->broker_ip[0], ctx->broker_ip[1], ctx->broker_ip[2], ctx->broker_ip[3]);
 
+    /* lwIP 对“非 NULL 但长度 0”的 user/pass 直接返回 ERR_VAL；空串必须传 NULL，
+       表示不带该字段（broker 不要求密码时就是这样）。 */
     mqtt_client_info.client_id   = ctx->client_id;
-    mqtt_client_info.client_user = ctx->client_user;
-    mqtt_client_info.client_pass = ctx->client_pass;
+    mqtt_client_info.client_user = ctx->client_user[0] != '\0' ? ctx->client_user : nullptr;
+    mqtt_client_info.client_pass = ctx->client_pass[0] != '\0' ? ctx->client_pass : nullptr;
 
     LOCK_TCPIP_CORE();
     err_t err = mqtt_client_connect((mqtt_client_t *)ctx->client, &broker_ip, ctx->broker_port,
@@ -163,9 +167,10 @@ void app_mqtt_connect(void)
     if (err == ERR_OK) {
         g_mqtt_ccb.state = APP_MQTT_STATE_CONNECTING;
     } else {
+        /* 同步失败不会再走连接回调；必须自己放信号量，否则主循环永远阻塞在
+           osSemaphoreAcquire(osWaitForever)，一次失败就再也不重连。客户端由主循环释放。 */
         g_mqtt_ccb.state = APP_MQTT_STATE_DISCONNECTED;
-        mqtt_client_free((mqtt_client_t *)ctx->client);
-        ctx->client = NULL;
+        osSemaphoreRelease(ctx->connect_sem);
     }
 }
 
@@ -176,42 +181,50 @@ void app_mqtt_task(void *argument)
     (void)argument; /* 单例通道：上下文取自静态控制块，不用任务参数 */
     app_mqtt_ctx_t *ctx = &g_mqtt_ccb.ctx;
 
-    ctx->client = mqtt_client_new();
-    if (ctx->client == NULL) { osThreadExit(); return; }
-
     ctx->connect_sem = osSemaphoreNew(1, 0, NULL);
+    if (ctx->connect_sem == NULL) {
+        osThreadExit();
+        return;
+    }
+
+    while ((ctx->client = mqtt_client_new()) == nullptr)
+        osDelay(1000);
+
     app_mqtt_connect();
 
     for (;;) {
         osSemaphoreAcquire(ctx->connect_sem, osWaitForever);
 
         switch (g_mqtt_ccb.state) {
-        case APP_MQTT_STATE_DISCONNECTED:
-            _mqtt_channel_deinit();
-            osDelay(1000);
-            ctx->client = mqtt_client_new();
-            if (ctx->client) app_mqtt_connect();
-            break;
-
-        case APP_MQTT_STATE_CONNECTING:
-            /* 连接失败：清理后重试 */
-            _mqtt_channel_deinit();
-            osDelay(1000);
-            mqtt_client_free((mqtt_client_t *)ctx->client);
-            ctx->client = mqtt_client_new();
-            if (ctx->client) app_mqtt_connect();
-            break;
-
         case APP_MQTT_STATE_CONNECTED:
             _mqtt_channel_init();
             /* 协议登记、通道施加：每次连接（含重连）统一重订，主题表在协议侧 */
-            for (uint8_t i = 0; i < s_sub_cnt; i++)
-                mqtt_subscribe((mqtt_client_t *)ctx->client, s_subs[i], 0, _mqtt_sub_request_fn, NULL);
+            for (uint8_t i = 0; i < s_sub_cnt; i++) {
+                err_t err = mqtt_subscribe((mqtt_client_t *)ctx->client, s_subs[i], 0,
+                                           _mqtt_sub_request_fn, nullptr);
+                if (err != ERR_OK)
+                    printf("[mqtt] 订阅 %s 提交失败（err=%d）\n", s_subs[i], (int)err);
+            }
             g_mqtt_ccb.state = APP_MQTT_STATE_READY;
             break;
 
+        case APP_MQTT_STATE_DISCONNECTED:
+        case APP_MQTT_STATE_CONNECTING:
+        default:
+            /* 连接失败/掉线：释放旧客户端，退避 1 s 后重建再连 */
+            _mqtt_channel_deinit();
+            if (ctx->client != nullptr) {
+                mqtt_client_free((mqtt_client_t *)ctx->client);
+                ctx->client = nullptr;
+            }
+            osDelay(1000);
+            while ((ctx->client = mqtt_client_new()) == nullptr)
+                osDelay(1000);
+            app_mqtt_connect();
+            break;
+
         case APP_MQTT_STATE_READY:
-            /* 断连时回调设 DISCONNECTED + release sem，回到 DISCONNECTED 分支 */
+            /* 断连时回调设 DISCONNECTED + release sem，回到重连分支 */
             break;
         }
     }
@@ -221,10 +234,13 @@ void app_mqtt_send(const char *topic, const void *data, uint16_t len)
 {
     app_mqtt_ctx_t *ctx = &g_mqtt_ccb.ctx;
 
-    if (ctx->client != NULL && g_mqtt_ccb.state == APP_MQTT_STATE_READY) {
+    if (ctx->client != nullptr && g_mqtt_ccb.state == APP_MQTT_STATE_READY) {
         LOCK_TCPIP_CORE();
-        mqtt_publish((mqtt_client_t *)ctx->client, topic, data, len, 0, 0, NULL, NULL);
+        err_t err = mqtt_publish((mqtt_client_t *)ctx->client, topic, data, len, 0, 0, nullptr,
+                                 nullptr);
         UNLOCK_TCPIP_CORE();
+        if (err != ERR_OK)
+            printf("[mqtt] 发布 %s 失败（err=%d）\n", topic, (int)err);
     }
 }
 
@@ -236,7 +252,15 @@ void app_mqtt_set_broker(const uint8_t ip[4], uint16_t port)
 
 void app_mqtt_set_credentials(const char *client_id, const char *user, const char *pass)
 {
-    strncpy(g_mqtt_ccb.ctx.client_id, client_id, sizeof(g_mqtt_ccb.ctx.client_id) - 1);
-    strncpy(g_mqtt_ccb.ctx.client_user, user, sizeof(g_mqtt_ccb.ctx.client_user) - 1);
-    strncpy(g_mqtt_ccb.ctx.client_pass, pass, sizeof(g_mqtt_ccb.ctx.client_pass) - 1);
+    /* user/pass 允许 NULL：语义是“不带该字段”，不是空字符串 */
+    g_mqtt_ccb.ctx.client_id[0]   = '\0';
+    g_mqtt_ccb.ctx.client_user[0] = '\0';
+    g_mqtt_ccb.ctx.client_pass[0] = '\0';
+
+    if (client_id != nullptr)
+        strncpy(g_mqtt_ccb.ctx.client_id, client_id, sizeof(g_mqtt_ccb.ctx.client_id) - 1);
+    if (user != nullptr)
+        strncpy(g_mqtt_ccb.ctx.client_user, user, sizeof(g_mqtt_ccb.ctx.client_user) - 1);
+    if (pass != nullptr)
+        strncpy(g_mqtt_ccb.ctx.client_pass, pass, sizeof(g_mqtt_ccb.ctx.client_pass) - 1);
 }
