@@ -16,7 +16,8 @@
  *  紧跟固定头之后。 */
 typedef struct {
     uint8_t light_level; /**< 亮度等级（0..7） */
-    uint8_t color;       /**< 显示颜色（dev_display_color_t） */
+    uint8_t color;       /**< 显示颜色，**线上口径** 0 红 / 1 绿 / 2 黄（由 handler 映射成
+                              `dev_display_color_t`；表外值整帧拒显，见 app_rls_cmd.c） */
     uint8_t style;       /**< 显示风格（协议字段） */
     uint8_t pic_num;     /**< 图片编号（协议字段） */
     uint8_t bitmap[];    /**< 1bpp 位图数据，行优先、MSB-first，长度由帧剩余量决定 */

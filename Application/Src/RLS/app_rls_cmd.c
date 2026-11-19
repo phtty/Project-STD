@@ -70,12 +70,45 @@ static bool _rls_display_bitmap_ok(uint16_t data_len)
     return false;
 }
 
+/** @brief 线上颜色字节 → 面板颜色（协议：0 红 / 1 绿 / 2 黄）；表外返回 false
+ *
+ *  **必须映射、不能直传**，两层原因：
+ *   1) `dev_display_color_t` 的下标是 BLACK=0 / RED=1 / GREEN=2 / YELLOW=3 ——
+ *      直传会把"红"画成灭、"绿"画成红、"黄"画成绿；
+ *   2) 越界值会一路落到板级扫描驱动的 `s_bsrr_table[ch][color]`（`_scan` 里按
+ *      帧缓冲里的字节查表）。越界读出来的 `port` 是 .ccmram 里的垃圾指针，
+ *      扫描中断里 `p->port->BSRR = p->val` 就是**往任意地址写** —— 不是显示错色，
+ *      是乱写内存。所以这里是**闭合映射**：表外值整帧拒显。
+ *
+ *  口径取文档里出现 3 次的 `0/1/2`（BM / DS / PIC 三张表的"数值"列）。SV 那张的
+ *  "数值"列写成 `1/2/3`，与它自己的描述栏（0红/1绿/2黄）矛盾；若现场抓包发现
+ *  上位机按 SV 那张发，只改这张表 —— 不要改成"两者都收"，1/2 在两张表里含义不同。 */
+static bool _rls_map_color(uint8_t v, dev_display_color_t *out)
+{
+    static const dev_display_color_t map[] = {
+        DEV_DISPLAY_COLOR_RED,    /* 0 = 红 */
+        DEV_DISPLAY_COLOR_GREEN,  /* 1 = 绿 */
+        DEV_DISPLAY_COLOR_YELLOW, /* 2 = 黄 */
+    };
+    if (v >= sizeof(map) / sizeof(map[0])) return false;
+
+    *out = map[v];
+    return true;
+}
+
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb; /* 回复走 app_ccb_send_to 的表来源，不需要本帧的通道 */
     app_rls_display_t *display_ctx = (app_rls_display_t *)data;
 
     if (!_rls_display_bitmap_ok(data_len)) return; // 位图不足：拒显，不碰 app_render
+
+    dev_display_color_t color;
+    if (!_rls_map_color(display_ctx->color, &color)) {
+        printf("[rls] 显示帧颜色 %u 不在协议约定（0红/1绿/2黄）内，拒显\n",
+               (unsigned)display_ctx->color);
+        return;
+    }
 
     // 显示前先清屏
     app_render(&(app_render_cfg_t){
@@ -92,7 +125,7 @@ static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len)
         .y      = 0,
         .w      = app_screen_rows(),
         .h      = app_screen_cols(),
-        .color  = display_ctx->color,
+        .color  = color,
         .bitmap = display_ctx->bitmap,
     });
 }
@@ -103,6 +136,13 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
     app_rls_display_t *display_ctx = (app_rls_display_t *)data;
 
     if (!_rls_display_bitmap_ok(data_len)) return; // 位图不足：拒显，不碰 app_render
+
+    dev_display_color_t color;
+    if (!_rls_map_color(display_ctx->color, &color)) {
+        printf("[rls] 显示帧颜色 %u 不在协议约定（0红/1绿/2黄）内，拒显\n",
+               (unsigned)display_ctx->color);
+        return;
+    }
 
     // 显示前先清屏
     app_render(&(app_render_cfg_t){
@@ -119,7 +159,7 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
         .y       = 0,
         .w       = app_screen_rows(),
         .h       = app_screen_cols(),
-        .color   = display_ctx->color,
+        .color   = color,
         .bitmap  = display_ctx->bitmap,
         /* **内容定稿之后才存**（app_screen 在落屏时取走这个请求）。
            原来是这里紧跟着调 app_render_save() —— 那时画布还没落屏，

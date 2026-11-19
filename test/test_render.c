@@ -894,7 +894,7 @@ static void case_rls_display_len(void)
     static uint8_t s_frame_buf[600];
     app_rls_display_t *disp = (app_rls_display_t *)s_frame_buf;
     memset(s_frame_buf, 0, sizeof(s_frame_buf));
-    disp->color = DEV_DISPLAY_COLOR_RED;
+    disp->color = 0; /* 协议口径 0 = 红（handler 负责映射成 dev_display_color_t） */
 
     /* --- 3833024 几何：need = 512 B --- */
     s_stub_rows = 128;
@@ -957,6 +957,74 @@ static void case_rls_display_len(void)
 
 /* ================================================================ */
 
+/**
+ * @brief RLS 显示帧颜色：线上 0/1/2 → 红/绿/黄；表外值整帧拒显（不碰 app_render）
+ *
+ * 直传有两层后果：`dev_display_color_t` 是 BLACK=0/RED=1/GREEN=2/YELLOW=3，直传会把
+ * "红"画成灭；更糟的是 >7 的值会一路落到板级扫描的 `s_bsrr_table[ch][color]`，
+ * 越界读出来的 `port` 是垃圾指针 → 扫描中断里往任意地址写 BSRR。故本用例同时钉
+ * "映射正确"与"表外拒显"两件事，并覆盖 SAVE 与 TMP 共用同一口径。
+ */
+static void case_rls_color(void)
+{
+    TEST_BEGIN("RLS 显示帧颜色：0/1/2 → 红/绿/黄，表外值拒显");
+
+    static uint8_t s_color_buf[600];
+    app_rls_display_t *disp = (app_rls_display_t *)s_color_buf;
+    memset(s_color_buf, 0, sizeof(s_color_buf));
+
+    s_stub_rows = 128;
+    s_stub_cols = 32;
+
+    /* 三色逐一映射：位图足够（525B）→ 清屏 + 贴图，贴图那一笔的颜色即映射结果 */
+    static const struct {
+        uint8_t             wire;
+        dev_display_color_t expect;
+    } cases[] = {
+        {0, DEV_DISPLAY_COLOR_RED},
+        {1, DEV_DISPLAY_COLOR_GREEN},
+        {2, DEV_DISPLAY_COLOR_YELLOW},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        disp->color = cases[i].wire;
+        cap_reset(128, 32);
+        _rls_cmd_display(&s_rls_ccb, disp, 525);
+        const uint8_t got = (s_rec_cnt == 2) ? s_recs[1].color : 0xEE;
+        CHECK_MSG(s_rec_cnt == 2 && s_recs[1].is_bitmap && got == (uint8_t)cases[i].expect,
+                  "color=%u 应映射成 %u 并贴图（期望 2 次绘制），得到 %d 次、颜色 %u",
+                  (unsigned)cases[i].wire, (unsigned)cases[i].expect, s_rec_cnt, (unsigned)got);
+    }
+
+    /* 表外值：3（SV 那张表的"黄"）、7（枚举内但协议外）、0xFF —— 都必须整帧拒显 */
+    const uint8_t bad[] = {3, 7, 0xFF};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        disp->color = bad[i];
+        cap_reset(128, 32);
+        _rls_cmd_display(&s_rls_ccb, disp, 525);
+        CHECK_MSG(s_rec_cnt == 0, "color=%u 越界必须拒显：期望 0 次绘制，得到 %d", (unsigned)bad[i],
+                  s_rec_cnt);
+    }
+
+    /* SAVE 与 TMP 必须共用同一口径（各写一份就会漂移） */
+    disp->color = 0;
+    cap_reset(128, 32);
+    _rls_cmd_display_save(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_rec_cnt == 2 && s_recs[1].color == (uint8_t)DEV_DISPLAY_COLOR_RED,
+              "SAVE 也应把 0 映射成红并贴图，得到 %d 次绘制", s_rec_cnt);
+
+    disp->color = 0xFF;
+    cap_reset(128, 32);
+    _rls_cmd_display_save(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_rec_cnt == 0, "SAVE 遇到表外颜色也必须拒显，得到 %d 次绘制", s_rec_cnt);
+
+    (void)app_render_take_persist_req(); /* 清掉 SAVE 置的落盘请求，别让后续用例看到 */
+
+    s_stub_rows = 64;
+    s_stub_cols = 64;
+}
+
+/* ================================================================ */
+
 int main(void)
 {
     printf("\n\033[36m文字渲染区域契约（字号 16，ASCII 半宽 8 / 汉字宽 16）\033[0m\n");
@@ -997,6 +1065,7 @@ int main(void)
     case_cvt_unicode_bounds();
     case_long_utf8_clamp();
     case_rls_display_len();
+    case_rls_color();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
