@@ -15,7 +15,8 @@
  *  对应显示命令（DISPLAY / DISPLAY_SAVE）DATA 域的开头；`bitmap` 用柔性数组
  *  紧跟固定头之后。 */
 typedef struct {
-    uint8_t light_level; /**< 亮度等级（0..7） */
+    uint8_t light_level; /**< 亮度，**线上口径** 0~31（0 最暗、31 最亮）/ 255 自动；
+                              handler 压到面板 1~7 档或恢复光感跟随 */
     uint8_t color;       /**< 显示颜色，**线上口径** 0 红 / 1 绿 / 2 黄（由 handler 映射成
                               `dev_display_color_t`；表外值整帧拒显，见 app_rls_cmd.c） */
     uint8_t style;       /**< 显示风格（协议字段） */

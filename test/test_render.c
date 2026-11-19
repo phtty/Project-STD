@@ -151,6 +151,20 @@ static uint16_t s_stub_cols = 64;
 uint16_t        app_screen_rows(void) { return s_stub_rows; }
 uint16_t        app_screen_cols(void) { return s_stub_cols; }
 
+/* ---- app_light_sensor 桩：显示命令会把帧内亮度应用到整屏 ----
+ * 真实实现要停光感跟随、再走 app_screen_set_brightness（级联下发），host 上不跑；
+ * 这里只记"调了哪个 API、参数是什么"。 */
+static int     s_light_fixed_cnt;
+static uint8_t s_light_fixed_last;
+static int     s_light_resume_cnt;
+
+void app_light_sensor_set_fixed(uint8_t level)
+{
+    s_light_fixed_cnt++;
+    s_light_fixed_last = level;
+}
+void app_light_sensor_resume(void) { s_light_resume_cnt++; }
+
 /* ---- 被测：生产源码本体（static 内部结构只能靠 TU-include 触达） ---- */
 #include "../Application/Src/Render/app_render.c"
 
@@ -1025,6 +1039,84 @@ static void case_rls_color(void)
 
 /* ================================================================ */
 
+/**
+ * @brief RLS 显示帧亮度：0~31 压到面板 1~7 档，255 恢复光感跟随，被拒的帧无副作用
+ *
+ * 口径来自文档：「亮度（32 级）0~31，0 最暗、31 最亮，255 自动」。面板只有 3 位
+ * 亮度且 0 = 全灭，故 0~31 落 **1~7**（0 落 1）—— 关屏是 DISPLAY_SW 的事，不该由
+ * 亮度字段顺手做掉。32~254 协议外，按最亮钳制。
+ */
+static void case_rls_light(void)
+{
+    TEST_BEGIN("RLS 显示帧亮度：0~31 → 1~7、255 → 恢复自动跟随");
+
+    static uint8_t s_light_buf[600];
+    app_rls_display_t *disp = (app_rls_display_t *)s_light_buf;
+    memset(s_light_buf, 0, sizeof(s_light_buf));
+    disp->color = 0; /* 红：先过颜色校验，才能走到亮度这一步 */
+
+    s_stub_rows = 128;
+    s_stub_cols = 32;
+
+    static const struct {
+        uint8_t wire;
+        uint8_t hw;
+    } cases[] = {
+        {0, 1},   /* 协议最暗 → 硬件最暗的**非零**档 */
+        {16, 4},
+        {31, 7},
+        {32, 7},  /* 协议外：按最亮钳制，不让显示失败 */
+        {254, 7},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        s_light_fixed_cnt  = 0;
+        s_light_resume_cnt = 0;
+        disp->light_level  = cases[i].wire;
+        cap_reset(128, 32);
+        _rls_cmd_display(&s_rls_ccb, disp, 525);
+        CHECK_MSG(s_light_fixed_cnt == 1 && s_light_fixed_last == cases[i].hw &&
+                      s_light_resume_cnt == 0,
+                  "亮度 %u 应设成 %u 档（固定 1 次 / 恢复 0 次），得到 fixed=%d(%u) resume=%d",
+                  (unsigned)cases[i].wire, (unsigned)cases[i].hw, s_light_fixed_cnt,
+                  (unsigned)s_light_fixed_last, s_light_resume_cnt);
+    }
+
+    /* 255 = 自动亮度：恢复光感跟随，不写固定档 */
+    s_light_fixed_cnt  = 0;
+    s_light_resume_cnt = 0;
+    disp->light_level  = 255;
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_light_resume_cnt == 1 && s_light_fixed_cnt == 0,
+              "亮度 255 应恢复自动跟随（恢复 1 次、固定 0 次），得到 resume=%d fixed=%d",
+              s_light_resume_cnt, s_light_fixed_cnt);
+
+    /* 拒显的帧不得有副作用：位图不足时亮度也不许动 */
+    s_light_fixed_cnt  = 0;
+    s_light_resume_cnt = 0;
+    disp->light_level  = 31;
+    cap_reset(128, 32);
+    _rls_cmd_display(&s_rls_ccb, disp, 64); /* 位图不足 → 拒显 */
+    CHECK_MSG(s_light_fixed_cnt == 0 && s_light_resume_cnt == 0,
+              "被拒的帧不得改亮度：得到 fixed=%d resume=%d", s_light_fixed_cnt, s_light_resume_cnt);
+
+    /* SAVE 与 TMP 共用同一亮度口径 */
+    s_light_fixed_cnt  = 0;
+    s_light_resume_cnt = 0;
+    disp->light_level  = 31;
+    cap_reset(128, 32);
+    _rls_cmd_display_save(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_light_fixed_cnt == 1 && s_light_fixed_last == 7,
+              "SAVE 也应应用亮度 31 → 7 档，得到 fixed=%d(%u)", s_light_fixed_cnt,
+              (unsigned)s_light_fixed_last);
+    (void)app_render_take_persist_req();
+
+    s_stub_rows = 64;
+    s_stub_cols = 64;
+}
+
+/* ================================================================ */
+
 int main(void)
 {
     printf("\n\033[36m文字渲染区域契约（字号 16，ASCII 半宽 8 / 汉字宽 16）\033[0m\n");
@@ -1066,6 +1158,7 @@ int main(void)
     case_long_utf8_clamp();
     case_rls_display_len();
     case_rls_color();
+    case_rls_light();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

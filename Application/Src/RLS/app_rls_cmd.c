@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "app_render.h"
+#include "app_light_sensor.h"
 
 static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len);
@@ -96,6 +97,30 @@ static bool _rls_map_color(uint8_t v, dev_display_color_t *out)
     return true;
 }
 
+/** @brief 应用显示帧的亮度字节（协议：0~31，0 最暗 / 31 最亮；255 = 自动）
+ *
+ *  **口径**：文档三张显示命令表都写"亮度（32 级），0~31，255 自动亮度"。
+ *  面板只有 3 位亮度（0~7，0 = 全灭），所以 0~31 线性压到 **1~7**：0 落 1 而不是 0，
+ *  因为 0 在硬件上是"不亮"，而文档里 0 是"最暗"、关屏另有 DISPLAY_SW 命令。
+ *  32~254 是协议外值，按最亮（7）处理 —— 它们不该让"显示"这件事失败。
+ *
+ *  与参考分支（rls_p20）的差别：那一版把 0 当关屏、把 DISPLAY_SW 的 0x30/0x31
+ *  也当亮度值喂进同一个函数（结果 0x30 也落到"最亮 7"，关屏关不掉）。这里亮度只
+ *  来自显示命令的亮度字段，开关留给 DISPLAY_SW 自己解释，别复用本函数。
+ */
+static void _rls_apply_light_level(uint8_t level)
+{
+    if (level == 255U) {
+        app_light_sensor_resume(); /* 恢复光感跟随并立即调光一次 */
+        return;
+    }
+    if (level > 31U) level = 31U;
+
+    /* 0~31 → 1~7（四舍五入）：31 → 1 + (186+15)/31 = 7，0 → 1 */
+    const uint8_t hw = (uint8_t)(1U + (uint16_t)((uint16_t)level * 6U + 15U) / 31U);
+    app_light_sensor_set_fixed(hw);
+}
+
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb; /* 回复走 app_ccb_send_to 的表来源，不需要本帧的通道 */
@@ -109,6 +134,8 @@ static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len)
                (unsigned)display_ctx->color);
         return;
     }
+
+    _rls_apply_light_level(display_ctx->light_level); /* 显示命令同步应用亮度 */
 
     // 显示前先清屏
     app_render(&(app_render_cfg_t){
@@ -143,6 +170,8 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
                (unsigned)display_ctx->color);
         return;
     }
+
+    _rls_apply_light_level(display_ctx->light_level); /* 显示命令同步应用亮度 */
 
     // 显示前先清屏
     app_render(&(app_render_cfg_t){
