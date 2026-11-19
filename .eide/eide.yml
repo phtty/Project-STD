@@ -461,9 +461,7 @@ targets:
       - <virtual_root>/boards/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/5006048
-      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
       - <virtual_root>/Application/protocol/ldi
-      - <virtual_root>/boards/3833024/Device/dev_p20_16x8_2200001667.c
       - <virtual_root>/boards/3833024/Device/dev_p5_64x32_.c
       - <virtual_root>/Application/protocol/cdstd
       - <virtual_root>/Application/protocol/ah
@@ -476,6 +474,8 @@ targets:
       - <virtual_root>/Application/Src/CDSTD/app_cdstd_cmd.c
       - <virtual_root>/Application/Src/CDSTD/app_cdstd_cfg.c
       - <virtual_root>/Application/protocol/cas
+      - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
+      - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -630,7 +630,6 @@ targets:
       - <virtual_root>/board/3833024/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
-      - <virtual_root>/boards/3833024
       - <virtual_root>/Application/protocol/rls
       - <virtual_root>/Application/Src/RLS/app_rls.c
       - <virtual_root>/Application/Src/RLS/app_rls_cmd.c
@@ -639,6 +638,7 @@ targets:
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/Application/protocol/cdstd
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000983.c
+      - <virtual_root>/boards/3833024
     settings:
       debugger: cortex-debug
     toolchain: GCC

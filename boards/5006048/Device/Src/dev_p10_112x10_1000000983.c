@@ -134,7 +134,7 @@ static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
 /* ---- P10 实例 ---- */
 typedef struct {
     dev_display_t base;
-} dev_module_t;
+} dev_display_module_t;
 
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
@@ -152,7 +152,7 @@ typedef struct {
    5 排堆叠 (modules_per_col=5), 每模组独占 1 接口 (total_channels=10×5)。
    注意 total_channels / channel_pixels 不满足 dev_display.h 注释中的级联屏公式,
    此处按直通屏物理结构直接赋值。 */
-static dev_module_t s_module = {
+static dev_display_module_t s_module = {
     .base = {
         .ops                  = nullptr,               /* 由 dev_display_init 设置 */
         .module_rows          = MODULE_PIXEL_ROW,      /* 112: 模组长轴 (屏宽方向) */

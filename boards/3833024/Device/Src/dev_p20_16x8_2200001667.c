@@ -63,19 +63,19 @@
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
     pl_hub75_bsrr_t r, g, b;
-} p20_bsrr_t;
+} module_bsrr_t;
 
-[[gnu::section(".ccmram")]] static p20_bsrr_t s_bsrr_table[P20_TOTAL_CHANNELS][8];
+[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[P20_TOTAL_CHANNELS][8];
 
 /* ---- P20 实例 ---- */
 typedef struct {
     dev_display_t base;
-} dev_display_p20_t;
+} dev_display_module_t;
 
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P20_BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P20_BUFFER_SIZE];
 
-static dev_display_p20_t s_p20_dev = {
+static dev_display_module_t s_p20_dev = {
     .base = {
         .ops                 = nullptr, /* 由 dev_display_p20_init 设置 */
         .module_rows         = P20_MODULE_PIXEL_ROW,
@@ -85,20 +85,16 @@ static dev_display_p20_t s_p20_dev = {
         .modules_per_col     = P20_MODULE_COLS,
         .scan_lines          = P20_SCAN_LINES,
         /* P20 只有 R/G 灯珠：黑/红/绿/黄 4 色（去掉 B/紫/青/白）*/
-        .supported_color_mask = DEV_DISPLAY_COLOR_ALL
-            & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN)
-              | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
-        .screen_rows         = P20_SCREEN_ROWS,
-        .screen_cols         = P20_SCREEN_COLS,
-        .total_channels      = P20_TOTAL_CHANNELS,
-        .channel_pixels      = P20_CHANNEL_PIXELS,
-        .scan_line_pixels    = P20_SCAN_LINE_PX,
-        .buffer_size         = P20_BUFFER_SIZE,
-        .pixel_map           = s_pixel_map,
-        .hub75_buff          = s_hub75_buff,
-        .light_level         = 7,
+        .supported_color_mask = DEV_DISPLAY_COLOR_ALL & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
+        .screen_rows          = P20_SCREEN_ROWS,
+        .screen_cols          = P20_SCREEN_COLS,
+        .total_channels       = P20_TOTAL_CHANNELS,
+        .channel_pixels       = P20_CHANNEL_PIXELS,
+        .scan_line_pixels     = P20_SCAN_LINE_PX,
+        .buffer_size          = P20_BUFFER_SIZE,
+        .pixel_map            = s_pixel_map,
+        .hub75_buff           = s_hub75_buff,
+        .light_level          = 7,
     },
 };
 
@@ -166,8 +162,8 @@ static inline void _p20_scan(dev_display_t *dev, uint8_t line)
 
         /* 同一像素位置同时输出所有通道的颜色数据 */
         for (uint8_t ch = 0; ch < dev->total_channels; ch++) {
-            uint8_t color    = dev->hub75_buff[pixel_base + ch * dev->channel_pixels];
-            p20_bsrr_t *bsrr = &s_bsrr_table[ch][color];
+            uint8_t color       = dev->hub75_buff[pixel_base + ch * dev->channel_pixels];
+            module_bsrr_t *bsrr = &s_bsrr_table[ch][color];
             pl_hub75_bsrr_flush(&bsrr->r);
             pl_hub75_bsrr_flush(&bsrr->g);
             pl_hub75_bsrr_flush(&bsrr->b);
@@ -213,17 +209,17 @@ void dev_p20_16x8_2200001667_init(void)
             /* R 通道: color bit0 决定亮灭 */
             s_bsrr_table[ch][color].r.port = g_hub75_pin_r[ch].port;
             s_bsrr_table[ch][color].r.val  = (color & 1) ? (uint32_t)g_hub75_pin_r[ch].pin        /* 置位: 输出高 */
-                                                   : (uint32_t)g_hub75_pin_r[ch].pin << 16; /* 复位: 输出低 */
+                                                         : (uint32_t)g_hub75_pin_r[ch].pin << 16; /* 复位: 输出低 */
 
             /* G 通道: color bit1 决定亮灭 */
             s_bsrr_table[ch][color].g.port = g_hub75_pin_g[ch].port;
             s_bsrr_table[ch][color].g.val  = (color & 2) ? (uint32_t)g_hub75_pin_g[ch].pin
-                                                   : (uint32_t)g_hub75_pin_g[ch].pin << 16;
+                                                         : (uint32_t)g_hub75_pin_g[ch].pin << 16;
 
             /* B 通道: color bit2 决定亮灭 */
             s_bsrr_table[ch][color].b.port = g_hub75_pin_b[ch].port;
             s_bsrr_table[ch][color].b.val  = (color & 4) ? (uint32_t)g_hub75_pin_b[ch].pin
-                                                   : (uint32_t)g_hub75_pin_b[ch].pin << 16;
+                                                         : (uint32_t)g_hub75_pin_b[ch].pin << 16;
         }
     }
 }

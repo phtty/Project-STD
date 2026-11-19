@@ -134,7 +134,7 @@ static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
 /* ---- P10 实例 ---- */
 typedef struct {
     dev_display_t base;
-} dev_module_t;
+} dev_display_module_t;
 
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
@@ -152,25 +152,25 @@ typedef struct {
    5 排堆叠 (modules_per_col=5), 每模组独占 1 接口 (total_channels=10×5)。
    注意 total_channels / channel_pixels 不满足 dev_display.h 注释中的级联屏公式,
    此处按直通屏物理结构直接赋值。 */
-static dev_module_t s_module = {
+static dev_display_module_t s_module = {
     .base = {
-        .ops                 = nullptr,             /* 由 dev_display_init 设置 */
-        .module_rows         = MODULE_PIXEL_ROW,    /* 112: 模组长轴 (屏宽方向) */
-        .module_cols         = MODULE_PIXEL_COL,    /* 10: 模组短轴 (屏高方向) */
-        .channels_per_module = CHANNELS_PER_MODULE, /* 5 */
-        .modules_per_row     = MODULES_PER_ROW,     /* 2: 左模组 + 右模组 */
-        .modules_per_col     = MODULES_PER_COL,     /* 5: 排数 */
-        .scan_lines          = SCAN_LINES,          /* 2: 1/2 扫描 */
+        .ops                  = nullptr,               /* 由 dev_display_init 设置 */
+        .module_rows          = MODULE_PIXEL_ROW,      /* 112: 模组长轴 (屏宽方向) */
+        .module_cols          = MODULE_PIXEL_COL,      /* 10: 模组短轴 (屏高方向) */
+        .channels_per_module  = CHANNELS_PER_MODULE,   /* 5 */
+        .modules_per_row      = MODULES_PER_ROW,       /* 2: 左模组 + 右模组 */
+        .modules_per_col      = MODULES_PER_COL,       /* 5: 排数 */
+        .scan_lines           = SCAN_LINES,            /* 2: 1/2 扫描 */
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL, /* P10 全彩：8 色全支持 */
-        .screen_rows         = SCREEN_ROWS,         /* 224: 屏宽 */
-        .screen_cols         = SCREEN_COLS,         /* 50: 屏高 */
-        .total_channels      = TOTAL_CHANNELS,      /* 50: 模组总数 × 每模组通道数 */
-        .channel_pixels      = CHANNEL_PIXELS,      /* 224: 每通道像素 (含 2 扫行) */
-        .scan_line_pixels    = SCAN_LINE_PIXELS,    /* 112 */
-        .buffer_size         = BUFFER_SIZE,         /* 11200 */
-        .pixel_map           = s_pixel_map,
-        .hub75_buff          = s_hub75_buff,
-        .light_level         = 7,
+        .screen_rows          = SCREEN_ROWS,           /* 224: 屏宽 */
+        .screen_cols          = SCREEN_COLS,           /* 50: 屏高 */
+        .total_channels       = TOTAL_CHANNELS,        /* 50: 模组总数 × 每模组通道数 */
+        .channel_pixels       = CHANNEL_PIXELS,        /* 224: 每通道像素 (含 2 扫行) */
+        .scan_line_pixels     = SCAN_LINE_PIXELS,      /* 112 */
+        .buffer_size          = BUFFER_SIZE,           /* 11200 */
+        .pixel_map            = s_pixel_map,
+        .hub75_buff           = s_hub75_buff,
+        .light_level          = 7,
     },
 };
 
@@ -232,7 +232,7 @@ typedef struct {
 
 #define P10_PORT_MAX_CH (16U) /**< 单端口最多几路（本板 PD 上 11 路，留余量）*/
 static p10_ch_t s_port_ch[USED_PORT_COUNT][P10_PORT_MAX_CH];
-static uint8_t  s_port_cnt[USED_PORT_COUNT];
+static uint8_t s_port_cnt[USED_PORT_COUNT];
 
 static void _build_channel_table(void)
 {
@@ -257,13 +257,13 @@ static void _prepare_send_buffer(dev_display_t *dev)
         /* 该扫描行要发送的时序步数 */
         for (uint16_t step_cnt = 0; step_cnt < TIMING_STEPS; step_cnt++) {
             const uint16_t pixel_offset   = (uint16_t)(step_cnt / 3 + scan_idx * SCAN_LINE_PIXELS);
-            const uint8_t  color_bit_shift = (uint8_t)(2 - (step_cnt % 3));
+            const uint8_t color_bit_shift = (uint8_t)(2 - (step_cnt % 3));
 
             /* 逐端口：一个累加器攒齐该端口的全部通道，**整字写一次** */
             for (uint8_t p = 0; p < USED_PORT_COUNT; p++) {
                 const p10_ch_t *c    = s_port_ch[p];
                 const p10_ch_t *last = c + s_port_cnt[p];
-                uint32_t        acc  = 0;
+                uint32_t acc         = 0;
 
                 /* 用指针走表：-Og 下不会重算下标（重算一次就吃掉一半收益） */
                 for (; c < last; c++) {

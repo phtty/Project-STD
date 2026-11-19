@@ -35,19 +35,19 @@
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
     pl_hub75_bsrr_t r, g, b;
-} bsrr_t;
+} module_bsrr_t;
 
-[[gnu::section(".ccmram")]] static bsrr_t s_bsrr_table[TOTAL_CHANNELS][8];
+[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[TOTAL_CHANNELS][8];
 
 /* ---- 模组实例 ---- */
 typedef struct {
     dev_display_t base;
-} dev_module_t;
+} dev_display_module_t;
 
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
 
-static dev_module_t s_dev = {
+static dev_display_module_t s_dev = {
     .base = {
         .ops                  = nullptr, /* 由 dev_display_init 设置 */
         .module_rows          = MODULE_PIXEL_ROW,
@@ -113,8 +113,8 @@ static inline void _scan(dev_display_t *dev, uint8_t line)
 
         /* 同一像素位置同时输出所有通道的颜色数据 */
         for (uint8_t ch = 0; ch < dev->total_channels; ch++) {
-            uint8_t color = dev->hub75_buff[pixel_base + ch * dev->channel_pixels];
-            bsrr_t *bsrr  = &s_bsrr_table[ch][color];
+            uint8_t color       = dev->hub75_buff[pixel_base + ch * dev->channel_pixels];
+            module_bsrr_t *bsrr = &s_bsrr_table[ch][color];
             pl_hub75_bsrr_flush(&bsrr->r);
             pl_hub75_bsrr_flush(&bsrr->g);
             pl_hub75_bsrr_flush(&bsrr->b);

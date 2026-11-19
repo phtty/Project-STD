@@ -51,14 +51,14 @@
 /* 非级联直通屏：每模组独占接口，通道数 = 模组总数 × 每模组通道数
    （dev_display.h 注释里的级联屏公式 modules_per_col × channels_per_module
    不适用于直通屏，P10 驱动同样是显式赋值）。 */
-#define TOTAL_CHANNELS      (MODULES_PER_ROW * MODULES_PER_COL * CHANNELS_PER_MODULE) /**< 32 */
-#define CHANNELS_PER_HALF   (TOTAL_CHANNELS / 2U)                                     /**< 16 */
-#define CHANNEL_PIXELS      (ROWS_PER_CHANNEL * MODULE_PIXEL_ROW)                     /**< 128 */
-#define SCAN_LINE_PIXELS    (CHANNEL_PIXELS / SCAN_LINES)                             /**< 128 */
-#define POINTS_PER_CHANNEL  (CHANNEL_PIXELS * 3U)                                     /**< 384 个灯珠位 */
-#define BYTES_PER_CHANNEL   (POINTS_PER_CHANNEL / 8U)                                 /**< 48 字节（老 fixBuf 的通道步长） */
-#define TIMING_STEPS        (BYTES_PER_CHANNEL * 8U)                                  /**< 384：每像素 R/G/B 各一步 */
-#define USED_PORT_COUNT     (7U)                                                      /**< PA..PG（PB 本屏不用，留位对齐） */
+#define TOTAL_CHANNELS     (MODULES_PER_ROW * MODULES_PER_COL * CHANNELS_PER_MODULE) /**< 32 */
+#define CHANNELS_PER_HALF  (TOTAL_CHANNELS / 2U)                                     /**< 16 */
+#define CHANNEL_PIXELS     (ROWS_PER_CHANNEL * MODULE_PIXEL_ROW)                     /**< 128 */
+#define SCAN_LINE_PIXELS   (CHANNEL_PIXELS / SCAN_LINES)                             /**< 128 */
+#define POINTS_PER_CHANNEL (CHANNEL_PIXELS * 3U)                                     /**< 384 个灯珠位 */
+#define BYTES_PER_CHANNEL  (POINTS_PER_CHANNEL / 8U)                                 /**< 48 字节（老 fixBuf 的通道步长） */
+#define TIMING_STEPS       (BYTES_PER_CHANNEL * 8U)                                  /**< 384：每像素 R/G/B 各一步 */
+#define USED_PORT_COUNT    (7U)                                                      /**< PA..PG（PB 本屏不用，留位对齐） */
 
 static_assert((TOTAL_CHANNELS * CHANNEL_PIXELS) == BUFFER_SIZE,
               "通道数 × 每通道像素数必须等于整屏像素数（hub75_buff 的布局前提）");
@@ -80,8 +80,8 @@ enum {
 
 /** @brief 单通道的端口与引脚 */
 typedef struct {
-    int8_t   port_idx; /**< 0..6 → GPIOA..GPIOG */
-    uint16_t pin;      /**< GPIO_PIN_x */
+    int8_t port_idx; /**< 0..6 → GPIOA..GPIOG */
+    uint16_t pin;    /**< GPIO_PIN_x */
 } channel_info_t;
 
 /* ---- 通道映射（32 路；下标 = hub75_buff 的通道序） ----
@@ -152,7 +152,7 @@ static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
 /* ---- P15 实例 ---- */
 typedef struct {
     dev_display_t base; /**< 基类必须是首成员 */
-} dev_p15_t;
+} dev_display_module_t;
 
 [[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
 [[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
@@ -168,7 +168,7 @@ typedef struct {
 [[gnu::section(".ccmram")]] static uint32_t s_hub75_io[TIMING_STEPS][USED_PORT_COUNT];
 
 /* 静态扫描：一帧只有一行，故没有 P10 那样的 [扫行] 维。 */
-static dev_p15_t s_p15 = {
+static dev_display_module_t s_p15 = {
     .base = {
         .ops                 = nullptr,             /* 由 dev_p15_64x8_1000001090_init 设置 */
         .module_rows         = MODULE_PIXEL_ROW,    /* 64：模组长轴（屏宽方向） */
@@ -179,15 +179,15 @@ static dev_p15_t s_p15 = {
         .scan_lines          = SCAN_LINES,          /* 1：静态扫描 */
         /* 1R1G1B 全彩灯珠：8 色全支持 */
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL,
-        .screen_rows         = SCREEN_ROWS,      /* 128：屏宽 */
-        .screen_cols         = SCREEN_COLS,      /* 32：屏高 */
-        .total_channels      = TOTAL_CHANNELS,   /* 32：模组总数 × 每模组通道数 */
-        .channel_pixels      = CHANNEL_PIXELS,   /* 128：每通道像素（2 行 × 64） */
-        .scan_line_pixels    = SCAN_LINE_PIXELS, /* 128：静态扫描一帧就是全部像素 */
-        .buffer_size         = BUFFER_SIZE,      /* 4096 */
-        .pixel_map           = s_pixel_map,
-        .hub75_buff          = s_hub75_buff,
-        .light_level         = 7,
+        .screen_rows          = SCREEN_ROWS,      /* 128：屏宽 */
+        .screen_cols          = SCREEN_COLS,      /* 32：屏高 */
+        .total_channels       = TOTAL_CHANNELS,   /* 32：模组总数 × 每模组通道数 */
+        .channel_pixels       = CHANNEL_PIXELS,   /* 128：每通道像素（2 行 × 64） */
+        .scan_line_pixels     = SCAN_LINE_PIXELS, /* 128：静态扫描一帧就是全部像素 */
+        .buffer_size          = BUFFER_SIZE,      /* 4096 */
+        .pixel_map            = s_pixel_map,
+        .hub75_buff           = s_hub75_buff,
+        .light_level          = 7,
     },
 };
 
@@ -212,8 +212,8 @@ static dev_p15_t s_p15 = {
 static void _convert_pixelmap(dev_display_t *dev)
 {
     for (uint16_t y = 0; y < dev->screen_cols; y++) {
-        const uint8_t mod_row = (uint8_t)(y / MODULE_PIXEL_COL); /* 0..3 */
-        const uint8_t row_in  = (uint8_t)(y % MODULE_PIXEL_COL); /* 模组内行 0..7 */
+        const uint8_t mod_row = (uint8_t)(y / MODULE_PIXEL_COL);      /* 0..3 */
+        const uint8_t row_in  = (uint8_t)(y % MODULE_PIXEL_COL);      /* 模组内行 0..7 */
         const uint8_t ch_row  = (uint8_t)(row_in / ROWS_PER_CHANNEL); /* 通道 0..3 */
         const uint8_t ch_line = (uint8_t)(row_in % ROWS_PER_CHANNEL); /* 通道内行 0/1 */
 
@@ -222,8 +222,7 @@ static void _convert_pixelmap(dev_display_t *dev)
             const uint8_t ch   = (uint8_t)(half * CHANNELS_PER_HALF + mod_row * CHANNELS_PER_MODULE + ch_row);
             const uint8_t xi   = (uint8_t)(x - (half ? MODULE_PIXEL_ROW : 0U));
 
-            dev->hub75_buff[(uint16_t)ch * CHANNEL_PIXELS + (uint16_t)ch_line * MODULE_PIXEL_ROW + xi]
-                = dev->pixel_map[(uint32_t)y * dev->screen_rows + x];
+            dev->hub75_buff[(uint16_t)ch * CHANNEL_PIXELS + (uint16_t)ch_line * MODULE_PIXEL_ROW + xi] = dev->pixel_map[(uint32_t)y * dev->screen_rows + x];
         }
     }
 }
@@ -255,16 +254,16 @@ static void _convert_pixelmap(dev_display_t *dev)
  *  不需要 memset（每个端口字都由 set/rst 位拼满）。与 P10 驱动同一手法。
  */
 typedef struct {
-    uint32_t set;  /**< 置位字（= 引脚掩码） */
-    uint32_t rst;  /**< 复位字（= 引脚掩码 << 16） */
-    uint16_t off;  /**< 该通道在 hub75_buff 里的起始偏移 = ch * CHANNEL_PIXELS */
-    uint8_t  half; /**< 0 = 左半屏（字节列倒序），1 = 右半屏（正序） */
-    uint8_t  pad;
+    uint32_t set; /**< 置位字（= 引脚掩码） */
+    uint32_t rst; /**< 复位字（= 引脚掩码 << 16） */
+    uint16_t off; /**< 该通道在 hub75_buff 里的起始偏移 = ch * CHANNEL_PIXELS */
+    uint8_t half; /**< 0 = 左半屏（字节列倒序），1 = 右半屏（正序） */
+    uint8_t pad;
 } p15_ch_t;
 
 #define P15_PORT_MAX_CH (16U) /**< 单端口最多几路（本屏 PD 上 9 路，留余量） */
 static p15_ch_t s_port_ch[USED_PORT_COUNT][P15_PORT_MAX_CH];
-static uint8_t  s_port_cnt[USED_PORT_COUNT];
+static uint8_t s_port_cnt[USED_PORT_COUNT];
 
 static void _build_channel_table(void)
 {
@@ -291,9 +290,9 @@ static void _prepare_send_buffer(dev_display_t *dev)
         const uint8_t i = (uint8_t)((BYTES_PER_CHANNEL - 1U) - step / 8U); /* 47..0 */
         const uint8_t j = (uint8_t)(step % 8U);                            /* 0..7 */
 
-        const uint8_t grp  = (uint8_t)(i / 6U);   /* 字节列 0..7 */
-        const uint8_t sub  = (uint8_t)(i % 6U);   /* 0=R0 1=R1 2=G0 3=G1 4=B0 5=B1 */
-        const uint8_t row  = (uint8_t)(sub & 1U); /* 通道内行 0/1 */
+        const uint8_t grp  = (uint8_t)(i / 6U);    /* 字节列 0..7 */
+        const uint8_t sub  = (uint8_t)(i % 6U);    /* 0=R0 1=R1 2=G0 3=G1 4=B0 5=B1 */
+        const uint8_t row  = (uint8_t)(sub & 1U);  /* 通道内行 0/1 */
         const uint8_t cbit = (uint8_t)(sub >> 1U); /* 颜色位：0=R 1=G 2=B（bit0/1/2） */
 
         /* 字节内像素号：行 1 的反序见上面 displayDataUpdata 的位序说明 */
@@ -307,7 +306,7 @@ static void _prepare_send_buffer(dev_display_t *dev)
         for (uint8_t p = 0; p < USED_PORT_COUNT; p++) {
             const p15_ch_t *c    = s_port_ch[p];
             const p15_ch_t *last = c + s_port_cnt[p];
-            uint32_t        acc  = 0;
+            uint32_t acc         = 0;
 
             /* 用指针走表：-Og 下不会重算下标 */
             for (; c < last; c++) {
