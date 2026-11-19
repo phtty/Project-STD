@@ -1342,7 +1342,7 @@ static void case_rls_report_ip(void)
  */
 static void case_rls_echo_rule(void)
 {
-    TEST_BEGIN("RLS 回显规则：BM/SV 不回显，其余已实现命令回显");
+    TEST_BEGIN("RLS 回显规则：BM/SV/搜索 不回显，其余已实现命令回显");
 
     CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY), "显示(BM)不得回显");
     CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SAVE), "显示并保存(SV)不得回显");
@@ -1351,8 +1351,10 @@ static void case_rls_echo_rule(void)
     CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SW), "开关显示(55)应回显");
     CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SW_ALT), "开关显示(备用码)应回显");
     CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_SET_IP), "修改 IP 应回显");
-    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP), "搜索(ST)应回显");
-    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP_SC), "搜索(SC)应回显");
+
+    /* 查询类只发自己的应答（搜索回 RB），不回显 —— 否则一次请求两帧 */
+    CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP), "搜索(ST)只应答不回显");
+    CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP_SC), "搜索(SC)只应答不回显");
 
     /* 未识别的命令码不播回去 */
     CHECK_MSG(!app_rls_cmd_should_echo((app_rls_cmd_type_t)0x1234), "未识别命令码不得回显");

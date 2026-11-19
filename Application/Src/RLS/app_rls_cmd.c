@@ -41,13 +41,15 @@ bool app_rls_cmd_should_echo(app_rls_cmd_type_t cmd)
         case APP_RLS_CMD_TYPE_DISPLAY:
         case APP_RLS_CMD_TYPE_DISPLAY_SAVE: return false;
 
+        /* 查询类（搜索）只发 RB 应答，不回显 —— 否则一次请求两帧 */
+        case APP_RLS_CMD_TYPE_AQUIRY_IP:
+        case APP_RLS_CMD_TYPE_AQUIRY_IP_SC: return false;
+
         /* 其余已实现的命令都回显 */
         case APP_RLS_CMD_TYPE_TEST:
         case APP_RLS_CMD_TYPE_DISPLAY_SW:
         case APP_RLS_CMD_TYPE_DISPLAY_SW_ALT:
-        case APP_RLS_CMD_TYPE_SET_IP:
-        case APP_RLS_CMD_TYPE_AQUIRY_IP:
-        case APP_RLS_CMD_TYPE_AQUIRY_IP_SC: return true;
+        case APP_RLS_CMD_TYPE_SET_IP: return true;
 
         default: return false; /* 未识别的命令码不播回去 */
     }
