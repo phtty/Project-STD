@@ -239,6 +239,29 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
 
 uint16_t app_tcp_server_get_port(void) { return s_tcp_port; }
 
+/* ---- 图片槽桩：SV/DS 经 rls_pic_save/show 落到三个槽，这里只记调用 ----
+ * 真实现要读写 W25Qxx 与三个干接点，host 上不跑。 */
+static int     s_pic_save_cnt;
+static uint8_t s_pic_save_slot;
+static uint8_t s_pic_save_color;
+static int     s_pic_show_cnt;
+static uint8_t s_pic_show_slot;
+
+bool rls_pic_save(uint8_t slot, const uint8_t *bitmap, uint8_t color)
+{
+    (void)bitmap;
+    s_pic_save_cnt++;
+    s_pic_save_slot  = slot;
+    s_pic_save_color = color;
+    return true;
+}
+
+void rls_pic_show(uint8_t slot)
+{
+    s_pic_show_cnt++;
+    s_pic_show_slot = slot;
+}
+
 /* ================================================================
  *  capture 渲染目标：只记几何
  * ================================================================ */
@@ -1087,19 +1110,25 @@ static void case_rls_color(void)
                   s_rec_cnt);
     }
 
-    /* SAVE 与 TMP 必须共用同一口径（各写一份就会漂移） */
-    disp->color = 1;
+    /* SAVE 与 TMP 必须共用同一口径（各写一份就会漂移）：
+       SV 现在走"存槽 + 显示槽"，颜色进槽、不再直接 app_render */
+    disp->color     = 1;
+    s_pic_save_cnt  = 0;
+    s_pic_show_cnt  = 0;
     cap_reset(128, 32);
     _rls_cmd_display_save(&s_rls_ccb, disp, 525);
-    CHECK_MSG(s_rec_cnt == 2 && s_recs[1].color == (uint8_t)DEV_DISPLAY_COLOR_RED,
-              "SAVE 也应把 1 透传成红并贴图，得到 %d 次绘制", s_rec_cnt);
+    CHECK_MSG(s_pic_save_cnt == 1 && s_pic_save_color == (uint8_t)DEV_DISPLAY_COLOR_RED &&
+                  s_pic_show_cnt == 1,
+              "SAVE 应把 1 透传成红存槽并显示（save=%d color=%u show=%d），绘制 %d 次",
+              s_pic_save_cnt, (unsigned)s_pic_save_color, s_pic_show_cnt, s_rec_cnt);
 
-    disp->color = 0xFF;
+    disp->color    = 0xFF;
+    s_pic_save_cnt = 0;
+    s_pic_show_cnt = 0;
     cap_reset(128, 32);
     _rls_cmd_display_save(&s_rls_ccb, disp, 525);
-    CHECK_MSG(s_rec_cnt == 0, "SAVE 遇到表外颜色也必须拒显，得到 %d 次绘制", s_rec_cnt);
-
-    (void)app_render_take_persist_req(); /* 清掉 SAVE 置的落盘请求，别让后续用例看到 */
+    CHECK_MSG(s_pic_save_cnt == 0 && s_pic_show_cnt == 0,
+              "SAVE 遇到越界颜色必须整帧丢弃（save=%d show=%d）", s_pic_save_cnt, s_pic_show_cnt);
 
     s_stub_rows = 64;
     s_stub_cols = 64;
@@ -1360,6 +1389,77 @@ static void case_rls_echo_rule(void)
     CHECK_MSG(!app_rls_cmd_should_echo((app_rls_cmd_type_t)0x1234), "未识别命令码不得回显");
 }
 
+/**
+ * @brief RLS 图片槽：SV 存进"图片编号"指定的槽并显示，DS 按编号取槽；越界整帧忽略
+ *
+ * 三个槽对应三个干接点（SW1/SW2/SW3），编号越界必须**整帧忽略**：不清屏、不动当前
+ * 画面 —— 一条畸形帧不该把屏擦黑。另钉"帧内位图够屏用、但不够填 512B 槽"这条
+ * 独立守卫（小屏几何时前者可以更小，缺了它 memcpy 会越过帧缓冲）。
+ */
+static void case_rls_pic_slots(void)
+{
+    TEST_BEGIN("RLS 图片槽：SV/DS 按图片编号落到 3 个槽，越界忽略");
+
+    static uint8_t s_pic_buf[600];
+    app_rls_display_t *disp = (app_rls_display_t *)s_pic_buf;
+    memset(s_pic_buf, 0, sizeof(s_pic_buf));
+    disp->color      = 1; /* 红 */
+    disp->light_level = 0;
+
+    s_stub_rows = 128;
+    s_stub_cols = 32;
+
+    /* SV：编号 2 → 存槽 2 + 显示槽 2 */
+    disp->pic_num  = 2;
+    s_pic_save_cnt = 0;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_save(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_pic_save_cnt == 1 && s_pic_save_slot == 2 && s_pic_show_cnt == 1 &&
+                  s_pic_show_slot == 2,
+              "SV 编号 2 应存并显示槽 2（save=%d/%u show=%d/%u）", s_pic_save_cnt,
+              (unsigned)s_pic_save_slot, s_pic_show_cnt, (unsigned)s_pic_show_slot);
+
+    /* SV：编号 3（越界）→ 整帧忽略，不存不显 */
+    disp->pic_num  = 3;
+    s_pic_save_cnt = 0;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_save(&s_rls_ccb, disp, 525);
+    CHECK_MSG(s_pic_save_cnt == 0 && s_pic_show_cnt == 0,
+              "SV 编号越界必须整帧忽略（save=%d show=%d）", s_pic_save_cnt, s_pic_show_cnt);
+
+    /* DS：编号 1 → 显示槽 1，帧长 13（6 头 + 4 显示头 + BCC + 尾） */
+    disp->pic_num  = 1;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_pic(&s_rls_ccb, disp, 13);
+    CHECK_MSG(s_pic_show_cnt == 1 && s_pic_show_slot == 1, "DS 编号 1 应显示槽 1（show=%d/%u）",
+              s_pic_show_cnt, (unsigned)s_pic_show_slot);
+
+    /* DS：编号越界 → 忽略 */
+    disp->pic_num  = 3;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_pic(&s_rls_ccb, disp, 13);
+    CHECK_MSG(s_pic_show_cnt == 0, "DS 编号越界必须忽略（show=%d）", s_pic_show_cnt);
+
+    /* DS：帧长 12（短 1 字节，显示头都不全）→ 忽略 */
+    disp->pic_num  = 0;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_pic(&s_rls_ccb, disp, 12);
+    CHECK_MSG(s_pic_show_cnt == 0, "DS 短帧必须忽略（show=%d）", s_pic_show_cnt);
+
+    /* 小屏几何：帧内位图够屏用（128B）但不够填 512B 槽 → SV 必须拒存 */
+    s_stub_rows    = 64;
+    s_stub_cols    = 16;
+    disp->pic_num  = 0;
+    s_pic_save_cnt = 0;
+    s_pic_show_cnt = 0;
+    _rls_cmd_display_save(&s_rls_ccb, disp, (uint16_t)(13 + 128));
+    CHECK_MSG(s_pic_save_cnt == 0 && s_pic_show_cnt == 0,
+              "帧内位图不足 512B 槽时必须拒存（save=%d show=%d）", s_pic_save_cnt, s_pic_show_cnt);
+
+    s_stub_rows = 64;
+    s_stub_cols = 64;
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -1408,6 +1508,7 @@ int main(void)
     case_rls_set_ip();
     case_rls_report_ip();
     case_rls_echo_rule();
+    case_rls_pic_slots();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

@@ -52,6 +52,7 @@ virtualFolder:
             - name: rls
               files:
                 - path: Application/Src/RLS/app_rls_cmd.c
+                - path: Application/Src/RLS/app_rls_pic.c
                 - path: Application/Src/RLS/app_rls.c
               folders: []
             - name: cas
@@ -631,6 +632,9 @@ targets:
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/boards/3833024
       - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/Src/RLS/app_rls.c
+      - <virtual_root>/Application/Src/RLS/app_rls_cmd.c
+      - <virtual_root>/Application/Src/RLS/app_rls_pic.c
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000661.c
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/Application/protocol/cdstd

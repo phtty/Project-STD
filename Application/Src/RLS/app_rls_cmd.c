@@ -10,6 +10,7 @@
 
 #include "app_render.h"
 #include "app_light_sensor.h"
+#include "app_rls_pic.h"
 #include "app_iap_cfg.h"
 #include "app_tcp_server.h"
 #include "pl_net.h"
@@ -18,6 +19,7 @@
 static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _rls_cmd_display_pic(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display_sw(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_aquire_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
@@ -27,6 +29,7 @@ const app_rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     _rls_cmd_test,
     _rls_cmd_display,
     _rls_cmd_display_save,
+    _rls_cmd_display_pic,    /* 线上 "DS"：按图片编号取槽 */
     _rls_cmd_display_sw,     /* 线上 "55"（0x35 0x35） */
     _rls_cmd_display_sw,     /* 线上 0x35 0x55（参考分支的读法） */
     _rls_cmd_set_ip,
@@ -45,8 +48,9 @@ bool app_rls_cmd_should_echo(app_rls_cmd_type_t cmd)
         case APP_RLS_CMD_TYPE_AQUIRY_IP:
         case APP_RLS_CMD_TYPE_AQUIRY_IP_SC: return false;
 
-        /* 其余已实现的命令都回显 */
+        /* 其余已实现的命令都回显（DS 不带位图，不算"发图"两条） */
         case APP_RLS_CMD_TYPE_TEST:
+        case APP_RLS_CMD_TYPE_DISPLAY_PIC:
         case APP_RLS_CMD_TYPE_DISPLAY_SW:
         case APP_RLS_CMD_TYPE_DISPLAY_SW_ALT:
         case APP_RLS_CMD_TYPE_SET_IP: return true;
@@ -157,7 +161,7 @@ static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len)
 
     dev_display_color_t color;
     if (!_rls_map_color(display_ctx->color, &color)) {
-        printf("[rls] 显示帧颜色 %u 不在协议约定（0红/1绿/2黄）内，拒显\n",
+        printf("[rls] 显示帧颜色 %u 超出颜色枚举（0..7），拒显\n",
                (unsigned)display_ctx->color);
         return;
     }
@@ -191,37 +195,57 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
 
     if (!_rls_display_bitmap_ok(data_len)) return; // 位图不足：拒显，不碰 app_render
 
+    /* 图片编号就是槽号：0/1/2 三槽，越界整帧丢弃（不清屏、不动当前画面） */
+    if (display_ctx->pic_num >= RLS_PIC_SLOT_COUNT) {
+        printf("[rls] 图片编号 %u 超出槽数 %u，整帧丢弃\n", (unsigned)display_ctx->pic_num,
+               (unsigned)RLS_PIC_SLOT_COUNT);
+        return;
+    }
+
     dev_display_color_t color;
     if (!_rls_map_color(display_ctx->color, &color)) {
-        printf("[rls] 显示帧颜色 %u 不在协议约定（0红/1绿/2黄）内，拒显\n",
-               (unsigned)display_ctx->color);
+        printf("[rls] 显示帧颜色 %u 超出颜色枚举（0..7），拒显\n", (unsigned)display_ctx->color);
+        return;
+    }
+
+    /* 槽里固定 512B：帧内必须真有这么多字节。按**屏几何**算的"位图够用"不等于够填槽
+       （小屏时前者可以更小），所以这里单独判一次，防 rls_pic_save 的 memcpy 越过帧缓冲。 */
+    if (_rls_display_bitmap_have(data_len) < RLS_PIC_BITMAP_BYTES) {
+        printf("[rls] 显示并保存帧内位图 %u B < 槽大小 %u B，拒存\n",
+               (unsigned)_rls_display_bitmap_have(data_len), (unsigned)RLS_PIC_BITMAP_BYTES);
         return;
     }
 
     _rls_apply_light_level(display_ctx->light_level); /* 显示命令同步应用亮度 */
 
-    // 显示前先清屏
-    app_render(&(app_render_cfg_t){
-        .type  = APP_RENDER_TYPE_FILL,
-        .x     = 0,
-        .y     = 0,
-        .w     = 0,
-        .h     = 0,
-        .color = DEV_DISPLAY_COLOR_BLACK,
-    });
-    app_render(&(app_render_cfg_t){
-        .type    = APP_RENDER_TYPE_BITMAP,
-        .x       = 0,
-        .y       = 0,
-        .w       = app_screen_rows(),
-        .h       = app_screen_cols(),
-        .color   = color,
-        .bitmap  = display_ctx->bitmap,
-        /* **内容定稿之后才存**（app_screen 在落屏时取走这个请求）。
-           原来是这里紧跟着调 app_render_save() —— 那时画布还没落屏，
-           存下去的是上一帧。 */
-        .persist = true,
-    });
+    /* 先存槽再显示：显示读的是槽（与 DS 同一条路径），存失败只影响掉电保持 */
+    (void)rls_pic_save(display_ctx->pic_num, display_ctx->bitmap, (uint8_t)color);
+    rls_pic_show(display_ctx->pic_num);
+}
+
+/** @brief 显示已存储图片（DS）：按图片编号取槽，帧内没有位图
+ *
+ *  亮度照帧内字段应用；**颜色用槽里存的**（SV 存图时一起存下来的那个），
+ *  帧内的颜色字段在这条命令上不生效 —— "显示已存储图片"取的是图片自身的属性。 */
+static void _rls_cmd_display_pic(app_ccb_t *ccb, void *data, uint16_t data_len)
+{
+    (void)ccb;
+    const uint16_t need = (uint16_t)(sizeof(app_rls_frame_t) + sizeof(app_rls_display_t) + 3U);
+
+    if (data_len < need) {
+        printf("[rls] 显示已存储图片帧长度 %u < %u，丢弃\n", (unsigned)data_len, (unsigned)need);
+        return;
+    }
+
+    app_rls_display_t *display_ctx = (app_rls_display_t *)data;
+    if (display_ctx->pic_num >= RLS_PIC_SLOT_COUNT) {
+        printf("[rls] 图片编号 %u 超出槽数 %u，忽略\n", (unsigned)display_ctx->pic_num,
+               (unsigned)RLS_PIC_SLOT_COUNT);
+        return;
+    }
+
+    _rls_apply_light_level(display_ctx->light_level);
+    rls_pic_show(display_ctx->pic_num);
 }
 
 /** @brief 显示开/关：DATA 单字节 0x31 = 打开显示、0x30 = 关闭显示

@@ -29,7 +29,10 @@ typedef struct {
 typedef enum {
     APP_RLS_CMD_TYPE_TEST          = 0x0000, /**< 测试命令（文档未列，沿用既有实现） */
     APP_RLS_CMD_TYPE_DISPLAY       = 0x4d42, /**< 全屏图片显示（线上 "BM"） */
-    APP_RLS_CMD_TYPE_DISPLAY_SAVE  = 0x5653, /**< 显示并保存（线上 "SV"） */
+    APP_RLS_CMD_TYPE_DISPLAY_SAVE  = 0x5653, /**< 显示并保存（线上 "SV"）——
+                                              *   位图同时存进"图片编号"指定的槽 */
+    APP_RLS_CMD_TYPE_DISPLAY_PIC   = 0x5344, /**< 显示已存储图片（线上 "DS"）——
+                                              *   按"图片编号"从槽里取图，帧内无位图 */
     APP_RLS_CMD_TYPE_DISPLAY_SW    = 0x3535, /**< 显示开/关（线上 "55" = 0x35 0x35，
                                               *   取文档"数值"列；"描述"列也写 55） */
     APP_RLS_CMD_TYPE_DISPLAY_SW_ALT = 0x5535, /**< 显示开/关的另一种读法（线上 0x35 0x55）。

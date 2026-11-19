@@ -337,6 +337,7 @@ SRC_APPLICATION = \
 	Application/Src/LDI/app_fold.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c \
+	Application/Src/RLS/app_rls_pic.c \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
