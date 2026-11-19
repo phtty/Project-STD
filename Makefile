@@ -705,6 +705,15 @@ TEST_AH_MQTT_CMD_SRCS = \
 	test/stubs/os_stub.c \
 	Application/Src/AH/app_ah.c
 
+# 套件二十：P15 64×8 静态扫描的映射（老 lamp_scan 的位流当参照）
+# 用例 TU-include 板级驱动 .c（BSRR 表 / 通道表都是 static）。
+# **包含路径与别的套件不同**：本套件要真的 dev_display.h（带 ops 虚表）与板级
+# main.h / pl_hub75.h 的 host 替身（test/host_p15）。把 test/stubs 换掉、并把真
+# dev_display.h 的目录提到前面 —— test/stubs 里的 dev_display.h 是没有 ops 的
+# 精简影子，驱动编不过。只换本套件的包含路径，不动别的套件的 TEST_CFLAGS。
+TEST_P15MAP_CFLAGS = $(subst -I test/stubs,-I test/host_p15 -I Device/Inc/Display,$(TEST_CFLAGS))
+TEST_P15MAP_SRCS   = test/test_p15_mapping.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -736,7 +745,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_casc_round $(TEST_BUILD)/test_casc_master \
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
-      $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd
+      $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
+      $(TEST_BUILD)/test_p15_mapping
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -808,6 +818,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── AH/MQTT 命令层 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ah_mqtt_cmd
+	@echo ""
+	@echo "──── P15 映射（老 lamp_scan 参照） ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_p15_mapping
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -970,6 +983,16 @@ $(TEST_BUILD)/test_ah_mqtt_cmd: $(TEST_AH_MQTT_CMD_SRCS)
 $(TEST_BUILD)/test_ah_mqtt_cmd: Application/Src/AH/app_ah_mqtt_cmd.c \
 	Application/Inc/AH/app_ah_mqtt.h Application/Inc/AH/app_ah_mqtt_cmd.h \
 	Application/Inc/Render/app_render.h Application/Inc/Render/app_screen.h
+
+# 用例 TU-include 了板级驱动 .c（不在 SRCS 里）与板级 main.h，必须单独挂依赖 ——
+# 否则改了被测源码/引脚表测试不重编，跑的是旧二进制。
+# 注意用 TEST_P15MAP_CFLAGS（换掉了 test/stubs），不要用通用的 TEST_CFLAGS。
+$(TEST_BUILD)/test_p15_mapping: $(TEST_P15MAP_SRCS) \
+	boards/5006048/Device/Src/dev_p15_64x8_1000001090.c \
+	boards/5006048/Core/Inc/main.h \
+	test/host_p15/main.h test/host_p15/pl_hub75.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_P15MAP_CFLAGS) -o $@ $(TEST_P15MAP_SRCS) $(TEST_LDFLAGS)
 
 # ---- Header Dependencies ----
 # -MMD writes <obj>.d next to each object; -MP adds phony targets so deleting a

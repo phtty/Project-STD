@@ -385,6 +385,7 @@ virtualFolder:
                 - path: boards/5006048/Device/Src/dev_p10_112x10_1000000661.c
                 - path: boards/5006048/Device/Src/dev_rs485.c
                 - path: boards/5006048/Device/Src/dev_p10_112x10_1000000983.c
+                - path: boards/5006048/Device/Src/dev_p15_64x8_1000001090.c
               folders: []
             - name: platform
               files:
@@ -625,6 +626,7 @@ targets:
       - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000661.c
       - <virtual_root>/Application/protocol/ldi
       - <virtual_root>/Application/protocol/cdstd
+      - <virtual_root>/boards/5006048/Device/dev_p10_112x10_1000000983.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

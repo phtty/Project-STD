@@ -28,9 +28,9 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 24 个测试套件（见 §7）；第一条自动跑结构规则闸
+make test                      # host 侧 25 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（24 套件，秒级；规范见 docs/测试约定.md）
+make lint                      # 只跑结构规则闸（25 套件，秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
@@ -63,7 +63,8 @@ Kernel/{Inc,Src}/                  零依赖工具：ring_buffer、initcall、co
 Compiler/                          startup.c（C 写的 Reset_Handler + 自定义向量表）、sections.ld（共享段）、OpenOCD cfg
 boards/<板>/                       board.h（板级 `BOARD_*` 事实）、board.mk（板级源清单）、Core/（CubeMX 生成）、
                                    Application|Device|Platform 下的覆盖文件、链接脚本
-test/                              host 测试套件 + stubs/（遮蔽真头文件的替身）
+test/                              host 测试套件 + stubs/（遮蔽真头文件的替身）；
+                                   host_p15/（P15 映射套件专属替身：真 dev_display.h + 假 main.h/pl_hub75.h）
 docs/                              命名约定.md（评审契约）、架构说明.md（设计理由与子系统细节）
 ```
 
@@ -137,7 +138,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-24 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+25 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -165,6 +166,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_ah_tcp` | AH/TCP 参数口：探针四态（WAIT/FAKE/SKIP/READY）、0AH 字段合并/校验/落盘/RTC/静默丢弃、0BH 采集应答（31H/32H 模块长度） |
 | `test_ah_mqtt` | AH/MQTT 上电装配：主题前缀/4 条订阅/2 条上报主题、Client ID、Broker/凭据注入（空密码→NULL）、订阅登记失败不启动、探针按完整主题分类 |
 | `test_ah_mqtt_cmd` | AH/MQTT 命令层：32H 文字显示与 31H/未知类型分派、颜色/字号越界、超长/短帧防护、清屏 0/1/2/3、重启、对时（写 RTC/跳过/非法）与应答通知号回显 |
+| `test_p15_mapping` | P15 64×8 静态扫描的映射：像素 → BSRR 位流逐位等于老 `lamp_scan`（参照模型独立异写：老 fixBuf 字节布局 + 老发送序 + 老 `LED_Color` 枚举）；含 32 路引脚唯一性、点亮位数不变式、`scan` 384 步与 `set_row` 行地址。**只用 `test/host_p15/` 的专属替身，不走 `test/stubs/`**（要真的 `dev_display.h` 的 ops 虚表） |
 
 **规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 
