@@ -103,29 +103,22 @@ static bool _rls_display_bitmap_ok(uint16_t data_len)
     return false;
 }
 
-/** @brief 线上颜色字节 → 面板颜色（协议：0 红 / 1 绿 / 2 黄）；表外返回 false
+/** @brief 线上颜色字节 → 面板颜色；超出颜色枚举范围返回 false
  *
- *  **必须映射、不能直传**，两层原因：
- *   1) `dev_display_color_t` 的下标是 BLACK=0 / RED=1 / GREEN=2 / YELLOW=3 ——
- *      直传会把"红"画成灭、"绿"画成红、"黄"画成绿；
- *   2) 越界值会一路落到板级扫描驱动的 `s_bsrr_table[ch][color]`（`_scan` 里按
- *      帧缓冲里的字节查表）。越界读出来的 `port` 是 .ccmram 里的垃圾指针，
- *      扫描中断里 `p->port->BSRR = p->val` 就是**往任意地址写** —— 不是显示错色，
- *      是乱写内存。所以这里是**闭合映射**：表外值整帧拒显。
+ *  **口径沿用本工程旧实现**：旧版把帧内 color 字节直接 cast 成 `dev_display_color_t`，
+ *  现场实测通过 —— 即 `0=黑 / 1=红 / 2=绿 / 3=黄 / … / 7=白`（与 `dev_display_color_t`
+ *  的枚举同序）。注意这与文档 BM 表"0红/1绿/2黄"的**描述栏**不符，而文档 SV 那行的
+ *  **数值列**写的正是 `1/2/3` —— 文档自身两套口径，以实机为准，这处标为存疑。
  *
- *  口径取文档里出现 3 次的 `0/1/2`（BM / DS / PIC 三张表的"数值"列）。SV 那张的
- *  "数值"列写成 `1/2/3`，与它自己的描述栏（0红/1绿/2黄）矛盾；若现场抓包发现
- *  上位机按 SV 那张发，只改这张表 —— 不要改成"两者都收"，1/2 在两张表里含义不同。 */
+ *  本次唯一改动是**加了边界**：`> DEV_DISPLAY_COLOR_WHITE` 的值旧版会一路传到板级
+ *  扫描驱动的 `s_bsrr_table[ch][color]`（`_scan` 里按帧缓冲里的字节查表）。越界读出的
+ *  `port` 是 .ccmram 里的垃圾指针，扫描中断里 `p->port->BSRR = p->val` 就是**往任意
+ *  地址写** —— 所以越界值必须整帧拒显，不能"钳到 7"糊过去（那会把主机的错值画成白）。 */
 static bool _rls_map_color(uint8_t v, dev_display_color_t *out)
 {
-    static const dev_display_color_t map[] = {
-        DEV_DISPLAY_COLOR_RED,    /* 0 = 红 */
-        DEV_DISPLAY_COLOR_GREEN,  /* 1 = 绿 */
-        DEV_DISPLAY_COLOR_YELLOW, /* 2 = 黄 */
-    };
-    if (v >= sizeof(map) / sizeof(map[0])) return false;
+    if (v > (uint8_t)DEV_DISPLAY_COLOR_WHITE) return false;
 
-    *out = map[v];
+    *out = (dev_display_color_t)v;
     return true;
 }
 

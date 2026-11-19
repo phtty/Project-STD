@@ -1037,16 +1037,17 @@ static void case_rls_display_len(void)
 /* ================================================================ */
 
 /**
- * @brief RLS 显示帧颜色：线上 0/1/2 → 红/绿/黄；表外值整帧拒显（不碰 app_render）
+ * @brief RLS 显示帧颜色：线上字节与 `dev_display_color_t` 同序（旧实现实测口径），
+ *        超过 7 整帧拒显（不碰 app_render）
  *
- * 直传有两层后果：`dev_display_color_t` 是 BLACK=0/RED=1/GREEN=2/YELLOW=3，直传会把
- * "红"画成灭；更糟的是 >7 的值会一路落到板级扫描的 `s_bsrr_table[ch][color]`，
- * 越界读出来的 `port` 是垃圾指针 → 扫描中断里往任意地址写 BSRR。故本用例同时钉
- * "映射正确"与"表外拒显"两件事，并覆盖 SAVE 与 TMP 共用同一口径。
+ * 旧版把帧内字节直接 cast 成颜色枚举、现场实测通过，所以新版**保持同序**：
+ * 0=黑 / 1=红 / 2=绿 / 3=黄 … 7=白。唯一新增的是上界守卫 —— >7 的值会一路落到板级
+ * 扫描的 `s_bsrr_table[ch][color]`，越界读出的 `port` 是垃圾指针 → 扫描中断里往任意
+ * 地址写 BSRR。本用例钉"同序透传"与"越界拒显"两件事，并覆盖 SAVE 与 TMP 共用同一口径。
  */
 static void case_rls_color(void)
 {
-    TEST_BEGIN("RLS 显示帧颜色：0/1/2 → 红/绿/黄，表外值拒显");
+    TEST_BEGIN("RLS 显示帧颜色：与颜色枚举同序透传，>7 拒显");
 
     static uint8_t s_color_buf[600];
     app_rls_display_t *disp = (app_rls_display_t *)s_color_buf;
@@ -1055,14 +1056,16 @@ static void case_rls_color(void)
     s_stub_rows = 128;
     s_stub_cols = 32;
 
-    /* 三色逐一映射：位图足够（525B）→ 清屏 + 贴图，贴图那一笔的颜色即映射结果 */
+    /* 同序透传：位图足够（525B）→ 清屏 + 贴图，贴图那一笔的颜色即映射结果 */
     static const struct {
         uint8_t             wire;
         dev_display_color_t expect;
     } cases[] = {
-        {0, DEV_DISPLAY_COLOR_RED},
-        {1, DEV_DISPLAY_COLOR_GREEN},
-        {2, DEV_DISPLAY_COLOR_YELLOW},
+        {0, DEV_DISPLAY_COLOR_BLACK},
+        {1, DEV_DISPLAY_COLOR_RED},
+        {2, DEV_DISPLAY_COLOR_GREEN},
+        {3, DEV_DISPLAY_COLOR_YELLOW},
+        {7, DEV_DISPLAY_COLOR_WHITE},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         disp->color = cases[i].wire;
@@ -1074,8 +1077,8 @@ static void case_rls_color(void)
                   (unsigned)cases[i].wire, (unsigned)cases[i].expect, s_rec_cnt, (unsigned)got);
     }
 
-    /* 表外值：3（SV 那张表的"黄"）、7（枚举内但协议外）、0xFF —— 都必须整帧拒显 */
-    const uint8_t bad[] = {3, 7, 0xFF};
+    /* 越界值：8（超出枚举）、0xFF —— 都必须整帧拒显（旧版会越界查 BSRR 表） */
+    const uint8_t bad[] = {8, 0xFF};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         disp->color = bad[i];
         cap_reset(128, 32);
@@ -1085,11 +1088,11 @@ static void case_rls_color(void)
     }
 
     /* SAVE 与 TMP 必须共用同一口径（各写一份就会漂移） */
-    disp->color = 0;
+    disp->color = 1;
     cap_reset(128, 32);
     _rls_cmd_display_save(&s_rls_ccb, disp, 525);
     CHECK_MSG(s_rec_cnt == 2 && s_recs[1].color == (uint8_t)DEV_DISPLAY_COLOR_RED,
-              "SAVE 也应把 0 映射成红并贴图，得到 %d 次绘制", s_rec_cnt);
+              "SAVE 也应把 1 透传成红并贴图，得到 %d 次绘制", s_rec_cnt);
 
     disp->color = 0xFF;
     cap_reset(128, 32);

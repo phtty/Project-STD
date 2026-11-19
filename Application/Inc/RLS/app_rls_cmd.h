@@ -18,8 +18,9 @@
 typedef struct {
     uint8_t light_level; /**< 亮度，**线上口径** 0~31（0 最暗、31 最亮）/ 255 自动；
                               handler 压到面板 1~7 档或恢复光感跟随 */
-    uint8_t color;       /**< 显示颜色，**线上口径** 0 红 / 1 绿 / 2 黄（由 handler 映射成
-                              `dev_display_color_t`；表外值整帧拒显，见 app_rls_cmd.c） */
+    uint8_t color;       /**< 显示颜色，**线上口径**，与 `dev_display_color_t` 同序
+                              （0 黑 / 1 红 / 2 绿 / 3 黄…7 白，旧实现实测口径）；
+                              > 7 整帧拒显，见 app_rls_cmd.c */
     uint8_t style;       /**< 显示风格（协议字段） */
     uint8_t pic_num;     /**< 图片编号（协议字段） */
     uint8_t bitmap[];    /**< 1bpp 位图数据，行优先、MSB-first，长度由帧剩余量决定 */
