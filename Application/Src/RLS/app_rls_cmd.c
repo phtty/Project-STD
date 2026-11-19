@@ -18,6 +18,7 @@
 static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _rls_cmd_display_sw(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_aquire_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
 
@@ -26,6 +27,8 @@ const app_rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     _rls_cmd_test,
     _rls_cmd_display,
     _rls_cmd_display_save,
+    _rls_cmd_display_sw,     /* 线上 "55"（0x35 0x35） */
+    _rls_cmd_display_sw,     /* 线上 0x35 0x55（参考分支的读法） */
     _rls_cmd_set_ip,
     _rls_cmd_aquire_ip, /* 线上 "ST"（文档数值列） */
     _rls_cmd_aquire_ip, /* 线上 "SC"（文档描述列） */
@@ -205,6 +208,32 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
            存下去的是上一帧。 */
         .persist = true,
     });
+}
+
+/** @brief 显示开/关：DATA 单字节 0x31 = 打开显示、0x30 = 关闭显示
+ *
+ *  只管**面板输出使能**（`app_screen_oe_*`），不动亮度 —— 开关与亮度是两个状态，
+ *  这是 CDSTD A0H / A2H 定下的口径（用"设亮度 0"实现关屏会把关屏前的档位永久丢掉）。
+ *  因此关屏再开屏能回到原档位，光感跟随也不会被打断。
+ *
+ *  **不能拿这个字节当亮度喂给 `_rls_apply_light_level()`** —— 参考分支就是这么做的，
+ *  0x31/0x30 双双落进 default → 都设成"最亮 7"，"关闭显示"关不掉屏。 */
+static void _rls_cmd_display_sw(app_ccb_t *ccb, void *data, uint16_t data_len)
+{
+    (void)ccb; /* 协议未定义应答帧 */
+    const uint16_t need = (uint16_t)(sizeof(app_rls_frame_t) + 1U + 3U); /* 6 + 1 + BCC1 + 尾2 */
+
+    if (data_len < need) {
+        printf("[rls] 开关显示帧长度 %u < %u，丢弃\n", (unsigned)data_len, (unsigned)need);
+        return;
+    }
+
+    const uint8_t sw = *(const uint8_t *)data;
+    switch (sw) {
+        case 0x31: app_screen_oe_enable(); break;  /* '1' 打开显示 */
+        case 0x30: app_screen_oe_disable(); break; /* '0' 关闭显示 */
+        default: printf("[rls] 开关显示参数 0x%02X 非 0x30/0x31，忽略\n", (unsigned)sw); break;
+    }
 }
 
 /* ================================================================

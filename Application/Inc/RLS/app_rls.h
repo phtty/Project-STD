@@ -30,6 +30,11 @@ typedef enum {
     APP_RLS_CMD_TYPE_TEST          = 0x0000, /**< 测试命令（文档未列，沿用既有实现） */
     APP_RLS_CMD_TYPE_DISPLAY       = 0x4d42, /**< 全屏图片显示（线上 "BM"） */
     APP_RLS_CMD_TYPE_DISPLAY_SAVE  = 0x5653, /**< 显示并保存（线上 "SV"） */
+    APP_RLS_CMD_TYPE_DISPLAY_SW    = 0x3535, /**< 显示开/关（线上 "55" = 0x35 0x35，
+                                              *   取文档"数值"列；"描述"列也写 55） */
+    APP_RLS_CMD_TYPE_DISPLAY_SW_ALT = 0x5535, /**< 显示开/关的另一种读法（线上 0x35 0x55）。
+                                              *   参考分支 rls_p20 用的是这个；两种都收，
+                                              *   与搜索命令同一处置方式 */
     APP_RLS_CMD_TYPE_SET_IP        = 0x5049, /**< 修改 IP（线上 "IP" = 0x49 0x50） */
     APP_RLS_CMD_TYPE_AQUIRY_IP     = 0x5453, /**< 搜索设备（线上 "ST" = 0x53 0x54，
                                               *   取文档"数值"列；"描述"列写作 SC） */

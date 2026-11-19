@@ -154,6 +154,13 @@ static uint16_t s_stub_cols = 64;
 uint16_t        app_screen_rows(void) { return s_stub_rows; }
 uint16_t        app_screen_cols(void) { return s_stub_cols; }
 
+/* ---- 屏开关桩：DISPLAY_SW 只切面板输出使能，不碰亮度 ---- */
+static int s_oe_enable_cnt;
+static int s_oe_disable_cnt;
+
+void app_screen_oe_enable(void) { s_oe_enable_cnt++; }
+void app_screen_oe_disable(void) { s_oe_disable_cnt++; }
+
 /* ---- app_light_sensor 桩：显示命令会把帧内亮度应用到整屏 ----
  * 真实实现要停光感跟随、再走 app_screen_set_brightness（级联下发），host 上不跑；
  * 这里只记"调了哪个 API、参数是什么"。 */
@@ -1176,6 +1183,64 @@ static void case_rls_light(void)
 /* ================================================================ */
 
 /**
+ * @brief RLS 显示开关：0x31 开、0x30 关，只切 OE；其它值/短帧无副作用
+ *
+ * 开关与亮度是**两个状态**（CDSTD A0H/A2H 定下的口径）：拿"设亮度 0"实现关屏会把
+ * 关屏前的档位永久丢掉。参考分支把 0x30/0x31 当亮度值喂给 _rls_apply_light_level()，
+ * 两个值都落到"最亮 7"，关屏根本关不掉 —— 本用例把正确语义钉住。
+ */
+static void case_rls_display_sw(void)
+{
+    TEST_BEGIN("RLS 显示开关：0x31 开 / 0x30 关，只切 OE 不动亮度");
+
+    /* 文档两处对命令码的写法不同：数值列 "55"（0x35 0x35）、参考分支用 0x35 0x55，
+       两种都收（同一 handler），枚举值按线上两字节小端拼接 */
+    CHECK_MSG((APP_RLS_CMD_TYPE_DISPLAY_SW & 0xFFU) == 0x35U &&
+                  ((APP_RLS_CMD_TYPE_DISPLAY_SW >> 8) & 0xFFU) == 0x35U,
+              "命令码 0x%04X 应为线上 0x35 0x35", (unsigned)APP_RLS_CMD_TYPE_DISPLAY_SW);
+    CHECK_MSG((APP_RLS_CMD_TYPE_DISPLAY_SW_ALT & 0xFFU) == 0x35U &&
+                  ((APP_RLS_CMD_TYPE_DISPLAY_SW_ALT >> 8) & 0xFFU) == 0x55U,
+              "备用命令码 0x%04X 应为线上 0x35 0x55", (unsigned)APP_RLS_CMD_TYPE_DISPLAY_SW_ALT);
+
+    static uint8_t s_sw_buf[16];
+    memset(s_sw_buf, 0, sizeof(s_sw_buf));
+
+    /* 0x31 = 打开显示 */
+    s_oe_enable_cnt  = 0;
+    s_oe_disable_cnt = 0;
+    s_sw_buf[0]      = 0x31;
+    _rls_cmd_display_sw(&s_rls_ccb, s_sw_buf, 10);
+    CHECK_MSG(s_oe_enable_cnt == 1 && s_oe_disable_cnt == 0,
+              "0x31 应开屏（enable=1 / disable=0），得到 %d / %d", s_oe_enable_cnt,
+              s_oe_disable_cnt);
+
+    /* 0x30 = 关闭显示 */
+    s_oe_enable_cnt  = 0;
+    s_oe_disable_cnt = 0;
+    s_sw_buf[0]      = 0x30;
+    _rls_cmd_display_sw(&s_rls_ccb, s_sw_buf, 10);
+    CHECK_MSG(s_oe_enable_cnt == 0 && s_oe_disable_cnt == 1,
+              "0x30 应关屏（enable=0 / disable=1），得到 %d / %d", s_oe_enable_cnt,
+              s_oe_disable_cnt);
+
+    /* 协议外参数：什么都不做（不能默认当成"开"） */
+    s_oe_enable_cnt  = 0;
+    s_oe_disable_cnt = 0;
+    s_sw_buf[0]      = 0x32;
+    _rls_cmd_display_sw(&s_rls_ccb, s_sw_buf, 10);
+    CHECK_MSG(s_oe_enable_cnt == 0 && s_oe_disable_cnt == 0,
+              "0x32 应被忽略（0/0），得到 %d / %d", s_oe_enable_cnt, s_oe_disable_cnt);
+
+    /* 短帧（9 字节 < 10）：整条丢弃 */
+    s_oe_enable_cnt  = 0;
+    s_oe_disable_cnt = 0;
+    s_sw_buf[0]      = 0x31;
+    _rls_cmd_display_sw(&s_rls_ccb, s_sw_buf, 9);
+    CHECK_MSG(s_oe_enable_cnt == 0 && s_oe_disable_cnt == 0,
+              "9 字节短帧必须丢弃（0/0），得到 %d / %d", s_oe_enable_cnt, s_oe_disable_cnt);
+}
+
+/**
  * @brief RLS 修改 IP：12 字节载荷落 IAP 记录、端口沿用当前配置；短帧整条丢弃
  *
  * 协议帧里没有端口字段，**不能固定传 0** —— 那会把记录里的 port 覆盖掉。口径：记录
@@ -1309,6 +1374,7 @@ int main(void)
     case_rls_display_len();
     case_rls_color();
     case_rls_light();
+    case_rls_display_sw();
     case_rls_set_ip();
     case_rls_report_ip();
 
