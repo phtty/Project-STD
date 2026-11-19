@@ -320,6 +320,41 @@ void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], co
     if (s_lock) osMutexRelease(s_lock);
 }
 
+/** @brief 上电应用记录里的网络参数（记录有效且与运行态不同才动）
+ *
+ *  记录 net_cfg 的正向职责是"镜像 main app 当前使用的网络参数"（见下面的
+ *  sync_from_runtime）；反向（记录 → 运行态）只在**没有更高优先级的配置源**时才该发生。
+ *  优先级：
+ *
+ *      AH 的 0AH 配置（sw_post(4)） > 本函数（sw_app(3)） > dev_eth 的编译期默认
+ *
+ *  所以放 sw_app：让 AH 在它之后覆盖，而两者都早于 app_boot 起通道（bind 地址之前）。
+ *  同层 initcall 顺序不可依赖，所以靠**层级**表达这条优先级，不靠链接次序。
+ *
+ *  **这条链路是 RLS"修改 IP"能生效的前提**：那条命令只写记录、不在运行态生效，
+ *  重启后要靠这里应用。此前它依赖 LDI 的上电逻辑（LDI 记录无效时回落到本记录），
+ *  LDI 移出本板构建后就没有消费者了 —— 表现为"命令回了、重启还是老地址"。
+ *
+ *  直烧板（BOARD_HAS_IAP_RECORD=0）没有记录区，get_net_cfg 恒 false → 本函数空转。 */
+static void _iap_cfg_apply_net(void)
+{
+    app_flash_iap_net_cfg_t rec;
+    if (!app_iap_get_net_cfg(&rec)) return;
+
+    uint8_t ip[4], mask[4], gw[4];
+    pl_net_get_ip(ip, mask, gw);
+    if (memcmp(ip, rec.ip, 4) == 0 && memcmp(mask, rec.mask, 4) == 0 && memcmp(gw, rec.gw, 4) == 0)
+        return; /* 与运行态一致：不必要地 set 一次会触发监听器与一次记录写 */
+
+    pl_net_set_ip(rec.ip, rec.mask, rec.gw);
+    printf("[iap_cfg] 上电应用记录里的网络：%u.%u.%u.%u/%u.%u.%u.%u gw %u.%u.%u.%u\n",
+           (unsigned)rec.ip[0], (unsigned)rec.ip[1], (unsigned)rec.ip[2], (unsigned)rec.ip[3],
+           (unsigned)rec.mask[0], (unsigned)rec.mask[1], (unsigned)rec.mask[2],
+           (unsigned)rec.mask[3], (unsigned)rec.gw[0], (unsigned)rec.gw[1], (unsigned)rec.gw[2],
+           (unsigned)rec.gw[3]);
+}
+sw_app_initcall(_iap_cfg_apply_net);
+
 /** @brief 镜像同步：运行态 IP/掩码/网关 + TCP server 端口 → IAP 记录
  *
  *  由 pl_net 的 IP 变更监听触发（任何协议调 pl_net_set_ip 都会走到），

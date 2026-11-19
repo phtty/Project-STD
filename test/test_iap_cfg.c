@@ -82,6 +82,15 @@ void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
     memcpy(mask, s_runtime_mask, 4);
     memcpy(gw, s_runtime_gw, 4);
 }
+
+/* ---- 上电应用记录网络时调用的 set_ip（就地改"运行态"，与真实现效果一致）---- */
+static int s_set_ip_calls;
+
+void pl_net_set_ip(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4])
+{
+    s_set_ip_calls++;
+    set_runtime_ip(ip, mask, gw);
+}
 uint16_t app_tcp_server_get_port(void) { return s_runtime_port; }
 
 /* ---- app_iap_cmd.c 的其余依赖（g_iap_cmd_table 被保留时会拉进全部 8 个处理函数）---- */
@@ -717,6 +726,51 @@ static void case_report_ip_never_returns_raw_flash(void)
     expect_report(IP_A, MASK, GW, PORT);
 }
 
+/* ================================================================
+ *  上电应用记录里的网络（RLS"修改 IP"生效的那一环）
+ * ================================================================ */
+
+/**
+ * @brief 上电应用记录网络：有效记录且与运行态不同才 set，相同不去重触发，空记录不动
+ *
+ * RLS 的"修改 IP"只写这条记录、不在运行态生效，重启后必须由本函数应用 —— 所以
+ * "地址真的被 set 出去"和"值没变就不 set"（避免每次上电白触发一次监听器与记录写）
+ * 都要钉住。直烧板没有记录区，get_net_cfg 恒 false，本用例在那种构建下不编译。
+ */
+static void case_boot_applies_record_net(void)
+{
+    flash_setup();
+
+    const uint8_t DEF[4] = {192, 168, 1, 100};
+    set_runtime_ip(DEF, MASK, GW);
+
+    /* ① 空记录 → 不动运行态 */
+    s_set_ip_calls = 0;
+    _iap_cfg_apply_net();
+    CHECK_MSG(s_set_ip_calls == 0, "空记录时不得调 set_ip（%d 次）", s_set_ip_calls);
+
+    /* ② 有效记录且与运行态不同 → set 成记录里的值 */
+    app_flash_iap_update_net_cfg(IP_A, MASK, GW, PORT);
+    s_set_ip_calls = 0;
+    _iap_cfg_apply_net();
+    CHECK_MSG(s_set_ip_calls == 1, "有效记录应 set 一次，得到 %d 次", s_set_ip_calls);
+    CHECK_MSG(memcmp(s_runtime_ip, IP_A, 4) == 0, "运行态 IP 应变成记录里的 10.0.0.1，得到 %u.%u.%u.%u",
+              (unsigned)s_runtime_ip[0], (unsigned)s_runtime_ip[1], (unsigned)s_runtime_ip[2],
+              (unsigned)s_runtime_ip[3]);
+
+    /* ③ 已经一致 → 不再 set（否则每次上电都白触发一次监听器与记录写） */
+    s_set_ip_calls = 0;
+    _iap_cfg_apply_net();
+    CHECK_MSG(s_set_ip_calls == 0, "记录与运行态一致时不得再 set（%d 次）", s_set_ip_calls);
+
+    /* ④ 换成 IP_B → 再应用一次应跟到新值 */
+    app_flash_iap_update_net_cfg(IP_B, MASK, GW, PORT);
+    s_set_ip_calls = 0;
+    _iap_cfg_apply_net();
+    CHECK_MSG(s_set_ip_calls == 1 && memcmp(s_runtime_ip, IP_B, 4) == 0,
+              "记录改成 10.0.0.2 后应跟到新值（set=%d 次）", s_set_ip_calls);
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -739,6 +793,7 @@ int main(void)
         {"存储接口 0 = 成功的约定", case_storage_returns_zero_on_success},
         {"跨模块访问器 app_iap_get_net_cfg()", case_net_cfg_accessor_contract},
         {"报告 IP 绝不回传裸 Flash", case_report_ip_never_returns_raw_flash},
+        {"上电应用记录里的网络", case_boot_applies_record_net},
     };
 
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
