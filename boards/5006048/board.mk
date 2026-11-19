@@ -5,7 +5,7 @@
 # CubeMX 产物在 Core/Src，由顶层 Makefile 的 SRC_CORE 收，不在这里。
 #
 # 与 3833024 的差异：没有 RS232（两路都没有）、没有 dev_io_ctrl（车道灯/黄闪灯）、
-# 显示模组是 P10 112×10 而非 P20 16×8。
+# 显示模组是 P15 64×8 静态屏（128×32）而非 P20 16×8。
 SRC_BOARD = \
 	$(BOARD_DIR)/Platform/Src/pl_tim_board.c \
 	$(BOARD_DIR)/Platform/Src/pl_uart_board.c \
@@ -16,13 +16,13 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Device/Src/dev_key_board.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c \
-	$(BOARD_DIR)/Device/Src/dev_p10_112x10_1000000983.c
+	$(BOARD_DIR)/Device/Src/dev_p15_64x8_1000001090.c
 
 # ---- 显示模组（二选一，**只能留一个**）----
-# 默认 P10 112×10（224×50、1/2 扫描），即上面 SRC_BOARD 的**最后一行**。
+# 默认 P15 64×8 静态屏（128×32），即上面 SRC_BOARD 的**最后一行**。
 #
-# 换 P15 64×8 静态屏（128×32）时：
-#   1) 把上面最后一行（P10）**整行注释掉**（连同行尾的续行反斜杠一起）；
+# 换回 P10 112×10（224×50、1/2 扫描）时：
+#   1) 把上面最后一行（P15）**整行注释掉**（连同行尾的续行反斜杠一起）；
 #   2) 放开下面这行。
 # 是"换"，不是"追加"：每个驱动自带 pixel_map + hub75_buff + BSRR 表（都在
 # CCMRAM），且都会 dev_display_register() —— 两份同时编译既顶 CCMRAM，又变成
@@ -30,8 +30,9 @@ SRC_BOARD = \
 #
 # 两块屏共用同一块控制卡（数据线 LED_CH0..59、OE/CLK/LAT、A~D 全同），板级其余
 # 东西不用动；屏几何由驱动运行期填的 screen_rows/cols 决定（级联/画布按运行期
-# 几何切分，128×32 单卡也成立）。EIDE 侧对应 5006048 目标的 excludeList。
-#SRC_BOARD += $(BOARD_DIR)/Device/Src/dev_p15_64x8_1000001090.c
+# 几何切分）。EIDE 侧对应 5006048 目标的 excludeList：P10 两个变体 0661/0983
+# 都在其中，P15 在 virtualFolder 里且未被排除 —— 与本文件默认（P15）一致。
+#SRC_BOARD += $(BOARD_DIR)/Device/Src/dev_p10_112x10_1000000983.c
 
 # ---- 本板不参与编译的共享源 ----
 # 与 EIDE 的 5006048 target excludeList 对齐（<virtual_root>/Application/protocol/{ldi,rls,cdstd}）：
