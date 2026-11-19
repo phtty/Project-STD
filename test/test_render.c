@@ -1330,6 +1330,31 @@ static void case_rls_report_ip(void)
               (unsigned)s_tx_buf[19], (unsigned)s_tx_buf[20]);
 }
 
+/**
+ * @brief RLS 回显规则：只有"发图并显示"两条（BM/SV）不回显，其余命令回显原帧
+ *
+ * 文档 §5 要求"非查询指令，收到什么指令反馈什么指令"；现场把两条发图命令排除在外
+ * （上位机只看屏，回一帧 525 字节只是给总线/网络加负担）。未知命令码也不回显 ——
+ * 那等于把一个不认识的帧原样播回去。
+ */
+static void case_rls_echo_rule(void)
+{
+    TEST_BEGIN("RLS 回显规则：BM/SV 不回显，其余已实现命令回显");
+
+    CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY), "显示(BM)不得回显");
+    CHECK_MSG(!app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SAVE), "显示并保存(SV)不得回显");
+
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_TEST), "测试命令应回显");
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SW), "开关显示(55)应回显");
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_DISPLAY_SW_ALT), "开关显示(备用码)应回显");
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_SET_IP), "修改 IP 应回显");
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP), "搜索(ST)应回显");
+    CHECK_MSG(app_rls_cmd_should_echo(APP_RLS_CMD_TYPE_AQUIRY_IP_SC), "搜索(SC)应回显");
+
+    /* 未识别的命令码不播回去 */
+    CHECK_MSG(!app_rls_cmd_should_echo((app_rls_cmd_type_t)0x1234), "未识别命令码不得回显");
+}
+
 /* ================================================================ */
 
 int main(void)
@@ -1377,6 +1402,7 @@ int main(void)
     case_rls_display_sw();
     case_rls_set_ip();
     case_rls_report_ip();
+    case_rls_echo_rule();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

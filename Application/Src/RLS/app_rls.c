@@ -4,6 +4,8 @@
  */
 
 #include "app_rls.h"
+
+#include <stdio.h>
 #include "FreeRTOS.h"
 #include "initcall.h"
 
@@ -63,15 +65,23 @@ void app_rls_task(void *argument)
             continue;
 
         app_rls_frame_t *rls_frame = (app_rls_frame_t *)(msg->data);
+        const app_rls_cmd_type_t cmd = *(app_rls_cmd_type_t *)rls_frame->cmd;
 
         /* 查表分派 */
         uint8_t idx = 0xFF;
         for (uint8_t i = 0; i < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]); i++)
-            if (cmd_index_table[i] == *(app_rls_cmd_type_t *)rls_frame->cmd)
-                idx = i;
+            if (cmd_index_table[i] == cmd) idx = i;
 
-        if (idx < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]))
-            g_rls_cmd_table[idx](msg->ccb, rls_frame->data_bcc_tail, msg->data_len);
+        if (idx >= sizeof(cmd_index_table) / sizeof(cmd_index_table[0])) continue; /* 命令不认识 */
+
+        g_rls_cmd_table[idx](msg->ccb, rls_frame->data_bcc_tail, msg->data_len);
+
+        /* 文档 §5：非查询指令"收到什么指令反馈什么指令" —— 发图两条（BM/SV）除外，
+           见 app_rls_cmd_should_echo()。回的是**原帧**（含帧头/长度/BCC/帧尾），
+           所以直接按 `msg->data_len` 把收到的整帧发回去，不重新组帧。 */
+        if (app_rls_cmd_should_echo(cmd) &&
+            app_ccb_send(msg->ccb, (const uint8_t *)rls_frame, msg->data_len) < 0)
+            printf("[rls] 回显发送失败（通道不可用）\n");
     }
 }
 

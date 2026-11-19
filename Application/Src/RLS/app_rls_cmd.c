@@ -34,6 +34,25 @@ const app_rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     _rls_cmd_aquire_ip, /* 线上 "SC"（文档描述列） */
 };
 
+bool app_rls_cmd_should_echo(app_rls_cmd_type_t cmd)
+{
+    switch (cmd) {
+        /* 发图并显示的两条：不回显（见头文件） */
+        case APP_RLS_CMD_TYPE_DISPLAY:
+        case APP_RLS_CMD_TYPE_DISPLAY_SAVE: return false;
+
+        /* 其余已实现的命令都回显 */
+        case APP_RLS_CMD_TYPE_TEST:
+        case APP_RLS_CMD_TYPE_DISPLAY_SW:
+        case APP_RLS_CMD_TYPE_DISPLAY_SW_ALT:
+        case APP_RLS_CMD_TYPE_SET_IP:
+        case APP_RLS_CMD_TYPE_AQUIRY_IP:
+        case APP_RLS_CMD_TYPE_AQUIRY_IP_SC: return true;
+
+        default: return false; /* 未识别的命令码不播回去 */
+    }
+}
+
 [[maybe_unused]] static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len)
 {
     (void)ccb;

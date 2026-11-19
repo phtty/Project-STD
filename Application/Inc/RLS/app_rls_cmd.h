@@ -5,6 +5,7 @@
  * @brief   RLS 命令定义：显示载荷结构与命令处理表
  */
 
+#include <stdbool.h>
 #include "string.h"
 
 #include "app_rls.h"
@@ -49,3 +50,13 @@ typedef void (*app_rls_cmd_handler_fn_t)(app_ccb_t *ccb, void *data, uint16_t da
 
 /** RLS 命令处理函数表，按命令码索引 */
 extern const app_rls_cmd_handler_fn_t g_rls_cmd_table[];
+
+/** @brief 该命令是否需要**回显原帧**（文档 §5"收到什么指令反馈什么指令"）
+ *
+ *  例外是"发图并显示"的两条（BM / SV）：上位机只看屏，回一帧 525 字节上去纯属给
+ *  总线/网络加负担；且这两条本身没有任何应答语义（现场约定）。未知命令码不回显 ——
+ *  那不是"收到什么回什么"，而是把一个我们不认识的帧原样播回去。
+ *
+ *  @param cmd 线上命令码（小端拼成的 uint16，取值见 app_rls_cmd_type_t）
+ *  @return true = 处理完把收到的原帧原样回给来源 */
+bool app_rls_cmd_should_echo(app_rls_cmd_type_t cmd);
