@@ -10,6 +10,7 @@
 #include "bcc_utils.h"
 #include "app_rls_cmd.h"
 #include "app_rs485.h"
+#include "app_udp.h"
 #include "pl_task.h"
 #include "pl_mem.h"
 
@@ -148,7 +149,7 @@ app_pcb_probe_state_t app_rls_probe_frame(app_pcb_t *self, const app_ccb_t *ccb,
 }
 
 /* ---- 协议控制块：协议自有缓冲区与队列，静态持有 ----
- * 承载 RS485（DMA 单次可达 2048）。容量须**严格大于**单次最大写入：
+ * 承载 RS485（DMA 单次可达 2048）与 UDP。容量须**严格大于**单次最大写入：
  * ring buffer 保留一个空槽区分满/空（rb_space = size - avail - 1），取相等值时
  * 恰好满的那一次会静默截掉最后一个字节。 */
 RB_DEFINE_ATTR(s_rls_rb, 2112, PL_CCMRAM); /**< max(2 × 最长帧 530, 单次最大写入 2048 + 1) */
@@ -172,7 +173,11 @@ static_assert(RLS_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "RLS 最长帧超过框架�
     s_rls_msg_queue = osMessageQueueNew(2, RLS_MSG_SIZE, &s_rls_queue_attr);
     s_rls_pcb.queue = s_rls_msg_queue;
 
+    /* 现场只用 UDP（上位机发到本机 10011，回包走本帧来源地址:10028），RS485 保留。
+       UDP 已绑 IAP/LDI/CDSTD 三个协议，本协议是第 4 个 —— 正好等于
+       APP_CCB_PROTO_MAX，再加一个就会 configASSERT。 */
     app_dispatch_bind(&s_rls_pcb, app_rs485_ccb());
+    app_dispatch_bind(&s_rls_pcb, app_udp_ccb());
 
     s_rls_task_handle = pl_task_new(app_rls_task, nullptr, &s_rls_task_attr);
 }
