@@ -467,6 +467,14 @@ targets:
       - <virtual_root>/boards/3833024/Device/dev_p5_64x32_.c
       - <virtual_root>/Application/protocol/cdstd
       - <virtual_root>/Application/protocol/ah
+      - <virtual_root>/Application/Src/LDI/app_ldi.c
+      - <virtual_root>/Application/Src/LDI/app_ldi_cmd.c
+      - <virtual_root>/Application/Src/LDI/app_ldi_cfg.c
+      - <virtual_root>/Application/Src/LDI/app_vms_ctrl.c
+      - <virtual_root>/Application/Src/LDI/app_fold.c
+      - <virtual_root>/Application/Src/CDSTD/app_cdstd.c
+      - <virtual_root>/Application/Src/CDSTD/app_cdstd_cmd.c
+      - <virtual_root>/Application/Src/CDSTD/app_cdstd_cfg.c
     settings:
       debugger: cortex-debug
     toolchain: GCC

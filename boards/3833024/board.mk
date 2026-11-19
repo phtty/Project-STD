@@ -25,9 +25,19 @@ SRC_BOARD = \
 	$(BOARD_DIR)/Application/Src/app_fold_preset_board.c
 
 # ---- 本板不参与编译的共享源 ----
-# CDSTD 与 AH 是互斥的产品协议；本板走 AH+LDI，不跑 CDSTD 帧协议任务。
-# 与 EIDE 3833024 target 的 excludeList（Application/protocol/cdstd）保持一致。
+# 本产品只用 **IAP + RLS** 两个帧协议（现场口径）。LDI / CDSTD 暂时用不上：
+#   · CDSTD 与 AH 是互斥的产品协议，本板走 AH；
+#   · LDI 整族（含 app_fold/app_vms_ctrl）本产品不发，去掉后少两个协议任务与两份
+#     协议缓冲，UDP 上的协议槽也从 3 个降到 2 个（IAP + RLS）。
+# **与 EIDE 3833024 target 的 excludeList 逐项对齐**（那里的老条目
+# `Application/protocol/ldi` 是失效路径，真实路径见下）。
+# 以后要用回来，删掉对应行即可（INC_DIRS 不用动：头文件仍可被引用）。
 BOARD_SRC_EXCLUDE = \
+	Application/Src/LDI/app_ldi.c \
+	Application/Src/LDI/app_ldi_cmd.c \
+	Application/Src/LDI/app_ldi_cfg.c \
+	Application/Src/LDI/app_vms_ctrl.c \
+	Application/Src/LDI/app_fold.c \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c
