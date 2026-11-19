@@ -638,12 +638,10 @@ TEST_RS485_SLOTS_SRCS = \
 # 用例直接 include 生产源码本体（s_line_widths / s_render_font 等是 file-static），
 # 渲染目标换成套件内的 capture 目标（记录每次 fill/bitmap 的几何）。
 # text_cvt.c 供 UTF8→GBK 转换；os_stub 供持久化路径引用的互斥量原语。
-# bcc_utils 走真实实现（RLS 搜索应答要算 BCC），不另写一份桩
 TEST_RENDER_SRCS = \
 	test/test_render.c \
 	test/stubs/os_stub.c \
-	Kernel/Src/text_cvt.c \
-	Kernel/Src/bcc_utils.c
+	Kernel/Src/text_cvt.c
 
 # 套件十七：折叠屏（模式判定 / 变体1 E9 两行各限半屏）
 # 用例 TU-include app_vms_ctrl.c（_vms_display_ctrl 是 static），app_render 换成
@@ -717,6 +715,18 @@ TEST_AH_MQTT_CMD_SRCS = \
 TEST_P15MAP_CFLAGS = $(subst -I test/stubs,-I test/host_p15 -I Device/Inc/Display,$(TEST_CFLAGS))
 TEST_P15MAP_SRCS   = test/test_p15_mapping.c
 
+# 套件：RLS 协议命令层（分派矩阵 / 回显规则 / 显示与图片槽 / 开关 / 修改 IP / 搜索应答）
+# 生产 TU **照原样编译**（不 TU-include）：命令表与处理函数都是外部可见的，
+# 副作用用套件内的记录桩（渲染 / 光感 / IAP / 网络 / 发送 / 图片槽）观察。
+# 进程不阻塞（任务与队列都在被 --gc-sections 丢弃的初始化段里），无需 SIGALRM 保护。
+TEST_RLS_SRCS = \
+	test/test_rls.c \
+	Application/Src/RLS/app_rls.c \
+	Application/Src/RLS/app_rls_cmd.c \
+	Kernel/Src/bcc_utils.c \
+	Kernel/Src/ring_buffer.c \
+	test/stubs/os_stub.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -749,7 +759,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
-      $(TEST_BUILD)/test_p15_mapping
+      $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -824,6 +834,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── P15 映射（老 lamp_scan 参照） ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_p15_mapping
+	@echo ""
+	@echo "──── RLS 协议命令层 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rls
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -915,8 +928,7 @@ $(TEST_BUILD)/test_rs485_slots: Application/Src/Channel/app_rs485.c
 
 # 用例 TU-include 了 app_render.c 与 app_rls_cmd.c，它们都不在 SRCS 里，必须单独挂
 # 依赖 —— 否则改了被测源码测试不重编、跑的是旧二进制。
-$(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render.c \
-	Application/Src/RLS/app_rls_cmd.c
+$(TEST_BUILD)/test_render: $(TEST_RENDER_SRCS) Application/Src/Render/app_render.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RENDER_SRCS) $(TEST_LDFLAGS)
 
@@ -986,6 +998,12 @@ $(TEST_BUILD)/test_ah_mqtt_cmd: $(TEST_AH_MQTT_CMD_SRCS)
 $(TEST_BUILD)/test_ah_mqtt_cmd: Application/Src/AH/app_ah_mqtt_cmd.c \
 	Application/Inc/AH/app_ah_mqtt.h Application/Inc/AH/app_ah_mqtt_cmd.h \
 	Application/Inc/Render/app_render.h Application/Inc/Render/app_screen.h
+
+$(TEST_BUILD)/test_rls: $(TEST_RLS_SRCS) Application/Src/RLS/app_rls_cmd.c \
+	Application/Src/RLS/app_rls.c Application/Inc/RLS/app_rls.h \
+	Application/Inc/RLS/app_rls_cmd.h Application/Inc/RLS/app_rls_pic.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RLS_SRCS) $(TEST_LDFLAGS)
 
 # 用例 TU-include 了板级驱动 .c（不在 SRCS 里）与板级 main.h，必须单独挂依赖 ——
 # 否则改了被测源码/引脚表测试不重编，跑的是旧二进制。

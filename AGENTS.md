@@ -28,9 +28,9 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 25 个测试套件（见 §7）；第一条自动跑结构规则闸
+make test                      # host 侧 26 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（25 套件，秒级；规范见 docs/测试约定.md）
+make lint                      # 只跑结构规则闸（26 套件，秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
@@ -138,7 +138,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-25 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+26 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -158,7 +158,8 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_casc_frame` | 级联探针 4 态 / 地址 / 长度 |
 | `test_casc_round` / `test_casc_master` | 级联从卡/主卡的图传与轮次 |
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
-| `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、`app_render` 锁配对；顺带盖 RLS 命令层（位图长度门禁 / 颜色映射 / 亮度换算 / 显示开关 / 修改 IP / 搜索应答 / 回显规则 / 图片槽编号） |
+| `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、`app_render` 锁配对 |
+| `test_rls` | RLS 协议命令层（从**一帧完整帧**往里测，生产 TU 照原样编译）：7 类命令码的分派矩阵、回显规则（BM/SV/搜索不回、其余回原帧）、显示位图门禁与颜色透传/>7 拒显、亮度 0~31→1~7 与 255 恢复跟随、显示开关只切 OE、修改 IP 的地址与端口取舍、搜索应答 21 帧逐字节（含 BCC）、图片槽 SV/DS 编号与「够屏不够槽」守卫。帧探测在 `test_probes` |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
 | `test_cdstd` | CDSTD 协议：探针四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化、队列取帧与命令分派；命令层 A0 屏开关、A1 文字、A2 亮度、A3 全屏填充、A4 固化显示、A5/A6 IP（A7/A8 仍空壳） |
 | `test_ah` | AH 纯函数：hex 编码、主题前缀（站8/道2/型2/号2）、Client ID、20 字符通知号（时间/计数回卷） |
