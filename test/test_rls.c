@@ -467,6 +467,13 @@ static void case_display(void)
     CHECK_MSG(s_fixed_cnt == 1 && s_fixed_last == 7, "亮度 31 应落到 7 档，得到 %d 档",
               (unsigned)s_fixed_last);
 
+    /* 协议外值（>31 且 !=255）按最亮处理，不能算出溢出档位 */
+    n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(254, 1, 0, 512));
+    fixture_reset();
+    app_rls_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_fixed_cnt == 1 && s_fixed_last == 7, "亮度 254（协议外）应按最亮 7 档，得到 %d 档",
+              (unsigned)s_fixed_last);
+
     n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(255, 1, 0, 512));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
