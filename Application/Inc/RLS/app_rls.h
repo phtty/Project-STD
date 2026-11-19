@@ -48,6 +48,16 @@ typedef enum {
                                               *   **仅设备→主机方向**，不进接收分派表 */
 } app_rls_cmd_type_t;
 
+/** @brief 处理一帧完整 RLS 帧：查命令表分派，按 §5 规则回显
+ *
+ *  从任务里拆出来的可测入口（套件 `test_rls` 直接喂帧）。`frame` 指向**含帧头**的
+ *  整帧，`len` 是帧字节数（= 帧内长度域）；越界/伪帧不归这里管 —— 探针已经筛过。
+ *
+ *  @param ccb   本帧来源通道（回显与原路应答都发往它）
+ *  @param frame 整帧首字节（可写，但本函数不修改内容）
+ *  @param len   整帧字节数 */
+void app_rls_handle_frame(app_ccb_t *ccb, uint8_t *frame, uint16_t len);
+
 /** @brief RLS 协议任务入口 */
 void app_rls_task(void *argument);
 

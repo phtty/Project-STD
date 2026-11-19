@@ -53,6 +53,39 @@ static const osThreadAttr_t s_rls_task_attr = {
     .priority   = (osPriority_t)osPriorityNormal,
 };
 
+/*--- 单帧处理：查表分派 + 回显 ---
+ *
+ * 从任务里拆出来是为了能在 host 上直接喂帧测（套件 `test_rls`）：任务本体依赖静态队列，
+ * 外部触发不了，而"命令码 → 处理函数"是**两张按位置对应的表**（本文件的
+ * `cmd_index_table` 与 `app_rls_cmd.c` 的 `g_rls_cmd_table`），一旦漂移就是错派甚至
+ * 越界，必须能测。
+ *
+ * 命令码按**显式小端**从两个字节拼出来，不用 `*(app_rls_cmd_type_t *)frame->cmd`：
+ * 那种写法依赖 `-fshort-enums`（枚举恰好 16 位）与 2 字节对齐。固件里两者都成立，
+ * 但 host 套件的 CFLAGS 没有 -fshort-enums（枚举 4 字节），会连 cmd 后面两个数据字节
+ * 一起读进来 —— 命令匹配随载荷内容而变，等于"测试跑的不是固件的行为"。 */
+void app_rls_handle_frame(app_ccb_t *ccb, uint8_t *frame, uint16_t len)
+{
+    app_rls_frame_t *rls_frame = (app_rls_frame_t *)frame;
+    const uint16_t wire = (uint16_t)((uint16_t)rls_frame->cmd[0] | ((uint16_t)rls_frame->cmd[1] << 8));
+    const app_rls_cmd_type_t cmd = (app_rls_cmd_type_t)wire;
+
+    /* 查表分派 */
+    uint8_t idx = 0xFF;
+    for (uint8_t i = 0; i < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]); i++)
+        if (cmd_index_table[i] == cmd) idx = i;
+
+    if (idx >= sizeof(cmd_index_table) / sizeof(cmd_index_table[0])) return; /* 命令不认识 */
+
+    g_rls_cmd_table[idx](ccb, rls_frame->data_bcc_tail, len);
+
+    /* 文档 §5：非查询指令"收到什么指令反馈什么指令" —— 发图两条（BM/SV）与查询类
+       （搜索）除外，见 app_rls_cmd_should_echo()。回的是**原帧**（含帧头/长度/BCC/
+       帧尾），所以直接按收到的字节数与内容发回去，不重新组帧。 */
+    if (app_rls_cmd_should_echo(cmd) && app_ccb_send(ccb, frame, len) < 0)
+        printf("[rls] 回显发送失败（通道不可用）\n");
+}
+
 /*--- 帧任务---*/
 void app_rls_task(void *argument)
 {
@@ -65,24 +98,7 @@ void app_rls_task(void *argument)
         if (osOK != osMessageQueueGet(s_rls_msg_queue, msg, NULL, osWaitForever))
             continue;
 
-        app_rls_frame_t *rls_frame = (app_rls_frame_t *)(msg->data);
-        const app_rls_cmd_type_t cmd = *(app_rls_cmd_type_t *)rls_frame->cmd;
-
-        /* 查表分派 */
-        uint8_t idx = 0xFF;
-        for (uint8_t i = 0; i < sizeof(cmd_index_table) / sizeof(cmd_index_table[0]); i++)
-            if (cmd_index_table[i] == cmd) idx = i;
-
-        if (idx >= sizeof(cmd_index_table) / sizeof(cmd_index_table[0])) continue; /* 命令不认识 */
-
-        g_rls_cmd_table[idx](msg->ccb, rls_frame->data_bcc_tail, msg->data_len);
-
-        /* 文档 §5：非查询指令"收到什么指令反馈什么指令" —— 发图两条（BM/SV）除外，
-           见 app_rls_cmd_should_echo()。回的是**原帧**（含帧头/长度/BCC/帧尾），
-           所以直接按 `msg->data_len` 把收到的整帧发回去，不重新组帧。 */
-        if (app_rls_cmd_should_echo(cmd) &&
-            app_ccb_send(msg->ccb, (const uint8_t *)rls_frame, msg->data_len) < 0)
-            printf("[rls] 回显发送失败（通道不可用）\n");
+        app_rls_handle_frame(msg->ccb, msg->data, msg->data_len);
     }
 }
 
