@@ -24,8 +24,10 @@
  * **还覆盖**（同套件顺带，不另立文件）：
  *   · `app_render()` 的模块互斥量 —— 每次调用（含提前返回）恰好一次 Acquire/Release；
  *   · `text_cvt.c` 的 UTF8/GBK/UNICODE 互转边界（截在多字节序列中间、半个码位）；
- *   · RLS 显示帧的位图长度门禁（`app_rls_cmd.c`）：不足**拒显且不碰 app_render**，
- *     下界钉 `data_len ≤ 13` 的守卫（防无符号减法回绕）。
+ *   · RLS 命令层（`app_rls_cmd.c`）：显示帧的位图长度门禁（不足**拒显且不碰
+ *     app_render**，下界钉 `data_len ≤ 13` 的守卫防无符号减法回绕）、颜色映射与表外
+ *     拒显、亮度 0~31/255 的档位换算、修改 IP 的落盘与端口保留、搜索应答帧的逐字节
+ *     布局与 BCC。
  */
 
 #include <stdbool.h>
@@ -38,6 +40,7 @@
 #include "dev_w25qxx.h"
 #include "dev_cfg_record.h"
 #include "app_cfg_sched.h"
+#include "app_iap_cfg.h"
 #include "app_render.h"
 
 /* os_stub.c 的互斥获取/释放计数（见 os_stub.c 的互斥段）；
@@ -173,6 +176,61 @@ void app_light_sensor_resume(void) { s_light_resume_cnt++; }
  * capture 目标，能直接断言"位图不足时一次 app_render 都不许调"；放 probes 那侧
  * 还得再造一份 app_render/app_screen 桩与调用计数，两处更容易漂移。 */
 #include "../Application/Src/RLS/app_rls_cmd.c"
+
+/* ---- 网络 / 持久化 / 通道桩：RLS 的修改 IP 与搜索应答 ----
+ * 真实现要走内部 Flash 记录与 LwIP，host 上不跑；这里只记"传了什么、发了什么"。 */
+static int     s_tx_cnt;
+static int     s_tx_len;
+static uint8_t s_tx_buf[64];
+
+int32_t app_ccb_send(app_ccb_t *ccb, const uint8_t *data, uint16_t len)
+{
+    (void)ccb;
+    s_tx_cnt++;
+    s_tx_len = (len <= sizeof(s_tx_buf)) ? (int)len : (int)sizeof(s_tx_buf);
+    if (s_tx_len > 0) memcpy(s_tx_buf, data, (size_t)s_tx_len);
+    return (int32_t)len;
+}
+
+static uint8_t s_net_ip[4]   = {192, 168, 1, 254};
+static uint8_t s_net_mask[4] = {255, 255, 255, 0};
+static uint8_t s_net_gw[4]   = {192, 168, 1, 1};
+
+void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
+{
+    memcpy(ip, s_net_ip, 4);
+    memcpy(mask, s_net_mask, 4);
+    memcpy(gw, s_net_gw, 4);
+}
+
+static app_flash_iap_net_cfg_t s_iap_rec;
+static bool                    s_iap_rec_valid;
+static uint8_t                 s_iap_new_ip[4];
+static uint8_t                 s_iap_new_mask[4];
+static uint8_t                 s_iap_new_gw[4];
+static uint32_t                s_iap_new_port;
+static int                     s_iap_upd_cnt;
+static uint16_t                s_tcp_port = 10028;
+
+bool app_iap_get_net_cfg(app_flash_iap_net_cfg_t *out)
+{
+    if (!s_iap_rec_valid) return false;
+
+    *out = s_iap_rec;
+    return true;
+}
+
+void app_flash_iap_update_net_cfg(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gw[4],
+                                  uint32_t port)
+{
+    s_iap_upd_cnt++;
+    memcpy(s_iap_new_ip, ip, 4);
+    memcpy(s_iap_new_mask, mask, 4);
+    memcpy(s_iap_new_gw, gw, 4);
+    s_iap_new_port = port;
+}
+
+uint16_t app_tcp_server_get_port(void) { return s_tcp_port; }
 
 /* ================================================================
  *  capture 渲染目标：只记几何
@@ -1117,6 +1175,98 @@ static void case_rls_light(void)
 
 /* ================================================================ */
 
+/**
+ * @brief RLS 修改 IP：12 字节载荷落 IAP 记录、端口沿用当前配置；短帧整条丢弃
+ *
+ * 协议帧里没有端口字段，**不能固定传 0** —— 那会把记录里的 port 覆盖掉。口径：记录
+ * 有效取记录的端口，无记录（直烧板）才回落运行态 TCP 端口。
+ */
+static void case_rls_set_ip(void)
+{
+    TEST_BEGIN("RLS 修改 IP：写 IAP 记录并保留端口，短帧丢弃");
+
+    /* 命令码口径：线上 0x49 0x50（"IP"）在这个枚举里是小端拼成的 0x5049 */
+    CHECK_MSG((APP_RLS_CMD_TYPE_SET_IP & 0xFFU) == 0x49U &&
+                  ((APP_RLS_CMD_TYPE_SET_IP >> 8) & 0xFFU) == 0x50U,
+              "命令码应为线上 'IP' = 0x49 0x50，枚举 0x%04X", (unsigned)APP_RLS_CMD_TYPE_SET_IP);
+
+    static uint8_t s_ip_buf[64];
+    app_rls_net_cfg_t *cfg = (app_rls_net_cfg_t *)s_ip_buf;
+    memset(s_ip_buf, 0, sizeof(s_ip_buf));
+    const uint8_t ip[4]   = {10, 1, 2, 3};
+    const uint8_t mask[4] = {255, 255, 255, 0};
+    const uint8_t gw[4]   = {10, 1, 2, 1};
+    memcpy(cfg->ip, ip, 4);
+    memcpy(cfg->mask, mask, 4);
+    memcpy(cfg->gw, gw, 4);
+
+    /* 有记录：端口取记录里的 6001，而不是运行态 TCP 端口 */
+    s_iap_rec_valid = true;
+    s_iap_rec.port  = 6001;
+    s_iap_upd_cnt   = 0;
+    _rls_cmd_set_ip(&s_rls_ccb, s_ip_buf, 21);
+    CHECK_MSG(s_iap_upd_cnt == 1, "21 字节帧应写 1 次记录，得到 %d 次", s_iap_upd_cnt);
+    CHECK_MSG(memcmp(s_iap_new_ip, ip, 4) == 0 && memcmp(s_iap_new_mask, mask, 4) == 0 &&
+                  memcmp(s_iap_new_gw, gw, 4) == 0,
+              "记录里的地址应为 %u.%u.%u.%u/%u.%u.%u.%u/%u.%u.%u.%u", (unsigned)s_iap_new_ip[0],
+              (unsigned)s_iap_new_ip[1], (unsigned)s_iap_new_ip[2], (unsigned)s_iap_new_ip[3],
+              (unsigned)s_iap_new_mask[0], (unsigned)s_iap_new_mask[1],
+              (unsigned)s_iap_new_mask[2], (unsigned)s_iap_new_mask[3], (unsigned)s_iap_new_gw[0],
+              (unsigned)s_iap_new_gw[1], (unsigned)s_iap_new_gw[2], (unsigned)s_iap_new_gw[3]);
+    CHECK_MSG(s_iap_new_port == 6001, "端口应沿用记录里的 6001，得到 %u", (unsigned)s_iap_new_port);
+
+    /* 无记录：回落运行态 TCP 端口 */
+    s_iap_rec_valid = false;
+    s_iap_upd_cnt   = 0;
+    _rls_cmd_set_ip(&s_rls_ccb, s_ip_buf, 21);
+    CHECK_MSG(s_iap_upd_cnt == 1 && s_iap_new_port == s_tcp_port,
+              "无记录时应回落 TCP 端口 %u，得到 upd=%d port=%u", (unsigned)s_tcp_port,
+              s_iap_upd_cnt, (unsigned)s_iap_new_port);
+
+    /* 短帧（20 字节 = 差 1 字节）必须整条丢弃，不得有副作用 */
+    s_iap_upd_cnt = 0;
+    _rls_cmd_set_ip(&s_rls_ccb, s_ip_buf, 20);
+    CHECK_MSG(s_iap_upd_cnt == 0, "20 字节帧必须丢弃：期望 0 次写入，得到 %d", s_iap_upd_cnt);
+}
+
+/**
+ * @brief RLS 搜索应答：21 字节 REPORT_IP 帧逐字节对拍（帧头/长度/命令/地址/BCC/帧尾）
+ *
+ * BCC 口径按文档正文"帧头到 BCC 之前所有字节异或"，即前 18 字节；参考分支只算 12
+ * 字节数据域。若现场上位机校验不过，改这一处的长度即可定位。
+ */
+static void case_rls_report_ip(void)
+{
+    TEST_BEGIN("RLS 搜索应答：21 字节 REPORT_IP，BCC 覆盖帧头到数据域");
+
+    s_tx_cnt = 0;
+    s_tx_len = 0;
+    _rls_cmd_aquire_ip(&s_rls_ccb, nullptr, 0);
+
+    CHECK_MSG(s_tx_cnt == 1 && s_tx_len == (int)RLS_REPORT_IP_LEN,
+              "应回 1 帧 %u 字节，得到 %d 帧 %d 字节", (unsigned)RLS_REPORT_IP_LEN, s_tx_cnt,
+              s_tx_len);
+    CHECK_MSG(s_tx_buf[0] == 0xFF && s_tx_buf[1] == 0xFE, "帧头应为 FF FE，得到 %02X %02X",
+              (unsigned)s_tx_buf[0], (unsigned)s_tx_buf[1]);
+    CHECK_MSG(s_tx_buf[2] == 0x00 && s_tx_buf[3] == RLS_REPORT_IP_LEN,
+              "长度域应为大端 0x00 0x15，得到 %02X %02X", (unsigned)s_tx_buf[2],
+              (unsigned)s_tx_buf[3]);
+    CHECK_MSG(s_tx_buf[4] == 0x52 && s_tx_buf[5] == 0x42, "命令码应为线上 'RB' = 0x52 0x42，得到 %02X %02X",
+              (unsigned)s_tx_buf[4], (unsigned)s_tx_buf[5]);
+    CHECK_MSG(memcmp(s_tx_buf + 6, s_net_ip, 4) == 0 && memcmp(s_tx_buf + 10, s_net_mask, 4) == 0 &&
+                  memcmp(s_tx_buf + 14, s_net_gw, 4) == 0,
+              "地址域应为运行态 IP/掩码/网关");
+
+    uint8_t bcc = 0;
+    for (int i = 0; i < 18; i++) bcc ^= s_tx_buf[i];
+    CHECK_MSG(s_tx_buf[18] == bcc, "BCC 应为前 18 字节异或 0x%02X，得到 0x%02X", (unsigned)bcc,
+              (unsigned)s_tx_buf[18]);
+    CHECK_MSG(s_tx_buf[19] == 0x0D && s_tx_buf[20] == 0x0C, "帧尾应为 0D 0C，得到 %02X %02X",
+              (unsigned)s_tx_buf[19], (unsigned)s_tx_buf[20]);
+}
+
+/* ================================================================ */
+
 int main(void)
 {
     printf("\n\033[36m文字渲染区域契约（字号 16，ASCII 半宽 8 / 汉字宽 16）\033[0m\n");
@@ -1159,6 +1309,8 @@ int main(void)
     case_rls_display_len();
     case_rls_color();
     case_rls_light();
+    case_rls_set_ip();
+    case_rls_report_ip();
 
     printf("\n通过 %d，失败 %d\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

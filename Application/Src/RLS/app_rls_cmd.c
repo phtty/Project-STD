@@ -10,15 +10,25 @@
 
 #include "app_render.h"
 #include "app_light_sensor.h"
+#include "app_iap_cfg.h"
+#include "app_tcp_server.h"
+#include "pl_net.h"
+#include "bcc_utils.h"
 
 static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display(app_ccb_t *ccb, void *data, uint16_t data_len);
 static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _rls_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
+static void _rls_cmd_aquire_ip(app_ccb_t *ccb, void *data, uint16_t data_len);
 
+/* 顺序必须与 app_rls.c 的 cmd_index_table 逐项一致；搜索命令两种线上码共用同一处理 */
 const app_rls_cmd_handler_fn_t g_rls_cmd_table[] = {
     _rls_cmd_test,
     _rls_cmd_display,
     _rls_cmd_display_save,
+    _rls_cmd_set_ip,
+    _rls_cmd_aquire_ip, /* 线上 "ST"（文档数值列） */
+    _rls_cmd_aquire_ip, /* 线上 "SC"（文档描述列） */
 };
 
 [[maybe_unused]] static void _rls_cmd_test(app_ccb_t *ccb, void *data, uint16_t data_len)
@@ -195,4 +205,80 @@ static void _rls_cmd_display_save(app_ccb_t *ccb, void *data, uint16_t data_len)
            存下去的是上一帧。 */
         .persist = true,
     });
+}
+
+/* ================================================================
+ *  网络类命令：修改 IP（IP）/ 搜索设备（ST、SC）
+ * ================================================================ */
+
+/** @brief 修改 IP：DATA = IP[4] | 掩码[4] | 网关[4]（整帧 21 字节）
+ *
+ *  **只写 IAP 记录、不在运行态生效** —— 与 IAP 0AH / LDI 06H 同口径：运行中换 IP 会把
+ *  当前连接连同这条命令的后果一起断掉，新地址下次上电生效。
+ *
+ *  端口沿用设备当前配置：记录有效就取记录里的（那条记录本来就是运行态端口的镜像），
+ *  没有记录区（直烧板）才回落到运行态 TCP 端口。**不能固定传 0** —— 记录里的 port
+ *  会被覆盖成 0，Recovery/上位机读到的端口就废了。
+ *
+ *  帧长不足直接丢弃（不产生任何副作用）：12 字节载荷以外还可能带别的字节，所以口径是
+ *  **≥** 而不是 ==。 */
+static void _rls_cmd_set_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
+{
+    (void)ccb; /* 协议未定义应答帧 */
+    const uint16_t need = (uint16_t)(sizeof(app_rls_frame_t) + sizeof(app_rls_net_cfg_t) + 3U);
+
+    if (data_len < need) {
+        printf("[rls] 修改 IP 帧长度 %u < %u，丢弃\n", (unsigned)data_len, (unsigned)need);
+        return;
+    }
+
+    const app_rls_net_cfg_t *cfg = (const app_rls_net_cfg_t *)data;
+
+    uint32_t port = app_tcp_server_get_port();
+    app_flash_iap_net_cfg_t rec;
+    if (app_iap_get_net_cfg(&rec)) port = rec.port;
+
+    app_flash_iap_update_net_cfg(cfg->ip, cfg->mask, cfg->gw, port);
+
+    printf("[rls] 设置 IP %u.%u.%u.%u / %u.%u.%u.%u / %u.%u.%u.%u：已写入 IAP 记录，重启后生效\n",
+           (unsigned)cfg->ip[0], (unsigned)cfg->ip[1], (unsigned)cfg->ip[2], (unsigned)cfg->ip[3],
+           (unsigned)cfg->mask[0], (unsigned)cfg->mask[1], (unsigned)cfg->mask[2],
+           (unsigned)cfg->mask[3], (unsigned)cfg->gw[0], (unsigned)cfg->gw[1],
+           (unsigned)cfg->gw[2], (unsigned)cfg->gw[3]);
+}
+
+/** @brief 搜索设备：回一帧 REPORT_IP（"RB"），携带本机当前生效的 IP/掩码/网关
+ *
+ *  命令里的地址字段是上位机自己带的，**不参与应答内容** —— 报文语义是"谁在线、报出
+ *  你的地址"，回运行态地址（`pl_net_get_ip`）而不是 IAP 记录里的旧值。
+ *
+ *  BCC 口径按文档正文："信息帧从帧头到 BCC 字节之前所有字节的异或" → 覆盖前 18 字节
+ *  （帧头 2 + 长度 2 + 命令 2 + 地址 12）。参考分支（rls_p20）只对 12 字节数据域做异或，
+ *  与正文不符；若现场上位机校验不过，把这里的长度改成 12 试一次即可定位。 */
+static void _rls_cmd_aquire_ip(app_ccb_t *ccb, void *data, uint16_t data_len)
+{
+    (void)data;
+    (void)data_len;
+
+    uint8_t frame[RLS_REPORT_IP_LEN];
+    uint8_t ip[4], mask[4], gw[4];
+
+    pl_net_get_ip(ip, mask, gw);
+
+    frame[0] = 0xFF;
+    frame[1] = 0xFE;
+    frame[2] = 0x00;
+    frame[3] = (uint8_t)RLS_REPORT_IP_LEN; /* 21：高字节恒 0，见文档"长度高字节在前" */
+    /* 命令码按小端写，与接收侧 `*(app_rls_cmd_type_t *)frame->cmd` 的读法一致 */
+    frame[4] = (uint8_t)(APP_RLS_CMD_TYPE_REPORT_IP & 0xFFU);
+    frame[5] = (uint8_t)((APP_RLS_CMD_TYPE_REPORT_IP >> 8) & 0xFFU);
+    memcpy(frame + 6, ip, 4);
+    memcpy(frame + 10, mask, 4);
+    memcpy(frame + 14, gw, 4);
+    frame[18] = bcc_calc(frame, 18U); /* 帧头 → 数据域末尾，不含 BCC 自身 */
+    frame[19] = 0x0D;
+    frame[20] = 0x0C;
+
+    if (app_ccb_send(ccb, frame, (uint16_t)sizeof(frame)) < 0)
+        printf("[rls] 搜索应答发送失败（通道不可用）\n");
 }

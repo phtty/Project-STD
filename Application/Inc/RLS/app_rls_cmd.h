@@ -24,6 +24,19 @@ typedef struct {
     uint8_t bitmap[];    /**< 1bpp 位图数据，行优先、MSB-first，长度由帧剩余量决定 */
 } app_rls_display_t;
 
+/** @brief 修改 IP 载荷：IP[4] | 子网掩码[4] | 网关[4]
+ *
+ *  协议帧里**没有端口字段**（文档那张表还留了一行没偏移的"别名"，21 字节装不下，
+ *  按笔误处理）—— 端口沿用设备当前配置，见 app_rls_cmd.c 的 `_rls_cmd_set_ip`。 */
+typedef struct {
+    uint8_t ip[4];   /**< 设备 IP */
+    uint8_t mask[4]; /**< 子网掩码 */
+    uint8_t gw[4];   /**< 默认网关 */
+} app_rls_net_cfg_t;
+
+/** @brief 搜索应答（REPORT_IP）定长：帧头 6 + 地址 12 + BCC 1 + 帧尾 2 */
+#define RLS_REPORT_IP_LEN (21U)
+
 /**
  * @brief RLS 命令处理函数指针类型
  * @param ccb      通道元信息（来源通道类型、编号等）

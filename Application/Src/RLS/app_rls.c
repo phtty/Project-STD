@@ -27,10 +27,16 @@ static const osMessageQueueAttr_t s_rls_queue_attr = {
     .mq_size = sizeof(s_rls_queue_buf),
 };
 
+/* 本表与 app_rls_cmd.c 的 g_rls_cmd_table **逐项对应**（按同一顺序）；加命令两边一起改。
+ * 搜索命令的两种线上码（"ST"/"SC"）都收，指向同一个处理函数 —— 文档在这里描述与数值
+ * 各写一套，实测前无法二选一。 */
 static const app_rls_cmd_type_t cmd_index_table[] = {
     APP_RLS_CMD_TYPE_TEST,
     APP_RLS_CMD_TYPE_DISPLAY,
     APP_RLS_CMD_TYPE_DISPLAY_SAVE,
+    APP_RLS_CMD_TYPE_SET_IP,
+    APP_RLS_CMD_TYPE_AQUIRY_IP,
+    APP_RLS_CMD_TYPE_AQUIRY_IP_SC,
 };
 
 static osMessageQueueId_t s_rls_msg_queue;

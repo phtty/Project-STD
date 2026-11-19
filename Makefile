@@ -637,10 +637,12 @@ TEST_RS485_SLOTS_SRCS = \
 # 用例直接 include 生产源码本体（s_line_widths / s_render_font 等是 file-static），
 # 渲染目标换成套件内的 capture 目标（记录每次 fill/bitmap 的几何）。
 # text_cvt.c 供 UTF8→GBK 转换；os_stub 供持久化路径引用的互斥量原语。
+# bcc_utils 走真实实现（RLS 搜索应答要算 BCC），不另写一份桩
 TEST_RENDER_SRCS = \
 	test/test_render.c \
 	test/stubs/os_stub.c \
-	Kernel/Src/text_cvt.c
+	Kernel/Src/text_cvt.c \
+	Kernel/Src/bcc_utils.c
 
 # 套件十七：折叠屏（模式判定 / 变体1 E9 两行各限半屏）
 # 用例 TU-include app_vms_ctrl.c（_vms_display_ctrl 是 static），app_render 换成

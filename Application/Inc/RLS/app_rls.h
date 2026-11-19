@@ -19,10 +19,25 @@ typedef struct {
 } app_rls_frame_t;
 
 /** @brief RLS 命令类型 */
+/** @brief RLS 命令类型
+ *
+ *  **命令码按"线上两个字节按小端拼成 uint16"取值**：线上 `0x49 0x50`（ASCII "IP"）
+ *  在本枚举里是 `0x5049`。探测端用 `*(app_rls_cmd_type_t *)frame->cmd` 读，
+ *  ARM 小端 + `-fshort-enums`（16 位）下正好等价于这两个字节。
+ *
+ *  文档里有两处命令码自相矛盾，取舍见各项注释。 */
 typedef enum {
-    APP_RLS_CMD_TYPE_TEST         = 0x0000, /**< 测试命令 */
-    APP_RLS_CMD_TYPE_DISPLAY      = 0x4d42, /**< 显示命令 */
-    APP_RLS_CMD_TYPE_DISPLAY_SAVE = 0x5653, /**< 显示并保存命令 */
+    APP_RLS_CMD_TYPE_TEST          = 0x0000, /**< 测试命令（文档未列，沿用既有实现） */
+    APP_RLS_CMD_TYPE_DISPLAY       = 0x4d42, /**< 全屏图片显示（线上 "BM"） */
+    APP_RLS_CMD_TYPE_DISPLAY_SAVE  = 0x5653, /**< 显示并保存（线上 "SV"） */
+    APP_RLS_CMD_TYPE_SET_IP        = 0x5049, /**< 修改 IP（线上 "IP" = 0x49 0x50） */
+    APP_RLS_CMD_TYPE_AQUIRY_IP     = 0x5453, /**< 搜索设备（线上 "ST" = 0x53 0x54，
+                                              *   取文档"数值"列；"描述"列写作 SC） */
+    APP_RLS_CMD_TYPE_AQUIRY_IP_SC  = 0x4353, /**< 搜索设备的另一种读法（线上 "SC" =
+                                              *   0x53 0x43）。两种都收，应答一致 ——
+                                              *   文档这里描述与数值各写一套，见 app_rls.c */
+    APP_RLS_CMD_TYPE_REPORT_IP     = 0x4252, /**< 搜索应答（线上 "RB" = 0x52 0x42）——
+                                              *   **仅设备→主机方向**，不进接收分派表 */
 } app_rls_cmd_type_t;
 
 /** @brief RLS 协议任务入口 */
