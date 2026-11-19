@@ -147,6 +147,19 @@ static void _rls_pic_key_task(void *argument)
     (void)argument;
     static const dev_key_id_t keys[RLS_PIC_SLOT_COUNT] = {DEV_KEY_SW1, DEV_KEY_SW2, DEV_KEY_SW3};
 
+    /* 本板一颗干接点都没有（例：5006048 只有 TEST 键）时**直接退出**：
+       对不存在的键 `dev_key_wait_press` 立刻返回 false，三个都不存在就是纯空转
+       —— 100% 占一个任务。RLS 目前只编进 3833024，但这条防的是"以后换板编"的情形。 */
+    bool any = false;
+    for (uint8_t i = 0; i < RLS_PIC_SLOT_COUNT; i++)
+        if (dev_key_get(keys[i]) != nullptr) any = true;
+
+    if (!any) {
+        printf("[rls] 本板无 SW1~SW3 干接点：图片槽按键任务退出（协议命令仍可用）\n");
+        osThreadExit();
+        return;
+    }
+
     for (;;) {
         for (uint8_t i = 0; i < RLS_PIC_SLOT_COUNT; i++)
             if (dev_key_wait_press(keys[i], 50)) rls_pic_show(i);
