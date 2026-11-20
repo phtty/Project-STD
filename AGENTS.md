@@ -28,9 +28,9 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
 
-make test                      # host 侧 30 个测试套件（见 §7）；第一条自动跑结构规则闸
+make test                      # host 侧 31 个测试套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（30 套件，秒级；规范见 docs/测试约定.md）
+make lint                      # 只跑结构规则闸（31 套件，秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
 # 编译数据库（clangd 用）
@@ -139,7 +139,7 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-30 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+31 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
@@ -162,6 +162,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_tcp_server` | TCP 服务器通道：实例 API（默认 9528 / 单扩展实例 / 未绑协议不启动）、发送门禁（DOWN+有 conn 也丢弃）、conn 生命周期（keepalive 10s/2s×3、只派发 len>1 的段、断开置 DOWN+释放信号量、早退也放）、manage 循环（bind/listen/accept/delete/失败重试）。用真 LwIP 头 + 脚本化 netconn |
 | `test_tcp_client` | TCP 客户端通道：远端配置（set_remote 打断当前连接）、非阻塞 connect → 4s 超时预算、建连成功后恢复阻塞并派生 conn 任务、断开/失败都 delete + 1s 重试。osDelay/时钟是假的（不真睡） |
 | `test_udp` | UDP 通道：端口配置、广播（SOF_BROADCAST + 255.255.255.255）、本帧来源回包与 dst->broadcast、收包来源/计数、0 字节段跳过、bind 循环与 2s 重试（现状见 §10 O6） |
+| `test_mqtt` | MQTT 通道：订阅登记（16 条上限/追加基址）、凭据注入（NULL=不带字段、有界拷贝）、connect 同步失败也必须放信号量、CONNACK 状态映射、发布目标（dst topic 优先）、分片累计与 LAST 派发、主题截断、任务重连（UP+逐条订阅 / free+1s 重建） |
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、`app_render` 锁配对 |
 | `test_rls` | RLS 协议命令层（从**一帧完整帧**往里测，生产 TU 照原样编译）：7 类命令码的分派矩阵、回显规则（BM/SV/搜索不回、其余回原帧）、显示位图门禁与颜色透传/>7 拒显、亮度 0~31→1~7 与 255 恢复跟随、显示开关只切 OE、修改 IP 的地址与端口取舍、搜索应答 21 帧逐字节（含 BCC）、图片槽 SV/DS 编号与「够屏不够槽」守卫。帧探测在 `test_probes` |
 | `test_rls_pic` | RLS 图片槽（SV/DS 的 3 槽）：记录布局契约（513B 槽 / 1540B 记录）、配置记录加载（有效/空/损坏/长度不符）、落盘失败仍存 RAM、几何门禁（非 128×32 只清屏）、SW1/2/3 干接点→槽 0/1/2 与无键退出。命令层在 `test_rls` |
