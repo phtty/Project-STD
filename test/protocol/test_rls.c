@@ -226,6 +226,10 @@ static void fixture_reset(void)
 
     s_rows = 128;
     s_cols = 32;
+
+    /* IAP 记录状态也是跨用例状态：不复位会让"记录有效/无效"随用例顺序漂移 */
+    s_iap_rec_valid = false;
+    memset(&s_iap_rec, 0, sizeof(s_iap_rec));
 }
 
 /** @brief 帧缓冲：head + len(2, 大端) + cmd(2) + payload + BCC + tail
@@ -266,11 +270,22 @@ static uint16_t disp_payload(uint8_t light, uint8_t color, uint8_t pic, uint16_t
     return (uint16_t)(sizeof(app_rls_display_t) + bitmap_len);
 }
 
+/** @brief 用例侧独立算 BCC：帧头到 BCC 之前逐字节异或
+ *
+ *  刻意**不复用**生产的 `bcc_calc()`：否则 bcc_utils 的算法写错时，期望值与
+ *  实际值一起错，"含 BCC 的逐字节对拍"就变成了自证（恒绿）。 */
+static uint8_t _expected_bcc(const uint8_t *p, uint16_t n)
+{
+    uint8_t b = 0;
+    for (uint16_t i = 0; i < n; i++) b ^= p[i];
+    return b;
+}
+
 /** @brief 位图字节数（128×32 → 512），显示类命令的"整帧恰好 525B"就是它 */
 #define DISP_FULL_FRAME (13U + 512U)
 
 /* ================================================================
- *  用例 1：分派矩阵 —— 每个线上命令码都必须落到自己的处理函数
+ *  分派矩阵 —— 每个线上命令码都必须落到自己的处理函数
  * ================================================================ */
 
 /**
@@ -345,7 +360,7 @@ static void case_dispatch_matrix(void)
 }
 
 /* ================================================================
- *  用例 2：回显规则（线上行为）
+ *  回显规则（线上行为）
  * ================================================================ */
 
 /**
@@ -410,26 +425,32 @@ static void case_echo_wire(void)
 }
 
 /* ================================================================
- *  用例 3：显示（BM）
+ *  显示（BM）：位图门禁 / 颜色 / 亮度
  * ================================================================ */
 
 /**
- * @brief 显示命令：位图不足拒显、颜色同序透传、越界拒显、几何取逻辑屏
+ * @brief 显示位图门禁：帧内位图必须 ≥ 逻辑屏所需字节数，恰好够才贴图
  *
- * 位图不足时**一次 app_render 都不许调**（否则渲染器按屏几何越界读帧缓冲）；颜色
- * 与 `dev_display_color_t` 同序透传（旧实现实机口径），>7 整帧拒显。
+ * 位图不足时**一次 app_render 都不许调** —— 否则渲染器按屏几何去读帧缓冲末尾
+ * 之外的内存。边界取"恰好头部（位图 0 字节）""少 1 字节"与"多 1 字节"。
  */
-static void case_display(void)
+static void case_display_bitmap(void)
 {
-    TEST_BEGIN("显示命令：位图门禁 / 颜色透传与拒显 / 逻辑屏几何");
+    TEST_BEGIN("显示位图门禁：恰好 512B 才贴图，空位图/少 1 拒显、多 1 照常");
+
+    /* 只有显示头、位图 0 字节（13B 帧）→ 拒显 */
+    uint16_t n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 0));
+    fixture_reset();
+    app_rls_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 0, "位图 0 字节（只有显示头）必须拒显，得到 %d 次绘制", s_draw_cnt);
 
     /* 位图差 1 字节（524B 帧）→ 拒显 */
-    uint16_t n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 511));
+    n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 511));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
     CHECK_MSG(s_draw_cnt == 0, "位图 511B（差 1）必须拒显，得到 %d 次绘制", s_draw_cnt);
 
-    /* 恰好 512B → 清屏 + 贴图，几何 = 逻辑屏 128×32，颜色 = 1（红） */
+    /* 恰好 512B → 清屏 + 贴图，几何 = 逻辑屏 128×32 */
     n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 512));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
@@ -438,10 +459,39 @@ static void case_display(void)
     CHECK_MSG(s_draws[1].w == 128 && s_draws[1].h == 32,
               "贴图几何应取逻辑屏 128×32，得到 %ux%u", (unsigned)s_draws[1].w,
               (unsigned)s_draws[1].h);
-    CHECK_MSG(s_draws[1].color == 1, "颜色 1 应透传成 1（红），得到 %u", (unsigned)s_draws[1].color);
     CHECK_MSG(s_draws[1].persist == false, "BM（非持久化）不得带 persist");
 
-    /* 颜色 7（白）透传；颜色 8 拒显 */
+    /* 多 1 字节（513B）→ 仍按逻辑屏贴图，多余字节不得越界读 */
+    n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 513));
+    fixture_reset();
+    app_rls_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 2 && s_draws[1].w == 128 && s_draws[1].h == 32,
+              "513B（多 1）应照常贴图，得到 %d 次、%ux%u", s_draw_cnt,
+              (unsigned)s_draws[1].w, (unsigned)s_draws[1].h);
+}
+
+/**
+ * @brief 显示颜色：0..7 与 `dev_display_color_t` 同序透传，>7 整帧拒显
+ *
+ * 颜色值直接进板级扫描的 BSRR 查表，>7 是越界读（写任意地址）；0（黑）与
+ * 7（白）是闭区间两端，都要测 —— 只测中间值分不清"透传"与"钳到最近端"。
+ */
+static void case_display_color(void)
+{
+    TEST_BEGIN("显示颜色：0/1/7 同序透传，8 越界拒显");
+
+    uint16_t n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 0, 0, 512));
+    fixture_reset();
+    app_rls_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 2 && s_draws[1].color == 0, "颜色 0（黑）应透传成 0，得到 %u",
+              (unsigned)s_draws[1].color);
+
+    n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 1, 0, 512));
+    fixture_reset();
+    app_rls_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 2 && s_draws[1].color == 1, "颜色 1 应透传成 1（红），得到 %u",
+              (unsigned)s_draws[1].color);
+
     n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(10, 7, 0, 512));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
@@ -453,9 +503,20 @@ static void case_display(void)
     app_rls_handle_frame(&s_ccb, s_frame, n);
     CHECK_MSG(s_draw_cnt == 0, "颜色 8 越界必须拒显（否则越界查 BSRR 表），得到 %d 次绘制",
               s_draw_cnt);
+}
 
-    /* 亮度：0 → 面板 1 档；31 → 7 档；255 → 恢复自动跟随 */
-    n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(0, 1, 0, 512));
+/**
+ * @brief 亮度映射：0 → 面板 1 档、31 → 7 档、255 → 恢复自动跟随
+ *
+ * 0 落 1 而不是 0：面板 0 档是"全灭"，协议 0 是"最暗"，关屏另有 DISPLAY_SW。
+ * 32~254 属**协议外**，实现按最亮（7）处理 —— **这是现状哨兵**：协议只定义
+ * 0~31 与 255，若协议方将来明确 32~254 的语义，期望与实现一并改。
+ */
+static void case_display_light(void)
+{
+    TEST_BEGIN("亮度映射：0→1 档 / 31→7 档 / 254 按最亮 / 255 恢复跟随");
+
+    uint16_t n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(0, 1, 0, 512));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
     CHECK_MSG(s_fixed_cnt == 1 && s_fixed_last == 1, "亮度 0 应落到 1 档，得到 %d 档",
@@ -467,7 +528,6 @@ static void case_display(void)
     CHECK_MSG(s_fixed_cnt == 1 && s_fixed_last == 7, "亮度 31 应落到 7 档，得到 %d 档",
               (unsigned)s_fixed_last);
 
-    /* 协议外值（>31 且 !=255）按最亮处理，不能算出溢出档位 */
     n = frame_build(APP_RLS_CMD_TYPE_DISPLAY, s_disp, disp_payload(254, 1, 0, 512));
     fixture_reset();
     app_rls_handle_frame(&s_ccb, s_frame, n);
@@ -482,7 +542,7 @@ static void case_display(void)
 }
 
 /* ================================================================
- *  用例 4：显示并保存（SV）→ 图片槽
+ *  显示并保存（SV）→ 图片槽
  * ================================================================ */
 
 /**
@@ -538,7 +598,7 @@ static void case_display_save(void)
 }
 
 /* ================================================================
- *  用例 5：显示已存储图片（DS）
+ *  显示已存储图片（DS）
  * ================================================================ */
 
 /**
@@ -576,7 +636,7 @@ static void case_display_pic(void)
 }
 
 /* ================================================================
- *  用例 6：显示开关（55）
+ *  显示开关（55）
  * ================================================================ */
 
 /**
@@ -626,7 +686,7 @@ static void case_display_switch(void)
 }
 
 /* ================================================================
- *  用例 7：修改 IP（IP）
+ *  修改 IP（IP）
  * ================================================================ */
 
 /**
@@ -639,10 +699,10 @@ static void case_set_ip(void)
     const uint8_t net[12] = {10, 1, 2, 3, 255, 255, 255, 0, 10, 1, 2, 1};
     uint16_t      n       = frame_build(APP_RLS_CMD_TYPE_SET_IP, net, sizeof(net));
 
-    /* 记录有效：端口取记录里的 6001 */
-    s_iap_rec_valid      = true;
-    s_iap_rec.port       = 6001;
+    /* 记录有效：端口取记录里的 6001（先 reset 再摆记录 —— reset 会清空记录状态） */
     fixture_reset();
+    s_iap_rec_valid = true;
+    s_iap_rec.port  = 6001;
     app_rls_handle_frame(&s_ccb, s_frame, n);
     CHECK_MSG(s_iap_upd_cnt == 1 && memcmp(s_iap_new_ip, net, 4) == 0 &&
                   memcmp(s_iap_new_mask, net + 4, 4) == 0 && memcmp(s_iap_new_gw, net + 8, 4) == 0,
@@ -664,7 +724,7 @@ static void case_set_ip(void)
 }
 
 /* ================================================================
- *  用例 8：搜索应答（ST/SC → RB）
+ *  搜索应答（ST/SC → RB）
  * ================================================================ */
 
 /**
@@ -692,8 +752,9 @@ static void case_report_ip(void)
     CHECK_MSG(memcmp(&s_tx_buf[6], s_net_ip, 4) == 0 && memcmp(&s_tx_buf[10], s_net_mask, 4) == 0 &&
                   memcmp(&s_tx_buf[14], s_net_gw, 4) == 0,
               "地址域应是运行态 IP/掩码/网关");
-    CHECK_MSG(s_tx_buf[18] == bcc_calc(s_tx_buf, 18), "BCC 应为前 18 字节异或（%02X，得到 %02X）",
-              (unsigned)bcc_calc(s_tx_buf, 18), (unsigned)s_tx_buf[18]);
+    CHECK_MSG(s_tx_buf[18] == _expected_bcc(s_tx_buf, 18),
+              "BCC 应为前 18 字节异或（%02X，得到 %02X）", (unsigned)_expected_bcc(s_tx_buf, 18),
+              (unsigned)s_tx_buf[18]);
     CHECK_MSG(s_tx_buf[19] == 0x0D && s_tx_buf[20] == 0x0C, "帧尾应 0D 0C（%02X %02X）",
               (unsigned)s_tx_buf[19], (unsigned)s_tx_buf[20]);
 }
@@ -706,7 +767,9 @@ int main(void)
 
     case_dispatch_matrix();
     case_echo_wire();
-    case_display();
+    case_display_bitmap();
+    case_display_color();
+    case_display_light();
     case_display_save();
     case_display_pic();
     case_display_switch();

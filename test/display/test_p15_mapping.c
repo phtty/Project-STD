@@ -29,6 +29,9 @@
  *     "同一引脚写两次 / 越界读到邻区"都会让这个数不对；
  *   · 8 帧确定性随机图：逐位对照；
  *   · `scan` 一帧 384 个 CLK、`set_row` 把 A~D 拉低。
+ *
+ * 本套件在 3833024 与 5006048 两种构建下**都会跑**：包含路径固定换成
+ * `test/stubs/host_p15/` 的替身头，与 `BOARD` 宏无关（被测的是 5006048 的驱动源码）。
  */
 
 #include <stdbool.h>
@@ -399,19 +402,34 @@ static void case_corners(void)
     static uint8_t        map[128U * 32U];
 
     unsigned bad = 0;
+    uint16_t bad_x = 0;
+    uint16_t bad_y = 0;
 
     for (unsigned k = 0; k < sizeof xs / sizeof xs[0]; k++) {
         memset(map, 0, sizeof map);
         map[(uint32_t)ys[k] * 128U + xs[k]] = 1U; /* 红 */
         const frame_result_t red = _compare_frame(map, true);
-        if (red.mismatches != 0U || red.undriven != 0U || red.ones != 1U) bad++;
+        if (red.mismatches != 0U || red.undriven != 0U || red.ones != 1U) {
+            if (bad == 0U) {
+                bad_x = xs[k];
+                bad_y = ys[k];
+            }
+            bad++;
+        }
 
         map[(uint32_t)ys[k] * 128U + xs[k]] = 7U; /* 白 */
         const frame_result_t white = _compare_frame(map, true);
-        if (white.mismatches != 0U || white.undriven != 0U || white.ones != 3U) bad++;
+        if (white.mismatches != 0U || white.undriven != 0U || white.ones != 3U) {
+            if (bad == 0U) {
+                bad_x = xs[k];
+                bad_y = ys[k];
+            }
+            bad++;
+        }
     }
 
-    CHECK_MSG(bad == 0U, "%u 个单点用例不对（红应 1 位、白应 3 位，且位流与参照一致）", bad);
+    CHECK_MSG(bad == 0U, "%u 个单点用例不对（首个 x=%u y=%u；红应 1 位、白应 3 位）", bad,
+              (unsigned)bad_x, (unsigned)bad_y);
 }
 
 /** @brief 8 帧确定性随机图：逐位对照 + 点亮位数不变式 */
@@ -422,6 +440,7 @@ static void case_random_frames(void)
     static uint8_t map[128U * 32U];
     uint32_t       rng = 0x12345678U;
     unsigned       bad = 0;
+    unsigned       bad_frame = 0;
 
     for (unsigned frame = 0; frame < 8U; frame++) {
         for (uint16_t i = 0; i < 128U * 32U; i++) {
@@ -430,10 +449,13 @@ static void case_random_frames(void)
         }
 
         const frame_result_t r = _compare_frame(map, true);
-        if (r.mismatches != 0U || r.undriven != 0U || r.ones != _expected_ones(map)) bad++;
+        if (r.mismatches != 0U || r.undriven != 0U || r.ones != _expected_ones(map)) {
+            if (bad == 0U) bad_frame = frame;
+            bad++;
+        }
     }
 
-    CHECK_MSG(bad == 0U, "%u/8 帧不一致（位流或点亮位数）", bad);
+    CHECK_MSG(bad == 0U, "%u/8 帧不一致（首个失败帧 %u，位流或点亮位数）", bad, bad_frame);
 }
 
 /** @brief scan 一帧发 384 个 CLK；set_row 把 A~D 拉低 */
