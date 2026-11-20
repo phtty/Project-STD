@@ -727,6 +727,13 @@ TEST_RLS_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件：RLS 图片槽（SV/DS 的 3 槽存储 / 配置记录加载落盘 / 几何门禁 / SW1~SW3 干接点）
+# 用例 TU-include app_rls_pic.c（槽镜像、加载回调、按键任务都是 static）；
+# 配置调度器 / 渲染 / 屏几何 / 显示门面 / 按键 / 任务创建都是本套件的记录桩。
+TEST_RLS_PIC_SRCS = \
+	test/protocol/test_rls_pic.c \
+	test/stubs/os_stub.c
+
 # 注意：新加套件时**必须同时**加进上面的依赖列表**和**下面的运行段。
 # 只加依赖的话 make 会编它但永远不跑 —— 看起来像覆盖了，实际一条断言都没执行。
 # 这两处由 lint（R1）机器检查：三处登记不一致会直接报违规，别再靠人记。
@@ -759,7 +766,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_rs485_slots $(TEST_BUILD)/test_render $(TEST_BUILD)/test_fold \
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
-      $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls
+      $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
+      $(TEST_BUILD)/test_rls_pic
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -837,6 +845,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── RLS 协议命令层 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rls
+	@echo ""
+	@echo "──── RLS 图片槽 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rls_pic
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
@@ -1004,6 +1015,13 @@ $(TEST_BUILD)/test_rls: $(TEST_RLS_SRCS) Application/Src/RLS/app_rls_cmd.c \
 	Application/Inc/RLS/app_rls_cmd.h Application/Inc/RLS/app_rls_pic.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RLS_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 了 app_rls_pic.c（不在 SRCS 里），必须单挂依赖。
+$(TEST_BUILD)/test_rls_pic: $(TEST_RLS_PIC_SRCS) Application/Src/RLS/app_rls_pic.c \
+	Application/Inc/RLS/app_rls_pic.h Application/Inc/app_cfg_sched.h \
+	Device/Inc/IO/dev_key.h Device/Inc/Storage/dev_cfg_record.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RLS_PIC_SRCS) $(TEST_LDFLAGS)
 
 # 用例 TU-include 了板级驱动 .c（不在 SRCS 里）与板级 main.h，必须单独挂依赖 ——
 # 否则改了被测源码/引脚表测试不重编，跑的是旧二进制。

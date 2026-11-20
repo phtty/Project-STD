@@ -174,6 +174,38 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "    if (!started) return HAL_CRC_Calculate(&hcrc, buf, 0);",
          "    if (!started) return hcrc.Instance->DR;"),
     ],
+    # RLS 图片槽 —— 断言见 test/protocol/test_rls_pic.c（记录加载/落盘 + 显示门禁 +
+    # 干接点映射）。槽布局是持久化契约，加载分支写错的表现是"上电花屏"。
+    "test_rls_pic": [
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P1  存图不置有效位（DS 显示不出来）",
+         "s_rec.valid_mask |= (uint8_t)(1U << slot);",
+         "s_rec.valid_mask &= (uint8_t)~(1U << slot);"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P2  槽号边界放宽到 >（越界写）",
+         "if (slot >= RLS_PIC_SLOT_COUNT || bitmap == nullptr) return false;",
+         "if (slot > RLS_PIC_SLOT_COUNT || bitmap == nullptr) return false;"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P3  加载不校验长度（半截记录也收）",
+         "if (st != DEV_CFG_RECORD_STATE_OK || len != sizeof(s_rec)) {",
+         "if (st != DEV_CFG_RECORD_STATE_OK) {"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P4  坏记录不清零（显示 Flash 垃圾）",
+         "        memset(&s_rec, 0, sizeof(s_rec));",
+         "        /* 变异：不清零 */"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P5  几何门禁恒真（按错误 stride 读 512B）",
+         "const bool     geom_ok = (need == RLS_PIC_BITMAP_BYTES);",
+         "const bool     geom_ok = true;"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P6  不查有效位（未写槽也画）",
+         "slot < RLS_PIC_SLOT_COUNT && (s_rec.valid_mask & (uint8_t)(1U << slot)) && geom_ok;",
+         "slot < RLS_PIC_SLOT_COUNT && geom_ok;"),
+        ("Application/Src/RLS/app_rls_pic.c",
+         "P7  SV 显示不请求持久化",
+         "            .persist = true,",
+         "            .persist = false,"),
+    ],
     # P15 64×8 静态扫描映射 —— 断言见 test/display/test_p15_mapping.c。
     # 字节序/位序/通道表都是"屏上哪一位对应哪个像素"，写反了不上机看不出来；
     # 每条都拿老 lamp_scan 的参照位流（oracle）逐位对拍。
