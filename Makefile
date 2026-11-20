@@ -739,6 +739,12 @@ TEST_TCP_SERVER_SRCS = test/channel/test_tcp_server.c
 # 套件：TCP 客户端通道（远端配置 / 4s 连接超时 / conn 生命周期 / 断线重连）
 # 与 server 同一手法：真 LwIP 头 + 脚本化 netconn；osDelay/时钟是假的（不真睡 4 秒）。
 # 链接 app_tcp_server.c 只为拿 `g_tcp_ccb_ops`（客户端的 send 复用 server 的虚表）。
+# 套件：显示设备基类（注册/颜色能力/裁剪/帧纪律/扫描任务）
+# 用例 TU-include Device/Display/dev_display.c，要真的 dev_display.h（ops 虚表）；
+# HUB75 用 test/stubs/display_base 的替身（真头是位带直写，host 编不了）。
+TEST_DISPLAY_BASE_CFLAGS = $(subst -I test/stubs,-I test/stubs/display_base -I Device/Inc/Display,$(TEST_CFLAGS))
+TEST_DISPLAY_BASE_SRCS   = test/display/test_display_base.c
+
 # 套件：MQTT 通道（订阅/凭据/连接回调/收发回调/任务重连）
 TEST_MQTT_SRCS = test/channel/test_mqtt.c
 # 套件：UDP 通道（端口 / 广播 / 来源回包 / 收包生命周期 / bind 循环）
@@ -788,7 +794,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
       $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
       $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_tcp_server \
-      $(TEST_BUILD)/test_tcp_client $(TEST_BUILD)/test_udp $(TEST_BUILD)/test_mqtt
+      $(TEST_BUILD)/test_tcp_client $(TEST_BUILD)/test_udp $(TEST_BUILD)/test_mqtt \
+      $(TEST_BUILD)/test_display_base
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -881,6 +888,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── MQTT 通道 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_mqtt
+	@echo ""
+	@echo "──── 显示设备基类 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_display_base
 
 $(TEST_BUILD)/test_tcp_server: $(TEST_TCP_SERVER_SRCS) \
 	Application/Src/Channel/app_tcp_server.c \
@@ -908,6 +918,13 @@ $(TEST_BUILD)/test_mqtt: $(TEST_MQTT_SRCS) \
 	Application/Inc/app_dispatch.h Platform/Inc/pl_net_adapt.h Platform/Inc/lwipopts.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CHANNEL_CFLAGS) -o $@ $(TEST_MQTT_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_display_base: $(TEST_DISPLAY_BASE_SRCS) \
+	Device/Display/dev_display.c Device/Inc/Display/dev_display.h \
+	Platform/Inc/pl_tim.h Platform/Inc/pl_task.h \
+	test/stubs/display_base/pl_hub75.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_DISPLAY_BASE_CFLAGS) -o $@ $(TEST_DISPLAY_BASE_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
