@@ -221,11 +221,28 @@ static void _iap_cmd_enter_recovery(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
     pl_system_reset();
 }
 
-/** @brief 0x07: 重启 —— main app 不处理，返回“状态不允许” */
+/** @brief 0x07: 重启 —— main app 也支持（协议原文“仅 Recovery”是本工程旧限制）
+ *
+ * main app 同样需要远程重启（应用新 IP / 维护），所以这里不再回“状态不允许”。
+ *
+ * 与 Recovery 的区别：**本卡复位不依赖从卡应答**。从卡离线时主卡仍要能重启，
+ * 否则现场只能断电；从卡在线时先发内部 0x15（带 delay），两卡尽量同时复位。
+ * 应答放在复位之前发，主机先收到 status=0 再等设备重启。 */
 static void _iap_cmd_restart(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
 {
-    uint32_t status = 2U;
+    uint32_t status = 0U;
+
+    if ((BOARD_IAP_CAPS & 0x01U) != 0U) {
+        uint32_t delay_ms = 100U;
+        app_iap_send_internal(0x00014C15U, 0, 1U, &delay_ms);
+        (void)app_iap_wait_internal_ack(0x0000BC15U, 300U); /* 尽力而为，不阻塞本卡复位 */
+    }
+
     _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_07, 1, &status);
+
+    osDelay(100);
+    pl_iwdg_refresh(pl_iwdg_get_handle());
+    pl_system_reset();
 }
 
 /** @brief 0x08~0x0B: 保留 */

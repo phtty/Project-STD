@@ -199,6 +199,24 @@ static void _iap_handle_internal(app_iap_frame_t *f)
         pl_system_reset();
         break;
     }
+    case 0x15U: {
+        /* 主卡重启从卡：回 ACK 后按请求的 delay 复位；主卡自身收到总线回显不应答 */
+        if (app_screen_is_master()) {
+            uint32_t st = 2U;
+            app_iap_send_internal(0x0000BC15U, f->seq, 1U, &st);
+            return;
+        }
+        uint32_t delay_ms = (f->len >= 1U) ? f->data_crc[0] : 100U;
+        if (delay_ms > 5000U) delay_ms = 5000U;
+        if (delay_ms < 20U) delay_ms = 20U;
+
+        uint32_t st = 0U;
+        app_iap_send_internal(0x0000BC15U, f->seq, 1U, &st);
+        osDelay(delay_ms);
+        pl_iwdg_refresh(pl_iwdg_get_handle());
+        pl_system_reset();
+        break;
+    }
     default: {
         uint32_t st = 2U;
         app_iap_send_internal(0x0000BC00U | id, f->seq, 1U, &st);

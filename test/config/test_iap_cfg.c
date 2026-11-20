@@ -115,8 +115,14 @@ bool pl_rtc_bkup_write(pl_rtc_handle_t h, uint32_t reg, uint32_t value)
     return true;
 }
 pl_iwdg_handle_t pl_iwdg_get_handle(void) { return NULL; }
-void pl_iwdg_refresh(pl_iwdg_handle_t h) { (void)h; }
-void pl_system_reset(void) {}
+static int s_iwdg_refresh_cnt;
+static int s_reset_cnt;
+void pl_iwdg_refresh(pl_iwdg_handle_t h)
+{
+    (void)h;
+    s_iwdg_refresh_cnt++;
+}
+void pl_system_reset(void) { s_reset_cnt++; }
 void app_iap_send_internal(uint32_t cmd, uint32_t seq, uint32_t len, const uint32_t *data)
 {
     (void)cmd;
@@ -249,6 +255,35 @@ static void expect_report(const uint8_t ip[4], const uint8_t mask[4], const uint
               (unsigned)port);
 }
 
+/**
+ * @brief 0x07 重启：main app 必须也能重启
+ *
+ * 旧实现写死 `status = 2`（"状态不允许"），main app 下这条命令完全不可用；
+ * 现场要远程重启只能断电。现在要求：回 status=0、刷新看门狗、真的复位。
+ * 从卡是否在线不影响本卡复位（从卡只做尽力通知），这条在双卡板上同样成立。
+ */
+static void case_restart_command(void)
+{
+    s_resp_cmd    = 0;
+    s_resp_nwords = 0;
+    s_reset_cnt   = 0;
+    s_iwdg_refresh_cnt = 0;
+
+    CHECK_MSG(g_iap_cmd_table[0x07] == _iap_cmd_restart, "命令表 0x07 未指向 _iap_cmd_restart");
+
+    app_iap_frame_t req = {0};
+    req.seq             = 0x77;
+    _iap_cmd_restart(NULL, &req);
+
+    CHECK_MSG(s_resp_cmd == APP_IAP_RTN_CMD_07, "回包命令码应为 0x07，实际 0x%X",
+              (unsigned)s_resp_cmd);
+    CHECK_MSG(s_resp_nwords == 1 && s_resp_words[0] == 0U,
+              "main app 重启应回 status=0，实际 len=%d status=%u", s_resp_nwords,
+              (unsigned)s_resp_words[0]);
+    CHECK_MSG(s_reset_cnt == 1, "0x07 必须真的复位（reset=%d）", s_reset_cnt);
+    CHECK_MSG(s_iwdg_refresh_cnt >= 1, "复位前应刷新看门狗（%d 次）", s_iwdg_refresh_cnt);
+}
+
 /* ================================================================
  *  看门狗（范式同 test_dispatch.c）
  *
@@ -372,7 +407,13 @@ int main(void)
     printf("  %s（本用例失败 %d）\n", g_failures == before ? "通过" : "**失败**",
            g_failures - before);
 
-    printf("\n用例 2 个，失败 %d 个\n", g_failures);
+    before = g_failures;
+    printf("▶ 0x07 重启：main app 也必须真的复位\n");
+    case_restart_command();
+    printf("  %s（本用例失败 %d）\n", g_failures == before ? "通过" : "**失败**",
+           g_failures - before);
+
+    printf("\n用例 3 个，失败 %d 个\n", g_failures);
     return g_failures ? 1 : 0;
 }
 
@@ -794,6 +835,7 @@ int main(void)
         {"跨模块访问器 app_iap_get_net_cfg()", case_net_cfg_accessor_contract},
         {"报告 IP 绝不回传裸 Flash", case_report_ip_never_returns_raw_flash},
         {"上电应用记录里的网络", case_boot_applies_record_net},
+        {"0x07 重启：main app 也必须真的复位", case_restart_command},
     };
 
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

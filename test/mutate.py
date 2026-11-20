@@ -81,6 +81,8 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Application/Src/IAP/app_iap_cfg.c",
          "C8  去重判定取反",
          "memcmp(info.net_cfg.ip, ip, 4) == 0", "memcmp(info.net_cfg.ip, ip, 4) != 0"),
+        # C9 是**等价变异体**（`if (0)` 空分支后仍走原条件），存活属预期；
+        # 跑本套件时加 `--allow-alive C9`。
         ("Application/Src/IAP/app_iap_cfg.c",
          "C9  去掉去重分支",
          "    } else if (memcmp(info.net_cfg.ip, ip, 4) == 0",
@@ -115,9 +117,20 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Device/Storage/dev_flash_int.c",
          "F3  _read 返回字节数",
          "return 0; /* 约定: 0 = 成功（不返回字节数） */", "return (int32_t)len;"),
+        # IAP 0x07 重启（main app）—— 断言见 test/config/test_iap_cfg.c 的 case_restart_command
+        ("Application/Src/IAP/app_iap_cmd.c",
+         "I1  main app 重启回 status=2（旧限制）",
+         "static void _iap_cmd_restart(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)\n{\n    uint32_t status = 0U;",
+         "static void _iap_cmd_restart(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)\n{\n    uint32_t status = 2U;"),
+        ("Application/Src/IAP/app_iap_cmd.c",
+         "I2  0x07 只回应答、不复位",
+         "    _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_07, 1, &status);\n\n    osDelay(100);\n    pl_iwdg_refresh(pl_iwdg_get_handle());\n    pl_system_reset();",
+         "    _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_07, 1, &status);"),
+        ("Application/Src/IAP/app_iap_cmd.c",
+         "I3  0x07 复位前不喂狗",
+         "    _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_07, 1, &status);\n\n    osDelay(100);\n    pl_iwdg_refresh(pl_iwdg_get_handle());\n    pl_system_reset();",
+         "    _iap_cmd_send_re_data(ccb, IAP_Data->seq, APP_IAP_RTN_CMD_07, 1, &status);\n\n    osDelay(100);\n    pl_system_reset();"),
     ],
-    # CDSTD 协议命令（A1 文字显示 / A3 全屏填充）——断言见 test/protocol/test_cdstd.c。
-    # RLS 协议命令层 —— 断言见 test/protocol/test_rls.c（分派 / 回显 / 显示 / 图片槽 / 开关 / 网络）
     "test_rls": [
         ("Application/Src/RLS/app_rls_cmd.c",
          "R1  颜色越界守卫放宽到 8", "    if (v > (uint8_t)DEV_DISPLAY_COLOR_WHITE) return false;",
