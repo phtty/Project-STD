@@ -221,7 +221,7 @@ static void _iap_cmd_enter_recovery(app_ccb_t *ccb, app_iap_frame_t *IAP_Data)
     pl_system_reset();
 }
 
-/** @brief 0x07: 重启 —— main app 也支持（协议原文“仅 Recovery”是本工程旧限制）
+/** @brief 0x07: 重启 —— main app 也支持（协议 2.1 起；2.0 曾限定仅 Recovery）
  *
  * main app 同样需要远程重启（应用新 IP / 维护），所以这里不再回“状态不允许”。
  *

@@ -169,7 +169,7 @@ bool app_iap_wait_internal_ack(uint32_t expect_cmd, uint32_t timeout_ms)
     return false;
 }
 
-/** @brief 内部 485 请求（0x4Cxx）：main app 只支持 0x10 查询与 0x14 进 Recovery */
+/** @brief 内部 485 请求（0x4Cxx）：main app 支持 0x10 查询、0x14 进 Recovery、0x15 重启 */
 static void _iap_handle_internal(app_iap_frame_t *f)
 {
     app_flash_iap_sys_info_t cfg = *g_iap_sys_info;
@@ -247,7 +247,7 @@ void app_iap_task(void *argument)
 
         /* 按完整命令码的方向字节路由：
          *   0x00004Bxx 上位机 → 命令表（低字节索引，必须先做范围检查）
-         *   0x00014Cxx 主卡→从卡 → 内部请求（0x10/0x14 在 main app 也要应答）
+         *   0x00014Cxx 主卡→从卡 → 内部请求（0x10/0x14/0x15 在 main app 也要应答）
          *   其余（含 0x0000BCxx）忽略 */
         uint32_t dir  = (frame_data->cmd >> 8) & 0xFFU;
         uint32_t addr = (frame_data->cmd >> 16) & 0xFFFFU;
