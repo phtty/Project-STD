@@ -157,6 +157,23 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Kernel/Src/bcc_utils.c",
          "R11 BCC 初值非 0", "    uint8_t bcc = 0;", "    uint8_t bcc = 1;"),
     ],
+    # 硬件 CRC 封装 —— 断言见 test/kernel/test_crc.c（链接生产 pl_crc.c，不是桩）。
+    # 三条都针对"分块累加"这条路径：截断、末块不补零、空输入不复位，是历史上
+    # 真实出现过的三类缺陷（前两类曾让 >256B 的非对齐输入静默少算）。
+    "test_crc": [
+        ("Platform/Src/pl_crc.c",
+         "C1  非对齐只算首块（256B 截断回归）",
+         "    while (len) {",
+         "    while (len && !started) {"),
+        ("Platform/Src/pl_crc.c",
+         "C2  末块不补零（尾巴带垃圾）",
+         "        memset(buf, 0, sizeof(buf)); /* 末块的尾巴靠这一步补零 */",
+         "        /* 变异：不补零 */"),
+        ("Platform/Src/pl_crc.c",
+         "C3  空输入不复位到初值",
+         "    if (!started) return HAL_CRC_Calculate(&hcrc, buf, 0);",
+         "    if (!started) return hcrc.Instance->DR;"),
+    ],
     # P15 64×8 静态扫描映射 —— 断言见 test/display/test_p15_mapping.c。
     # 字节序/位序/通道表都是"屏上哪一位对应哪个像素"，写反了不上机看不出来；
     # 每条都拿老 lamp_scan 的参照位流（oracle）逐位对拍。

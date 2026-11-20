@@ -614,7 +614,7 @@ TEST_CASC_MASTER_SRCS = \
 # 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
 TEST_CRC_SRCS = \
 	test/kernel/test_crc.c \
-	test/stubs/pl_crc_stub.c \
+	Platform/Src/pl_crc.c \
 	test/stubs/os_stub.c
 
 # 套件十一：级联协议探针（四态 / 地址过滤 / 长度域 / 与既有协议互不毒化）
