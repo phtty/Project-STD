@@ -375,8 +375,8 @@ static void oe_stub_reset(bool on, uint8_t hw_level)
 /*  被测：生产源码本体（与 test_casc_frame 同一手法）               */
 /* ================================================================ */
 
-#include "../Application/Src/CDSTD/app_cdstd.c"
-#include "../Application/Src/CDSTD/app_cdstd_cmd.c" /* 命令层跑真的：表/拼帧/CRC 都是被测对象 */
+#include "../../Application/Src/CDSTD/app_cdstd.c"
+#include "../../Application/Src/CDSTD/app_cdstd_cmd.c" /* 命令层跑真的：表/拼帧/CRC 都是被测对象 */
 
 /* ================================================================ */
 /*  夹具                                                            */

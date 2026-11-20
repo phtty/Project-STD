@@ -27,7 +27,7 @@
 #include "ring_buffer.h"
 
 /* 生产实现 TU-include：`_ah_mqtt_module_init`、`_build_topics` 等是 static */
-#include "../Application/Src/AH/app_ah_mqtt.c"
+#include "../../Application/Src/AH/app_ah_mqtt.c"
 
 /* ---- 断言 ---- */
 static int g_pass;

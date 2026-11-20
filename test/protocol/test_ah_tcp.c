@@ -28,7 +28,7 @@
 #include "ring_buffer.h"
 
 /* 生产实现 TU-include：`_ah_tcp_cmd_set/get`、`_ah_tcp_send` 都是 static */
-#include "../Application/Src/AH/app_ah_tcp.c"
+#include "../../Application/Src/AH/app_ah_tcp.c"
 
 /* ---- 断言 ---- */
 static int g_pass;

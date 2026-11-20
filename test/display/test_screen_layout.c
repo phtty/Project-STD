@@ -98,7 +98,7 @@ bool app_render_take_persist_req(void)
 }
 bool app_render_peek_persist_req(void) { return s_persist_req; }
 
-/* dev_display 原语（参考实现）已提到共享头 test/dev_display_ref.h ——
+/* dev_display 原语（参考实现）已提到共享头 test/display/dev_display_ref.h ——
  * 与 test_screen_canvas.c 共用一份，语义固定为真 dev_display.c 的裁剪语义。
  * 原来这里那份是旧语义（fill 只裁右下、draw_bitmap 越界整张放弃），
  * 与真实现漂移，正是本头要消除的问题。 */
@@ -108,9 +108,9 @@ bool app_render_peek_persist_req(void) { return s_persist_req; }
    画布实现已拆到独立 TU（app_screen_canvas.c），卡片状态与快照已拆到
    app_screen_status.c —— 用例同样 TU-include，否则 static sink / 画布缓冲与
    各接缝符号都缺失，链接报未定义（本用例正是状态快照的覆盖套件）。 */
-#include "../Application/Src/Render/app_screen.c"
-#include "../Application/Src/Render/app_screen_canvas.c"
-#include "../Application/Src/Render/app_screen_status.c"
+#include "../../Application/Src/Render/app_screen.c"
+#include "../../Application/Src/Render/app_screen_canvas.c"
+#include "../../Application/Src/Render/app_screen_status.c"
 
 /* ================================================================
  *  夹具

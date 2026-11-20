@@ -44,7 +44,7 @@ void dev_display_set_brightness(dev_display_t *dev, uint8_t level)
 dev_display_t *dev_display_get(void) { return &s_dev; }
 
 /* ---- 被测：生产源码本体（开关 / 期望值 / 待下发标志都是 file-static）---- */
-#include "../Application/Src/Render/app_screen_brightness.c"
+#include "../../Application/Src/Render/app_screen_brightness.c"
 
 /* ================================================================
  *  夹具

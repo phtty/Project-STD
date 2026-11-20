@@ -93,7 +93,7 @@ app_ccb_t   *app_rs485_ccb(void) { return nullptr; }
 void     pl_task_new_stub(void) {}
 
 /* 被测：生产源码本体 */
-#include "../Application/Src/CASC/app_casc.c"
+#include "../../Application/Src/CASC/app_casc.c"
 
 /* ================================================================ */
 /*  夹具                                                            */

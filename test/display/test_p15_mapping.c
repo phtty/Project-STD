@@ -70,7 +70,7 @@ void dev_display_register(dev_display_t *dev)
  *  生产驱动本体（TU-include：BSRR 表、通道表、prepare/scan 都是 static）
  * ================================================================ */
 
-#include "../boards/5006048/Device/Src/dev_p15_64x8_1000001090.c"
+#include "../../boards/5006048/Device/Src/dev_p15_64x8_1000001090.c"
 
 /* ================================================================
  *  参照模型（oracle）—— 老工程的 displayDataUpdata + lamp_scan

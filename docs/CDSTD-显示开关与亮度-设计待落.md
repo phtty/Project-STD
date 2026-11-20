@@ -33,7 +33,7 @@
 - `app_screen_oe_enable()` / `app_screen_oe_disable()` / `app_screen_is_oe_enabled()`（声明 `Application/Inc/Render/app_screen.h`，实现 `Application/Src/Render/app_screen_brightness.c`；上电默认**开**；OE = 面板输出使能）；
 - `app_screen_set_brightness()` 施加 **`显示开 ? 期望值 : 0`**（期望值仍记在 `s_bright_level`，即"缓存"本身；`>7` 仍钳到 7）；
 - `app_screen_brightness_take_pending()` 返回 **有效值**（关屏时为 0），级联据此让从卡一起灭；
-- 新增 host 套件 `test/test_screen_brightness.c`（8 case / 33 断言——该 TU 此前**零覆盖**），已按 Makefile 四处登记（闸① R1 校验：19 套件 0 违规）；
+- 新增 host 套件 `test/display/test_screen_brightness.c`（8 case / 33 断言——该 TU 此前**零覆盖**），已按 Makefile 四处登记（闸① R1 校验：19 套件 0 违规）；
 - 反向验证：去掉关屏门控 → 失败 2；`take_pending` 退回返回期望值 → 失败 2；两板复跑均逐字节还原。
 
 **命令层（CDSTD）**

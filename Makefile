@@ -479,13 +479,13 @@ TEST_LDFLAGS = -fsanitize=address,undefined -lpthread -Wl,--gc-sections
 # 套件一：ring_buffer（窥视路径的容量夹紧）
 TEST_RB_SRCS = \
 	Kernel/Src/ring_buffer.c \
-	test/test_ring_buffer.c \
+	test/kernel/test_ring_buffer.c \
 	test/stubs/os_stub.c
 
 # 套件二：协议/通道分发引擎（真实 frame_dispatch_task 跑在 pthread 上）
 TEST_DISPATCH_SRCS = \
 	test/stubs/os_stub.c \
-	test/test_dispatch.c \
+	test/dispatch/test_dispatch.c \
 	Application/Src/app_dispatch.c \
 	Platform/Src/pl_task.c \
 	Kernel/Src/ring_buffer.c
@@ -494,7 +494,7 @@ TEST_DISPATCH_SRCS = \
 TEST_PROBES_SRCS = \
 	test/stubs/os_stub.c \
 	test/stubs/pl_crc_stub.c \
-	test/test_probes.c \
+	test/dispatch/test_probes.c \
 	Platform/Src/pl_task.c \
 	Application/Src/IAP/app_iap.c \
 	Application/Src/LDI/app_ldi.c \
@@ -511,7 +511,7 @@ TEST_PROBES_SRCS = \
 # 重复编译会符号重定义。
 TEST_CFG_SCHED_SRCS = \
 	test/stubs/os_stub.c \
-	test/test_cfg_sched.c \
+	test/config/test_cfg_sched.c \
 	Device/Storage/dev_cfg_record.c \
 	Application/Src/app_cfg_sched.c \
 	Kernel/Src/crc_utils.c
@@ -526,7 +526,7 @@ TEST_IAP_CFG_SRCS = \
 	test/stubs/os_stub.c \
 	test/stubs/pl_crc_stub.c \
 	test/stubs/pl_flash_stub.c \
-	test/test_iap_cfg.c \
+	test/config/test_iap_cfg.c \
 	Device/Storage/dev_flash_int.c
 
 # 被测试文件 #include 的实现 TU：**不参与编译，但必须参与依赖**。
@@ -543,7 +543,7 @@ TEST_LDI_0AH_SRCS = \
 	test/stubs/os_stub.c \
 	test/stubs/pl_crc_stub.c \
 	test/stubs/pl_flash_stub.c \
-	test/test_ldi_0ah.c \
+	test/config/test_ldi_0ah.c \
 	Device/Storage/dev_flash_int.c \
 	Device/Storage/dev_cfg_record.c \
 	Application/Src/app_cfg_sched.c \
@@ -556,7 +556,7 @@ TEST_LDI_0AH_SRCS = \
 # 只编两个 Platform .c；HAL 由 test/stubs/stm32f4xx_hal.h 给形状，
 # 板级表 g_pl_tim_board / g_pl_uart_board 由测试文件自己提供。
 TEST_ISR_PREINIT_SRCS = \
-	test/test_isr_preinit.c \
+	test/kernel/test_isr_preinit.c \
 	test/stubs/os_stub.c \
 	Platform/Src/pl_tim.c \
 	Platform/Src/pl_uart.c
@@ -566,7 +566,7 @@ TEST_ISR_PREINIT_SRCS = \
 # 它的消费逻辑由本套件的结构性断言与 _render_init 的运行期校验共同覆盖。
 # 按 BOARD 分板编译：两版字库的字号集合、字符集、单元顺序都不同。
 TEST_FONT_LIB_SRCS = \
-	test/test_font_lib.c \
+	test/display/test_font_lib.c \
 	$(BOARD_DIR)/Application/Src/app_font_lib_board.c
 
 # 套件九：整屏画布（经画布渲染必须与直写实屏逐像素相等）
@@ -574,14 +574,14 @@ TEST_FONT_LIB_SRCS = \
 # 提供 dev_display 原语作为独立参考实现 —— 两个生产 .c 都不列进 SRCS，
 # Device/Display/dev_display.c 同样不列（否则符号重复）。
 TEST_SCREEN_CANVAS_SRCS = \
-	test/test_screen_canvas.c \
+	test/display/test_screen_canvas.c \
 	test/stubs/os_stub.c
 
 # 套件十九：整屏门面 · 亮度与屏开关（开关与亮度分离 / 关屏缓存 / 级联有效值）
 # 用例 TU-include app_screen_brightness.c（开关/期望值/待下发都是 file-static），
 # 并把 dev_display_set_brightness 换成记录桩 —— 生产 .c 不列进 SRCS，否则符号重复。
 TEST_SCREEN_BRIGHTNESS_SRCS = \
-	test/test_screen_brightness.c
+	test/display/test_screen_brightness.c
 
 # 套件十二：切分表与抽带（画布上的矩形 → 1bpp 位图，必须与独立参考逐位相等）
 # 同套件九：用例 TU-include app_screen.c、app_screen_canvas.c 与 app_screen_status.c
@@ -589,14 +589,14 @@ TEST_SCREEN_BRIGHTNESS_SRCS = \
 # 独立参考 —— 三个生产 .c 都不列进 SRCS，dev_display.c 同样不列。本套件的本卡
 # 地址被钉成 1（非原点矩形），故与套件九不重复。
 TEST_SCREEN_LAYOUT_SRCS = \
-	test/test_screen_layout.c \
+	test/display/test_screen_layout.c \
 	test/stubs/os_stub.c
 
 # 套件十三：级联图传 · 从卡侧（分片暂存 / 陈旧分片 / 短分片 / 缺片应答 / NACK）
 # 用例 include app_casc.c（探针与分派表都是 static），用真探针 + 真分派表，
 # 只把总线与 app_screen 换成替身。
 TEST_CASC_ROUND_SRCS = \
-	test/test_casc_round.c \
+	test/protocol/test_casc_round.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
@@ -605,7 +605,7 @@ TEST_CASC_ROUND_SRCS = \
 # 同套件十三：用例 include app_casc.c。总线那头坐着一个**假从卡**，
 # 它收到的分片经真探针 + 真队列喂回主卡 —— 分帧、探针、等待循环都是真的。
 TEST_CASC_MASTER_SRCS = \
-	test/test_casc_master.c \
+	test/protocol/test_casc_master.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
@@ -613,7 +613,7 @@ TEST_CASC_MASTER_SRCS = \
 # 套件十：硬件 CRC32 封装（任意长度/对齐都要算全，不得截断）
 # 链接**真的** Platform/Src/pl_crc.c —— 桩会掩盖这类缺陷，测真文件才有意义。
 TEST_CRC_SRCS = \
-	test/test_crc.c \
+	test/kernel/test_crc.c \
 	test/stubs/pl_crc_stub.c \
 	test/stubs/os_stub.c
 
@@ -621,7 +621,7 @@ TEST_CRC_SRCS = \
 # 用例 include app_casc.c（探针是 static）；除探针真正用到的 rb 与 CRC 外，
 # 其余符号都要给桩 —— 探针只窥视，不碰通道与队列。
 TEST_CASC_FRAME_SRCS = \
-	test/test_casc_frame.c \
+	test/protocol/test_casc_frame.c \
 	test/stubs/pl_crc_stub.c \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
@@ -630,7 +630,7 @@ TEST_CASC_FRAME_SRCS = \
 # 用例 include app_rs485.c（rs485_isr_cb 与槽位都是 static），只把 HAL 替身接上；
 # 队列用**生产的那份属性**，所以深度与缓冲定容写错也会被发现。
 TEST_RS485_SLOTS_SRCS = \
-	test/test_rs485_slots.c \
+	test/channel/test_rs485_slots.c \
 	test/stubs/os_stub.c \
 	Kernel/Src/ring_buffer.c
 
@@ -639,7 +639,7 @@ TEST_RS485_SLOTS_SRCS = \
 # 渲染目标换成套件内的 capture 目标（记录每次 fill/bitmap 的几何）。
 # text_cvt.c 供 UTF8→GBK 转换；os_stub 供持久化路径引用的互斥量原语。
 TEST_RENDER_SRCS = \
-	test/test_render.c \
+	test/display/test_render.c \
 	test/stubs/os_stub.c \
 	Kernel/Src/text_cvt.c
 
@@ -649,7 +649,7 @@ TEST_RENDER_SRCS = \
 # g_ldi_ctx 与 app_ldi_get_device_idx，故三态判定走真实访问器而非复制的逻辑。
 # app_vms_ctrl.c / app_render.c 都不列进 SRCS（前者被 include，后者是桩）。
 TEST_FOLD_SRCS = \
-	test/test_fold.c \
+	test/display/test_fold.c \
 	test/stubs/os_stub.c \
 	test/stubs/pl_crc_stub.c \
 	Application/Src/LDI/app_fold.c \
@@ -662,7 +662,7 @@ TEST_FOLD_SRCS = \
 # 命令表整个换成记录桩（生产表全是空桩，观察不到分派）；os_stub + pl_task 让真实任务
 # 跑在 pthread 上。app_cdstd_cmd.c **不列进 SRCS** —— 表由用例定义，链进去会重定义。
 TEST_CDSTD_SRCS = \
-	test/test_cdstd.c \
+	test/protocol/test_cdstd.c \
 	test/stubs/os_stub.c \
 	Platform/Src/pl_task.c \
 	Kernel/Src/ring_buffer.c \
@@ -671,21 +671,21 @@ TEST_CDSTD_SRCS = \
 # 套件：AH 纯函数（主题前缀 / Client ID / 通知号）
 # 只链生产 TU app_ah.c；输入是手工构造的 cfg，不碰 Flash/任务。
 TEST_AH_SRCS = \
-	test/test_ah.c \
+	test/protocol/test_ah.c \
 	Application/Src/AH/app_ah.c
 
 # 套件：AH 参数配置（默认值 / 校验 / ah_cfg 记录读写）
 # 用例 TU-include app_ah_cfg.c（static 加载回调与 RAM 镜像要从外部够到），
 # 故实现 TU **不列进 SRCS**，只在下面单挂依赖行。
 TEST_AH_CFG_SRCS = \
-	test/test_ah_cfg.c
+	test/protocol/test_ah_cfg.c
 
 # 套件：AH/TCP 参数口（探针四态 / 0AH 设置 / 0BH 采集）
 # 用例 TU-include app_ah_tcp.c（0AH/0BH 处理函数与组帧是 static），
 # 故实现 TU **不列进 SRCS**，只在下面单挂依赖行。
 # 发送、配置层、RTC、网络、TCP 实例全部是桩；探针走真实 rb_*。
 TEST_AH_TCP_SRCS = \
-	test/test_ah_tcp.c \
+	test/protocol/test_ah_tcp.c \
 	test/stubs/os_stub.c \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
@@ -694,7 +694,7 @@ TEST_AH_TCP_SRCS = \
 # 用例 TU-include app_ah_mqtt.c（装配函数是 static）；通道、任务、RTC 是桩，
 # 主题纯函数走真实 app_ah.c，探针走真实 rb_*。
 TEST_AH_MQTT_SRCS = \
-	test/test_ah_mqtt.c \
+	test/protocol/test_ah_mqtt.c \
 	test/stubs/os_stub.c \
 	Application/Src/AH/app_ah.c \
 	Kernel/Src/ring_buffer.c
@@ -702,25 +702,25 @@ TEST_AH_MQTT_SRCS = \
 # 套件：AH/MQTT 命令层（显示分派/清屏/重启/对时）
 # 用例 TU-include app_ah_mqtt_cmd.c；渲染/屏幕/RTC/复位/发送是桩。
 TEST_AH_MQTT_CMD_SRCS = \
-	test/test_ah_mqtt_cmd.c \
+	test/protocol/test_ah_mqtt_cmd.c \
 	test/stubs/os_stub.c \
 	Application/Src/AH/app_ah.c
 
 # 套件二十：P15 64×8 静态扫描的映射（老 lamp_scan 的位流当参照）
 # 用例 TU-include 板级驱动 .c（BSRR 表 / 通道表都是 static）。
 # **包含路径与别的套件不同**：本套件要真的 dev_display.h（带 ops 虚表）与板级
-# main.h / pl_hub75.h 的 host 替身（test/host_p15）。把 test/stubs 换掉、并把真
+# main.h / pl_hub75.h 的 host 替身（test/stubs/host_p15）。把 test/stubs 换掉、并把真
 # dev_display.h 的目录提到前面 —— test/stubs 里的 dev_display.h 是没有 ops 的
 # 精简影子，驱动编不过。只换本套件的包含路径，不动别的套件的 TEST_CFLAGS。
-TEST_P15MAP_CFLAGS = $(subst -I test/stubs,-I test/host_p15 -I Device/Inc/Display,$(TEST_CFLAGS))
-TEST_P15MAP_SRCS   = test/test_p15_mapping.c
+TEST_P15MAP_CFLAGS = $(subst -I test/stubs,-I test/stubs/host_p15 -I Device/Inc/Display,$(TEST_CFLAGS))
+TEST_P15MAP_SRCS   = test/display/test_p15_mapping.c
 
 # 套件：RLS 协议命令层（分派矩阵 / 回显规则 / 显示与图片槽 / 开关 / 修改 IP / 搜索应答）
 # 生产 TU **照原样编译**（不 TU-include）：命令表与处理函数都是外部可见的，
 # 副作用用套件内的记录桩（渲染 / 光感 / IAP / 网络 / 发送 / 图片槽）观察。
 # 进程不阻塞（任务与队列都在被 --gc-sections 丢弃的初始化段里），无需 SIGALRM 保护。
 TEST_RLS_SRCS = \
-	test/test_rls.c \
+	test/protocol/test_rls.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c \
 	Kernel/Src/bcc_utils.c \
@@ -865,7 +865,7 @@ $(TEST_BUILD)/test_font_lib: $(BOARD_DIR)/board.h
 
 $(TEST_BUILD)/test_screen_canvas: $(TEST_SCREEN_CANVAS_SRCS) \
 	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c \
-	test/dev_display_ref.h
+	test/display/dev_display_ref.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_CANVAS_SRCS) $(TEST_LDFLAGS)
 
@@ -893,13 +893,13 @@ $(TEST_BUILD)/test_casc_frame: Application/Src/CASC/app_casc.c
 # 与板级 board.h，都不在 SRCS 里。
 $(TEST_BUILD)/test_screen_layout: $(TEST_SCREEN_LAYOUT_SRCS) \
 	Application/Src/Render/app_screen.c Application/Src/Render/app_screen_canvas.c \
-	Application/Src/Render/app_screen_status.c test/dev_display_ref.h
+	Application/Src/Render/app_screen_status.c test/display/dev_display_ref.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_SCREEN_LAYOUT_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_screen_layout: Application/Src/Render/app_screen.c \
 	Application/Src/Render/app_screen_canvas.c Application/Src/Render/app_screen_status.c \
-	test/dev_display_ref.h $(BOARD_DIR)/board.h
+	test/display/dev_display_ref.h $(BOARD_DIR)/board.h
 
 # 同上：用例 TU-include 了 app_casc.c。
 $(TEST_BUILD)/test_casc_round: $(TEST_CASC_ROUND_SRCS) Application/Src/CASC/app_casc.c
@@ -1011,7 +1011,7 @@ $(TEST_BUILD)/test_rls: $(TEST_RLS_SRCS) Application/Src/RLS/app_rls_cmd.c \
 $(TEST_BUILD)/test_p15_mapping: $(TEST_P15MAP_SRCS) \
 	boards/5006048/Device/Src/dev_p15_64x8_1000001090.c \
 	boards/5006048/Core/Inc/main.h \
-	test/host_p15/main.h test/host_p15/pl_hub75.h
+	test/stubs/host_p15/main.h test/stubs/host_p15/pl_hub75.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_P15MAP_CFLAGS) -o $@ $(TEST_P15MAP_SRCS) $(TEST_LDFLAGS)
 

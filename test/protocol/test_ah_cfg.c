@@ -125,7 +125,7 @@ void pl_net_get_ip(uint8_t ip[4], uint8_t mask[4], uint8_t gw[4])
 }
 
 /* 被测实现：static 的加载回调与 RAM 镜像要在本 TU 内可见 */
-#include "../Application/Src/AH/app_ah_cfg.c"
+#include "../../Application/Src/AH/app_ah_cfg.c"
 
 /* ================================================================
  *  用例装置

@@ -39,11 +39,11 @@
  * NULL，各入口的空守卫等于没锁 —— 并发用例会（正确地）报出交错。生产代码不动，
  * 由测试显式补上这一步，与 test_cfg_sched.c 对 app_ldi_cfg.c 的做法一致。
  * 注意 Makefile 里**不能**再列 Application/Src/IAP/app_iap_cfg.c，否则符号重定义。 */
-#include "../Application/Src/IAP/app_iap_cfg.c"
+#include "../../Application/Src/IAP/app_iap_cfg.c"
 /* _iap_cmd_report_ip 是 static，要覆盖它只能把实现 TU 也 include 进来。
    这也把 app_iap_cmd.c 挂进了"被测源码"——Makefile 里对应加了依赖行，否则改了它
    测试不重编、跑的是旧二进制（同本文件与 app_iap_cfg.c 的关系）。 */
-#include "../Application/Src/IAP/app_iap_cmd.c"
+#include "../../Application/Src/IAP/app_iap_cmd.c"
 
 /* ---- pl_flash 替身的控制接口（test/stubs/pl_flash_stub.c）---- */
 void pl_flash_stub_set_region(uint32_t base, uint32_t len);

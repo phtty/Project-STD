@@ -33,7 +33,7 @@ from pathlib import Path
 RULES: list[tuple[str, str, str]] = [
     (
         "R1",
-        "套件登记完整性：磁盘 test/test_*.c、Makefile test: 依赖段、test: 运行段三者一致",
+        "套件登记完整性：磁盘 test/**/test_*.c、Makefile test: 依赖段、test: 运行段三者一致",
         "解析 Makefile 的 test: 规则，按 $(TEST_BUILD)/test_<name> 取依赖段与运行段的套件名，与磁盘文件集合比对（防编了不跑/漏登记）",
     ),
     (
@@ -92,48 +92,48 @@ RULE_INDEX = {r[0]: i for i, r in enumerate(RULES)}
 
 # ---------------------------------------------------------------- 例外白名单
 # (规则号, 文件, 符号名或 None=整文件, 理由, 文档锚点)
-# 粒度纪律：test/test_*.c 之外的整文件豁免只允许 R2/R3（宏与骨架变体）；
+# 粒度纪律：test/**/test_*.c 之外的整文件豁免只允许 R2/R3（宏与骨架变体）；
 # 质量规则（R4/R6/R7/R8）只允许符号级。理由必须写明"为什么这是有意的、不是漏网"。
 
 EXCEPTIONS: list[tuple[str, str, str | None, str, str]] = [
     (
         "R2",
-        "test/test_ring_buffer.c",
+        "test/kernel/test_ring_buffer.c",
         None,
         "有意：早期 g_failures 变体（反相 CHECK + 三参 CHECK_MSG + 无 TEST_BEGIN）按 E2 冻结不改写，改动只补 @brief",
         "docs/测试约定.md §8 E2",
     ),
     (
         "R2",
-        "test/test_iap_cfg.c",
+        "test/config/test_iap_cfg.c",
         None,
         "有意：同 E2 早期变体（含 __VA_OPT__ 三参 CHECK_MSG）；冻结，不重写宏",
         "docs/测试约定.md §8 E2",
     ),
     (
         "R3",
-        "test/test_ring_buffer.c",
+        "test/kernel/test_ring_buffer.c",
         None,
         "有意：E2 汇总行为 `=== 全部通过 ===`，退出码由 g_failures 分支给出；替代形态仍被校验",
         "docs/测试约定.md §8 E2",
     ),
     (
         "R3",
-        "test/test_cfg_sched.c",
+        "test/config/test_cfg_sched.c",
         None,
         "有意：fork 隔离型套件，子进程内汇总，父进程只能按退出码统计；替代形态（失败计数汇总 + 失败退出码）仍被校验",
         "docs/测试约定.md §8 E1",
     ),
     (
         "R3",
-        "test/test_ldi_0ah.c",
+        "test/config/test_ldi_0ah.c",
         None,
         "有意：fork 隔离型套件，同上 E1",
         "docs/测试约定.md §8 E1",
     ),
     (
         "R3",
-        "test/test_iap_cfg.c",
+        "test/config/test_iap_cfg.c",
         None,
         "有意：fork 隔离型 + 早期变体（E1/E2 叠加），父进程只能按退出码汇总",
         "docs/测试约定.md §8 E1/E2",
@@ -814,13 +814,17 @@ def load_inputs(root: Path) -> Inputs:
     mf_lines = makefile.read_text(encoding="utf-8", errors="replace").splitlines()
 
     test_dir = root / "test"
-    suite_files = sorted(p.name for p in test_dir.glob("test_*.c"))
-    if not suite_files:
+    # 套件按类别分目录（test/<类别>/test_<模块>.c）；按**文件名**登记，类别目录可自由调整。
+    paths = sorted(test_dir.rglob("test_*.c"))
+    if not paths:
         raise CheckerError(f"test/ 下没有 test_*.c 套件文件：{test_dir}")
+    suite_files = sorted(p.name for p in paths)
+    if len(set(suite_files)) != len(suite_files):
+        raise CheckerError("test/ 下有重名套件文件（套件名 = 文件名，必须全仓唯一）")
 
     files: dict[str, dict] = {}
-    for filename in suite_files:
-        path = test_dir / filename
+    for path in paths:
+        filename = path.name
         try:
             raw = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:  # noqa: PERF203

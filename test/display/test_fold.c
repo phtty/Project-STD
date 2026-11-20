@@ -224,7 +224,7 @@ static const render_rec_t *nth_type(app_render_type_t t, int n)
 /* ================================================================
  *  被测：生产源码本体
  * ================================================================ */
-#include "../Application/Src/LDI/app_vms_ctrl.c"
+#include "../../Application/Src/LDI/app_vms_ctrl.c"
 
 /* ================================================================
  *  断言

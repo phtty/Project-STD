@@ -32,7 +32,7 @@
 void NVIC_SystemReset(void);
 
 /* 生产实现 TU-include：命令处理与回复拼接是 static */
-#include "../Application/Src/AH/app_ah_mqtt_cmd.c"
+#include "../../Application/Src/AH/app_ah_mqtt_cmd.c"
 
 /* ---- 断言 ---- */
 static int g_pass;

@@ -52,9 +52,9 @@
 #include "dev_cfg_record.h"
 #include "dev_flash_int.h"
 
-#include "../Application/Src/LDI/app_ldi_cfg.c" /* 静态注册入口 */
-#include "../Application/Src/IAP/app_iap_cfg.c" /* _iap_cfg_lock_init */
-#include "../Application/Src/LDI/app_ldi_cmd.c" /* _ldi_cmd_set_ip 与 cmd_set_ip_t（后者在 .c 内定义） */
+#include "../../Application/Src/LDI/app_ldi_cfg.c" /* 静态注册入口 */
+#include "../../Application/Src/IAP/app_iap_cfg.c" /* _iap_cfg_lock_init */
+#include "../../Application/Src/LDI/app_ldi_cmd.c" /* _ldi_cmd_set_ip 与 cmd_set_ip_t（后者在 .c 内定义） */
 
 /* pl_flash 替身的控制接口（test/stubs/pl_flash_stub.c） */
 void pl_flash_stub_set_region(uint32_t base, uint32_t len);

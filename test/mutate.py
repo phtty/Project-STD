@@ -116,8 +116,8 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "F3  _read 返回字节数",
          "return 0; /* 约定: 0 = 成功（不返回字节数） */", "return (int32_t)len;"),
     ],
-    # CDSTD 协议命令（A1 文字显示 / A3 全屏填充）——断言见 test/test_cdstd.c。
-    # RLS 协议命令层 —— 断言见 test/test_rls.c（分派 / 回显 / 显示 / 图片槽 / 开关 / 网络）
+    # CDSTD 协议命令（A1 文字显示 / A3 全屏填充）——断言见 test/protocol/test_cdstd.c。
+    # RLS 协议命令层 —— 断言见 test/protocol/test_rls.c（分派 / 回显 / 显示 / 图片槽 / 开关 / 网络）
     "test_rls": [
         ("Application/Src/RLS/app_rls_cmd.c",
          "R1  颜色越界守卫放宽到 8", "    if (v > (uint8_t)DEV_DISPLAY_COLOR_WHITE) return false;",

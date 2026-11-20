@@ -85,7 +85,7 @@ void app_ccb_dispatch(const app_ccb_t *ccb, const app_ccb_src_t *src, const uint
 }
 
 /* 被测：生产源码本体 */
-#include "../Application/Src/Channel/app_rs485.c"
+#include "../../Application/Src/Channel/app_rs485.c"
 
 /* ================================================================
  *  夹具

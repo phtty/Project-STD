@@ -63,8 +63,9 @@ Kernel/{Inc,Src}/                  零依赖工具：ring_buffer、initcall、co
 Compiler/                          startup.c（C 写的 Reset_Handler + 自定义向量表）、sections.ld（共享段）、OpenOCD cfg
 boards/<板>/                       board.h（板级 `BOARD_*` 事实）、board.mk（板级源清单）、Core/（CubeMX 生成）、
                                    Application|Device|Platform 下的覆盖文件、链接脚本
-test/                              host 测试套件 + stubs/（遮蔽真头文件的替身）；
-                                   host_p15/（P15 映射套件专属替身：真 dev_display.h + 假 main.h/pl_hub75.h）
+test/                              host 测试套件，按被测对象分目录：kernel/ dispatch/ channel/
+                                   config/ protocol/ display/（布局与写法见 docs/测试约定.md §1.1）；
+                                   stubs/（遮蔽真头文件的替身，含整套替身 host_p15/）、tools/（主机侧脚本）
 docs/                              命名约定.md（评审契约）、架构说明.md（设计理由与子系统细节）
 ```
 
@@ -167,7 +168,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_ah_tcp` | AH/TCP 参数口：探针四态（WAIT/FAKE/SKIP/READY）、0AH 字段合并/校验/落盘/RTC/静默丢弃、0BH 采集应答（31H/32H 模块长度） |
 | `test_ah_mqtt` | AH/MQTT 上电装配：主题前缀/4 条订阅/2 条上报主题、Client ID、Broker/凭据注入（空密码→NULL）、订阅登记失败不启动、探针按完整主题分类 |
 | `test_ah_mqtt_cmd` | AH/MQTT 命令层：32H 文字显示与 31H/未知类型分派、颜色/字号越界、超长/短帧防护、清屏 0/1/2/3、重启、对时（写 RTC/跳过/非法）与应答通知号回显 |
-| `test_p15_mapping` | P15 64×8 静态扫描的映射：像素 → BSRR 位流逐位等于老 `lamp_scan`（参照模型独立异写：老 fixBuf 字节布局 + 老发送序 + 老 `LED_Color` 枚举）；含 32 路引脚唯一性、点亮位数不变式、`scan` 384 步与 `set_row` 行地址。**只用 `test/host_p15/` 的专属替身，不走 `test/stubs/`**（要真的 `dev_display.h` 的 ops 虚表） |
+| `test_p15_mapping` | P15 64×8 静态扫描的映射：像素 → BSRR 位流逐位等于老 `lamp_scan`（参照模型独立异写：老 fixBuf 字节布局 + 老发送序 + 老 `LED_Color` 枚举）；含 32 路引脚唯一性、点亮位数不变式、`scan` 384 步与 `set_row` 行地址。**只用 `test/stubs/host_p15/` 的专属替身，不走 `test/stubs/`**（要真的 `dev_display.h` 的 ops 虚表） |
 
 **规范与三道闸**见 `docs/测试约定.md`：`make lint`（结构规则 R1~R11）/ `make mutate`（变异测试）/ 双板全绿。
 

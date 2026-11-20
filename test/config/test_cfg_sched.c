@@ -60,7 +60,7 @@
    是 static、由 sw_dev_initcall 调用，host 上没有 initcall 段运行器（Kernel/Src/
    initcall.c 依赖链接脚本给出的 __hw/sw_initcall_start/_end 边界符号），
    从外部无法触达。包含 .c 让测试能真正跑到它，而不是为了可测性去改生产代码。 */
-#include "../Application/Src/LDI/app_ldi_cfg.c"
+#include "../../Application/Src/LDI/app_ldi_cfg.c"
 
 /* ================================================================
  *  断言与统计

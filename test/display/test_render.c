@@ -145,7 +145,7 @@ bool app_cfg_sched_ready(void) { return false; }
 void app_cfg_sched_load_all(void) {}
 
 /* ---- 被测：生产源码本体（static 内部结构只能靠 TU-include 触达） ---- */
-#include "../Application/Src/Render/app_render.c"
+#include "../../Application/Src/Render/app_render.c"
 
 /* ================================================================
  *  capture 渲染目标：只记几何

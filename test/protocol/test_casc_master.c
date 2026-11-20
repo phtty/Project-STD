@@ -313,7 +313,7 @@ dev_display_t *dev_display_get(void)
 { return &s_dev; }
 
 /* ---- 被测：生产源码本体 ---- */
-#include "../Application/Src/CASC/app_casc.c"
+#include "../../Application/Src/CASC/app_casc.c"
 
 /* ================================================================
  *  假从卡 —— 坐在总线另一头，按协议收 IMAGE、组 ACK

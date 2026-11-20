@@ -171,7 +171,7 @@ uint16_t app_screen_card_bm_len(uint8_t idx)
 }
 
 /* ---- 被测：生产源码本体（探针与分派表都是 static） ---- */
-#include "../Application/Src/CASC/app_casc.c"
+#include "../../Application/Src/CASC/app_casc.c"
 
 /* ================================================================
  *  夹具
