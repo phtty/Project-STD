@@ -727,6 +727,16 @@ TEST_RLS_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件：TCP 服务器通道（实例 API / 发送门禁 / conn 生命周期 / manage 循环）
+# app_tcp_server.c 依赖 LwIP 的 netconn/netbuf 与 struct tcp_pcb 字段（keepalive 契约），
+# 所以本套件用**真的 LwIP 头文件**，只把 netconn 的行为换成脚本（见测试文件内的替身）。
+# 线程是真的：manage/conn 任务跑在 pthread 上，无限循环由脚本里的 pthread_exit 收尾。
+TEST_CHANNEL_CFLAGS = $(TEST_CFLAGS) \
+	-I Middlewares/Third_Party/LwIP/src/include \
+	-I Middlewares/Third_Party/LwIP/system \
+	-I Middlewares/Third_Party/FreeRTOS/Source/include
+TEST_TCP_SERVER_SRCS = test/channel/test_tcp_server.c
+
 # 套件：RLS 图片槽（SV/DS 的 3 槽存储 / 配置记录加载落盘 / 几何门禁 / SW1~SW3 干接点）
 # 用例 TU-include app_rls_pic.c（槽镜像、加载回调、按键任务都是 static）；
 # 配置调度器 / 渲染 / 屏几何 / 显示门面 / 按键 / 任务创建都是本套件的记录桩。
@@ -767,7 +777,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
       $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
-      $(TEST_BUILD)/test_rls_pic
+      $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_tcp_server
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -848,6 +858,16 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── RLS 图片槽 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rls_pic
+	@echo ""
+	@echo "──── TCP 服务器通道 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_tcp_server
+
+$(TEST_BUILD)/test_tcp_server: $(TEST_TCP_SERVER_SRCS) \
+	Application/Src/Channel/app_tcp_server.c \
+	Application/Inc/Channel/app_tcp_server.h Application/Inc/app_dispatch.h \
+	Platform/Inc/pl_net_adapt.h Platform/Inc/lwipopts.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CHANNEL_CFLAGS) -o $@ $(TEST_TCP_SERVER_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
