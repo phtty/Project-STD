@@ -146,8 +146,10 @@ osThreadId_t osThreadNew(osThreadFunc_t func, void *argument, const osThreadAttr
  *  netconn / netbuf 脚本替身
  * ================================================================ */
 
-static struct netconn s_conn;
+static struct netconn s_conn;   /* 直连发送用例用 */
 static struct udp_pcb s_udp_pcb;
+static struct netconn s_conns[2]; /* 任务重连用例：两轮必须是两个不同句柄 */
+static struct udp_pcb s_pcbs[2];
 static struct netbuf  s_rx_buf;
 static struct netbuf  s_tx_buf;
 
@@ -159,7 +161,9 @@ static int s_sendto_cnt;
 static int s_buf_new_cnt;
 static int s_buf_del_cnt;
 
-static bool     s_new_fail;
+static bool     s_new_fail;       /* 广播/新建失败用例：单次返回 NULL */
+static int      s_new_fail_until; /* 前 N 次 new 返回 NULL（任务退避用例） */
+static int      s_new_exit_at;    /* 第 N 次 new 从任务线程退出（脚本收尾） */
 static err_t    s_bind_ret = ERR_OK;
 static err_t    s_sendto_ret = ERR_OK;
 static uint16_t s_bind_port;
@@ -182,13 +186,18 @@ static void _reset_fakes(void)
 {
     memset(&s_conn, 0, sizeof(s_conn));
     memset(&s_udp_pcb, 0, sizeof(s_udp_pcb));
+    memset(s_conns, 0, sizeof(s_conns));
+    memset(s_pcbs, 0, sizeof(s_pcbs));
     memset(&s_rx_buf, 0, sizeof(s_rx_buf));
     memset(&s_tx_buf, 0, sizeof(s_tx_buf));
     s_conn.pcb.udp = &s_udp_pcb;
+    for (int i = 0; i < 2; i++) s_conns[i].pcb.udp = &s_pcbs[i];
 
     s_new_cnt = s_bind_cnt = s_delete_cnt = s_recv_cnt = 0;
     s_sendto_cnt = s_buf_new_cnt = s_buf_del_cnt = 0;
-    s_new_fail   = false;
+    s_new_fail        = false;
+    s_new_fail_until  = 0;
+    s_new_exit_at     = 0;
     s_bind_ret   = ERR_OK;
     s_sendto_ret = ERR_OK;
     s_bind_port  = 0;
@@ -215,14 +224,13 @@ struct netconn *netconn_new_with_proto_and_callback(enum netconn_type type, u8_t
     (void)proto;
     (void)callback;
     s_new_cnt++;
+    if (s_new_exit_at > 0 && s_new_cnt >= s_new_exit_at) pthread_exit(NULL);
     if (s_new_fail) return NULL;
-    if (s_new_cnt == 1) {
-        s_conn.type = type;
-        return &s_conn;
-    }
-    /* 脚本结束：任务循环在下一轮 new 处退出 */
-    pthread_exit(NULL);
-    return NULL;
+    if (s_new_cnt <= s_new_fail_until) return NULL;
+
+    struct netconn *c = &s_conns[(s_new_cnt - 1) % 2];
+    c->type           = type;
+    return c;
 }
 
 err_t netconn_bind(struct netconn *conn, const ip_addr_t *addr, u16_t port)
@@ -232,8 +240,7 @@ err_t netconn_bind(struct netconn *conn, const ip_addr_t *addr, u16_t port)
     s_bind_port = port;
     if (s_bind_cnt <= (int)(sizeof(s_bind_conn) / sizeof(s_bind_conn[0])))
         s_bind_conn[s_bind_cnt - 1] = conn;
-    /* 生产循环在 delete 之后**复用同一个 conn 指针**（见 docs §10 O6）；
-       这里在第 2 次 bind 处退出线程，避免测试跟着走进已释放的 netconn。 */
+    /* 第 2 轮 bind 时从任务线程退出（生产循环是无限重连） */
     if (s_bind_cnt >= 2) pthread_exit(NULL);
     return s_bind_ret;
 }
@@ -400,8 +407,8 @@ static void case_broadcast(void)
     app_udp_broadcast(payload, sizeof(payload));
 
     CHECK_MSG(s_new_cnt == 1, "广播应新建 1 个 UDP netconn（%d）", s_new_cnt);
-    CHECK_MSG((s_udp_pcb.so_options & SOF_BROADCAST) != 0, "广播必须置 SOF_BROADCAST（%02X）",
-              (unsigned)s_udp_pcb.so_options);
+    CHECK_MSG((s_pcbs[0].so_options & SOF_BROADCAST) != 0, "广播必须置 SOF_BROADCAST（%02X）",
+              (unsigned)s_pcbs[0].so_options);
     CHECK_MSG(s_ref_data == payload && s_ref_len == sizeof(payload),
               "netbuf_ref 应引用整段载荷（%p/%u）", (const void *)s_ref_data,
               (unsigned)s_ref_len);
@@ -492,43 +499,45 @@ static void case_conn_lifecycle(void)
 }
 
 /**
- * @brief 任务循环：bind 端口 + SOF_BROADCAST；断开后 delete + 2s 再重试
+ * @brief 任务循环：bind 端口 + SOF_BROADCAST；断开后 delete + 2s，下一轮**新句柄**重试
  *
- * **现状哨兵**：`app_udp_task` 的 `netconn_new` 在循环**外**，`netconn_delete` 之后
- * 下一轮仍拿同一个 `conn` 指针去 bind —— 真机上是 use-after-free（第一次 bind 失败
- * 或网络恢复重试时就会踩到）。本用例只钉"确实 delete 了、确实歇了 2s、确实会重试"，
- * 不把"复用已释放指针"当契约；该问题登记在 docs/测试约定.md §10 O6，等产品/协议
- * 决策后再改实现与期望（届时循环内应重新 netconn_new）。
+ * 回归守卫：`netconn_new` 必须在循环**内**。放到循环外就是"delete 之后跨轮复用同一个
+ * 已释放的 conn"（原 O6，真机 use-after-free）；两轮 bind 拿到**不同指针**是这条的
+ * 直接证据。
  */
 static void case_task_loop(void)
 {
-    TEST_BEGIN("任务循环：bind 端口 + SOF_BROADCAST，断开后 delete + 2s 重试");
+    TEST_BEGIN("任务循环：bind 端口 + SOF_BROADCAST，断开后 delete + 2s 用新句柄重试");
 
     fixture_reset();
     _run_udp_task();
 
-    CHECK_MSG(s_new_cnt == 1, "当前实现只 new 一次（重试复用的是同一个 conn）—— 见 §10 O6（%d）",
-              s_new_cnt);
+    CHECK_MSG(s_new_cnt == 2, "每轮重试都应新建 1 个 netconn（共 %d 次）", s_new_cnt);
     CHECK_MSG(s_bind_cnt == 2 && s_bind_port == 10011U, "第一次 bind 10011，断开后重试第二次（%d/%u）",
               s_bind_cnt, (unsigned)s_bind_port);
-    CHECK_MSG(s_bind_conn[0] == s_bind_conn[1], "现状：重试复用同一 conn 指针（§10 O6）");
-    CHECK_MSG((s_udp_pcb.so_options & SOF_BROADCAST) != 0, "bind 前必须置 SOF_BROADCAST");
+    CHECK_MSG(s_bind_conn[0] != NULL && s_bind_conn[1] != NULL &&
+                  s_bind_conn[0] != s_bind_conn[1],
+              "重试必须换新句柄（同一指针 = delete 后复用，O6 回归）");
+    CHECK_MSG((s_pcbs[0].so_options & SOF_BROADCAST) != 0, "bind 前必须置 SOF_BROADCAST");
     CHECK_MSG(s_disp_cnt == 1, "连接期间应派发 1 次（%d）", s_disp_cnt);
     CHECK_MSG(s_delete_cnt >= 1, "conn 结束后必须 delete（%d）", s_delete_cnt);
     CHECK_MSG(s_delay_cnt >= 1 && s_delay_ms == 2000U, "重试前应歇 2000ms（%d 次，末次 %u）",
               s_delay_cnt, (unsigned)s_delay_ms);
 }
 
-/** @brief 新建失败：任务直接退出，不得 bind/空转 */
+/** @brief 新建失败：退避后继续重试（不能退出任务，否则再也没人重连） */
 static void case_task_new_fail(void)
 {
-    TEST_BEGIN("netconn_new 失败：任务直接退出（不 bind/不空转）");
+    TEST_BEGIN("netconn_new 失败：退避 2s 后重试，不退出任务");
 
     fixture_reset();
-    s_new_fail = true;
+    s_new_fail_until = 2; /* 前两次 new 失败 */
+    s_new_exit_at    = 3; /* 第三次从任务线程退出（脚本收尾） */
     _run_udp_task();
 
+    CHECK_MSG(s_new_cnt == 3, "失败后应继续重试（new=%d 次）", s_new_cnt);
     CHECK_MSG(s_bind_cnt == 0, "new 失败不得 bind（%d）", s_bind_cnt);
+    CHECK_MSG(s_delay_cnt == 2 && s_delay_ms == 2000U, "每次失败应退避 2000ms（%d 次）", s_delay_cnt);
     CHECK_MSG(s_disp_cnt == 0 && s_delete_cnt == 0, "new 失败不得派发/delete");
 }
 

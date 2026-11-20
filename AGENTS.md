@@ -161,7 +161,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_rs485_slots` | RS485 收包槽位（环回拆帧） |
 | `test_tcp_server` | TCP 服务器通道：实例 API（默认 9528 / 单扩展实例 / 未绑协议不启动）、发送门禁（DOWN+有 conn 也丢弃）、conn 生命周期（keepalive 10s/2s×3、只派发 len>1 的段、断开置 DOWN+释放信号量、早退也放）、manage 循环（bind/listen/accept/delete/失败重试）。用真 LwIP 头 + 脚本化 netconn |
 | `test_tcp_client` | TCP 客户端通道：远端配置（set_remote 打断当前连接）、非阻塞 connect → 4s 超时预算、建连成功后恢复阻塞并派生 conn 任务、断开/失败都 delete + 1s 重试。osDelay/时钟是假的（不真睡） |
-| `test_udp` | UDP 通道：端口配置、广播（SOF_BROADCAST + 255.255.255.255）、本帧来源回包与 dst->broadcast、收包来源/计数、0 字节段跳过、bind 循环与 2s 重试（现状见 §10 O6） |
+| `test_udp` | UDP 通道：端口配置、广播（SOF_BROADCAST + 255.255.255.255）、本帧来源回包与 dst->broadcast、收包来源/计数、0 字节段跳过、bind 循环与 2s 重试（每轮新建 netconn，O6 已修） |
 | `test_mqtt` | MQTT 通道：订阅登记（16 条上限/追加基址）、凭据注入（NULL=不带字段、有界拷贝）、connect 同步失败也必须放信号量、CONNACK 状态映射、发布目标（dst topic 优先）、分片累计与 LAST 派发、主题截断、任务重连（UP+逐条订阅 / free+1s 重建） |
 | `test_display_base` | 显示设备基类（生产 `dev_display.c` 首次进 host）：注册/颜色能力（0 掩码=全彩）、像素与矩形裁剪（含 x+w 回绕、0 尺寸、越界起点）、位图右侧裁剪仍按原 stride、frame_begin/end 脏标记纪律、扫描任务（帧首才 prepare、行循环、OE+LAT 原子窗口、PWM 占空比、节拍统计） |
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、`app_render` 锁配对 |

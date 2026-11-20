@@ -133,13 +133,17 @@ void app_udp_task(void *argument)
     if (s_udp_disconnect_sem == NULL)
         s_udp_disconnect_sem = osSemaphoreNew(1, 0, NULL);
 
-    struct netconn *conn = netconn_new(NETCONN_UDP);
-    if (conn == NULL) {
-        osThreadExit();
-        return;
-    }
-
     for (;;) {
+        /* **每轮都新建**：循环末尾 netconn_delete 之后旧句柄已释放，跨轮复用就是
+           use-after-free（曾登记为 O6）。同一时刻仍只有一个 UDP 句柄 —— 收包路径
+           在 `app_udp_connect_task` 里对同一个 conn 反复 recv，不新建 netconn。 */
+        struct netconn *conn = netconn_new(NETCONN_UDP);
+        if (conn == NULL) {
+            /* 瞬时内存不足：退避后重试。**不能退出任务** —— 退出就再没人重连。 */
+            osDelay(2000);
+            continue;
+        }
+
         ip_set_option(conn->pcb.udp, SOF_BROADCAST);
         err_t err = netconn_bind(conn, IP_ADDR_ANY, s_udp_port);
 
