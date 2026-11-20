@@ -62,22 +62,14 @@ const app_ah_mqtt_cmd_entry_t g_ah_mqtt_cmd_table[AH_MQTT_CMD_COUNT] = {
     {"ASK/op/checktime", _cmd_checktime},
 };
 
-static const dev_display_color_t disp_color[] = {
-    DEV_DISPLAY_COLOR_BLACK,
-    DEV_DISPLAY_COLOR_GREEN,
-    DEV_DISPLAY_COLOR_RED,
-    DEV_DISPLAY_COLOR_YELLOW,
-};
-
 static const app_font_size_t disp_size[] = {
-    0,
-    0,
     APP_FONT_SIZE_16,
     APP_FONT_SIZE_24,
     APP_FONT_SIZE_32,
-    0,
-    0,
-    0,
+    APP_FONT_SIZE_32,
+    APP_FONT_SIZE_32,
+    APP_FONT_SIZE_32,
+    APP_FONT_SIZE_32,
     APP_FONT_SIZE_32,
 };
 
@@ -85,28 +77,27 @@ static const app_font_size_t disp_size[] = {
 static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32_t text_len,
                                    uint8_t color_idx, uint8_t size_idx)
 {
-    char gbk_txt[128] = {0};
-    uint32_t gbk_len  = 0U;
-
-    /* 文本长度 = 帧内剩余字节。cvt_utf8_to_gbk 的 toSize 是纯输出、不接收容量，
-       其不变量是“输出字节数 ≤ 输入字节数”；把输入夹到 sizeof(gbk_txt)-1，
-       输出必然 ≤ 127，缓冲不会越界。超长按失败处理，不渲染半截文本。 */
-    if (text_len > sizeof(gbk_txt) - 1U)
-        return false;
-
-    cvt_utf8_to_gbk(para->text, text_len, gbk_txt, &gbk_len);
+    app_render(&(app_render_cfg_t){.type = APP_RENDER_TYPE_FILL, .color = DEV_DISPLAY_COLOR_BLACK});
     app_render(&(app_render_cfg_t){
-        .type      = APP_RENDER_TYPE_TEXT,
-        .x         = 0,
-        .y         = 0,
-        .w         = app_screen_rows(),
-        .h         = app_screen_cols(),
-        .color     = disp_color[color_idx],
-        .text      = gbk_txt,
-        .len       = (uint16_t)gbk_len,
+        .type  = APP_RENDER_TYPE_TEXT,
+        .x     = 0,
+        .y     = 0,
+        .w     = app_screen_rows(),
+        .h     = app_screen_cols(),
+        .style = &(app_render_style_t){
+            .h_align   = APP_RENDER_ALIGN_CENTER,
+            .v_align   = APP_RENDER_ALIGN_CENTER,
+            .word_wrap = true,
+        },
+        .color = color_idx,
+        // .text      = gbk_txt,
+        // .len       = (uint16_t)gbk_len,
+        .text      = para->text,
+        .len       = text_len,
         .font_size = disp_size[size_idx],
-        .font_type = APP_FONT_TYPE_ST,
+        .font_type = APP_FONT_TYPE_HT,
         .text_enc  = APP_FONT_ENC_UTF8,
+        .persist   = true,
     });
     return true;
 }
@@ -123,6 +114,13 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     app_ah_mqtt_proto_t *p          = _ah_mqtt_proto_of(self);
     app_ah_mqtt_cmd_display_t *para = (app_ah_mqtt_cmd_display_t *)buff;
 
+    const dev_display_color_t text_color[] = {
+        DEV_DISPLAY_COLOR_BLACK,
+        DEV_DISPLAY_COLOR_GREEN,
+        DEV_DISPLAY_COLOR_RED,
+        DEV_DISPLAY_COLOR_YELLOW,
+    };
+
     size_t length = strlen(buff);
     _ah_mqtt_notify_capture(p, buff, length);
 
@@ -137,7 +135,7 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     /* 颜色/字号是 ASCII 编码，先验范围再查表：网络来的字节不能直接当下标 */
     uint8_t color_idx = (uint8_t)para->color - (uint8_t)'0';
     uint8_t size_idx  = (uint8_t)para->size - (uint8_t)'0';
-    bool range_ok     = color_idx < sizeof(disp_color) / sizeof(disp_color[0]) &&
+    bool range_ok     = color_idx < sizeof(text_color) / sizeof(text_color[0]) &&
                         size_idx < sizeof(disp_size) / sizeof(disp_size[0]);
 
     bool ok = false;
@@ -147,7 +145,7 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     } else {
         switch (p->cfg.device_id) {
             case AH_DEV_LED_BOARD: /* 32H：本期实现 */
-                ok = _ah_mqtt_display_board(para, text_len, color_idx, size_idx);
+                ok = _ah_mqtt_display_board(para, text_len, text_color[color_idx], size_idx);
                 break;
             case AH_DEV_FEE_DISPLAY: /* 31H：载荷格式不同，后续增量 */
                 printf("[ah/mqtt] 31H 费显业务载荷未实现，忽略显示命令\n");
@@ -174,6 +172,13 @@ static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff)
     app_ah_mqtt_proto_t *p       = _ah_mqtt_proto_of(self);
     app_ah_mqtt_cmd_fill_t *para = (app_ah_mqtt_cmd_fill_t *)buff;
 
+    const dev_display_color_t fill_color[] = {
+        DEV_DISPLAY_COLOR_BLACK,
+        DEV_DISPLAY_COLOR_RED,
+        DEV_DISPLAY_COLOR_GREEN,
+        DEV_DISPLAY_COLOR_YELLOW,
+    };
+
     size_t length = strlen(buff);
     _ah_mqtt_notify_capture(p, buff, length);
 
@@ -185,13 +190,13 @@ static void _cmd_fill(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 
     /* 同 display：颜色字节先验范围，别拿网络来的值直接当下标 */
     uint8_t color_idx = (uint8_t)para->color - (uint8_t)'0';
-    if (color_idx >= sizeof(disp_color) / sizeof(disp_color[0])) {
+    if (color_idx >= sizeof(fill_color) / sizeof(fill_color[0])) {
         _ah_mqtt_reply_send(self, "Reply/display/clean");
         _ah_mqtt_send_data(self, ccb, 1U, "1");
         return;
     }
 
-    app_render(&(app_render_cfg_t){.type = APP_RENDER_TYPE_FILL, .color = disp_color[color_idx]});
+    app_render(&(app_render_cfg_t){.type = APP_RENDER_TYPE_FILL, .color = fill_color[color_idx]});
 
     _ah_mqtt_reply_send(self, "Reply/display/clean");
     _ah_mqtt_send_data(self, ccb, 1U, "0");
