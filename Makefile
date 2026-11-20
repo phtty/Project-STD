@@ -736,6 +736,14 @@ TEST_CHANNEL_CFLAGS = $(TEST_CFLAGS) \
 	-I Middlewares/Third_Party/LwIP/system \
 	-I Middlewares/Third_Party/FreeRTOS/Source/include
 TEST_TCP_SERVER_SRCS = test/channel/test_tcp_server.c
+# 套件：TCP 客户端通道（远端配置 / 4s 连接超时 / conn 生命周期 / 断线重连）
+# 与 server 同一手法：真 LwIP 头 + 脚本化 netconn；osDelay/时钟是假的（不真睡 4 秒）。
+# 链接 app_tcp_server.c 只为拿 `g_tcp_ccb_ops`（客户端的 send 复用 server 的虚表）。
+# 套件：UDP 通道（端口 / 广播 / 来源回包 / 收包生命周期 / bind 循环）
+TEST_UDP_SRCS = test/channel/test_udp.c
+TEST_TCP_CLIENT_SRCS = \
+	test/channel/test_tcp_client.c \
+	Application/Src/Channel/app_tcp_server.c
 
 # 套件：RLS 图片槽（SV/DS 的 3 槽存储 / 配置记录加载落盘 / 几何门禁 / SW1~SW3 干接点）
 # 用例 TU-include app_rls_pic.c（槽镜像、加载回调、按键任务都是 static）；
@@ -777,7 +785,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
       $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
-      $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_tcp_server
+      $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_tcp_server \
+      $(TEST_BUILD)/test_tcp_client $(TEST_BUILD)/test_udp
 	@echo "──── ring_buffer ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_ring_buffer
 	@echo ""
@@ -861,6 +870,12 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── TCP 服务器通道 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_tcp_server
+	@echo ""
+	@echo "──── TCP 客户端通道 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_tcp_client
+	@echo ""
+	@echo "──── UDP 通道 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_udp
 
 $(TEST_BUILD)/test_tcp_server: $(TEST_TCP_SERVER_SRCS) \
 	Application/Src/Channel/app_tcp_server.c \
@@ -868,6 +883,20 @@ $(TEST_BUILD)/test_tcp_server: $(TEST_TCP_SERVER_SRCS) \
 	Platform/Inc/pl_net_adapt.h Platform/Inc/lwipopts.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CHANNEL_CFLAGS) -o $@ $(TEST_TCP_SERVER_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_tcp_client: $(TEST_TCP_CLIENT_SRCS) \
+	Application/Src/Channel/app_tcp_client.c \
+	Application/Inc/Channel/app_tcp_client.h Application/Inc/app_dispatch.h \
+	Platform/Inc/pl_net_adapt.h Platform/Inc/lwipopts.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CHANNEL_CFLAGS) -o $@ $(TEST_TCP_CLIENT_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_udp: $(TEST_UDP_SRCS) \
+	Application/Src/Channel/app_udp.c Application/Inc/Channel/app_udp.h \
+	Application/Inc/app_dispatch.h Platform/Inc/pl_net_adapt.h Platform/Inc/pl_net.h \
+	Platform/Inc/pl_net_diag.h Platform/Inc/lwipopts.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CHANNEL_CFLAGS) -o $@ $(TEST_UDP_SRCS) $(TEST_LDFLAGS)
 
 $(TEST_BUILD)/test_ring_buffer: $(TEST_RB_SRCS)
 	@mkdir -p $(dir $@)
