@@ -57,12 +57,17 @@ static int g_fail;
  * ================================================================ */
 
 typedef struct {
-    int               calls;
-    app_render_type_t type;
+    int                 calls;
+    /* ---- 最后一次渲染 ---- */
+    app_render_type_t   type;
     dev_display_color_t color;
-    app_font_size_t   font_size;
-    uint16_t          len;
-    char              text[160];
+    app_font_size_t     font_size;
+    uint16_t            len;
+    char                text[160];
+    /* ---- 第一次渲染（32H 显示现在是"先清屏、再画字"两笔）---- */
+    app_render_type_t   first_type;
+    dev_display_color_t first_color;
+    uint16_t            first_x, first_y, first_w, first_h;
 } render_cap_t;
 
 static render_cap_t s_render;
@@ -72,6 +77,16 @@ void app_render(const app_render_cfg_t *cfg)
     s_render.calls++;
     if (cfg == nullptr)
         return;
+
+    if (s_render.calls == 1) {
+        s_render.first_type  = cfg->type;
+        s_render.first_color = cfg->color;
+        s_render.first_x     = cfg->x;
+        s_render.first_y     = cfg->y;
+        s_render.first_w     = cfg->w;
+        s_render.first_h     = cfg->h;
+    }
+
     s_render.type      = cfg->type;
     s_render.color     = cfg->color;
     s_render.font_size = cfg->font_size;
@@ -212,8 +227,18 @@ static void case_display_ok(void)
     uint16_t n = _display_buff(buff, '2', '4', "Hello");
     g_ah_mqtt_cmd_table[0].handler(&s_proto.base, &s_ccb, buff);
 
-    CHECK_MSG(s_render.calls == 1, "应渲染一次，实际 %d", s_render.calls);
-    CHECK_MSG(s_render.type == APP_RENDER_TYPE_TEXT, "渲染类型应为文字");
+    /* 32H 显示 = 先整体清屏（覆盖全屏的 FILL）+ 再画文字：上位机不发清屏命令时
+       新旧文字不能叠在一起（现场确认的协议行为）。 */
+    CHECK_MSG(s_render.calls == 2, "应渲染两次（清屏 + 文字），实际 %d", s_render.calls);
+    CHECK_MSG(s_render.first_type == APP_RENDER_TYPE_FILL &&
+                  s_render.first_color == DEV_DISPLAY_COLOR_BLACK,
+              "第一笔应是黑色全屏填充（type=%d color=%u）", (int)s_render.first_type,
+              (unsigned)s_render.first_color);
+    CHECK_MSG(s_render.first_x == 0 && s_render.first_y == 0 && s_render.first_w == 0 &&
+                  s_render.first_h == 0,
+              "清屏必须覆盖全屏（x/y/w/h 全 0），得到 %u/%u/%u/%u", (unsigned)s_render.first_x,
+              (unsigned)s_render.first_y, (unsigned)s_render.first_w, (unsigned)s_render.first_h);
+    CHECK_MSG(s_render.type == APP_RENDER_TYPE_TEXT, "第二笔渲染类型应为文字");
     CHECK_MSG(s_render.color == DEV_DISPLAY_COLOR_RED, "颜色 '2' 应映射为红色");
     CHECK_MSG(s_render.font_size == APP_FONT_SIZE_32, "字号 '4' 应映射为 32");
     CHECK_MSG(s_render.len == 5U && strcmp(s_render.text, "Hello") == 0, "文本应为 Hello");
@@ -285,10 +310,15 @@ static void case_display_too_long(void)
  *  清屏
  * ================================================================ */
 
-/** @brief 兼容清屏 0/1/2/3：黑/绿/红/黄，全部回 '0' */
+/**
+ * @brief 清屏 0/1/2/3：**黑/红/绿/黄**，全部回 '0'
+ *
+ *  **与文字显示的颜色码不同**（文字显示是 0 黑 / 1 绿 / 2 红 / 3 黄）—— 现场实机核对过，
+ *  两套编码本来就不一样；别再"统一"它们，改了任一边都会与上位机对不上。
+ */
 static void case_clean(void)
 {
-    TEST_BEGIN("清屏：0/1/2/3 → 黑/绿/红/黄");
+    TEST_BEGIN("清屏：0/1/2/3 → 黑/红/绿/黄（与文字颜色码不同）");
     _reset((uint8_t)AH_DEV_LED_BOARD);
 
     static const struct {
@@ -296,8 +326,8 @@ static void case_clean(void)
         dev_display_color_t color;
     } cases[] = {
         {'0', DEV_DISPLAY_COLOR_BLACK},
-        {'1', DEV_DISPLAY_COLOR_GREEN},
-        {'2', DEV_DISPLAY_COLOR_RED},
+        {'1', DEV_DISPLAY_COLOR_RED},
+        {'2', DEV_DISPLAY_COLOR_GREEN},
         {'3', DEV_DISPLAY_COLOR_YELLOW},
     };
 
