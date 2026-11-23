@@ -73,10 +73,24 @@ static const app_font_size_t disp_size[] = {
     APP_FONT_SIZE_32,
 };
 
-/** @brief 32H 情报板显示：NotifyID + OpenClose + FontColor + FontSize + Text */
+/** @brief 32H 文本长度上限（字节，UTF-8 输入口径）
+ *
+ *  **超长整条拒绝**（不渲染、回 '1'），不画半截文本：渲染器的 UTF-8 路径会先把文本转成
+ *  GBK，内部缓冲只有 256B（见 `app_render.h` 的 `text_enc` 说明），超长是**静默截断** ——
+ *  屏上是半句话，而上位机以为整段发出去了，现场无从判断是被截了还是没收到。
+ *
+ *  127 沿用本命令自有的约定（`test_ah_mqtt_cmd` 的"文本超过 127 B"用例钉住）。 */
+#define AH_MQTT_TEXT_MAX (127U)
+
+/** @brief 32H 情报板显示：NotifyID + OpenClose + FontColor + FontSize + Text
+ *
+ *  先整体清屏再渲染文字：上位机不发清屏命令时，新旧文字会叠在一起（现场已确认的
+ *  协议行为 —— 显示命令自带"覆盖全屏"的语义）。 */
 static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32_t text_len,
-                                   uint8_t color_idx, uint8_t size_idx)
+                                   dev_display_color_t color, uint8_t size_idx)
 {
+    if (text_len > AH_MQTT_TEXT_MAX) return false;
+
     app_render(&(app_render_cfg_t){.type = APP_RENDER_TYPE_FILL, .color = DEV_DISPLAY_COLOR_BLACK});
     app_render(&(app_render_cfg_t){
         .type  = APP_RENDER_TYPE_TEXT,
@@ -89,11 +103,9 @@ static bool _ah_mqtt_display_board(const app_ah_mqtt_cmd_display_t *para, uint32
             .v_align   = APP_RENDER_ALIGN_CENTER,
             .word_wrap = true,
         },
-        .color = color_idx,
-        // .text      = gbk_txt,
-        // .len       = (uint16_t)gbk_len,
+        .color     = color,
         .text      = para->text,
-        .len       = text_len,
+        .len       = (uint16_t)text_len,
         .font_size = disp_size[size_idx],
         .font_type = APP_FONT_TYPE_HT,
         .text_enc  = APP_FONT_ENC_UTF8,
@@ -161,7 +173,10 @@ static void _cmd_display(app_pcb_t *self, app_ccb_t *ccb, char *buff)
 }
 
 /**
- * @brief 全屏填充（兼容旧文档的清屏命令：0 黑 / 1 绿 / 2 红 / 3 黄）
+ * @brief 全屏填充（清屏命令：0 黑 / **1 红 / 2 绿** / 3 黄 —— 与文字显示的颜色码**不同**）
+ *
+ *  两套编码是现场实机核对过的协议行为（文字显示 1 绿 / 2 红；全屏填充 1 红 / 2 绿），
+ *  不是笔误，改任何一边都会与上位机不一致。
  *
  * @param self 协议对象
  * @param ccb 通道实例
