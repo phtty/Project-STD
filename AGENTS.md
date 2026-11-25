@@ -45,6 +45,31 @@ openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4
 产物在 `build/<板>/<配置>/`：`Project_STD.elf`（带符号，调试用）、`.hex`（烧录）、`.bin`（IAP 用）。
 **Makefile 没有烧录目标**——烧录走上面那条 OpenOCD，或 IDE（EIDE）。
 
+### 2.1 交互式调试（DSH 的 openocd MCP）
+
+DSH 里挂了 `mcp__openocd__*`（OpenOCD + GDB/MI，server 在 `~/.dsh/mcp/openocd-mcp/`）。
+典型流程：
+
+```
+mcp__openocd__set_project("/home/phtty/workspace/source/Project_STD")  # 读 .vscode/launch.json
+mcp__openocd__debug_attach(config_name="attach", firmware_path="…/build/3833024/Project_STD.elf")
+mcp__openocd__debug_interrupt()          # attach 不停目标，要读寄存器必须先中断
+mcp__openocd__debug_command("info registers pc")
+mcp__openocd__debug_command("x/24wx 0x40023800")   # 值 → ~/workspace/tools/SVD/svd.py decode
+mcp__openocd__debug_continue(); mcp__openocd__debug_stop()
+```
+
+三条硬约束：
+
+1. **`firmware_path` 必须显式给**：`launch.json` 里两份配置的 `executable` 都写着
+   `build/5006048/Project_STD.elf`，`debug_start` 会真的 `-target-download`——不传就等于把
+   5006048 的固件写进 3833024。
+2. **`debug_attach` 不 halt 目标**：紧跟着读寄存器会卡 30 s 超时，先 `debug_interrupt`。
+3. **调试会话独占探针**：此时不能跑 `eide_flash`，也不能有第二个 OpenOCD。
+
+`monitor ...` 与 `-break-list` 不回显（MCP 只取 console 流），确认状态用 `debug_state`
+和 `info breakpoints`。寄存器字段名用 `~/workspace/tools/SVD/svd.py`（`--chip STM32F407`）。
+
 ## 3. 目录地图
 
 ```
