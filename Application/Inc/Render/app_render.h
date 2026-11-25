@@ -316,3 +316,33 @@ void app_render_save(void);
 /** @brief 从存储设备加载持久化数据恢复显存
  *  @return true=成功恢复并置脏标记, false=无有效数据/尺寸不匹配/CRC错误 */
 bool app_render_restore(void);
+
+/* ================================================================
+ *  上电画面接管钩子 —— 给"自己存多色图、自己重放"的协议用
+ * ================================================================ */
+
+/** @brief 上电画面接管函数
+ *
+ *  返回 true = 本模块已经把上电该显示的内容画好了（`app_boot` 不再恢复
+ *  `render_persist`、也不画兜底文案）；false = 没画过，走默认流程。
+ *  @return true = 已接管 */
+typedef bool (*app_render_boot_paint_fn_t)(void);
+
+/** @brief 注册上电画面接管函数（传 NULL 取消）
+ *
+ *  存在理由：`render_persist` 只能表达"1bpp + 单一颜色"，而有的协议（如 P25RLS 的
+ *  `SV`）一幅图里同时有红/绿/黄，存不进那份记录，只能自己存、自己重放。
+ *  但 `app_boot` 的 `app_default_display()` 在 `initcall_run_sw()` **之后**才跑，
+ *  会拿 `render_persist`（或兜底文案）把重放好的画面盖掉 —— 这个钩子就是让
+ *  "自己重放"的一方能在恢复之前接手。
+ *
+ *  **同一块板不要同时注册两个接管者**（与 RLS/P25RLS 同帧头一样属于二选一）。
+ *  @param fn 接管函数；NULL = 取消接管 */
+void app_render_set_boot_paint(app_render_boot_paint_fn_t fn);
+
+/** @brief 执行上电画面接管（`app_default_display` 第一句调）
+ *
+ *  没注册接管者、或接管者说"我没画"时返回 false，调用方继续走
+ *  `app_render_restore()` / 兜底文案。
+ *  @return true = 画面已由接管者画好，调用方不要再动屏 */
+bool app_render_run_boot_paint(void);

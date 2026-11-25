@@ -66,6 +66,10 @@ void app_boot(void)
 
 [[maybe_unused]] static void app_default_display(void)
 {
+    /* 有协议自己管上电画面（如 P25RLS 的多色图存不进 `render_persist`）时，它必须先来 ——
+       本函数在 `initcall_run_sw()` 之后跑，直接恢复/兜底会把人家刚重放的画面盖掉。 */
+    if (app_render_run_boot_paint()) return;
+
     /* **多卡的从卡**：它要照常恢复自己那一块（各卡各存各的），但**不能画兜底文案** ——
        "车道关闭"会正好盖掉刚从记录恢复出来的内容，而它的内容本该由主卡下发。 */
     const bool slave_of_many = app_screen_layout()->count > 1 && !app_screen_is_master();

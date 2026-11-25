@@ -299,8 +299,8 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "        /* 变异：不清零 */"),
         ("Application/Src/P25RLS/app_p25rls_pic.c",
          "W6  重放不看有效位（把未写过的槽画成黑屏）",
-         "    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return;",
-         "    if (false) return;"),
+         "    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return false;",
+         "    if (false) return false;"),
     ],
     # 协议探针（帧的**结构**判定）—— 断言见 test/dispatch/test_probes.c。
     # 这里只登记 GZZH 的：其余协议的探针变异体在各自命令层套件里没有落点。

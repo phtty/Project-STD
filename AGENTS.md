@@ -209,6 +209,12 @@ docs/                              命名约定.md（评审契约）、架构说
     （`/etc/pacman.conf` 的 `IgnorePkg`，注释写明理由与解除条件）；`pacman -Syu` 后若再撞这个错，
     先跑 `arm-none-eabi-ld --version` 看是不是被升回 ≥ 2.47。
 
+14. **上电画面有两套持久化，谁画谁说了算**：`app_boot` 的 `app_default_display()` 在 `initcall_run_sw()`
+    **之后**跑，会先恢复 `render_persist`（1bpp + 单色）→ 失败再画兜底"车道关闭"。协议若**自己存图**
+    （P25RLS 的 `SV` 三色图存不进那份记录），就必须 `app_render_set_boot_paint()` 注册接管函数，
+    否则重放好的画面会被旧记录/兜底文案盖掉（真机现象："上电看到的是上一代协议存的图"）。
+    同一块板只允许一个接管者；`p25rls_pic_restore()` 返回 false 时仍走默认流程。
+
 ## 7. 测试（host 侧，`make test`）
 
 35 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，

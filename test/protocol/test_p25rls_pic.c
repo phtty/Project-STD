@@ -142,6 +142,11 @@ static uint16_t s_cols = 32;
 uint16_t app_screen_rows(void) { return s_rows; }
 uint16_t app_screen_cols(void) { return s_cols; }
 
+/* ---- 上电画面接管钩子：记录注册进来的函数（app_boot 用）---- */
+static app_render_boot_paint_fn_t s_boot_paint_fn;
+
+void app_render_set_boot_paint(app_render_boot_paint_fn_t fn) { s_boot_paint_fn = fn; }
+
 /* ---- 显示门面：帧窗口计数 + 可切换的"无显示" ---- */
 static dev_display_t  s_dsp;
 static dev_display_t *s_dsp_ptr = &s_dsp;
@@ -172,8 +177,9 @@ static void fixture_reset(void)
     memset(&s_rec, 0, sizeof(s_rec));
     s_cfg_id = 0xFF;
 
-    s_reg_desc = nullptr;
-    s_reg_ret  = 2;
+    s_reg_desc      = nullptr;
+    s_reg_ret       = 2;
+    s_boot_paint_fn = nullptr;
 
     s_load_cnt   = 0;
     s_load_state = DEV_CFG_RECORD_STATE_OK;
@@ -234,6 +240,9 @@ static void case_register(void)
     CHECK_MSG(s_cfg_id == 2, "注册成功应拿到 id=2，得到 %u", (unsigned)s_cfg_id);
     CHECK_MSG(s_rec.last_shown == 0xFF, "刚注册时没有最后显示槽（0xFF），得到 %u",
               (unsigned)s_rec.last_shown);
+    /* 上电画面必须由本模块接管：不注册的话 app_boot 会用 render_persist / 兜底文案盖掉 */
+    CHECK_MSG(s_boot_paint_fn == p25rls_pic_restore,
+              "注册时应把 p25rls_pic_restore 挂成上电画面接管函数");
 
     /* 注册失败：id 保持 0xFF，save 不落盘但 RAM 更新 */
     fixture_reset();
@@ -522,7 +531,8 @@ static void case_restore(void)
     s_draw_cnt    = 0;
     s_frame_begin = s_frame_end = 0;
 
-    p25rls_pic_restore();
+    const bool painted = p25rls_pic_restore();
+    CHECK_MSG(painted, "有有效槽时应返回 true（= 上电画面已被接管）");
     CHECK_MSG(s_frame_begin == 1 && s_frame_end == 1, "重放应走一次完整帧窗口（begin=%d end=%d）",
               s_frame_begin, s_frame_end);
     CHECK_MSG(s_draw_cnt == 4, "重放应是清屏 + 三遍共 4 笔，实际 %d", s_draw_cnt);
@@ -531,13 +541,13 @@ static void case_restore(void)
     fixture_reset();
     s_cfg_id         = 1;
     s_rec.last_shown = 0;
-    p25rls_pic_restore();
+    CHECK_MSG(!p25rls_pic_restore(), "槽未写过 → 返回 false（交回 app_boot 兜底）");
     CHECK_MSG(s_draw_cnt == 0, "槽未写过 → 不重放，实际 %d 笔", s_draw_cnt);
 
     /* last_shown = 0xFF（新板/空记录）*/
     fixture_reset();
     s_cfg_id = 1;
-    p25rls_pic_restore();
+    CHECK_MSG(!p25rls_pic_restore(), "last_shown=0xFF → 返回 false");
     CHECK_MSG(s_draw_cnt == 0, "last_shown=0xFF → 不重放，实际 %d 笔", s_draw_cnt);
 
     /* 无显示设备 */
@@ -546,7 +556,7 @@ static void case_restore(void)
     s_dsp_ptr        = nullptr;
     s_rec.valid_mask = 0x01;
     s_rec.last_shown = 0;
-    p25rls_pic_restore();
+    CHECK_MSG(!p25rls_pic_restore(), "无显示设备时（画不出）仍算接管？——应为 false");
     CHECK_MSG(s_draw_cnt == 0, "无显示设备时不该绘制");
 }
 

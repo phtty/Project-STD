@@ -156,15 +156,18 @@ void p25rls_pic_show(uint8_t slot)
 
 /** @brief 上电重放最后一次显示的槽
  *
- *  只在 `last_shown` 指向"写过且槽号合法"时重放；否则什么都不做（屏上保留
- * 渲染层恢复出来的内容，或干脆是黑的 —— 与本协议"只有 SV 承诺断电保存"一致）。 */
-void p25rls_pic_restore(void)
+ *  只在 `last_shown` 指向"写过且槽号合法"时重放；否则不动屏（返回 false，让
+ *  `app_boot` 走它自己的恢复/兜底 —— 与本协议"只有 SV 承诺断电保存"一致）。 */
+bool p25rls_pic_restore(void)
 {
-    if (s_rec.last_shown >= P25RLS_PIC_SLOT_COUNT) return;
-    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return;
+    /* 没有显示设备就画不出来 —— 别谎报"接管了"，让 app_boot 走它自己的流程 */
+    if (dev_display_get() == nullptr) return false;
+    if (s_rec.last_shown >= P25RLS_PIC_SLOT_COUNT) return false;
+    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return false;
 
     p25rls_pic_show(s_rec.last_shown);
     printf("[p25rls] 上电重放图片槽 %u\n", (unsigned)s_rec.last_shown);
+    return true;
 }
 
 /* ================================================================
@@ -182,15 +185,13 @@ static const app_cfg_sched_desc_t s_p25rls_pic_desc = {
     s_cfg_id         = app_cfg_sched_register(&s_p25rls_pic_desc);
     s_rec.last_shown = 0xFF;
 
+    /* 上电画面归本模块：`app_boot` 的 `app_default_display()` 跑在 initcall 之后，
+     * 不接管的话它会用 `render_persist`（可能是别的协议时代的旧图、或兜底"车道关闭"）
+     * 把刚重放的 SV 多色图盖掉。 */
+    app_render_set_boot_paint(p25rls_pic_restore);
+
     /* 注册失败（配置区满 / 名字冲突）：降级为"只在 RAM 里生效"，屏照常显示、掉电丢图 */
     if (s_cfg_id == 0xFF)
         printf("[p25rls] 图片槽记录注册失败（配置区满或名字冲突）：本次会话可用，掉电不保存\n");
 }
 sw_dev_initcall(_p25rls_pic_register);
-
-/* 上电重放：必须晚于配置加载（sw_app）与渲染层初始化，所以挂 sw_post(4)。 */
-[[maybe_unused]] static void _p25rls_pic_start(void)
-{
-    p25rls_pic_restore();
-}
-sw_post_initcall(_p25rls_pic_start);

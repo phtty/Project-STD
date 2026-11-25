@@ -62,9 +62,13 @@ bool p25rls_pic_save(uint8_t slot, const uint8_t *bitmap);
 void p25rls_pic_show(uint8_t slot);
 
 /**
- * @brief 上电重放最后一次 `show` 的槽（`sw_post` 里调用；无有效槽则什么都不做）
+ * @brief 上电重放最后一次 `show` 的槽（由 `app_boot` 的"上电画面接管"钩子调用）
  *
- * 必须晚于配置加载（`sw_app` 的 `app_cfg_sched_load_all`）与渲染层初始化，
- * 所以挂在 `sw_post(4)`。
+ * 时机：**必须**在 `app_default_display()` 的 `app_render_restore()` 之前。多色图存不进
+ * `render_persist`（那份记录只有 1bpp + 单色），所以本模块自己存、自己重放，并通过
+ * `app_render_set_boot_paint()` 告诉 `app_boot`"别再用持久化记录/兜底文案盖我的画面"。
+ * 挂 `sw_post` 直接画是不够的 —— `app_default_display()` 在 `initcall_run_sw()` 之后跑。
+ *
+ * @return true = 画了某个槽（上电画面已被本模块接管）；false = 没有有效槽、没动屏
  */
-void p25rls_pic_restore(void);
+bool p25rls_pic_restore(void);

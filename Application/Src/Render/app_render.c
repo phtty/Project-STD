@@ -210,6 +210,19 @@ void app_render_set_persist_hook(const app_render_persist_hook_fn_t *h)
     s_persist_hook = h;
 }
 
+/* 上电画面接管者（见 app_render.h）。单槽、不排队：注册即"这一板上电画面归我"。 */
+static app_render_boot_paint_fn_t s_boot_paint;
+
+void app_render_set_boot_paint(app_render_boot_paint_fn_t fn)
+{
+    s_boot_paint = fn;
+}
+
+bool app_render_run_boot_paint(void)
+{
+    return s_boot_paint ? s_boot_paint() : false;
+}
+
 /* 显存持久化的调度器句柄（地址/归属/CRC/去重都由调度器管） */
 static uint8_t s_persist_id = 0xFF;
 
