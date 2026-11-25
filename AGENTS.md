@@ -70,6 +70,17 @@ mcp__openocd__debug_continue(); mcp__openocd__debug_stop()
 `monitor ...` 与 `-break-list` 不回显（MCP 只取 console 流），确认状态用 `debug_state`
 和 `info breakpoints`。寄存器字段名用 `~/workspace/tools/SVD/svd.py`（`--chip STM32F407`）。
 
+**RTT 日志怎么读**：固件带 RTT —— `Platform/Src/pl_rtt.c` 的 `hw_pl_initcall(pl_rtt_init)`
+调 `SEGGER_RTT_Init()`，`printf` 经 `SEGGER_RTT_Syscalls_GCC.c` 的 `_write` 走 RTT（上行 1 KB）。
+但周期诊断 `app_diag` 默认关（`app_diag.c` 的 `APP_DIAG_ENABLE 0`，因为一次全量打印 ~0.9 KB
+会挤占上行缓冲），所以正常运行时只有启动日志和错误日志；`read_rtt` 返回空不一定有问题。
+`read_rtt` 的前提是 OpenOCD 的 `rtt setup <addr> <size> "SEGGER RTT"` 成功（少签名会静默失败、
+端口照样在监听却永远没数据 —— 本机已给 `~/.dsh/mcp/openocd-mcp` 打补丁修掉）。
+
+**探针不能抢**：同时跑两个 OpenOCD（包括一个忘了退的 `timeout` 包裹进程）会让 CMSIS-DAP
+刷 `error reading data: Input/Output Error`，随后 `CMD_INFO failed`。清理用
+`pgrep -af '/usr/bin/openocd'` 看，`timeout` 只发 SIGTERM（OpenOCD 可能不退出），必要时 `kill -9`。
+
 ## 3. 目录地图
 
 ```
