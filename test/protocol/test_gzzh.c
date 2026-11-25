@@ -457,6 +457,80 @@ static void case_text_bounds(void)
     CHECK_MSG(!s_draws[1].persist, "纯黑文本不该落盘");
 }
 
+/** @brief 坐标门禁跟随**逻辑屏几何**：5006048 的 P15 是单卡 128×32、1×2 级联 → 整屏 128×64
+ *
+ *  门禁里用的是 `app_screen_rows()/cols()`（整屏逻辑几何），不是本卡实屏几何 ——
+ *  这条用例把几何换成 128×64 再压一遍边界：y=32..63（第二张卡那一带）必须可达，
+ *  否则"上层半屏能显示、下层半屏怎么发都不显示"，现场会当成级联/硬件故障去查线。
+ */
+static void case_text_geometry_128x64(void)
+{
+    TEST_BEGIN("0x20 坐标门禁跟随逻辑屏：128×64（级联整屏）可打到 y=63");
+
+    const uint8_t rgb[3] = {0x00, 0xFF, 0x00};
+    uint16_t      n;
+
+    /* 右下角最后一个像素 (127,63) 仍是合法起点，区域缩到 1×1 */
+    fixture_reset();
+    s_rows = 128;
+    s_cols = 64;
+    n = frame_build(APP_GZZH_CMD_TYPE_TEXT, s_payload,
+                    text_payload(127, 63, s_font_song, 16, rgb, "A", 1));
+    app_gzzh_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 2, "清屏 + 文字两笔，实际 %d 笔", s_draw_cnt);
+    if (s_draw_cnt == 2) {
+        CHECK_MSG((s_draws[0].w == 128) && (s_draws[0].h == 64), "清屏应铺满整屏 128×64，实际 %ux%u",
+                  (unsigned)s_draws[0].w, (unsigned)s_draws[0].h);
+        CHECK_MSG((s_draws[1].x == 127) && (s_draws[1].y == 63), "起点应为 (127,63)，实际 (%u,%u)",
+                  (unsigned)s_draws[1].x, (unsigned)s_draws[1].y);
+        CHECK_MSG((s_draws[1].w == 1) && (s_draws[1].h == 1), "区域应到屏右下角 = 1×1，实际 %ux%u",
+                  (unsigned)s_draws[1].w, (unsigned)s_draws[1].h);
+    }
+
+    /* 第二张卡那一带（y = 32..63）必须可达：区域高 = 64 - 32 = 32 */
+    fixture_reset();
+    s_rows = 128;
+    s_cols = 64;
+    n = frame_build(APP_GZZH_CMD_TYPE_TEXT, s_payload,
+                    text_payload(0, 32, s_font_song, 32, rgb, "A", 1));
+    app_gzzh_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 2, "y=32（下半屏）应被接受，实际 %d 笔", s_draw_cnt);
+    if (s_draw_cnt == 2)
+        CHECK_MSG((s_draws[1].y == 32) && (s_draws[1].h == 32), "区域应为 (0,32)+128×32，实际 y=%u h=%u",
+                  (unsigned)s_draws[1].y, (unsigned)s_draws[1].h);
+
+    /* 边界仍是"恰好等于几何"：x=128 / y=64 丢弃（零副作用） */
+    fixture_reset();
+    s_rows = 128;
+    s_cols = 64;
+    n = frame_build(APP_GZZH_CMD_TYPE_TEXT, s_payload,
+                    text_payload(128, 0, s_font_song, 16, rgb, "A", 1));
+    app_gzzh_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 0, "x=128 应拒绝，实际 %d 笔", s_draw_cnt);
+
+    fixture_reset();
+    s_rows = 128;
+    s_cols = 64;
+    n = frame_build(APP_GZZH_CMD_TYPE_TEXT, s_payload,
+                    text_payload(0, 64, s_font_song, 16, rgb, "A", 1));
+    app_gzzh_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 0, "y=64 应拒绝，实际 %d 笔", s_draw_cnt);
+
+    /* 0x80 全屏纯色也跟着逻辑几何走（不是本卡 128×32）；载荷是 RGB 三字节 */
+    fixture_reset();
+    s_rows = 128;
+    s_cols = 64;
+    const uint8_t red[3] = {0xFF, 0x00, 0x00};
+    memcpy(s_payload, red, sizeof(red));
+    n = frame_build(APP_GZZH_CMD_TYPE_FILL, s_payload, (uint16_t)GZZH_FILL_BYTES);
+    app_gzzh_handle_frame(&s_ccb, s_frame, n);
+    CHECK_MSG(s_draw_cnt == 1, "全屏纯色应画 1 笔，实际 %d", s_draw_cnt);
+    if (s_draw_cnt == 1)
+        CHECK_MSG((s_draws[0].w == 128) && (s_draws[0].h == 64), "纯色应铺满 128×64，实际 %ux%u",
+                  (unsigned)s_draws[0].w, (unsigned)s_draws[0].h);
+}
+
+
 /** @brief 0x30 清屏：整屏填黑、不落盘、无应答 */
 static void case_clear(void)
 {
@@ -607,6 +681,7 @@ int main(void)
     case_text_size_map();
     case_text_color_map();
     case_text_bounds();
+    case_text_geometry_128x64();
     case_clear();
     case_fill();
     case_set_ip();
