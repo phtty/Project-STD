@@ -48,17 +48,17 @@
  * 由 HUB75 驱动芯片的数据输入格式决定。
  * ================================================================ */
 
-#define GROUP_PIXEL_W 4  /* 每组覆盖的列数 */
-#define GROUP_PIXEL_H 4  /* 每组覆盖的行数 */
-#define GROUP_SIZE    16 /* 每组的字节数 = GROUP_PIXEL_W × GROUP_PIXEL_H */
+#define P20_GROUP_PIXEL_W 4  /* 每组覆盖的列数 */
+#define P20_GROUP_PIXEL_H 4  /* 每组覆盖的行数 */
+#define P20_GROUP_SIZE    16 /* 每组的字节数 = P20_GROUP_PIXEL_W × P20_GROUP_PIXEL_H */
 
 /* 组内行偏移的基准值 */
-#define GROUP_ROW0_OFFSET  0 /* row%4 == 0: 双字节对偏移 0 */
-#define GROUP_ROW1_OFFSET  1 /* row%4 == 1: 双字节对偏移 1 */
-#define GROUP_ROW2_OFFSET  9 /* row%4 == 2: 双字节对偏移 9 */
-#define GROUP_ROW3_OFFSET  8 /* row%4 == 3: 双字节对偏移 8 */
+#define P20_GROUP_ROW0_OFFSET 0 /* row%4 == 0: 双字节对偏移 0 */
+#define P20_GROUP_ROW1_OFFSET 1 /* row%4 == 1: 双字节对偏移 1 */
+#define P20_GROUP_ROW2_OFFSET 9 /* row%4 == 2: 双字节对偏移 9 */
+#define P20_GROUP_ROW3_OFFSET 8 /* row%4 == 3: 双字节对偏移 8 */
 
-#define GROUP_COLS_PER_ROW (P20_MODULE_ROWS * GROUP_PIXEL_W) /* 每行模块的水平组数 */
+#define P20_GROUP_COLS_PER_ROW (P20_MODULE_ROWS * P20_GROUP_PIXEL_W) /* 每行模块的水平组数 */
 
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
@@ -77,7 +77,7 @@ typedef struct {
 
 static dev_display_module_t s_p20_dev = {
     .base = {
-        .ops                 = nullptr, /* 由 dev_display_p20_init 设置 */
+        .ops                 = nullptr, /* 由 dev_display_init 设置 */
         .module_rows         = P20_MODULE_PIXEL_ROW,
         .module_cols         = P20_MODULE_PIXEL_COL,
         .channels_per_module = P20_CHANNELS_PER_MODULE,
@@ -98,11 +98,6 @@ static dev_display_module_t s_p20_dev = {
     },
 };
 
-dev_display_t *dev_display_p20_get(void)
-{
-    return &s_p20_dev.base;
-}
-
 /* ================================================================
  *  prepare: pixel_map → hub75_buff 像素重排
  *
@@ -121,25 +116,25 @@ static void _p20_prepare(dev_display_t *dev)
         pixel_col = linear % (int32_t)dev->screen_rows; /* 行优先: x 先递增 */
         pixel_row = linear / (int32_t)dev->screen_rows;
 
-        /* 计算组索引: 每组 4×4 像素，横向 GROUP_PIXEL_W 列、纵向 GROUP_PIXEL_H 行 */
-        group_index = pixel_col / GROUP_PIXEL_W + (pixel_row / GROUP_PIXEL_H * GROUP_COLS_PER_ROW);
+        /* 计算组索引: 每组 4×4 像素，横向 P20_GROUP_PIXEL_W 列、纵向 P20_GROUP_PIXEL_H 行 */
+        group_index = pixel_col / P20_GROUP_PIXEL_W + (pixel_row / P20_GROUP_PIXEL_H * P20_GROUP_COLS_PER_ROW);
 
         /* 根据行模 4 结果选择组内偏移，匹配 HUB75 驱动芯片的输入格式 */
-        switch (pixel_row % GROUP_PIXEL_H) {
+        switch (pixel_row % P20_GROUP_PIXEL_H) {
             case 0: /* 第 0 行: 行镜像 (3 - col%4), 双字节对起始偏移 0 */
-                dev->hub75_buff[GROUP_ROW0_OFFSET + 2 * (GROUP_PIXEL_W - 1 - pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
+                dev->hub75_buff[P20_GROUP_ROW0_OFFSET + 2 * (P20_GROUP_PIXEL_W - 1 - pixel_col % P20_GROUP_PIXEL_W) + group_index * P20_GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
             case 1: /* 第 1 行: 行镜像, 双字节对起始偏移 1 */
-                dev->hub75_buff[GROUP_ROW1_OFFSET + 2 * (GROUP_PIXEL_W - 1 - pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
+                dev->hub75_buff[P20_GROUP_ROW1_OFFSET + 2 * (P20_GROUP_PIXEL_W - 1 - pixel_col % P20_GROUP_PIXEL_W) + group_index * P20_GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
             case 2: /* 第 2 行: 行正序, 双字节对起始偏移 8 */
-                dev->hub75_buff[GROUP_ROW2_OFFSET + 2 * (pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
+                dev->hub75_buff[P20_GROUP_ROW2_OFFSET + 2 * (pixel_col % P20_GROUP_PIXEL_W) + group_index * P20_GROUP_SIZE] = dev->pixel_map[linear];
                 break;
 
             case 3: /* 第 3 行: 行正序, 双字节对起始偏移 9 */
-                dev->hub75_buff[GROUP_ROW3_OFFSET + 2 * (pixel_col % GROUP_PIXEL_W) + group_index * GROUP_SIZE] = dev->pixel_map[linear];
+                dev->hub75_buff[P20_GROUP_ROW3_OFFSET + 2 * (pixel_col % P20_GROUP_PIXEL_W) + group_index * P20_GROUP_SIZE] = dev->pixel_map[linear];
                 break;
             default:
                 break;
@@ -188,7 +183,7 @@ static const dev_display_ops_t s_p20_ops = {
 };
 
 /* ================================================================
- *  dev_display_p20_init: 预计算 BSRR 查表 + 绑定 ops
+ *  dev_display_init: 预计算 BSRR 查表 + 绑定 ops
  *
  *  s_bsrr_table[ch][c] 存储通道 ch 在颜色 c (0~7) 时的 R/G/B 引脚输出值。
  *  颜色 c 的 bit0→R, bit1→G, bit2→B:

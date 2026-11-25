@@ -15,54 +15,54 @@
  *  P5 模组参数
  * ================================================================ */
 
-#define MODULE_ROWS         (1U)  /* 每行模块数 */
-#define MODULE_COLS         (1U)  /* 每列模块数 */
-#define MODULE_PIXEL_ROW    (64U) /* 单模块像素行数 */
-#define MODULE_PIXEL_COL    (32U) /* 单模块像素列数 */
-#define CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */
-#define SCAN_LINES          (8U)  /* 扫描行数 */
+#define P5_MODULE_ROWS         (1U)  /* 每行模块数 */
+#define P5_MODULE_COLS         (1U)  /* 每列模块数 */
+#define P5_MODULE_PIXEL_ROW    (64U) /* 单模块像素行数 */
+#define P5_MODULE_PIXEL_COL    (32U) /* 单模块像素列数 */
+#define P5_CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */
+#define P5_SCAN_LINES          (8U)  /* 扫描行数 */
 
 /* ---- 派生参数（由模组参数计算，勿手动修改） ---- */
-#define SCREEN_ROWS    (MODULE_ROWS * MODULE_PIXEL_ROW)
-#define SCREEN_COLS    (MODULE_COLS * MODULE_PIXEL_COL)
-#define BUFFER_SIZE    (SCREEN_ROWS * SCREEN_COLS)
-#define TOTAL_CHANNELS (MODULE_COLS * CHANNELS_PER_MODULE)
-#define CHANNEL_PIXELS (MODULE_PIXEL_ROW * MODULE_PIXEL_COL * MODULE_ROWS / CHANNELS_PER_MODULE)
-#define SCAN_LINE_PX   (CHANNEL_PIXELS / SCAN_LINES)
+#define P5_SCREEN_ROWS    (P5_MODULE_ROWS * P5_MODULE_PIXEL_ROW)
+#define P5_SCREEN_COLS    (P5_MODULE_COLS * P5_MODULE_PIXEL_COL)
+#define P5_BUFFER_SIZE    (P5_SCREEN_ROWS * P5_SCREEN_COLS)
+#define P5_TOTAL_CHANNELS (P5_MODULE_COLS * P5_CHANNELS_PER_MODULE)
+#define P5_CHANNEL_PIXELS (P5_MODULE_PIXEL_ROW * P5_MODULE_PIXEL_COL * P5_MODULE_ROWS / P5_CHANNELS_PER_MODULE)
+#define P5_SCAN_LINE_PX   (P5_CHANNEL_PIXELS / P5_SCAN_LINES)
 
-#define GROUP_SIZE     (SCAN_LINE_PX / MODULE_ROWS) /* 单个组的大小 */
+#define P5_GROUP_SIZE     (P5_SCAN_LINE_PX / P5_MODULE_ROWS) /* 单个组的大小 */
 
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
     pl_hub75_bsrr_t r, g, b;
 } module_bsrr_t;
 
-[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[TOTAL_CHANNELS][8];
+[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[P5_TOTAL_CHANNELS][8];
 
 /* ---- 模组实例 ---- */
 typedef struct {
     dev_display_t base;
 } dev_display_module_t;
 
-[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P5_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P5_BUFFER_SIZE];
 
-static dev_display_module_t s_dev = {
+static dev_display_module_t s_p5_dev = {
     .base = {
         .ops                  = nullptr, /* 由 dev_display_init 设置 */
-        .module_rows          = MODULE_PIXEL_ROW,
-        .module_cols          = MODULE_PIXEL_COL,
-        .channels_per_module  = CHANNELS_PER_MODULE,
-        .modules_per_row      = MODULE_ROWS,
-        .modules_per_col      = MODULE_COLS,
-        .scan_lines           = SCAN_LINES,
+        .module_rows          = P5_MODULE_PIXEL_ROW,
+        .module_cols          = P5_MODULE_PIXEL_COL,
+        .channels_per_module  = P5_CHANNELS_PER_MODULE,
+        .modules_per_row      = P5_MODULE_ROWS,
+        .modules_per_col      = P5_MODULE_COLS,
+        .scan_lines           = P5_SCAN_LINES,
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL,
-        .screen_rows          = SCREEN_ROWS,
-        .screen_cols          = SCREEN_COLS,
-        .total_channels       = TOTAL_CHANNELS,
-        .channel_pixels       = CHANNEL_PIXELS,
-        .scan_line_pixels     = SCAN_LINE_PX,
-        .buffer_size          = BUFFER_SIZE,
+        .screen_rows          = P5_SCREEN_ROWS,
+        .screen_cols          = P5_SCREEN_COLS,
+        .total_channels       = P5_TOTAL_CHANNELS,
+        .channel_pixels       = P5_CHANNEL_PIXELS,
+        .scan_line_pixels     = P5_SCAN_LINE_PX,
+        .buffer_size          = P5_BUFFER_SIZE,
         .pixel_map            = s_pixel_map,
         .hub75_buff           = s_hub75_buff,
         .light_level          = 7,
@@ -77,7 +77,7 @@ static dev_display_module_t s_dev = {
  *  此函数将像素值从逻辑坐标映射到硬件输出缓冲。
  * ================================================================ */
 
-static void _prepare(dev_display_t *dev)
+static void _p5_prepare(dev_display_t *dev)
 {
     int32_t group_index = 0; /* 当前像素所属的"组"索引 */
     int32_t pixel_col   = 0; /* 像素列坐标x*/
@@ -89,10 +89,10 @@ static void _prepare(dev_display_t *dev)
         pixel_row = linear / (int32_t)dev->screen_rows;
 
         /* 计算组索引*/
-        group_index = pixel_row % SCAN_LINES * MODULE_ROWS + pixel_col / MODULE_PIXEL_ROW + pixel_row / 16 * (SCAN_LINES * MODULE_ROWS);
+        group_index = pixel_row % P5_SCAN_LINES * P5_MODULE_ROWS + pixel_col / P5_MODULE_PIXEL_ROW + pixel_row / 16 * (P5_SCAN_LINES * P5_MODULE_ROWS);
 
         /* 计算组内偏移 */
-        dbg_offset = group_index * GROUP_SIZE + (pixel_row / 8 % 2 ^ 1) * MODULE_PIXEL_ROW + pixel_col % MODULE_PIXEL_ROW;
+        dbg_offset = group_index * P5_GROUP_SIZE + (pixel_row / 8 % 2 ^ 1) * P5_MODULE_PIXEL_ROW + pixel_col % P5_MODULE_PIXEL_ROW;
 
         dev->hub75_buff[dbg_offset] = dev->pixel_map[linear];
     }
@@ -105,7 +105,7 @@ static void _prepare(dev_display_t *dev)
  *  得到该通道、该颜色的 R/G/B 三组 {port, BSRR_val}，直接 flush 输出。
  * ================================================================ */
 
-static inline void _scan(dev_display_t *dev, uint8_t line)
+static inline void _p5_scan(dev_display_t *dev, uint8_t line)
 {
     for (uint16_t pixel = 0; pixel < dev->scan_line_pixels; pixel++) {
         /* 当前像素在所有通道中的起始偏移 */
@@ -126,16 +126,16 @@ static inline void _scan(dev_display_t *dev, uint8_t line)
 }
 
 /* ---- set_row: ABCD 行地址编码 (静态扫描无需切换行) ---- */
-static void _set_row(uint8_t row)
+static void _p5_set_row(uint8_t row)
 {
     pl_hub75_set_row(row);
 }
 
 /* ---- ops 虚表 ---- */
-static const dev_display_ops_t s_ops = {
-    .prepare = _prepare,
-    .scan    = _scan,
-    .set_row = _set_row,
+static const dev_display_ops_t s_p5_ops = {
+    .prepare = _p5_prepare,
+    .scan    = _p5_scan,
+    .set_row = _p5_set_row,
 };
 
 /* ================================================================
@@ -150,12 +150,12 @@ static const dev_display_ops_t s_ops = {
  *  预计算避免扫描热路径中的分支判断。
  * ================================================================ */
 
-void dev_module_init(void)
+void dev_p5_64x32_init(void)
 {
-    s_dev.base.ops = &s_ops;
-    dev_display_register(&s_dev.base);
+    s_p5_dev.base.ops = &s_p5_ops;
+    dev_display_register(&s_p5_dev.base);
 
-    for (uint8_t ch = 0; ch < s_dev.base.total_channels; ch++) {
+    for (uint8_t ch = 0; ch < s_p5_dev.base.total_channels; ch++) {
         for (uint8_t color = 0; color < 8; color++) {
             /* R 通道: color bit0 决定亮灭 */
             s_bsrr_table[ch][color].r.port = g_hub75_pin_r[ch].port;
@@ -174,4 +174,4 @@ void dev_module_init(void)
         }
     }
 }
-hw_dev_initcall(dev_module_init);
+hw_dev_initcall(dev_p5_64x32_init);

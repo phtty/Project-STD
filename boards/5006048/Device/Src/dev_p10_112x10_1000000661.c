@@ -3,13 +3,13 @@
  * @brief   P10 模组派生类型 — 1/2 扫描、50 数据通道（自 B 工程 display.c 移植）
  *
  * 实现 dev_display_ops:
- *   prepare: _convert_pixelmap (像素重排) + _prepare_send_buffer (预计算 BSRR 整行表)
+ *   prepare: _p10_convert_pixelmap (像素重排) + _p10_prepare_send_buffer (预计算 BSRR 整行表)
  *   scan:    整行 336 步 × 7 端口 BSRR 推送 + CLK 脉冲（OE/LAT 原子窗口由框架负责）
  *   set_row: 1/2 扫描行地址编码（1-based, 框架传 0-based 需 +1；且 A/B 与二进制
  *            位序交叉，是本面板专有接法，故不走板级 pl_hub75_set_row）
  *
  * 屏幕 224×50, 2 行 × 5 列 P10 模组, 每模组 5 通道, 颜色不走固定 R/G/B 通道,
- * 由 _convert_pixelmap 的组映射与 _prepare_send_buffer 的逐通道位拆解共同决定。
+ * 由 _p10_convert_pixelmap 的组映射与 _p10_prepare_send_buffer 的逐通道位拆解共同决定。
  */
 
 #include "dev_display.h"
@@ -26,25 +26,25 @@
  *  5 排堆叠构成全屏 (屏高 50)。共 10 模组 = 10 接口 × 5 通道 = 50 数据通道。
  * ================================================================ */
 
-#define MODULES_PER_ROW     (2U)   /* 每排模组数: 左模组 + 右模组 */
-#define MODULES_PER_COL     (5U)   /* 每列模组数: 5 排堆叠 */
-#define MODULE_PIXEL_ROW    (112U) /* 单模块长轴像素数 (屏宽方向, 左/右各占一半) */
-#define MODULE_PIXEL_COL    (10U)  /* 单模块短轴像素数 (屏高方向) */
-#define CHANNELS_PER_MODULE (5U)   /* 每模块通道数 (接口 6 数据线启用 5) */
-#define SCAN_LINES          (2U)   /* 1/2 扫描 */
+#define P10_MODULES_PER_ROW     (2U)   /* 每排模组数: 左模组 + 右模组 */
+#define P10_MODULES_PER_COL     (5U)   /* 每列模组数: 5 排堆叠 */
+#define P10_MODULE_PIXEL_ROW    (112U) /* 单模块长轴像素数 (屏宽方向, 左/右各占一半) */
+#define P10_MODULE_PIXEL_COL    (10U)  /* 单模块短轴像素数 (屏高方向) */
+#define P10_CHANNELS_PER_MODULE (5U)   /* 每模块通道数 (接口 6 数据线启用 5) */
+#define P10_SCAN_LINES          (2U)   /* 1/2 扫描 */
 
-#define GROUP_SIZE          (MODULE_PIXEL_ROW * SCAN_LINES) /* 每模组显存块 224 字节 */
+#define P10_GROUP_SIZE          (P10_MODULE_PIXEL_ROW * P10_SCAN_LINES) /* 每模组显存块 224 字节 */
 
-#define SCREEN_ROWS         (MODULES_PER_ROW * MODULE_PIXEL_ROW) /* 屏宽 224 = 左112 + 右112 */
-#define SCREEN_COLS         (MODULES_PER_COL * MODULE_PIXEL_COL) /* 屏高 50 = 5 排 × 10 */
-#define BUFFER_SIZE         (SCREEN_ROWS * SCREEN_COLS)          /* 11200 */
+#define P10_SCREEN_ROWS         (P10_MODULES_PER_ROW * P10_MODULE_PIXEL_ROW) /* 屏宽 224 = 左112 + 右112 */
+#define P10_SCREEN_COLS         (P10_MODULES_PER_COL * P10_MODULE_PIXEL_COL) /* 屏高 50 = 5 排 × 10 */
+#define P10_BUFFER_SIZE         (P10_SCREEN_ROWS * P10_SCREEN_COLS)          /* 11200 */
 /* 非级联直通屏: 每模组独占接口, 通道数 = 模组总数 × 每模组通道数
    (级联屏公式 modules_per_col × channels_per_module 不适用) */
-#define TOTAL_CHANNELS   (MODULES_PER_ROW * MODULES_PER_COL * CHANNELS_PER_MODULE) /* 2×5×5 = 50 */
-#define CHANNEL_PIXELS   (MODULE_PIXEL_ROW * SCAN_LINES)                           /* 每通道像素 224 = 112 × 2 扫行 */
-#define SCAN_LINE_PIXELS (CHANNEL_PIXELS / SCAN_LINES)                             /* 112 */
-#define TIMING_STEPS     (SCAN_LINE_PIXELS * 3)                                    /* 336: 每像素 R/G/B 各一步 */
-#define USED_PORT_COUNT  (7U)                                                      /* PA..PG */
+#define P10_TOTAL_CHANNELS   (P10_MODULES_PER_ROW * P10_MODULES_PER_COL * P10_CHANNELS_PER_MODULE) /* 2×5×5 = 50 */
+#define P10_CHANNEL_PIXELS   (P10_MODULE_PIXEL_ROW * P10_SCAN_LINES)                           /* 每通道像素 224 = 112 × 2 扫行 */
+#define P10_SCAN_LINE_PIXELS (P10_CHANNEL_PIXELS / P10_SCAN_LINES)                             /* 112 */
+#define P10_TIMING_STEPS     (P10_SCAN_LINE_PIXELS * 3)                                    /* 336: 每像素 R/G/B 各一步 */
+#define P10_USED_PORT_COUNT  (7U)                                                      /* PA..PG */
 
 /* 原先这里有一条与 dev_display.h 的 DEV_DISPLAY_SCREEN_ROWS/COLS 的交叉校验。
    那两个宏已从共享头移除：一块板上可以接多种模组，共享头里放一个编译期几何
@@ -68,7 +68,7 @@ typedef struct {
 } channel_info_t;
 
 /* ---- 通道映射（B 工程 display.c 生效版本, 升序, 50 通道） ---- */
-static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
+static const channel_info_t s_channel_map[P10_TOTAL_CHANNELS] = {
     // 模组第1排左
     {PF_IDX, LED_CH10_Pin},
     {PF_IDX, LED_CH9_Pin},
@@ -136,8 +136,8 @@ typedef struct {
     dev_display_t base;
 } dev_display_module_t;
 
-[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P10_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P10_BUFFER_SIZE];
 /* BSRR 预计算表: [扫行][时序步][端口]
  *
  * **不做双缓冲**（B 原版是 [2][...] 双 bank + IO_Flag 翻转）。本框架下
@@ -146,28 +146,28 @@ typedef struct {
  * 纯属从 B 原架构带过来的遗留。而它值 18816 字节 CCMRAM —— 双 bank 时
  * 本板 CCMRAM 超出 6988 字节根本链接不了。
  * 若日后 prepare 与 scan 被拆到不同上下文，必须把双缓冲加回来。 */
-[[gnu::section(".ccmram")]] static uint32_t s_hub75_io[SCAN_LINES][TIMING_STEPS][USED_PORT_COUNT];
+[[gnu::section(".ccmram")]] static uint32_t s_hub75_io[P10_SCAN_LINES][P10_TIMING_STEPS][P10_USED_PORT_COUNT];
 
 /* 直通格栅屏实例: 一左一右两模组构成一排 (modules_per_row=2),
    5 排堆叠 (modules_per_col=5), 每模组独占 1 接口 (total_channels=10×5)。
    注意 total_channels / channel_pixels 不满足 dev_display.h 注释中的级联屏公式,
    此处按直通屏物理结构直接赋值。 */
-static dev_display_module_t s_module = {
+static dev_display_module_t s_p10_dev = {
     .base = {
         .ops                  = nullptr,               /* 由 dev_display_init 设置 */
-        .module_rows          = MODULE_PIXEL_ROW,      /* 112: 模组长轴 (屏宽方向) */
-        .module_cols          = MODULE_PIXEL_COL,      /* 10: 模组短轴 (屏高方向) */
-        .channels_per_module  = CHANNELS_PER_MODULE,   /* 5 */
-        .modules_per_row      = MODULES_PER_ROW,       /* 2: 左模组 + 右模组 */
-        .modules_per_col      = MODULES_PER_COL,       /* 5: 排数 */
-        .scan_lines           = SCAN_LINES,            /* 2: 1/2 扫描 */
+        .module_rows          = P10_MODULE_PIXEL_ROW,      /* 112: 模组长轴 (屏宽方向) */
+        .module_cols          = P10_MODULE_PIXEL_COL,      /* 10: 模组短轴 (屏高方向) */
+        .channels_per_module  = P10_CHANNELS_PER_MODULE,   /* 5 */
+        .modules_per_row      = P10_MODULES_PER_ROW,       /* 2: 左模组 + 右模组 */
+        .modules_per_col      = P10_MODULES_PER_COL,       /* 5: 排数 */
+        .scan_lines           = P10_SCAN_LINES,            /* 2: 1/2 扫描 */
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL, /* P10 全彩：8 色全支持 */
-        .screen_rows          = SCREEN_ROWS,           /* 224: 屏宽 */
-        .screen_cols          = SCREEN_COLS,           /* 50: 屏高 */
-        .total_channels       = TOTAL_CHANNELS,        /* 50: 模组总数 × 每模组通道数 */
-        .channel_pixels       = CHANNEL_PIXELS,        /* 224: 每通道像素 (含 2 扫行) */
-        .scan_line_pixels     = SCAN_LINE_PIXELS,      /* 112 */
-        .buffer_size          = BUFFER_SIZE,           /* 11200 */
+        .screen_rows          = P10_SCREEN_ROWS,           /* 224: 屏宽 */
+        .screen_cols          = P10_SCREEN_COLS,           /* 50: 屏高 */
+        .total_channels       = P10_TOTAL_CHANNELS,        /* 50: 模组总数 × 每模组通道数 */
+        .channel_pixels       = P10_CHANNEL_PIXELS,        /* 224: 每通道像素 (含 2 扫行) */
+        .scan_line_pixels     = P10_SCAN_LINE_PIXELS,      /* 112 */
+        .buffer_size          = P10_BUFFER_SIZE,           /* 11200 */
         .pixel_map            = s_pixel_map,
         .hub75_buff           = s_hub75_buff,
         .light_level          = 7,
@@ -175,14 +175,14 @@ static dev_display_module_t s_module = {
 };
 
 /* ================================================================
- *  _convert_pixelmap: pixel_map → hub75_buff 像素重排（B 工程逐字移植）
+ *  _p10_convert_pixelmap: pixel_map → hub75_buff 像素重排（B 工程逐字移植）
  *
  *  pixel_map[] 行优先 (y * screen_rows + x), x=0..223, y=0..49。
  *  屏幕左右两半（col < 112 为上排模组, 其余为下排）映射到不同模组组号,
  *  组号按行对 (y%2) 区分上下扫描行。
  * ================================================================ */
 
-static void _convert_pixelmap(dev_display_t *dev)
+static void _p10_convert_pixelmap(dev_display_t *dev)
 {
     uint16_t moduel_group = 0;
     uint16_t row_cnt = 0, col_cnt = 0;
@@ -192,22 +192,22 @@ static void _convert_pixelmap(dev_display_t *dev)
         row_cnt = map_cnt / dev->screen_rows; /* y: 0..49 */
         col_cnt = map_cnt % dev->screen_rows; /* x: 0..223 */
 
-        if (col_cnt < MODULE_PIXEL_ROW) { /* 屏幕左侧模块映射 */
+        if (col_cnt < P10_MODULE_PIXEL_ROW) { /* 屏幕左侧模块映射 */
             /* 大缓冲区组号 */
             moduel_group = row_cnt / 10 * 10 + row_cnt % 10 / 2 + 5;
             /* 大缓冲区映射到显存 */
-            dev->hub75_buff[col_cnt + row_cnt % 2 * MODULE_PIXEL_ROW + moduel_group * GROUP_SIZE] = dev->pixel_map[map_cnt];
+            dev->hub75_buff[col_cnt + row_cnt % 2 * P10_MODULE_PIXEL_ROW + moduel_group * P10_GROUP_SIZE] = dev->pixel_map[map_cnt];
         } else { /* 屏幕右侧模块映射, 同时模组内的通道也要倒序 */
             /* 大缓冲区组号 */
             moduel_group = row_cnt / 10 * 10 + 4 - row_cnt % 10 / 2;
             /* 大缓冲区映射到显存 */
-            dev->hub75_buff[(MODULE_PIXEL_ROW * 2 - col_cnt - 1) + row_cnt % 2 * MODULE_PIXEL_ROW + moduel_group * GROUP_SIZE] = dev->pixel_map[map_cnt];
+            dev->hub75_buff[(P10_MODULE_PIXEL_ROW * 2 - col_cnt - 1) + row_cnt % 2 * P10_MODULE_PIXEL_ROW + moduel_group * P10_GROUP_SIZE] = dev->pixel_map[map_cnt];
         }
     }
 }
 
 /* ================================================================
- *  _prepare_send_buffer: 显存 → 双缓冲 BSRR 整行表（B 工程逐字移植）
+ *  _p10_prepare_send_buffer: 显存 → 双缓冲 BSRR 整行表（B 工程逐字移植）
  *
  *  每个时序步对应一个像素的一种颜色 (step%3 → RGB), 颜色位从显存像素值
  *  (bit0=R, bit1=G, bit2=B) 拆解, 逐通道按 s_channel_map 的端口/引脚累加
@@ -221,46 +221,46 @@ static void _convert_pixelmap(dev_display_t *dev)
  *  "读一个字节 → 选一张掩码 → 或进累加器"，而且**每个时序步每端口只写一次**
  *  （整张表不再需要 memset）。
  *
- *  实测（-Og / Cortex-M4，见下面 _prepare_send_buffer 的说明）：内层 20 条指令
+ *  实测（-Og / Cortex-M4，见下面 _p10_prepare_send_buffer 的说明）：内层 20 条指令
  *  → 12 条，且去掉了每次迭代的读-改-写。 */
 typedef struct {
     uint32_t set; /**< 置位字（= 引脚掩码）*/
     uint32_t rst; /**< 复位字（= 引脚掩码 << 16）*/
-    uint16_t off; /**< 该通道在 hub75_buff 里的起始偏移 = ch * CHANNEL_PIXELS */
+    uint16_t off; /**< 该通道在 hub75_buff 里的起始偏移 = ch * P10_CHANNEL_PIXELS */
     uint16_t pad;
 } p10_ch_t;
 
 #define P10_PORT_MAX_CH (16U) /**< 单端口最多几路（本板 PD 上 11 路，留余量）*/
-static p10_ch_t s_port_ch[USED_PORT_COUNT][P10_PORT_MAX_CH];
-static uint8_t s_port_cnt[USED_PORT_COUNT];
+static p10_ch_t s_port_ch[P10_USED_PORT_COUNT][P10_PORT_MAX_CH];
+static uint8_t s_port_cnt[P10_USED_PORT_COUNT];
 
-static void _build_channel_table(void)
+static void _p10_build_channel_table(void)
 {
-    for (uint8_t p = 0; p < USED_PORT_COUNT; p++) s_port_cnt[p] = 0;
+    for (uint8_t p = 0; p < P10_USED_PORT_COUNT; p++) s_port_cnt[p] = 0;
 
-    for (uint8_t ch = 0; ch < TOTAL_CHANNELS; ch++) {
+    for (uint8_t ch = 0; ch < P10_TOTAL_CHANNELS; ch++) {
         const uint8_t p = (uint8_t)s_channel_map[ch].port_idx;
-        if (p >= USED_PORT_COUNT || s_port_cnt[p] >= P10_PORT_MAX_CH) continue;
+        if (p >= P10_USED_PORT_COUNT || s_port_cnt[p] >= P10_PORT_MAX_CH) continue;
         p10_ch_t *e = &s_port_ch[p][s_port_cnt[p]++];
         e->set      = s_channel_map[ch].pin;
         e->rst      = (uint32_t)s_channel_map[ch].pin << 16;
-        e->off      = (uint16_t)(ch * CHANNEL_PIXELS);
+        e->off      = (uint16_t)(ch * P10_CHANNEL_PIXELS);
     }
 }
 
-static void _prepare_send_buffer(dev_display_t *dev)
+static void _p10_prepare_send_buffer(dev_display_t *dev)
 {
     const uint8_t *buff = dev->hub75_buff;
 
     /* 按扫描行 */
-    for (uint8_t scan_idx = 0; scan_idx < SCAN_LINES; scan_idx++) {
+    for (uint8_t scan_idx = 0; scan_idx < P10_SCAN_LINES; scan_idx++) {
         /* 该扫描行要发送的时序步数 */
-        for (uint16_t step_cnt = 0; step_cnt < TIMING_STEPS; step_cnt++) {
-            const uint16_t pixel_offset   = (uint16_t)(step_cnt / 3 + scan_idx * SCAN_LINE_PIXELS);
+        for (uint16_t step_cnt = 0; step_cnt < P10_TIMING_STEPS; step_cnt++) {
+            const uint16_t pixel_offset   = (uint16_t)(step_cnt / 3 + scan_idx * P10_SCAN_LINE_PIXELS);
             const uint8_t color_bit_shift = (uint8_t)(2 - (step_cnt % 3));
 
             /* 逐端口：一个累加器攒齐该端口的全部通道，**整字写一次** */
-            for (uint8_t p = 0; p < USED_PORT_COUNT; p++) {
+            for (uint8_t p = 0; p < P10_USED_PORT_COUNT; p++) {
                 const p10_ch_t *c    = s_port_ch[p];
                 const p10_ch_t *last = c + s_port_cnt[p];
                 uint32_t acc         = 0;
@@ -275,11 +275,11 @@ static void _prepare_send_buffer(dev_display_t *dev)
     }
 }
 
-/* ---- prepare: 像素重排 + 预计算（B 工程 _convert_pixelmap 尾部即调用） ---- */
-static void _prepare(dev_display_t *dev)
+/* ---- prepare: 像素重排 + 预计算（B 工程 _p10_convert_pixelmap 尾部即调用） ---- */
+static void _p10_prepare(dev_display_t *dev)
 {
-    _convert_pixelmap(dev);
-    _prepare_send_buffer(dev);
+    _p10_convert_pixelmap(dev);
+    _p10_prepare_send_buffer(dev);
 }
 
 /* ================================================================
@@ -288,14 +288,14 @@ static void _prepare(dev_display_t *dev)
  *  OE/LAT 行切换由 dev_display 框架的原子窗口统一处理。
  * ================================================================ */
 
-static void _scan(dev_display_t *dev, uint8_t line)
+static void _p10_scan(dev_display_t *dev, uint8_t line)
 {
     (void)dev;
     uint32_t *pData = &s_hub75_io[line][0][0];
 
     /* 逐行发送该扫描行每个像素的每种颜色 */
-    for (uint16_t line_cnt = 0; line_cnt < TIMING_STEPS; line_cnt++) {
-        for (uint8_t i = 0; i < USED_PORT_COUNT; i++) {
+    for (uint16_t line_cnt = 0; line_cnt < P10_TIMING_STEPS; line_cnt++) {
+        for (uint8_t i = 0; i < P10_USED_PORT_COUNT; i++) {
             if (*pData)
                 pl_hub75_port_by_idx(i)->BSRR = *pData;
 
@@ -327,7 +327,7 @@ static void _scan(dev_display_t *dev, uint8_t line)
  *  3833024 —— 那块板行地址走 PA4~PA7、标签不交叉，照二进制写才是对的。
  * ================================================================ */
 
-static void _set_row(uint8_t row)
+static void _p10_set_row(uint8_t row)
 {
     uint8_t addr = row + 1; /* 框架 0-based → 本面板 1-based */
 
@@ -339,15 +339,15 @@ static void _set_row(uint8_t row)
 
 /* ---- ops 虚表 ---- */
 static const dev_display_ops_t s_p10_ops = {
-    .prepare = _prepare,
-    .scan    = _scan,
-    .set_row = _set_row,
+    .prepare = _p10_prepare,
+    .scan    = _p10_scan,
+    .set_row = _p10_set_row,
 };
 
 void dev_p10_112x10_init(void)
 {
-    _build_channel_table(); /* 通道→端口/掩码 展开一次，prepare 的内层不再查表 */
-    s_module.base.ops = &s_p10_ops;
-    dev_display_register(&s_module.base);
+    _p10_build_channel_table(); /* 通道→端口/掩码 展开一次，prepare 的内层不再查表 */
+    s_p10_dev.base.ops = &s_p10_ops;
+    dev_display_register(&s_p10_dev.base);
 }
 hw_dev_initcall(dev_p10_112x10_init);

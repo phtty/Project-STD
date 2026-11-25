@@ -223,8 +223,8 @@ static frame_result_t _compare_frame(const uint8_t *map, bool report)
 
     _legacy_fixbuf(map, fix);
 
-    memcpy(s_p15.base.pixel_map, map, 128U * 32U);
-    _prepare(&s_p15.base); /* 生产驱动本体 */
+    memcpy(s_p15_dev.base.pixel_map, map, 128U * 32U);
+    _p15_prepare(&s_p15_dev.base); /* 生产驱动本体 */
 
     for (uint8_t ch = 0; ch < 32U; ch++) {
         const uint8_t  port = s_oracle_pins[ch].port;
@@ -308,9 +308,9 @@ static void case_init_and_geometry(void)
 
     dev_p15_64x8_1000001090_init();
 
-    const dev_display_t *d = &s_p15.base;
+    const dev_display_t *d = &s_p15_dev.base;
 
-    CHECK_MSG(s_registered == &s_p15.base, "初始化没有把本实例注册为活动显示");
+    CHECK_MSG(s_registered == &s_p15_dev.base, "初始化没有把本实例注册为活动显示");
     CHECK_MSG(d->ops != NULL && d->ops->prepare != NULL && d->ops->scan != NULL &&
                   d->ops->set_row != NULL,
               "ops 虚表不完整");
@@ -468,14 +468,14 @@ static void case_scan_and_set_row(void)
     g_p15_host_bit[5][14] = 1; /* B */
     g_p15_host_bit[6][1]  = 1; /* C */
     g_p15_host_bit[6][0]  = 1; /* D */
-    _set_row(0);
+    _p15_set_row(0);
 
     CHECK_MSG(g_p15_host_bit[5][15] == 0 && g_p15_host_bit[5][14] == 0 &&
                   g_p15_host_bit[6][1] == 0 && g_p15_host_bit[6][0] == 0,
               "set_row 之后 A~D 应全为 0");
 
     g_p15_host_clk_pulses = 0;
-    _scan(&s_p15.base, 0);
+    _p15_scan(&s_p15_dev.base, 0);
 
     CHECK_MSG(g_p15_host_clk_pulses == 384U, "一帧应发 384 个 CLK，实际 %u",
               (unsigned)g_p15_host_clk_pulses);

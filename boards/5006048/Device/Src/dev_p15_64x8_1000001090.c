@@ -3,8 +3,8 @@
  * @brief   P15 64×8 模组派生类型 — 静态扫描、每模组 4 路串行数据
  *
  * 实现 dev_display_ops:
- *   prepare: _convert_pixelmap（像素 → 通道优先的颜色缓冲）
- *            + _prepare_send_buffer（预计算 [时序步][端口] 的 BSRR 整帧表）
+ *   prepare: _p15_convert_pixelmap（像素 → 通道优先的颜色缓冲）
+ *            + _p15_prepare_send_buffer（预计算 [时序步][端口] 的 BSRR 整帧表）
  *   scan:    384 步 × 7 端口 BSRR 推送 + CLK 脉冲（OE/LAT 原子窗口由框架负责）
  *   set_row: 静态扫描没有行地址复用，A/B/C/D 恒拉低
  *
@@ -36,35 +36,35 @@
  *  fixBuf = 32 通道 × 48 字节 = 1536。
  * ================================================================ */
 
-#define MODULES_PER_ROW     (2U)  /**< 每排模组数：左列 + 右列 */
-#define MODULES_PER_COL     (4U)  /**< 每列模组数：4 排堆叠 */
-#define MODULE_PIXEL_ROW    (64U) /**< 单模组长轴像素数（屏宽方向） */
-#define MODULE_PIXEL_COL    (8U)  /**< 单模组短轴像素数（屏高方向） */
-#define CHANNELS_PER_MODULE (4U)  /**< 每模组 4 路串行数据（每路 2 行） */
-#define ROWS_PER_CHANNEL    (2U)  /**< 每路数据驱动的像素行数 */
-#define SCAN_LINES          (1U)  /**< 静态扫描：无行地址复用 */
+#define P15_MODULES_PER_ROW     (2U)  /**< 每排模组数：左列 + 右列 */
+#define P15_MODULES_PER_COL     (4U)  /**< 每列模组数：4 排堆叠 */
+#define P15_MODULE_PIXEL_ROW    (64U) /**< 单模组长轴像素数（屏宽方向） */
+#define P15_MODULE_PIXEL_COL    (8U)  /**< 单模组短轴像素数（屏高方向） */
+#define P15_CHANNELS_PER_MODULE (4U)  /**< 每模组 4 路串行数据（每路 2 行） */
+#define P15_ROWS_PER_CHANNEL    (2U)  /**< 每路数据驱动的像素行数 */
+#define P15_SCAN_LINES          (1U)  /**< 静态扫描：无行地址复用 */
 
-#define SCREEN_ROWS         (MODULES_PER_ROW * MODULE_PIXEL_ROW) /**< 屏宽 128 */
-#define SCREEN_COLS         (MODULES_PER_COL * MODULE_PIXEL_COL) /**< 屏高 32 */
-#define BUFFER_SIZE         (SCREEN_ROWS * SCREEN_COLS)          /**< 4096 */
+#define P15_SCREEN_ROWS         (P15_MODULES_PER_ROW * P15_MODULE_PIXEL_ROW) /**< 屏宽 128 */
+#define P15_SCREEN_COLS         (P15_MODULES_PER_COL * P15_MODULE_PIXEL_COL) /**< 屏高 32 */
+#define P15_BUFFER_SIZE         (P15_SCREEN_ROWS * P15_SCREEN_COLS)          /**< 4096 */
 
 /* 非级联直通屏：每模组独占接口，通道数 = 模组总数 × 每模组通道数
    （dev_display.h 注释里的级联屏公式 modules_per_col × channels_per_module
    不适用于直通屏，P10 驱动同样是显式赋值）。 */
-#define TOTAL_CHANNELS     (MODULES_PER_ROW * MODULES_PER_COL * CHANNELS_PER_MODULE) /**< 32 */
-#define CHANNELS_PER_HALF  (TOTAL_CHANNELS / 2U)                                     /**< 16 */
-#define CHANNEL_PIXELS     (ROWS_PER_CHANNEL * MODULE_PIXEL_ROW)                     /**< 128 */
-#define SCAN_LINE_PIXELS   (CHANNEL_PIXELS / SCAN_LINES)                             /**< 128 */
-#define POINTS_PER_CHANNEL (CHANNEL_PIXELS * 3U)                                     /**< 384 个灯珠位 */
-#define BYTES_PER_CHANNEL  (POINTS_PER_CHANNEL / 8U)                                 /**< 48 字节（老 fixBuf 的通道步长） */
-#define TIMING_STEPS       (BYTES_PER_CHANNEL * 8U)                                  /**< 384：每像素 R/G/B 各一步 */
-#define USED_PORT_COUNT    (7U)                                                      /**< PA..PG（PB 本屏不用，留位对齐） */
+#define P15_TOTAL_CHANNELS     (P15_MODULES_PER_ROW * P15_MODULES_PER_COL * P15_CHANNELS_PER_MODULE) /**< 32 */
+#define P15_CHANNELS_PER_HALF  (P15_TOTAL_CHANNELS / 2U)                                     /**< 16 */
+#define P15_CHANNEL_PIXELS     (P15_ROWS_PER_CHANNEL * P15_MODULE_PIXEL_ROW)                     /**< 128 */
+#define P15_SCAN_LINE_PIXELS   (P15_CHANNEL_PIXELS / P15_SCAN_LINES)                             /**< 128 */
+#define P15_POINTS_PER_CHANNEL (P15_CHANNEL_PIXELS * 3U)                                     /**< 384 个灯珠位 */
+#define P15_BYTES_PER_CHANNEL  (P15_POINTS_PER_CHANNEL / 8U)                                 /**< 48 字节（老 fixBuf 的通道步长） */
+#define P15_TIMING_STEPS       (P15_BYTES_PER_CHANNEL * 8U)                                  /**< 384：每像素 R/G/B 各一步 */
+#define P15_USED_PORT_COUNT    (7U)                                                      /**< PA..PG（PB 本屏不用，留位对齐） */
 
-static_assert((TOTAL_CHANNELS * CHANNEL_PIXELS) == BUFFER_SIZE,
+static_assert((P15_TOTAL_CHANNELS * P15_CHANNEL_PIXELS) == P15_BUFFER_SIZE,
               "通道数 × 每通道像素数必须等于整屏像素数（hub75_buff 的布局前提）");
-static_assert((POINTS_PER_CHANNEL % 8U) == 0U,
+static_assert((P15_POINTS_PER_CHANNEL % 8U) == 0U,
               "每通道灯珠位数必须整字节（老 fixBuf 按字节移位）");
-static_assert((MODULE_PIXEL_ROW % 8U) == 0U,
+static_assert((P15_MODULE_PIXEL_ROW % 8U) == 0U,
               "模组宽必须是 8 的整数倍（一个字节覆盖 8 像素）");
 
 /* ---- 端口索引（与 P10 驱动 / B 工程 port_index 一致） ---- */
@@ -104,7 +104,7 @@ typedef struct {
  */
 
 /* 左半屏（pixel_map x 0..63）：每模块 4 路串行数据 */
-static const channel_info_t s_channel_map[TOTAL_CHANNELS] = {
+static const channel_info_t s_channel_map[P15_TOTAL_CHANNELS] = {
     /* 模组第 1 排（显示 y 0..7） */
     {PA_IDX, LED_CH0_Pin},
     {PA_IDX, LED_CH1_Pin},
@@ -154,8 +154,8 @@ typedef struct {
     dev_display_t base; /**< 基类必须是首成员 */
 } dev_display_module_t;
 
-[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P15_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P15_BUFFER_SIZE];
 
 /* BSRR 预计算表：[时序步][端口]。
  *
@@ -165,26 +165,26 @@ typedef struct {
  * 不同上下文，必须把双缓冲加回来。
  *
  * 384 × 7 × 4B = 10752B CCMRAM。 */
-[[gnu::section(".ccmram")]] static uint32_t s_hub75_io[TIMING_STEPS][USED_PORT_COUNT];
+[[gnu::section(".ccmram")]] static uint32_t s_hub75_io[P15_TIMING_STEPS][P15_USED_PORT_COUNT];
 
 /* 静态扫描：一帧只有一行，故没有 P10 那样的 [扫行] 维。 */
-static dev_display_module_t s_p15 = {
+static dev_display_module_t s_p15_dev = {
     .base = {
         .ops                 = nullptr,             /* 由 dev_p15_64x8_1000001090_init 设置 */
-        .module_rows         = MODULE_PIXEL_ROW,    /* 64：模组长轴（屏宽方向） */
-        .module_cols         = MODULE_PIXEL_COL,    /* 8：模组短轴（屏高方向） */
-        .channels_per_module = CHANNELS_PER_MODULE, /* 4 */
-        .modules_per_row     = MODULES_PER_ROW,     /* 2：左列 + 右列 */
-        .modules_per_col     = MODULES_PER_COL,     /* 4：排数 */
-        .scan_lines          = SCAN_LINES,          /* 1：静态扫描 */
+        .module_rows         = P15_MODULE_PIXEL_ROW,    /* 64：模组长轴（屏宽方向） */
+        .module_cols         = P15_MODULE_PIXEL_COL,    /* 8：模组短轴（屏高方向） */
+        .channels_per_module = P15_CHANNELS_PER_MODULE, /* 4 */
+        .modules_per_row     = P15_MODULES_PER_ROW,     /* 2：左列 + 右列 */
+        .modules_per_col     = P15_MODULES_PER_COL,     /* 4：排数 */
+        .scan_lines          = P15_SCAN_LINES,          /* 1：静态扫描 */
         /* 1R1G1B 全彩灯珠：8 色全支持 */
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL,
-        .screen_rows          = SCREEN_ROWS,      /* 128：屏宽 */
-        .screen_cols          = SCREEN_COLS,      /* 32：屏高 */
-        .total_channels       = TOTAL_CHANNELS,   /* 32：模组总数 × 每模组通道数 */
-        .channel_pixels       = CHANNEL_PIXELS,   /* 128：每通道像素（2 行 × 64） */
-        .scan_line_pixels     = SCAN_LINE_PIXELS, /* 128：静态扫描一帧就是全部像素 */
-        .buffer_size          = BUFFER_SIZE,      /* 4096 */
+        .screen_rows          = P15_SCREEN_ROWS,      /* 128：屏宽 */
+        .screen_cols          = P15_SCREEN_COLS,      /* 32：屏高 */
+        .total_channels       = P15_TOTAL_CHANNELS,   /* 32：模组总数 × 每模组通道数 */
+        .channel_pixels       = P15_CHANNEL_PIXELS,   /* 128：每通道像素（2 行 × 64） */
+        .scan_line_pixels     = P15_SCAN_LINE_PIXELS, /* 128：静态扫描一帧就是全部像素 */
+        .buffer_size          = P15_BUFFER_SIZE,      /* 4096 */
         .pixel_map            = s_pixel_map,
         .hub75_buff           = s_hub75_buff,
         .light_level          = 7,
@@ -192,13 +192,13 @@ static dev_display_module_t s_p15 = {
 };
 
 /* ================================================================
- *  _convert_pixelmap: pixel_map → hub75_buff（通道优先的颜色缓冲）
+ *  _p15_convert_pixelmap: pixel_map → hub75_buff（通道优先的颜色缓冲）
  *
- *  布局：hub75_buff[ch * CHANNEL_PIXELS + 行内偏移]，
+ *  布局：hub75_buff[ch * P15_CHANNEL_PIXELS + 行内偏移]，
  *        行内偏移 = 通道内行（0/1）× 64 + 模组内列（0..63）。
  *
  *  这一层只表达「哪个像素归哪一路、在通道里排第几个」，**不掺任何移位/倒序**
- *  —— 位序是 BSRR 表的职责（见 _prepare_send_buffer）。
+ *  —— 位序是 BSRR 表的职责（见 _p15_prepare_send_buffer）。
  *
  *  ⚠ `app_test_led_mapping`（直写 hub75_buff、把 dirty 压成 false）对表驱动
  *  不适用：本驱动的 prepare 每次都会用 pixel_map 重写 hub75_buff，直接写
@@ -209,26 +209,26 @@ static dev_display_module_t s_p15 = {
  *  即一个通道覆盖显示 y 的连续两行（老固件 fixBuf 的 channel = y/2）。
  * ================================================================ */
 
-static void _convert_pixelmap(dev_display_t *dev)
+static void _p15_convert_pixelmap(dev_display_t *dev)
 {
     for (uint16_t y = 0; y < dev->screen_cols; y++) {
-        const uint8_t mod_row = (uint8_t)(y / MODULE_PIXEL_COL);      /* 0..3 */
-        const uint8_t row_in  = (uint8_t)(y % MODULE_PIXEL_COL);      /* 模组内行 0..7 */
-        const uint8_t ch_row  = (uint8_t)(row_in / ROWS_PER_CHANNEL); /* 通道 0..3 */
-        const uint8_t ch_line = (uint8_t)(row_in % ROWS_PER_CHANNEL); /* 通道内行 0/1 */
+        const uint8_t mod_row = (uint8_t)(y / P15_MODULE_PIXEL_COL);      /* 0..3 */
+        const uint8_t row_in  = (uint8_t)(y % P15_MODULE_PIXEL_COL);      /* 模组内行 0..7 */
+        const uint8_t ch_row  = (uint8_t)(row_in / P15_ROWS_PER_CHANNEL); /* 通道 0..3 */
+        const uint8_t ch_line = (uint8_t)(row_in % P15_ROWS_PER_CHANNEL); /* 通道内行 0/1 */
 
         for (uint16_t x = 0; x < dev->screen_rows; x++) {
-            const uint8_t half = (x < MODULE_PIXEL_ROW) ? 0U : 1U;
-            const uint8_t ch   = (uint8_t)(half * CHANNELS_PER_HALF + mod_row * CHANNELS_PER_MODULE + ch_row);
-            const uint8_t xi   = (uint8_t)(x - (half ? MODULE_PIXEL_ROW : 0U));
+            const uint8_t half = (x < P15_MODULE_PIXEL_ROW) ? 0U : 1U;
+            const uint8_t ch   = (uint8_t)(half * P15_CHANNELS_PER_HALF + mod_row * P15_CHANNELS_PER_MODULE + ch_row);
+            const uint8_t xi   = (uint8_t)(x - (half ? P15_MODULE_PIXEL_ROW : 0U));
 
-            dev->hub75_buff[(uint16_t)ch * CHANNEL_PIXELS + (uint16_t)ch_line * MODULE_PIXEL_ROW + xi] = dev->pixel_map[(uint32_t)y * dev->screen_rows + x];
+            dev->hub75_buff[(uint16_t)ch * P15_CHANNEL_PIXELS + (uint16_t)ch_line * P15_MODULE_PIXEL_ROW + xi] = dev->pixel_map[(uint32_t)y * dev->screen_rows + x];
         }
     }
 }
 
 /* ================================================================
- *  _prepare_send_buffer: hub75_buff → BSRR 整帧表（384 时序步）
+ *  _p15_prepare_send_buffer: hub75_buff → BSRR 整帧表（384 时序步）
  *
  *  一步一步解码出「这一步要往每路送哪一位」，再按端口攒 BSRR 字。
  *  步骤语义**逐字保留老固件 lamp_scan()**：
@@ -256,38 +256,38 @@ static void _convert_pixelmap(dev_display_t *dev)
 typedef struct {
     uint32_t set; /**< 置位字（= 引脚掩码） */
     uint32_t rst; /**< 复位字（= 引脚掩码 << 16） */
-    uint16_t off; /**< 该通道在 hub75_buff 里的起始偏移 = ch * CHANNEL_PIXELS */
+    uint16_t off; /**< 该通道在 hub75_buff 里的起始偏移 = ch * P15_CHANNEL_PIXELS */
     uint8_t half; /**< 0 = 左半屏（字节列倒序），1 = 右半屏（正序） */
     uint8_t pad;
 } p15_ch_t;
 
 #define P15_PORT_MAX_CH (16U) /**< 单端口最多几路（本屏 PD 上 9 路，留余量） */
-static p15_ch_t s_port_ch[USED_PORT_COUNT][P15_PORT_MAX_CH];
-static uint8_t s_port_cnt[USED_PORT_COUNT];
+static p15_ch_t s_port_ch[P15_USED_PORT_COUNT][P15_PORT_MAX_CH];
+static uint8_t s_port_cnt[P15_USED_PORT_COUNT];
 
-static void _build_channel_table(void)
+static void _p15_build_channel_table(void)
 {
-    for (uint8_t p = 0; p < USED_PORT_COUNT; p++) s_port_cnt[p] = 0;
+    for (uint8_t p = 0; p < P15_USED_PORT_COUNT; p++) s_port_cnt[p] = 0;
 
-    for (uint8_t ch = 0; ch < TOTAL_CHANNELS; ch++) {
+    for (uint8_t ch = 0; ch < P15_TOTAL_CHANNELS; ch++) {
         const uint8_t p = (uint8_t)s_channel_map[ch].port_idx;
-        if (p >= USED_PORT_COUNT || s_port_cnt[p] >= P15_PORT_MAX_CH) continue;
+        if (p >= P15_USED_PORT_COUNT || s_port_cnt[p] >= P15_PORT_MAX_CH) continue;
 
         p15_ch_t *e = &s_port_ch[p][s_port_cnt[p]++];
         e->set      = s_channel_map[ch].pin;
         e->rst      = (uint32_t)s_channel_map[ch].pin << 16;
-        e->off      = (uint16_t)(ch * CHANNEL_PIXELS);
-        e->half     = (ch >= CHANNELS_PER_HALF) ? 1U : 0U;
+        e->off      = (uint16_t)(ch * P15_CHANNEL_PIXELS);
+        e->half     = (ch >= P15_CHANNELS_PER_HALF) ? 1U : 0U;
     }
 }
 
-static void _prepare_send_buffer(dev_display_t *dev)
+static void _p15_prepare_send_buffer(dev_display_t *dev)
 {
     const uint8_t *buff = dev->hub75_buff;
 
-    for (uint16_t step = 0; step < TIMING_STEPS; step++) {
+    for (uint16_t step = 0; step < P15_TIMING_STEPS; step++) {
         /* 老 lamp_scan 的（字节号 i, 步内位号 j） */
-        const uint8_t i = (uint8_t)((BYTES_PER_CHANNEL - 1U) - step / 8U); /* 47..0 */
+        const uint8_t i = (uint8_t)((P15_BYTES_PER_CHANNEL - 1U) - step / 8U); /* 47..0 */
         const uint8_t j = (uint8_t)(step % 8U);                            /* 0..7 */
 
         const uint8_t grp  = (uint8_t)(i / 6U);    /* 字节列 0..7 */
@@ -298,12 +298,12 @@ static void _prepare_send_buffer(dev_display_t *dev)
         /* 字节内像素号：行 1 的反序见上面 displayDataUpdata 的位序说明 */
         const uint8_t xb = (row == 0U) ? j : (uint8_t)(7U - j);
 
-        const uint16_t row_off  = (uint16_t)row * MODULE_PIXEL_ROW;
+        const uint16_t row_off  = (uint16_t)row * P15_MODULE_PIXEL_ROW;
         const uint16_t xi_left  = (uint16_t)(((7U - grp) * 8U) + xb); /* 左半：字节列倒序 */
         const uint16_t xi_right = (uint16_t)((grp * 8U) + xb);        /* 右半：字节列正序 */
 
         /* 逐端口：一个累加器攒齐该端口的全部通道，**整字写一次** */
-        for (uint8_t p = 0; p < USED_PORT_COUNT; p++) {
+        for (uint8_t p = 0; p < P15_USED_PORT_COUNT; p++) {
             const p15_ch_t *c    = s_port_ch[p];
             const p15_ch_t *last = c + s_port_cnt[p];
             uint32_t acc         = 0;
@@ -319,10 +319,10 @@ static void _prepare_send_buffer(dev_display_t *dev)
 }
 
 /* ---- prepare: 像素重排 + 预计算 ---- */
-static void _prepare(dev_display_t *dev)
+static void _p15_prepare(dev_display_t *dev)
 {
-    _convert_pixelmap(dev);
-    _prepare_send_buffer(dev);
+    _p15_convert_pixelmap(dev);
+    _p15_prepare_send_buffer(dev);
 }
 
 /* ================================================================
@@ -333,15 +333,15 @@ static void _prepare(dev_display_t *dev)
  *  所以"边移边显示"不会出现残影。
  * ================================================================ */
 
-static void _scan(dev_display_t *dev, uint8_t line)
+static void _p15_scan(dev_display_t *dev, uint8_t line)
 {
     (void)dev;
     (void)line; /* 静态扫描：只有一行 */
 
     const uint32_t *pData = &s_hub75_io[0][0];
 
-    for (uint16_t step = 0; step < TIMING_STEPS; step++) {
-        for (uint8_t i = 0; i < USED_PORT_COUNT; i++) {
+    for (uint16_t step = 0; step < P15_TIMING_STEPS; step++) {
+        for (uint8_t i = 0; i < P15_USED_PORT_COUNT; i++) {
             if (*pData) pl_hub75_port_by_idx(i)->BSRR = *pData;
 
             pData++;
@@ -361,7 +361,7 @@ static void _scan(dev_display_t *dev, uint8_t line)
  *  地址"这件事在虚表里可见。
  * ================================================================ */
 
-static void _set_row(uint8_t row)
+static void _p15_set_row(uint8_t row)
 {
     (void)row;
 
@@ -373,9 +373,9 @@ static void _set_row(uint8_t row)
 
 /* ---- ops 虚表 ---- */
 static const dev_display_ops_t s_p15_ops = {
-    .prepare = _prepare,
-    .scan    = _scan,
-    .set_row = _set_row,
+    .prepare = _p15_prepare,
+    .scan    = _p15_scan,
+    .set_row = _p15_set_row,
 };
 
 /**
@@ -386,9 +386,9 @@ static const dev_display_ops_t s_p15_ops = {
  */
 void dev_p15_64x8_1000001090_init(void)
 {
-    _build_channel_table(); /* 通道 → 端口/掩码 展开一次，prepare 内层不再查表 */
-    s_p15.base.ops = &s_p15_ops;
-    dev_display_register(&s_p15.base);
+    _p15_build_channel_table(); /* 通道 → 端口/掩码 展开一次，prepare 内层不再查表 */
+    s_p15_dev.base.ops = &s_p15_ops;
+    dev_display_register(&s_p15_dev.base);
 }
 hw_dev_initcall(dev_p15_64x8_1000001090_init);
 
@@ -412,7 +412,7 @@ hw_dev_initcall(dev_p15_64x8_1000001090_init);
  *     b. app_test_pixel_scan：逐像素走一遍，确认 32 路都通、无错位。
  *     c. 四角点亮：确认半屏/模组排的拼接方向（左半屏字节列倒序最容易在这里
  *        暴露 —— 症状是左半屏左右镜像）。
- *     d. 若 c 出现"左半屏镜像"，先把 _prepare_send_buffer 里的 xi_left 改成
+ *     d. 若 c 出现"左半屏镜像"，先把 _p15_prepare_send_buffer 里的 xi_left 改成
  *        grp * 8 + xb（与右半同向）复测；若出现"行 1 与行 0 交错"，检查 xb
  *        的 row 分支（行 1 反序）。
  *     e. 若怀疑某一路接线与表不符（单点/整条不亮、串位），按 s_channel_map
@@ -421,6 +421,6 @@ hw_dev_initcall(dev_p15_64x8_1000001090_init);
  *  4. 帧率
  *     框架每拍调一次 scan（本板 TIM3 = 200Hz），静态屏不需要刷新，但整帧
  *     重发让移位寄存器被周期性重写，抗干扰/自愈 —— 一帧 384 步的 CPU 占用
- *     约 1%（-Og，168MHz）。如日后要省，可在 _scan 里按"表未变则跳过"裁剪，
+ *     约 1%（-Og，168MHz）。如日后要省，可在 _p15_scan 里按"表未变则跳过"裁剪，
  *     但必须保留每拍一次的 OE/LAT 窗口。
  * ================================================================ */

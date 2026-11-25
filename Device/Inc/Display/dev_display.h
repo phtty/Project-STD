@@ -144,10 +144,6 @@ bool dev_display_supports_color(const dev_display_t *dev, dev_display_color_t c)
  *  @return 掩码：bit N = 支持 `DEV_DISPLAY_COLOR_<N>`（bit0 黑不表示） */
 uint8_t dev_display_color_mask(const dev_display_t *dev);
 
-/** @brief 获取 P20 模组显示实例
- *  @return 实例指针；未注册时返回 nullptr */
-dev_display_t *dev_display_p20_get(void);
-
 /** @brief 注册活动显示实例（由显示模组的 hw_dev_initcall 调用） */
 void dev_display_register(dev_display_t *dev);
 

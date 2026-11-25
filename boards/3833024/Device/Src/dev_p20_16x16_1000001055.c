@@ -12,20 +12,20 @@
  *  P20 模组参数
  * ================================================================ */
 
-#define MODULE_ROWS         (2U)  /* 每行模块数 */
-#define MODULE_COLS         (1U)  /* 每列模块数 */
-#define MODULE_PIXEL_ROW    (16U) /* 单模块每行像素数 */
-#define MODULE_PIXEL_COL    (16U) /* 单模块每列像素数 */
-#define CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */
-#define SCAN_LINES          (1U)  /* 静态扫描 */
+#define P20_MODULE_ROWS         (2U)  /* 每行模块数 */
+#define P20_MODULE_COLS         (1U)  /* 每列模块数 */
+#define P20_MODULE_PIXEL_ROW    (16U) /* 单模块每行像素数 */
+#define P20_MODULE_PIXEL_COL    (16U) /* 单模块每列像素数 */
+#define P20_CHANNELS_PER_MODULE (2U)  /* 每模块通道数（R1G1B1 + R2G2B2） */
+#define P20_SCAN_LINES          (1U)  /* 静态扫描 */
 
 /* ---- 派生参数（由模组参数计算，勿手动修改） ---- */
-#define SCREEN_ROWS    (MODULE_ROWS * MODULE_PIXEL_ROW)                                          /* 16 */
-#define SCREEN_COLS    (MODULE_COLS * MODULE_PIXEL_COL)                                          /* 16 */
-#define BUFFER_SIZE    (SCREEN_ROWS * SCREEN_COLS)                                               /* 256 */
-#define TOTAL_CHANNELS (MODULE_COLS * CHANNELS_PER_MODULE)                                       /* 4 */
-#define CHANNEL_PIXELS (MODULE_PIXEL_ROW * MODULE_PIXEL_COL * MODULE_ROWS / CHANNELS_PER_MODULE) /* 64 */
-#define SCAN_LINE_PX   (CHANNEL_PIXELS / SCAN_LINES)                                             /* 64 */
+#define P20_SCREEN_ROWS    (P20_MODULE_ROWS * P20_MODULE_PIXEL_ROW)                                          /* 16 */
+#define P20_SCREEN_COLS    (P20_MODULE_COLS * P20_MODULE_PIXEL_COL)                                          /* 16 */
+#define P20_BUFFER_SIZE    (P20_SCREEN_ROWS * P20_SCREEN_COLS)                                               /* 256 */
+#define P20_TOTAL_CHANNELS (P20_MODULE_COLS * P20_CHANNELS_PER_MODULE)                                       /* 4 */
+#define P20_CHANNEL_PIXELS (P20_MODULE_PIXEL_ROW * P20_MODULE_PIXEL_COL * P20_MODULE_ROWS / P20_CHANNELS_PER_MODULE) /* 64 */
+#define P20_SCAN_LINE_PX   (P20_CHANNEL_PIXELS / P20_SCAN_LINES)                                             /* 64 */
 
 /* ================================================================
  *  hub75_buff 布局
@@ -45,42 +45,42 @@
  * 由 HUB75 驱动芯片的数据输入格式决定。
  * ================================================================ */
 
-#define GROUP_SIZE        (16U)                                // 每组的像素个数
-#define GROUP_PER_ROW     (MODULE_ROWS * MODULE_PIXEL_ROW / 4) // 单行组数
-#define GROUP_PER_CHANNEL (GROUP_PER_ROW * 4)                  // 单通道组数
+#define P20_GROUP_SIZE        (16U)                                // 每组的像素个数
+#define P20_GROUP_PER_ROW     (P20_MODULE_ROWS * P20_MODULE_PIXEL_ROW / 4) // 单行组数
+#define P20_GROUP_PER_CHANNEL (P20_GROUP_PER_ROW * 4)                  // 单通道组数
 
 /* ---- BSRR 预计算查表 ---- */
 typedef struct {
     pl_hub75_bsrr_t r, g, b;
 } module_bsrr_t;
 
-[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[TOTAL_CHANNELS][8];
+[[gnu::section(".ccmram")]] static module_bsrr_t s_bsrr_table[P20_TOTAL_CHANNELS][8];
 
 /* ---- P20 实例 ---- */
 typedef struct {
     dev_display_t base;
 } dev_display_module_t;
 
-[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[BUFFER_SIZE];
-[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_pixel_map[P20_BUFFER_SIZE];
+[[gnu::section(".ccmram")]] static uint8_t s_hub75_buff[P20_BUFFER_SIZE];
 
 static dev_display_module_t s_p20_dev = {
     .base = {
         .ops                 = nullptr, /* 由 dev_display_p20_init 设置 */
-        .module_rows         = MODULE_PIXEL_ROW,
-        .module_cols         = MODULE_PIXEL_COL,
-        .channels_per_module = CHANNELS_PER_MODULE,
-        .modules_per_row     = MODULE_ROWS,
-        .modules_per_col     = MODULE_COLS,
-        .scan_lines          = SCAN_LINES,
+        .module_rows         = P20_MODULE_PIXEL_ROW,
+        .module_cols         = P20_MODULE_PIXEL_COL,
+        .channels_per_module = P20_CHANNELS_PER_MODULE,
+        .modules_per_row     = P20_MODULE_ROWS,
+        .modules_per_col     = P20_MODULE_COLS,
+        .scan_lines          = P20_SCAN_LINES,
         /* P20 只有 R/G 灯珠：黑/红/绿/黄 4 色（去掉 B/紫/青/白）*/
         .supported_color_mask = DEV_DISPLAY_COLOR_ALL & ~(DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_BLUE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_PURPLE) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_CYAN) | DEV_DISPLAY_COLOR_BIT(DEV_DISPLAY_COLOR_WHITE)),
-        .screen_rows          = SCREEN_ROWS,
-        .screen_cols          = SCREEN_COLS,
-        .total_channels       = TOTAL_CHANNELS,
-        .channel_pixels       = CHANNEL_PIXELS,
-        .scan_line_pixels     = SCAN_LINE_PX,
-        .buffer_size          = BUFFER_SIZE,
+        .screen_rows          = P20_SCREEN_ROWS,
+        .screen_cols          = P20_SCREEN_COLS,
+        .total_channels       = P20_TOTAL_CHANNELS,
+        .channel_pixels       = P20_CHANNEL_PIXELS,
+        .scan_line_pixels     = P20_SCAN_LINE_PX,
+        .buffer_size          = P20_BUFFER_SIZE,
         .pixel_map            = s_pixel_map,
         .hub75_buff           = s_hub75_buff,
         .light_level          = 1,
@@ -95,7 +95,7 @@ static dev_display_module_t s_p20_dev = {
  *  此函数将像素值从逻辑坐标映射到硬件输出缓冲。
  * ================================================================ */
 
-static void _prepare(dev_display_t *dev)
+static void _p20_prepare(dev_display_t *dev)
 {
     int32_t group_index = 0; /* 当前像素所属的"组"索引 */
     int32_t pixel_col   = 0; /* 像素列坐标 x */
@@ -109,10 +109,10 @@ static void _prepare(dev_display_t *dev)
         int32_t gcol = pixel_col / 4;
 
         /* 计算组索引*/
-        group_index = gcol * 2 + (1 - grow % 2) + grow % 4 / 2 * (grow / 2 * 2 * GROUP_PER_ROW) + (1 - grow % 4 / 2) * grow / 4 * GROUP_PER_CHANNEL;
+        group_index = gcol * 2 + (1 - grow % 2) + grow % 4 / 2 * (grow / 2 * 2 * P20_GROUP_PER_ROW) + (1 - grow % 4 / 2) * grow / 4 * P20_GROUP_PER_CHANNEL;
 
         /* 计算组内偏移*/
-        dev->hub75_buff[pixel_row % 4 * 4 + pixel_col % 4 + group_index * GROUP_SIZE] = dev->pixel_map[linear];
+        dev->hub75_buff[pixel_row % 4 * 4 + pixel_col % 4 + group_index * P20_GROUP_SIZE] = dev->pixel_map[linear];
     }
 }
 
@@ -123,7 +123,7 @@ static void _prepare(dev_display_t *dev)
  *  得到该通道、该颜色的 R/G/B 三组 {port, BSRR_val}，直接 flush 输出。
  * ================================================================ */
 
-static inline void _scan(dev_display_t *dev, uint8_t line)
+static inline void _p20_scan(dev_display_t *dev, uint8_t line)
 {
     for (uint16_t pixel = 0; pixel < dev->scan_line_pixels; pixel++) {
         /* 当前像素在所有通道中的起始偏移 */
@@ -144,16 +144,16 @@ static inline void _scan(dev_display_t *dev, uint8_t line)
 }
 
 /* ---- set_row: ABCD 行地址编码 (静态扫描无需切换行) ---- */
-static void _set_row(uint8_t row)
+static void _p20_set_row(uint8_t row)
 {
     pl_hub75_set_row(row);
 }
 
 /* ---- ops 虚表 ---- */
 static const dev_display_ops_t s_p20_ops = {
-    .prepare = _prepare,
-    .scan    = _scan,
-    .set_row = _set_row,
+    .prepare = _p20_prepare,
+    .scan    = _p20_scan,
+    .set_row = _p20_set_row,
 };
 
 /* ================================================================
