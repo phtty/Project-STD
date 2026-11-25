@@ -134,6 +134,8 @@ HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *huart, uint8_t *data, ui
 HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 HAL_StatusTypeDef HAL_UART_DMAStop(UART_HandleTypeDef *huart);
+/* 运行期改波特率用（pl_uart_set_baud）：重配外设，不碰 GPIO/DMA 归属 */
+HAL_StatusTypeDef HAL_UART_Init(UART_HandleTypeDef *huart);
 /* 空闲中断里**只**停接收用（HAL_UART_DMAStop 会把发送 DMA 一起中止，见 pl_uart.c） */
 HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *huart);
 /* 桩不模拟 TC 中断，故这个回调在 host 上不会被调用；声明是为了让

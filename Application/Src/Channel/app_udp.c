@@ -83,6 +83,10 @@ static int32_t _udp_send(app_ccb_t *ccb, const app_ccb_dst_t *dst, const uint8_t
     if (!nb)
         return -1;
 
+    /* 这里**引用**调用方缓冲、不拷贝（生产口径）。因此调用方的缓冲必须在**片内 SRAM**
+       （.data / .bss / 栈）：ETH 的 TX DMA 读不到 Flash 与 CCMRAM，缓冲落在那两处会让
+       描述符 OWN 位不释放 → 下一次发送永远 BUSY → `pl_eth.c` 的重试循环把 tcpip 线程
+       卡死，ARP/UDP 全停（应用任务照跑、无 HardFault，现场看起来就是"网卡死了"）。 */
     netbuf_ref(nb, data, len);
     /* 从字节数组重建 ip_addr_t，隔离 middleware 类型 */
     struct netconn *conn = (struct netconn *)udp->conn;

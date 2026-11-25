@@ -13,7 +13,9 @@
 #include "app_rs232.h"
 #include "initcall.h"
 #include "app_iap.h"
+#include "app_gzzh.h"
 #include "app_dispatch.h"
+#include "board.h" /* BOARD_RS232_1_BAUD */
 
 #include "FreeRTOS.h"
 #include "pl_uart.h"
@@ -171,13 +173,22 @@ osThreadId_t app_rs232_1_start(void)
  * 顺序（实测本函数排在前）。这里恰好安全，但**不是**因为顺序对：本函数只负责
  * 建任务，而 _rs232_task 是 Normal 优先级、_init_task 是 High，新建的下级任务不会
  * 抢占 _init_task，因此整个 initcall_run_sw（含 _iap_module_init 的 app_dispatch_bind）
- * 必定先跑完，_rs232_task 才可能首次执行。换优先级时这个前提会失效。 */
+ * 必定先跑完，_rs232_task 才可能首次执行。换优先级时这个前提会失效。
+ *
+ * GZZH 的模块初始化在 sw_app(3)，**早于**本函数所在的 sw_post(4) ——
+ * 跨层顺序是确定的，取 `app_gzzh_pcb()` 绑定不依赖链接顺序。 */
 static void _rs232_channels_start(void)
 {
-    /* 本板的 RS232 端点承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
+    /* RS232-0 承载 IAP 协议。绑定点放在这里而不是 app_iap.c：
        RS232 只有 3833024 有，让共享的 IAP 文件认识它等于让共享文件认识某一块板。 */
     app_dispatch_bind(app_iap_pcb(), app_rs232_0_ccb());
-    app_dispatch_bind(app_iap_pcb(), app_rs232_1_ccb());
+
+    /* RS232-1 改作 GZZH 现场口：**不再绑 IAP**，并按协议要求降到 9600 8N1。
+       改波特率必须在通道任务开始收之前 —— 重配会把外设复位一次，接收若已在跑
+       就会静默断掉（见 pl_uart_set_baud 的说明）。此刻任务刚建、还没排到，
+       而本函数跑在 _init_task（High）里，因此这个顺序是确定的。 */
+    (void)pl_uart_set_baud(pl_uart_get_handle(PL_UART6), BOARD_RS232_1_BAUD);
+    app_dispatch_bind(app_gzzh_pcb(), app_rs232_1_ccb());
 
     app_rs232_start();
     app_rs232_1_start();

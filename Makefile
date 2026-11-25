@@ -58,6 +58,7 @@ INC_DIRS = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
+	-I Application/Inc/GZZH \
 	-I Device/Inc \
 	-I Device/Inc/Display \
 	-I Device/Inc/IO \
@@ -338,6 +339,8 @@ SRC_APPLICATION = \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/RLS/app_rls_cmd.c \
 	Application/Src/RLS/app_rls_pic.c \
+	Application/Src/GZZH/app_gzzh.c \
+	Application/Src/GZZH/app_gzzh_cmd.c \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
@@ -460,6 +463,7 @@ TEST_INC     = \
 	-I Application/Inc/Render \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
+	-I Application/Inc/GZZH \
 	-I Application/Inc/AH \
 	-I Kernel/Inc \
 	-I Platform/Inc \
@@ -499,6 +503,7 @@ TEST_PROBES_SRCS = \
 	Application/Src/IAP/app_iap.c \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/RLS/app_rls.c \
+	Application/Src/GZZH/app_gzzh.c \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
@@ -727,6 +732,16 @@ TEST_RLS_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件：GZZH 协议命令层（贵州地标：故障查询 / 文字 / 清屏 / 全屏纯色 / 设置 IP）
+# 生产 TU **照原样编译**；副作用用套件内的记录桩（渲染 / IAP 记录 / 发送）观察。
+# 帧探测在 test_probes，本套件从"一帧完整帧"往里测。
+TEST_GZZH_SRCS = \
+	test/protocol/test_gzzh.c \
+	Application/Src/GZZH/app_gzzh.c \
+	Application/Src/GZZH/app_gzzh_cmd.c \
+	Kernel/Src/ring_buffer.c \
+	test/stubs/os_stub.c
+
 # 套件：TCP 服务器通道（实例 API / 发送门禁 / conn 生命周期 / manage 循环）
 # app_tcp_server.c 依赖 LwIP 的 netconn/netbuf 与 struct tcp_pcb 字段（keepalive 契约），
 # 所以本套件用**真的 LwIP 头文件**，只把 netconn 的行为换成脚本（见测试文件内的替身）。
@@ -793,7 +808,8 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_cdstd $(TEST_BUILD)/test_ah $(TEST_BUILD)/test_ah_cfg \
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
       $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
-      $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_tcp_server \
+      $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_gzzh \
+      $(TEST_BUILD)/test_tcp_server \
       $(TEST_BUILD)/test_tcp_client $(TEST_BUILD)/test_udp $(TEST_BUILD)/test_mqtt \
       $(TEST_BUILD)/test_display_base
 	@echo "──── ring_buffer ────"
@@ -876,6 +892,9 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── RLS 图片槽 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_rls_pic
+	@echo ""
+	@echo "──── GZZH 协议命令层 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_gzzh
 	@echo ""
 	@echo "──── TCP 服务器通道 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_tcp_server
@@ -1099,6 +1118,13 @@ $(TEST_BUILD)/test_rls_pic: $(TEST_RLS_PIC_SRCS) Application/Src/RLS/app_rls_pic
 	Device/Inc/IO/dev_key.h Device/Inc/Storage/dev_cfg_record.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_RLS_PIC_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_gzzh: $(TEST_GZZH_SRCS) \
+	Application/Inc/GZZH/app_gzzh.h Application/Inc/GZZH/app_gzzh_cmd.h \
+	Application/Inc/Render/app_render.h Application/Inc/Render/app_screen.h \
+	Application/Inc/IAP/app_iap_cfg.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_GZZH_SRCS) $(TEST_LDFLAGS)
 
 # 用例 TU-include 了板级驱动 .c（不在 SRCS 里）与板级 main.h，必须单独挂依赖 ——
 # 否则改了被测源码/引脚表测试不重编，跑的是旧二进制。

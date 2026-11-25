@@ -148,6 +148,29 @@ pl_uart_handle_t pl_uart_get_handle(uint8_t id)
     return (id < PL_UART_MAX) ? &s_uart_ctx[id] : NULL;
 }
 
+int32_t pl_uart_set_baud(pl_uart_handle_t h, uint32_t baud)
+{
+    uart_ctx_t *ctx = (uart_ctx_t *)h;
+    if (!ctx || !ctx->huart || baud == 0) return -1;
+
+    const uint32_t old_baud = ctx->huart->Init.BaudRate;
+    if (old_baud == baud) return 0;
+
+    /* HAL_UART_Init 对已初始化的句柄是"disable → UART_SetConfig → enable"，
+       MspInit（GPIO/时钟）只在 gState == RESET 时跑一次，所以这里不会重配引脚，
+       也不会动 DMA 流的归属。**代价是外设被复位一次** —— 接收若已在跑就断了，
+       故本函数只在 start_rx 之前使用（见头文件）。 */
+    ctx->huart->Init.BaudRate = baud;
+    if (HAL_UART_Init(ctx->huart) != HAL_OK) {
+        ctx->huart->Init.BaudRate = old_baud;
+        printf("[pl_uart] 改波特率失败：%u → %u\n", (unsigned)old_baud, (unsigned)baud);
+        return -1;
+    }
+
+    printf("[pl_uart] 波特率 %u → %u\n", (unsigned)old_baud, (unsigned)baud);
+    return 0;
+}
+
 int32_t pl_uart_send_ex(pl_uart_handle_t h, const uint8_t *buf, size_t len, uint32_t timeout_ms,
                         pl_uart_tx_mode_t mode)
 {

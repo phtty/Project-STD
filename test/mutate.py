@@ -170,6 +170,65 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
         ("Kernel/Src/bcc_utils.c",
          "R11 BCC 初值非 0", "    uint8_t bcc = 0;", "    uint8_t bcc = 1;"),
     ],
+    # GZZH（贵州地标）—— 断言见 test/protocol/test_gzzh.c（命令层）与
+    # test/dispatch/test_probes.c（帧探测）。线上字段语义没有抓包可对照，
+    # 这批变异体钉的正是"错一位就换一种现场表现"的那些点。
+    "test_gzzh": [
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G1  RGB 颜色优先级接错（红落到绿）",
+         "    if (rgb[0]) return DEV_DISPLAY_COLOR_RED;",
+         "    if (rgb[0]) return DEV_DISPLAY_COLOR_GREEN;"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G2  \"顺手修好\"参考实现的字体名倒置（宋体→宋体）",
+         "    if (0 == memcmp(name, s_gzzh_font_song, sizeof(s_gzzh_font_song))) return APP_FONT_TYPE_HT;",
+         "    if (0 == memcmp(name, s_gzzh_font_song, sizeof(s_gzzh_font_song))) return APP_FONT_TYPE_ST;"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G3  字号码 16 映射成 24",
+         "        case 16: return APP_FONT_SIZE_16;",
+         "        case 16: return APP_FONT_SIZE_24;"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G4  0x10 应答少发 1 字节",
+         "    if (app_ccb_send(ccb, s_gzzh_no_fault, (uint16_t)sizeof(s_gzzh_no_fault)) < 0)",
+         "    if (app_ccb_send(ccb, s_gzzh_no_fault, (uint16_t)sizeof(s_gzzh_no_fault) - 1U) < 0)"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G5  文字载荷门禁放宽（允许零文本）",
+         "    if (payload_len <= sizeof(app_gzzh_text_t)) {",
+         "    if (payload_len < sizeof(app_gzzh_text_t)) {"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G6  坐标门禁从 >= 放宽到 >",
+         "    if ((x >= rows) || (y >= cols)) {",
+         "    if ((x > rows) || (y >= cols)) {"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G7  端口按小端拼（该字段是大端）",
+         "    const uint32_t port = ((uint32_t)net_cfg->port[0] << 8) | (uint32_t)net_cfg->port[1];",
+         "    const uint32_t port = ((uint32_t)net_cfg->port[1] << 8) | (uint32_t)net_cfg->port[0];"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G8  应答长度域写成载荷长度（少 17）",
+         "    reply->length[0] = (uint8_t)(GZZH_REPORT_IP_BYTES & 0xFFU);\n"
+         "    reply->length[1] = (uint8_t)((GZZH_REPORT_IP_BYTES >> 8) & 0xFFU);",
+         "    reply->length[0] = (uint8_t)(sizeof(app_gzzh_net_cfg_t) & 0xFFU);\n"
+         "    reply->length[1] = 0;"),
+        ("Application/Src/GZZH/app_gzzh_cmd.c",
+         "G9  纯黑也落盘（清屏归档）",
+         "    _gzzh_fill_screen(color, (color != DEV_DISPLAY_COLOR_BLACK));",
+         "    _gzzh_fill_screen(color, true);"),
+    ],
+    # 协议探针（帧的**结构**判定）—— 断言见 test/dispatch/test_probes.c。
+    # 这里只登记 GZZH 的：其余协议的探针变异体在各自命令层套件里没有落点。
+    "test_probes": [
+        ("Application/Src/GZZH/app_gzzh.c",
+         "Q1  探针长度上限放宽 1 字节",
+         "    if ((total < GZZH_FRAME_MIN_BYTES) || (total > GZZH_FRAME_MAX_BYTES))",
+         "    if ((total < GZZH_FRAME_MIN_BYTES) || (total > GZZH_FRAME_MAX_BYTES + 1U))"),
+        ("Application/Src/GZZH/app_gzzh.c",
+         "Q2  结束符不校验",
+         "    if (GZZH_TAIL_BYTE != tail) return APP_PCB_PROBE_STATE_FAKE;",
+         "    if (false) return APP_PCB_PROBE_STATE_FAKE;"),
+        ("Application/Src/GZZH/app_gzzh.c",
+         "Q3  长度下界不判",
+         "    if ((total < GZZH_FRAME_MIN_BYTES) || (total > GZZH_FRAME_MAX_BYTES))",
+         "    if (total > GZZH_FRAME_MAX_BYTES)"),
+    ],
     # 硬件 CRC 封装 —— 断言见 test/kernel/test_crc.c（链接生产 pl_crc.c，不是桩）。
     # 三条都针对"分块累加"这条路径：截断、末块不补零、空输入不复位，是历史上
     # 真实出现过的三类缺陷（前两类曾让 >256B 的非对齐输入静默少算）。

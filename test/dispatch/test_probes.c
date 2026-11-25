@@ -1,6 +1,6 @@
 /**
  * @file    test_probes.c
- * @brief   各协议探针的 host 单测（IAP / LDI / RLS）
+ * @brief   各协议探针的 host 单测（IAP / LDI / RLS / GZZH）
  *
  * 探针是纯函数：给定环形缓冲区、暂存区与来源通道，返回四态之一。这里直接调用
  * 真实探针（app_iap.c / app_ldi.c / app_rls.c 原样编译），只自建一个最小 pcb
@@ -29,6 +29,8 @@
 #include "pl_crc.h"
 
 #include "app_rls.h"
+
+#include "app_gzzh.h"
 
 /* ================================================================
  *  断言与统计
@@ -75,7 +77,7 @@ static app_ccb_t s_ccb = {.name = "chan", .ops = NULL};
 
 __attribute__((aligned(4))) static uint8_t s_scratch_buf[FRAME_DATA_MAX_LEN];
 
-__attribute__((aligned(4))) static uint8_t s_frame[1200];
+__attribute__((aligned(4))) static uint8_t s_frame[1500]; /* ≥ GZZH_FRAME_MAX_BYTES(1440) */
 
 /** @brief 清空缓冲区并放入一段字节 */
 static void feed(const void *data, size_t len)
@@ -442,6 +444,106 @@ static void test_rls(void)
 }
 
 /* ================================================================
+ *  GZZH 探针
+ * ================================================================ */
+
+static uint32_t s_gzzh_len;
+
+static app_pcb_probe_state_t gzzh_probe(void)
+{
+    uint8_t aux = 0;
+    return app_gzzh_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf),
+                                &s_gzzh_len, &aux);
+}
+
+/** @brief 构造一整帧 GZZH（**长度域 = 整帧字节数**，含引导串与结束符）
+ *  @param total 整帧字节数；调用方保证不超过 sizeof(s_frame)
+ *  @return total */
+static size_t gzzh_build(uint16_t total)
+{
+    app_gzzh_frame_t *f = (app_gzzh_frame_t *)s_frame;
+
+    memset(s_frame, 0, sizeof(s_frame));
+    memcpy(f->head, g_gzzh_head, GZZH_HEAD_BYTES);
+    f->length[0] = (uint8_t)(total & 0xFFU);
+    f->length[1] = (uint8_t)((total >> 8) & 0xFFU);
+    f->cmd[0]    = (uint8_t)APP_GZZH_CMD_TYPE_TEXT;
+    s_frame[total - 1] = GZZH_TAIL_BYTE;
+    return total;
+}
+
+/** @brief GZZH 探针：长度域是整帧字节数，上下界与结束符两侧都要拦下
+ *
+ *  长度域低位（0/1/下限-1）会让 `total - 1` 回绕到帧前，高位（上限+1）会读到暂存区
+ *  之外；结束符错说明帧边界已经不对，继续解析就是把后面的字节当载荷。
+ *  与 RLS 的差别：RLS 的长度域同样含头尾，但最短帧/上限完全不同，不能套用。 */
+static void test_gzzh(void)
+{
+    TEST_BEGIN("GZZH 探针");
+
+    /* 合法帧 */
+    size_t n = gzzh_build(32);
+    feed(s_frame, n);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_READY);
+    CHECK(s_gzzh_len == 32);
+
+    /* 不足一个引导段（16）→ WAIT */
+    feed(s_frame, 8);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_WAIT);
+
+    /* 引导串错 → FAKE */
+    gzzh_build(32);
+    s_frame[0] = 0x00;
+    feed(s_frame, 32);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 声明 32、只到 20 字节 → WAIT（整帧没到齐不得读结束符）*/
+    gzzh_build(32);
+    feed(s_frame, 20);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_WAIT);
+
+    /* 结束符错 → FAKE */
+    gzzh_build(32);
+    s_frame[31] = 0x01;
+    feed(s_frame, 32);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域 = 0 → FAKE */
+    gzzh_build(32);
+    s_frame[8] = 0x00;
+    s_frame[9] = 0x00;
+    feed(s_frame, 32);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域 = 1 → FAKE（低位侧仍会向前越界）*/
+    gzzh_build(32);
+    s_frame[8] = 0x01;
+    s_frame[9] = 0x00;
+    feed(s_frame, 32);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域 = 最短帧 - 1（16）→ FAKE */
+    gzzh_build(32);
+    s_frame[8] = 16;
+    s_frame[9] = 0x00;
+    feed(s_frame, 32);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 边界：恰好上限 → READY */
+    n = gzzh_build(GZZH_FRAME_MAX_BYTES);
+    feed(s_frame, n);
+    CHECK_MSG(gzzh_probe() == APP_PCB_PROBE_STATE_READY, "上限边界应被接受（%u 字节）",
+              (unsigned)GZZH_FRAME_MAX_BYTES);
+
+    /* 上限 + 1 → FAKE（长度域检查先于"整帧到齐"，喂 17 字节即可触发）*/
+    gzzh_build(32);
+    s_frame[8] = (uint8_t)((GZZH_FRAME_MAX_BYTES + 1U) & 0xFFU);
+    s_frame[9] = (uint8_t)((GZZH_FRAME_MAX_BYTES + 1U) >> 8);
+    feed(s_frame, 17);
+    CHECK(gzzh_probe() == APP_PCB_PROBE_STATE_FAKE);
+}
+
+/* ================================================================
  *  暂存区容量契约
  * ================================================================ */
 
@@ -514,6 +616,7 @@ static void test_fake_does_not_copy_whole(void)
         {"iap", app_iap_probe_frame},
         {"ldi", app_ldi_probe_frame},
         {"rls", app_rls_probe_frame},
+        {"gzzh", app_gzzh_probe_frame},
     };
 
     memset(junk, 0x43, sizeof(junk)); /* 一个 A5 5A / FF FE / 0x7E 都不给 */
@@ -606,6 +709,9 @@ static void test_fake_advances_exactly_one_byte(void)
 
     n = rls_build(64);
     fake_advance_check("rls", app_rls_probe_frame, s_frame, n, &len);
+
+    n = gzzh_build(32);
+    fake_advance_check("gzzh", app_gzzh_probe_frame, s_frame, n, &len);
 }
 
 /* ================================================================
@@ -642,11 +748,16 @@ static size_t build_rls(uint32_t v)
 {
     return rls_build((uint16_t)(16 + (v % 120)));
 }
+static size_t build_gzzh(uint32_t v)
+{
+    return gzzh_build((uint16_t)(GZZH_FRAME_MIN_BYTES + (v % 200)));
+}
 
 static const probe_entry_t s_probes[] = {
     {"iap", app_iap_probe_frame, 1044, build_iap},
     {"ldi", app_ldi_probe_frame, 522, build_ldi},
     {"rls", app_rls_probe_frame, 530, build_rls},
+    {"gzzh", app_gzzh_probe_frame, GZZH_FRAME_MAX_BYTES, build_gzzh},
 };
 
 /* 确定性伪随机（xorshift32）：失败可复现，不依赖平台 rand 的实现 */
@@ -738,11 +849,12 @@ static void test_conformance(void)
 
 int main(void)
 {
-    printf("协议探针 host 单测（IAP / LDI / RLS）\n");
+    printf("协议探针 host 单测（IAP / LDI / RLS / GZZH）\n");
 
     test_iap();
     test_ldi();
     test_rls();
+    test_gzzh();
     test_scratch_contract();
     test_fake_does_not_copy_whole();
     test_fake_advances_exactly_one_byte();

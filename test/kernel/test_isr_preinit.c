@@ -130,6 +130,12 @@ HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *h, uint8_t *d, uint1
     (void)h; (void)d; (void)l;
     return HAL_OK;
 }
+/* pl_uart_set_baud 用：本套件不验证重配细节，只保证符号可链接 */
+HAL_StatusTypeDef HAL_UART_Init(UART_HandleTypeDef *h)
+{
+    (void)h;
+    return HAL_OK;
+}
 HAL_StatusTypeDef HAL_UART_DMAStop(UART_HandleTypeDef *h)
 {
     (void)h;

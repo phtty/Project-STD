@@ -201,8 +201,9 @@ static_assert(RLS_PAYLOAD_MAX <= FRAME_DATA_MAX_LEN, "RLS 最长帧超过框架�
     s_rls_pcb.queue = s_rls_msg_queue;
 
     /* 现场只用 UDP（上位机发到本机 10011，回包走本帧来源地址:10028），RS485 保留。
-       UDP 已绑 IAP/LDI/CDSTD 三个协议，本协议是第 4 个 —— 正好等于
-       APP_CCB_PROTO_MAX，再加一个就会 configASSERT。 */
+       3833024 的这条 UDP 上现在绑了 **IAP + RLS + GZZH** 三个协议（LDI/CDSTD 在本板
+       构建里排除），余量只剩 1 个 —— 再恢复任一个协议族都会撞 APP_CCB_PROTO_MAX
+       的 configASSERT，必须连带调大该上限或换通道。 */
     app_dispatch_bind(&s_rls_pcb, app_rs485_ccb());
     app_dispatch_bind(&s_rls_pcb, app_udp_ccb());
 

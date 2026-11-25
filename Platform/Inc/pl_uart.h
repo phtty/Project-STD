@@ -72,6 +72,20 @@ void pl_uart_init(void);
  *  @return 该路句柄；ID 越界或本板无此路时为 NULL */
 pl_uart_handle_t pl_uart_get_handle(uint8_t id);
 
+/** @brief 运行期改波特率（重配 UART 外设，不动 GPIO/DMA 归属）
+ *
+ *  **必须在 `pl_uart_start_rx()` 之前调用**：重配会把外设 disable 再 enable，
+ *  接收若已在跑，DMA 流还在转、但外设已被复位 —— 这一路会静默收不到东西。
+ *  本工程的使用点是通道启动前的 initcall（如 3833024 的 RS232-1 跑 GZZH 的 9600）。
+ *
+ *  只改 UART 外设配置；`pl_uart_send_ex` 的发送超时预算读的是同一个
+ *  `Init.BaudRate`，所以改完波特率再发长帧不会按旧速率判超时。
+ *
+ *  @param h     UART 句柄（`pl_uart_get_handle` 的返回值）
+ *  @param baud  目标波特率（0 视为非法参数）
+ *  @return 0 成功（含"已经是该值"）；-1 句柄不可用或 HAL 重配失败 */
+int32_t pl_uart_set_baud(pl_uart_handle_t h, uint32_t baud);
+
 /** @brief 发送模式 */
 typedef enum {
     PL_UART_TX_POLL = 0, /**< 轮询 TXE，阻塞。短帧、或 RTOS 未就绪的早期路径 */

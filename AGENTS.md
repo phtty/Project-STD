@@ -64,7 +64,7 @@ make -j$(nproc) CONFIG=Release   # 另一套输出目录（CFLAGS 恒为 -Og -g�
 make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
 make clean                       # 删 build/<板>/<配置> 与 build/<板>/test（保留 compile_commands.json 再放回）
 
-make test                        # host 侧 32 个套件（见 §7）；第一条自动跑结构规则闸
+make test                        # host 侧 33 个套件（见 §7）；第一条自动跑结构规则闸
 make BOARD=5006048 test
 make lint                        # 只跑结构规则闸（秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
@@ -125,7 +125,7 @@ Application/{Inc,Src}/              业务层（app_*）
 ├── Render/     app_render.*（字库渲染引擎）+ app_screen.*（整屏门面）
 │               └ app_screen_canvas.c / _status.c / _brightness.c（同模块的按职责拆分 TU）
 ├── BIST/       app_test.*（硬件冒烟用例）、app_factory_test.*（出厂检测模式）、app_diag.c（运行时健康诊断）
-├── IAP/ LDI/ RLS/ CASC/ CDSTD/ AH/ 六个协议（各有自己的目录；AH = AH/MQTT + AH/TCP）
+├── IAP/ LDI/ RLS/ CASC/ CDSTD/ AH/ GZZH/ 七个协议（各有自己的目录；AH = AH/MQTT + AH/TCP）
 ├── Channel/    UDP / TCP server / TCP client / MQTT / RS485 传输通道
 └── 根          app_boot.c（RTOS 编排）、app_dispatch.c（分发引擎）、app_cfg_sched.c、app_key.c、app_light_sensor.c
 Device/                            设备层（dev_*）。**源按类别分目录** Display/ IO/ Network/ Storage/，
@@ -211,14 +211,14 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 7. 测试（host 侧，`make test`）
 
-32 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
+33 个套件，在 `build/<板>/test/` 生成可执行文件；用 pthread 版 cmsis_os2 + `test/stubs/` 遮蔽真头文件，
 带 ASan/UBSan。**它们跑在宿主机上，不碰硬件**：
 
 | 套件 | 覆盖 |
 |---|---|
 | `test_ring_buffer` | 环形缓冲区（含容量钳位） |
 | `test_dispatch` | 分发引擎（pcb/ccb、probe 4 态、帧投递） |
-| `test_probes` | IAP / LDI / RLS 三个协议的探针 |
+| `test_probes` | IAP / LDI / RLS / GZZH 四个协议的探针 |
 | `test_cfg_sched` | 配置记录调度器（块扫描、校验） |
 | `test_iap_cfg` | IAP 记录（走 RAM 假扇区；含跨模块访问器契约） |
 | `test_ldi_0ah` | LDI 0AH 配置跨 IAP + LDI 两条记录 |
@@ -239,6 +239,7 @@ docs/                              命名约定.md（评审契约）、架构说
 | `test_render` | 渲染引擎的区域契约（高度门禁 / 换行与截断 / 对齐防下溢 / 越界裁剪）、`text_cvt` 转换边界、`app_render` 锁配对 |
 | `test_rls` | RLS 协议命令层（从**一帧完整帧**往里测，生产 TU 照原样编译）：7 类命令码的分派矩阵、回显规则（BM/SV/搜索不回、其余回原帧）、显示位图门禁与颜色透传/>7 拒显、亮度 0~31→1~7 与 255 恢复跟随、显示开关只切 OE、修改 IP 的地址与端口取舍、搜索应答 21 帧逐字节（含 BCC）、图片槽 SV/DS 编号与「够屏不够槽」守卫。帧探测在 `test_probes` |
 | `test_rls_pic` | RLS 图片槽（SV/DS 的 3 槽）：记录布局契约（513B 槽 / 1540B 记录）、配置记录加载（有效/空/损坏/长度不符）、落盘失败仍存 RAM、几何门禁（非 128×32 只清屏）、SW1/2/3 干接点→槽 0/1/2 与无键退出。命令层在 `test_rls` |
+| `test_gzzh` | GZZH（贵州地标）命令层：0x10 故障查询回**裸 2 字节**、0x20 文字（整屏替换 + 坐标/字号/字型/GBK/颜色逐字段下传）、0x30 清屏、0x80 全屏纯色、0x40 设置 IP（端口**大端** + 0x50 应答帧）、越界矩阵与命令分派。帧探测在 `test_probes` |
 | `test_fold` | 折叠屏模式判定（几何门禁 / E9 / E9+EA）、`app_fold_split_lines` 切分、变体1 E9 两行各限半屏（FLAT 与暂态变体2） |
 | `test_cdstd` | CDSTD 协议：探针四态 / 整帧等待 / CRC→FAKE / 与 LDI 同一 FFFF 帧头互不毒化、队列取帧与命令分派；命令层 A0 屏开关、A1 文字、A2 亮度、A3 全屏填充、A4 固化显示、A5/A6 IP（A7/A8 仍空壳） |
 | `test_ah` | AH 纯函数：hex 编码、主题前缀（站8/道2/型2/号2）、Client ID、20 字符通知号（时间/计数回卷） |

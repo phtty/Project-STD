@@ -65,6 +65,11 @@ virtualFolder:
                 - path: Application/Src/CDSTD/app_cdstd_cmd.c
                 - path: Application/Src/CDSTD/app_cdstd_cfg.c
               folders: []
+            - name: gzzh
+              files:
+                - path: Application/Src/GZZH/app_gzzh.c
+                - path: Application/Src/GZZH/app_gzzh_cmd.c
+              folders: []
         - name: render
           files:
             - path: Application/Src/Render/app_render.c
@@ -439,6 +444,7 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
+        - Application/Inc/GZZH
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -611,6 +617,7 @@ targets:
         - Application/Inc/Render
         - Application/Inc/BIST
         - Application/Inc/CDSTD
+        - Application/Inc/GZZH
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
