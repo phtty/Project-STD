@@ -3,6 +3,27 @@
 > 本文是**操作手册**：命令、目录地图、硬约束、以及"别踩的坑"。
 > **架构的设计理由**与各子系统细节见 `docs/架构说明.md`；**命名与注释的评审契约**见 `docs/命名约定.md`。
 > （全局性内容——中文交流、代理、工具环境——在你自己的 `~/.config/opencode/AGENTS.md` 里，本文不重复。）
+>
+> **第一原则：能用 MCP 就别手改工程配置。** 构建、烧录、目标切换、宏、包含路径、排除文件都走 `mcp__eide__*`；调试与 RTT 走 `mcp__openocd__*`。EIDE 会在打开/保存时重写 `.eide/eide.yml`，手改的内容可能被无声覆盖，而 MCP 是直接对它自己的进程发请求，不存在这个竞态。
+
+## 0. 工具分工：先判断「这是不是 MCP 的活」
+
+DSH 里挂了两个 MCP：`mcp__eide__*`（EIDE 扩展内置：工程配置 / 构建 / 烧录）与 `mcp__openocd__*`（OpenOCD + GDB：调试 / RTT / 寄存器）。**EIDE 是工程配置的事实源**，`Makefile` 是给 host 测试和无 IDE 场景的旁路。
+
+| 要做的事 | 用它 | 别这么做 |
+|---|---|---|
+| 构建固件 | `mcp__eide__eide_build`（增量）/ `eide_rebuild`（全量） | 只跑 `make` 就以为 IDE 那边也绿了 |
+| 烧录 | `mcp__eide__eide_flash` | 手拼 openocd 命令行（cwd/相对路径容易错）；在调试会话里烧（抢探针） |
+| 切目标板 | `eide_get_targets` 看、`eide_switch_target` 切 | 手改 `eide.yml` 的 `targets` |
+| 宏 / 包含路径 | `eide_get_defines`/`eide_set_defines`、`eide_get_inc_dirs`/`eide_set_inc_dirs` | 手改 `defineList` / `incList` |
+| 排除源文件 | `eide_exclude_src_file` / `eide_include_src_file` | 手改 `excludeList` |
+| 新增源文件 | 放进目录 + 补 `Makefile`；EIDE 侧**不会自动收集**（实测：新文件不参与编译），新增目录用 `eide_add_src_dir` | 以为「丢进已有目录 EIDE 就会编」 |
+| host 测试 / 变异 / lint | `make test` / `make mutate` / `make lint` | 以为 MCP 能跑 host 测试（不能） |
+| 调试 / RTT | `mcp__openocd__*`（见 §2.3） | 同时开两个 OpenOCD |
+
+一句话：**源码手改，工程配置与构建/烧录走 MCP，host 测试走 make。** 改完源码按 `eide_build` → `make test` 两道闸都过一遍。
+
+> ⚠️ **EIDE 两个 target 的源集合不一样（记录时 2026-11-25 实测）**：EIDE 用**显式文件清单**（`eide.yml` 的 `virtualFolder`）+ target 级 `excludeList`，不做目录扫描。`3833024` target 排除了 virtual folder `protocol/{ah,cas,ldi,cdstd}`，所以它的产物**不含 AH 与级联**（204 个 .o）；`5006048` target 排除的是 `protocol/{rls,ldi,cdstd}`（含 AH/CASC、不含 RLS）。而 `Makefile` 的 `3833024` 构建**含** AH 与 `app_casc.c`（210 个源，LDI/CDSTD 两边都不编）。**结论：需要 AH/级联行为的固件以 `make` 产物为准**；要改 EIDE 的取舍就在目标里增删排除项，别拿不同 target 的产物互相当基准。
 
 ## 1. 这是什么
 
@@ -21,31 +42,46 @@ C23，FreeRTOS v10.3.1 + CMSIS-RTOS V2，LwIP，`arm-none-eabi-gcc`。
 
 ## 2. 构建 / 烧录 / 测试
 
-```sh
-make -j$(nproc)                  # 默认板 3833024，Debug（CONFIG 默认 Debug）；按核数并行
-make -j$(nproc) BOARD=5006048    # 换板
-make -j$(nproc) CONFIG=Release   # 另一套输出目录（注意：CFLAGS 恒为 -Og -g，Release 并不改优化）
-make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
-make clean                     # 删 build/<板>/<配置> 与 build/<板>/test（先保留 compile_commands.json 再放回）
+### 2.1 固件：EIDE MCP（首选）
 
-make test                      # host 侧 32 个测试套件（见 §7）；第一条自动跑结构规则闸
-make BOARD=5006048 test        # 同上；BOARD 影响测试里的板级宏
-make lint                      # 只跑结构规则闸（32 套件，秒级；规范见 docs/测试约定.md）
+```
+mcp__eide__eide_get_targets(uid)              # 当前目标 + 可选板（3833024 / 5006048）
+mcp__eide__eide_switch_target(uid, "5006048")
+mcp__eide__eide_build(uid)                    # 增量；全量 eide_rebuild，清产物 eide_clean
+mcp__eide__eide_flash(uid, eraseAll=false)    # 烧录（upload 命令已改成 ${workspaceFolder} 绝对路径）
+mcp__eide__eide_reload(uid)                   # 工程文件被外部改过之后，让 EIDE 重新读
+```
+
+`uid` 取 `.eide/eide.yml` 的 `miscInfo.uid`。产物在 `build/<板>/Project_STD.elf|.hex|.bin`。
+**MCP 依赖 VS Code 开着**（服务跑在 EIDE 扩展进程里）；关了 VS Code 就退回 2.2 的命令行。
+
+### 2.2 命令行旁路：host 测试与无 IDE 场景
+
+```sh
+make -j$(nproc)                  # 固件（旁路），产物 build/<板>/Debug/ —— 与 EIDE 的 build/<板>/ 不是同一目录
+make -j$(nproc) BOARD=5006048
+make -j$(nproc) CONFIG=Release   # 另一套输出目录（CFLAGS 恒为 -Og -g，Release 并不改优化）
+make -j$(nproc) TOOLCHAIN=clang  # 仅换编译器（链接仍走 arm-none-eabi-gcc）
+make clean                       # 删 build/<板>/<配置> 与 build/<板>/test（保留 compile_commands.json 再放回）
+
+make test                        # host 侧 32 个套件（见 §7）；第一条自动跑结构规则闸
+make BOARD=5006048 test
+make lint                        # 只跑结构规则闸（秒级；规范见 docs/测试约定.md）
 make mutate MUT_ARGS="--suite test_cdstd --fail-on-alive"   # 变异闸（要求基线是绿的）
 
-# 编译数据库（clangd 用）
-bear --output build/3833024/Debug/compile_commands.json -- make -B -j$(nproc)
+bear --output build/3833024/Debug/compile_commands.json -- make -B -j$(nproc)   # clangd 数据库
+```
 
-# 烧录（OpenOCD）
+手工烧录（只在 MCP 不可用时）：
+
+```sh
 openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/Debug/Project_STD.hex verify reset exit"
-# 整片擦除
 openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
 ```
 
-产物在 `build/<板>/<配置>/`：`Project_STD.elf`（带符号，调试用）、`.hex`（烧录）、`.bin`（IAP 用）。
-**Makefile 没有烧录目标**——烧录走上面那条 OpenOCD，或 IDE（EIDE）。
+> ⚠️ 两套构建的产物目录不同（EIDE `build/<板>/`、Makefile `build/<板>/Debug/`）——**调试/烧录用哪套编的 ELF 要对上**，别拿旧产物。
 
-### 2.1 交互式调试（DSH 的 openocd MCP）
+### 2.3 交互式调试（DSH 的 openocd MCP）
 
 DSH 里挂了 `mcp__openocd__*`（OpenOCD + GDB/MI，server 在 `~/.dsh/mcp/openocd-mcp/`）。
 典型流程：
@@ -133,9 +169,8 @@ docs/                              命名约定.md（评审契约）、架构说
 
 ## 6. 别踩的坑（都是实际踩过的）
 
-1. **`.eide/eide.yml` 会被 EIDE 重写**：它由 IDE 维护，改了 `Makefile` 忘了它、或反过来，都会让另一套构建编不过。
-   改它尽量在 EIDE 关闭时；提交前 `git diff .eide/eide.yml` 看一眼有没有被回退。
-2. **新增/搬动源文件要同步两套构建清单**：`Makefile`（固件 **和测试** 两处 `INC_DIRS`/源清单）+ `.eide/eide.yml`（**两个目标**）。
+1. **`.eide/eide.yml` 是 EIDE 的，不是你的**：EIDE 打开/保存时会重写它。改目标、宏、包含路径、排除文件一律走 §0 的 MCP 工具；只有 MCP 覆盖不到的情况才手改，改完 `eide_reload` 让 EIDE 重读，并在提交前 `git diff .eide/eide.yml` 确认没被回退。
+2. **新增源文件：两边都要显式加，EIDE 不会自动收集**：EIDE 的工程文件是**显式清单**（`eide.yml` 的 `virtualFolder`）加 target 级 `excludeList`；**实测把新 `.c` 丢进已有目录后 `eide_build` 编译 0 个文件**。`Makefile` 同样是显式 `SRC_*`（无 wildcard）。所以「加文件」= 落盘 + 补 `Makefile` + 让 EIDE 也认它：新增**目录**用 `eide_add_src_dir`（实测会写进 `srcDirs`，该目录下的文件随后被自动收集并编译），**单个文件**目前 MCP 没有对应工具，只能在 EIDE 界面里加。**不要**手动改 `eide.yml` 的 `virtualFolder`/`srcDirs`（会被 EIDE 重写）；不想让某文件参与编译用 `eide_exclude_src_file`。
 3. **Doxygen 与 `__attribute__` 的两个错位**（见 `docs/命名约定.md` §12「Doxygen 已知行为」）：
    - **尾置**属性（`uint8_t x[] __attribute__((aligned(4)));`）会让 Doxygen 把**后续声明吞进前一条**、误报符号未声明 → 属性写**前置**
    - `typedef` 类型的文档要点必须放**尾部** `/**< */`
