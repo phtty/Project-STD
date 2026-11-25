@@ -1,6 +1,6 @@
 /**
  * @file    test_probes.c
- * @brief   各协议探针的 host 单测（IAP / LDI / RLS / GZZH）
+ * @brief   各协议探针的 host 单测（IAP / LDI / RLS / GZZH / P25RLS）
  *
  * 探针是纯函数：给定环形缓冲区、暂存区与来源通道，返回四态之一。这里直接调用
  * 真实探针（app_iap.c / app_ldi.c / app_rls.c 原样编译），只自建一个最小 pcb
@@ -31,6 +31,7 @@
 #include "app_rls.h"
 
 #include "app_gzzh.h"
+#include "app_p25rls.h"
 
 /* ================================================================
  *  断言与统计
@@ -544,6 +545,131 @@ static void test_gzzh(void)
 }
 
 /* ================================================================
+ *  P25RLS 探针
+ * ================================================================ */
+
+static uint32_t s_p25rls_len;
+
+static app_pcb_probe_state_t p25rls_probe(void)
+{
+    uint8_t aux = 0;
+    return app_p25rls_probe_frame(&s_pcb, &s_ccb, nullptr, s_scratch_buf, sizeof(s_scratch_buf),
+                                  &s_p25rls_len, &aux);
+}
+
+/** @brief 构造一整帧 P25RLS：帧头 `FF FE` + **大端整帧长度** + 命令 + DATA + BCC + `0D 0C`
+ *  @param total 整帧字节数（≥ P25RLS_FRAME_MIN_BYTES）；调用方保证不超过 sizeof(s_frame)
+ *  @return total */
+static size_t p25rls_build(uint16_t total)
+{
+    app_p25rls_frame_t *f = (app_p25rls_frame_t *)s_frame;
+
+    memset(s_frame, 0, sizeof(s_frame));
+    f->head[0]   = P25RLS_HEAD_BYTE0;
+    f->head[1]   = P25RLS_HEAD_BYTE1;
+    f->length[0] = (uint8_t)(total >> 8);
+    f->length[1] = (uint8_t)(total & 0xFFU);
+    f->cmd[0]    = (uint8_t)((uint16_t)APP_P25RLS_CMD_TYPE_DISPLAY_SAVE & 0xFFU);
+    f->cmd[1]    = (uint8_t)(((uint16_t)APP_P25RLS_CMD_TYPE_DISPLAY_SAVE >> 8) & 0xFFU);
+    s_frame[total - 2] = P25RLS_TAIL_BYTE0;
+    s_frame[total - 1] = P25RLS_TAIL_BYTE1;
+    return total;
+}
+
+/** @brief P25RLS 探针：帧头两字节 / 大端整帧长度 / 帧尾；**不校验 BCC**
+ *
+ *  与 RLS 同帧头的协议有两个（RLS / P25RLS），格式相同但命令集与上限不同，所以
+ *  "同格式"不能当成"可以共用探针"：探针只判结构，命令字留给处理层。这里把长度域的
+ *  四个方向（0 / 1 / 最短-1 / 上限+1）都压一遍 —— 长度域是帧内取来的 16 位值，
+ *  拿它当偏移之前必须夹住，否则 `total - 2` 会回绕到帧前。
+ *
+ *  BCC 故意不校验：现场上位机的 BCC 算法与文档对不上（文档自己的例子就是坏的），
+ *  校验它会把正常帧全判伪。 */
+static void test_p25rls(void)
+{
+    TEST_BEGIN("P25RLS 探针");
+
+    /* 合法帧 */
+    size_t n = p25rls_build(32);
+    feed(s_frame, n);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_READY);
+    CHECK(s_p25rls_len == 32);
+
+    /* 不足一个帧头（6）→ WAIT */
+    feed(s_frame, 5);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_WAIT);
+
+    /* 帧头首字节错 → FAKE */
+    p25rls_build(32);
+    s_frame[0] = 0x00;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 帧头次字节错 → FAKE（只比首字节的实现会漏掉）*/
+    p25rls_build(32);
+    s_frame[1] = 0xFF;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 声明 32、只到 20 字节 → WAIT（整帧没到齐不得读帧尾）*/
+    p25rls_build(32);
+    feed(s_frame, 20);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_WAIT);
+
+    /* 帧尾错 → FAKE */
+    p25rls_build(32);
+    s_frame[31] = 0x01;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域 = 0 / 1 → FAKE（`total - 2` 会回绕到帧前）*/
+    p25rls_build(32);
+    s_frame[2] = 0x00;
+    s_frame[3] = 0x00;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    p25rls_build(32);
+    s_frame[2] = 0x00;
+    s_frame[3] = 0x01;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域 = 最短帧 - 1 → FAKE */
+    p25rls_build(32);
+    s_frame[2] = 0x00;
+    s_frame[3] = (uint8_t)(P25RLS_FRAME_MIN_BYTES - 1U);
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 长度域是高字节在前：把大端写反（小端）必须判 FAKE */
+    p25rls_build(32);
+    s_frame[2] = 0x20;
+    s_frame[3] = 0x00;
+    feed(s_frame, 32);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* 边界：恰好上限 → READY */
+    n = p25rls_build(P25RLS_FRAME_MAX_BYTES);
+    feed(s_frame, n);
+    CHECK_MSG(p25rls_probe() == APP_PCB_PROBE_STATE_READY, "上限边界应被接受（%u 字节）",
+              (unsigned)P25RLS_FRAME_MAX_BYTES);
+
+    /* 上限 + 1 → FAKE（长度域检查先于"整帧到齐"）*/
+    p25rls_build(32);
+    s_frame[2] = (uint8_t)((P25RLS_FRAME_MAX_BYTES + 1U) >> 8);
+    s_frame[3] = (uint8_t)((P25RLS_FRAME_MAX_BYTES + 1U) & 0xFFU);
+    feed(s_frame, 17);
+    CHECK(p25rls_probe() == APP_PCB_PROBE_STATE_FAKE);
+
+    /* BCC 错也判 READY：接收端不校验（见本函数说明）*/
+    p25rls_build(32);
+    s_frame[29] = 0xFF; /* BCC 位置 = total - 3 */
+    feed(s_frame, 32);
+    CHECK_MSG(p25rls_probe() == APP_PCB_PROBE_STATE_READY, "接收端不校验 BCC，错 BCC 也应 READY");
+}
+
+/* ================================================================
  *  暂存区容量契约
  * ================================================================ */
 
@@ -617,6 +743,7 @@ static void test_fake_does_not_copy_whole(void)
         {"ldi", app_ldi_probe_frame},
         {"rls", app_rls_probe_frame},
         {"gzzh", app_gzzh_probe_frame},
+        {"p25rls", app_p25rls_probe_frame},
     };
 
     memset(junk, 0x43, sizeof(junk)); /* 一个 A5 5A / FF FE / 0x7E 都不给 */
@@ -712,6 +839,9 @@ static void test_fake_advances_exactly_one_byte(void)
 
     n = gzzh_build(32);
     fake_advance_check("gzzh", app_gzzh_probe_frame, s_frame, n, &len);
+
+    n = p25rls_build(32);
+    fake_advance_check("p25rls", app_p25rls_probe_frame, s_frame, n, &len);
 }
 
 /* ================================================================
@@ -752,12 +882,17 @@ static size_t build_gzzh(uint32_t v)
 {
     return gzzh_build((uint16_t)(GZZH_FRAME_MIN_BYTES + (v % 200)));
 }
+static size_t build_p25rls(uint32_t v)
+{
+    return p25rls_build((uint16_t)(P25RLS_FRAME_MIN_BYTES + (v % 200)));
+}
 
 static const probe_entry_t s_probes[] = {
     {"iap", app_iap_probe_frame, 1044, build_iap},
     {"ldi", app_ldi_probe_frame, 522, build_ldi},
     {"rls", app_rls_probe_frame, 530, build_rls},
     {"gzzh", app_gzzh_probe_frame, GZZH_FRAME_MAX_BYTES, build_gzzh},
+    {"p25rls", app_p25rls_probe_frame, P25RLS_FRAME_MAX_BYTES, build_p25rls},
 };
 
 /* 确定性伪随机（xorshift32）：失败可复现，不依赖平台 rand 的实现 */
@@ -849,12 +984,13 @@ static void test_conformance(void)
 
 int main(void)
 {
-    printf("协议探针 host 单测（IAP / LDI / RLS / GZZH）\n");
+    printf("协议探针 host 单测（IAP / LDI / RLS / GZZH / P25RLS）\n");
 
     test_iap();
     test_ldi();
     test_rls();
     test_gzzh();
+    test_p25rls();
     test_scratch_contract();
     test_fake_does_not_copy_whole();
     test_fake_advances_exactly_one_byte();

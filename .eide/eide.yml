@@ -70,6 +70,12 @@ virtualFolder:
                 - path: Application/Src/GZZH/app_gzzh.c
                 - path: Application/Src/GZZH/app_gzzh_cmd.c
               folders: []
+            - name: p25rls
+              files:
+                - path: Application/Src/P25RLS/app_p25rls.c
+                - path: Application/Src/P25RLS/app_p25rls_cmd.c
+                - path: Application/Src/P25RLS/app_p25rls_pic.c
+              folders: []
         - name: render
           files:
             - path: Application/Src/Render/app_render.c
@@ -445,6 +451,7 @@ targets:
         - Application/Inc/BIST
         - Application/Inc/CDSTD
         - Application/Inc/GZZH
+        - Application/Inc/P25RLS
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -482,6 +489,7 @@ targets:
       - <virtual_root>/Application/protocol/cas
       - <virtual_root>/boards/3833024/Device/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/Device/dev_p20_16x16_1000001055.c
+      - <virtual_root>/Application/protocol/p25rls
     settings:
       debugger: cortex-debug
     toolchain: GCC
@@ -618,6 +626,7 @@ targets:
         - Application/Inc/BIST
         - Application/Inc/CDSTD
         - Application/Inc/GZZH
+        - Application/Inc/P25RLS
       libList: []
     excludeList:
       - <virtual_root>/Drivers/BSP/Key/key.c
@@ -638,6 +647,7 @@ targets:
       - <virtual_root>/boards/3833024/dev_p10_32x16_2200001703.c
       - <virtual_root>/boards/3833024/dev_p20_16x16_1000001055.c
       - <virtual_root>/Application/protocol/rls
+      - <virtual_root>/Application/protocol/p25rls
       - <virtual_root>/Application/Src/RLS/app_rls.c
       - <virtual_root>/Application/Src/RLS/app_rls_cmd.c
       - <virtual_root>/Application/Src/RLS/app_rls_pic.c

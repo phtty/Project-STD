@@ -213,6 +213,95 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "    _gzzh_fill_screen(color, (color != DEV_DISPLAY_COLOR_BLACK));",
          "    _gzzh_fill_screen(color, true);"),
     ],
+    # P25RLS（P25 可变信息板）命令层 —— 断言见 test/protocol/test_p25rls.c。
+    # 这批变异体钉的是"线上字节对、行为不对"的那几个点：命令字字节序、亮度映射、
+    # 颜色码、应答帧长度域/BCC、以及"改 IP 时端口沿用记录"这条会让设备失联的约定。
+    "test_p25rls": [
+        ("Application/Src/P25RLS/app_p25rls.c",
+         "V1  命字按大端拼（一条命令都不响应）",
+         "    const uint16_t wire = (uint16_t)((uint16_t)p25_frame->cmd[0] |\n"
+         "                                     ((uint16_t)p25_frame->cmd[1] << 8));",
+         "    const uint16_t wire = (uint16_t)(((uint16_t)p25_frame->cmd[0] << 8) |\n"
+         "                                     (uint16_t)p25_frame->cmd[1]);"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V2  亮度不再抬到最暗 1（0 落到硬件全灭）",
+         "    const uint8_t hw = (uint8_t)(1U + (uint16_t)((uint16_t)level * 6U + 15U) / 31U);",
+         "    const uint8_t hw = (uint8_t)((uint16_t)((uint16_t)level * 6U + 15U) / 31U);"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V3  亮度越界不夹（40 落到 9 级）",
+         "    if (level > 31U) level = 31U;",
+         "    if (false) level = 31U;"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V4  颜色码 1/2 互换（红绿颠倒）",
+         "        case 1: *out = DEV_DISPLAY_COLOR_RED; return true;",
+         "        case 1: *out = DEV_DISPLAY_COLOR_GREEN; return true;"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V5  点阵大小 1 档落到 16（不是 24）",
+         "        case 1: return APP_FONT_SIZE_24;",
+         "        case 1: return APP_FONT_SIZE_16;"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V6  SV 载荷门禁放宽（短帧也按 576B 读位图）",
+         "    if (payload_len < P25RLS_DISPLAY_PAYLOAD_BYTES) {",
+         "    if (payload_len < P25RLS_DISPLAY_PAYLOAD_BYTES - 100U) {"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V7  图片编号边界 >= 放宽到 >（槽号越界）",
+         "    if (ctx->pic_num >= P25RLS_PIC_SLOT_COUNT) {",
+         "    if (ctx->pic_num > P25RLS_PIC_SLOT_COUNT) {"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V8  先显示后存（存失败会留下错误画面）",
+         "    (void)p25rls_pic_save(ctx->pic_num, ctx->bitmap);\n"
+         "    p25rls_pic_show(ctx->pic_num);",
+         "    p25rls_pic_show(ctx->pic_num);\n"
+         "    (void)p25rls_pic_save(ctx->pic_num, ctx->bitmap);"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V9  改 IP 不沿用记录端口（重启后失联）",
+         "    if (app_iap_get_net_cfg(&rec)) port = rec.port;",
+         "    if (false) port = rec.port;"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V10 应答长度域写成数据段长度（少 9）",
+         "    frame[3] = (uint8_t)P25RLS_REPORT_IP_BYTES; /* 21：高字节恒 0，线上是高字节在前 */",
+         "    frame[3] = (uint8_t)P25RLS_NET_CFG_BYTES;"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V11 应答 BCC 只覆盖帧头 6 字节",
+         "    frame[18] = bcc_calc(frame, 18U); /* 帧头 → 数据域末尾，不含 BCC 自身 */",
+         "    frame[18] = bcc_calc(frame, 6U);"),
+        ("Application/Src/P25RLS/app_p25rls_cmd.c",
+         "V12 文字固定字型改成黑体",
+         "        .font_type = APP_FONT_TYPE_ST, /* 协议无字型字段，固定宋体 */",
+         "        .font_type = APP_FONT_TYPE_HT, /* 协议无字型字段，固定宋体 */"),
+    ],
+    # P25RLS 图片槽 —— 断言见 test/protocol/test_p25rls_pic.c（两平面 → 三色掩码、
+    # 记录加载/落盘、上电重放）。槽布局与掩码是"抓包看不出错"的两处：字节全对，
+    # 但颜色错、上电花屏。
+    "test_p25rls_pic": [
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W1  红遍不剔除绿（黄被红盖掉一半）",
+         "            s_mask[i] = (pass == 0U) ? (uint8_t)(r & (uint8_t)~g)",
+         "            s_mask[i] = (pass == 0U) ? (uint8_t)(r)"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W2  黄遍写成并集（红绿都当黄）",
+         "                                       : (uint8_t)(r & g);",
+         "                                       : (uint8_t)(r | g);"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W3  存图不记最后显示槽（上电不重放）",
+         "    memcpy(s_rec.slot[slot].bitmap, bitmap, P25RLS_BITMAP_BYTES);\n"
+         "    s_rec.valid_mask |= (uint8_t)(1U << slot);\n"
+         "    s_rec.last_shown = slot;",
+         "    memcpy(s_rec.slot[slot].bitmap, bitmap, P25RLS_BITMAP_BYTES);\n"
+         "    s_rec.valid_mask |= (uint8_t)(1U << slot);"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W4  加载不校验长度（半截记录也收）",
+         "    if (st != DEV_CFG_RECORD_STATE_OK || len != sizeof(s_rec)) {",
+         "    if (st != DEV_CFG_RECORD_STATE_OK) {"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W5  坏记录不清零（显示 Flash 垃圾）",
+         "        memset(&s_rec, 0, sizeof(s_rec));",
+         "        /* 变异：不清零 */"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W6  重放不看有效位（把未写过的槽画成黑屏）",
+         "    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return;",
+         "    if (false) return;"),
+    ],
     # 协议探针（帧的**结构**判定）—— 断言见 test/dispatch/test_probes.c。
     # 这里只登记 GZZH 的：其余协议的探针变异体在各自命令层套件里没有落点。
     "test_probes": [

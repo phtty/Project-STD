@@ -59,6 +59,7 @@ INC_DIRS = \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
 	-I Application/Inc/GZZH \
+	-I Application/Inc/P25RLS \
 	-I Device/Inc \
 	-I Device/Inc/Display \
 	-I Device/Inc/IO \
@@ -341,6 +342,9 @@ SRC_APPLICATION = \
 	Application/Src/RLS/app_rls_pic.c \
 	Application/Src/GZZH/app_gzzh.c \
 	Application/Src/GZZH/app_gzzh_cmd.c \
+	Application/Src/P25RLS/app_p25rls.c \
+	Application/Src/P25RLS/app_p25rls_cmd.c \
+	Application/Src/P25RLS/app_p25rls_pic.c \
 	Application/Src/CDSTD/app_cdstd.c \
 	Application/Src/CDSTD/app_cdstd_cmd.c \
 	Application/Src/CDSTD/app_cdstd_cfg.c \
@@ -370,10 +374,17 @@ SRC_ALL = \
 	$(SRC_STARTUP)
 
 # ---- Object Files ----
-# 工程级排除（当前为空）：AH 协议族已接入构建，但链路未激活（initcall 仍注释）。
+# 工程级排除：AH 协议族已接入构建，但链路未激活（initcall 仍注释）。
 # 若以后要整体排除，**必须与 eIDE 两个 target 的 excludeList 保持一致**，
 # 否则同一份源码在两套构建下会产出不同的固件。
-SRC_EXCLUDE =
+#
+# P25RLS 默认不上任何产品：它与 RLS 共用帧头（FF FE）又都会挂 UDP 10011，
+# 编在同一个板子上会互相抢帧、互不兼容——每个产品只选一个协议。
+# 要上机验证时把下面三行删掉，同时**排除 RLS**（board.mk 或 eIDE 的 excludeList）。
+SRC_EXCLUDE = \
+	Application/Src/P25RLS/app_p25rls.c \
+	Application/Src/P25RLS/app_p25rls_cmd.c \
+	Application/Src/P25RLS/app_p25rls_pic.c
 
 # 板级排除由 boards/<板>/board.mk 追加到 BOARD_SRC_EXCLUDE，在这里并入。
 # **别让 board.mk 直接往 SRC_EXCLUDE 里 +=** —— board.mk 在 300 行就被 include，
@@ -464,6 +475,7 @@ TEST_INC     = \
 	-I Application/Inc/BIST \
 	-I Application/Inc/CDSTD \
 	-I Application/Inc/GZZH \
+	-I Application/Inc/P25RLS \
 	-I Application/Inc/AH \
 	-I Kernel/Inc \
 	-I Platform/Inc \
@@ -504,6 +516,7 @@ TEST_PROBES_SRCS = \
 	Application/Src/LDI/app_ldi.c \
 	Application/Src/RLS/app_rls.c \
 	Application/Src/GZZH/app_gzzh.c \
+	Application/Src/P25RLS/app_p25rls.c \
 	Kernel/Src/ring_buffer.c \
 	Kernel/Src/crc_utils.c
 
@@ -742,6 +755,21 @@ TEST_GZZH_SRCS = \
 	Kernel/Src/ring_buffer.c \
 	test/stubs/os_stub.c
 
+# 套件：P25RLS 协议命令层（P25 可变信息板：图片显示/存图 / 设置 IP / 查询 IP /
+# 全屏纯色 / 文字 / 清屏 / 波特率）。生产 TU **照原样编译**；副作用用套件内的记录桩
+# （渲染 / 亮度 / IAP 记录 / 图片槽 / 发送）观察。帧探测在 test_probes。
+TEST_P25RLS_SRCS = \
+	test/protocol/test_p25rls.c \
+	Application/Src/P25RLS/app_p25rls.c \
+	Application/Src/P25RLS/app_p25rls_cmd.c \
+	Kernel/Src/bcc_utils.c \
+	Kernel/Src/ring_buffer.c \
+	test/stubs/os_stub.c
+
+# 套件：P25RLS 图片槽（3 槽双平面位图 / 配置记录 / 三色绘制 / 上电重放）
+# 用例 TU-include Application/Src/P25RLS/app_p25rls_pic.c（s_rec 与加载回调都是 static）。
+TEST_P25RLS_PIC_SRCS = test/protocol/test_p25rls_pic.c test/stubs/os_stub.c
+
 # 套件：TCP 服务器通道（实例 API / 发送门禁 / conn 生命周期 / manage 循环）
 # app_tcp_server.c 依赖 LwIP 的 netconn/netbuf 与 struct tcp_pcb 字段（keepalive 契约），
 # 所以本套件用**真的 LwIP 头文件**，只把 netconn 的行为换成脚本（见测试文件内的替身）。
@@ -809,6 +837,7 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
       $(TEST_BUILD)/test_ah_tcp $(TEST_BUILD)/test_ah_mqtt $(TEST_BUILD)/test_ah_mqtt_cmd \
       $(TEST_BUILD)/test_p15_mapping $(TEST_BUILD)/test_rls \
       $(TEST_BUILD)/test_rls_pic $(TEST_BUILD)/test_gzzh \
+      $(TEST_BUILD)/test_p25rls $(TEST_BUILD)/test_p25rls_pic \
       $(TEST_BUILD)/test_tcp_server \
       $(TEST_BUILD)/test_tcp_client $(TEST_BUILD)/test_udp $(TEST_BUILD)/test_mqtt \
       $(TEST_BUILD)/test_display_base
@@ -895,6 +924,12 @@ test: lint $(TEST_BUILD)/test_ring_buffer $(TEST_BUILD)/test_dispatch $(TEST_BUI
 	@echo ""
 	@echo "──── GZZH 协议命令层 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_gzzh
+	@echo ""
+	@echo "──── P25RLS 协议命令层 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_p25rls
+	@echo ""
+	@echo "──── P25RLS 图片槽 ────"
+	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_p25rls_pic
 	@echo ""
 	@echo "──── TCP 服务器通道 ────"
 	@ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 $(TEST_BUILD)/test_tcp_server
@@ -1125,6 +1160,22 @@ $(TEST_BUILD)/test_gzzh: $(TEST_GZZH_SRCS) \
 	Application/Inc/IAP/app_iap_cfg.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_GZZH_SRCS) $(TEST_LDFLAGS)
+
+$(TEST_BUILD)/test_p25rls: $(TEST_P25RLS_SRCS) \
+	Application/Inc/P25RLS/app_p25rls.h Application/Inc/P25RLS/app_p25rls_cmd.h \
+	Application/Inc/P25RLS/app_p25rls_pic.h \
+	Application/Inc/Render/app_render.h Application/Inc/Render/app_screen.h \
+	Application/Inc/IAP/app_iap_cfg.h Application/Inc/app_light_sensor.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_P25RLS_SRCS) $(TEST_LDFLAGS)
+
+# 用例 TU-include 了 app_p25rls_pic.c（不在 SRCS 里），必须单挂依赖 ——
+# 否则改了被 TU-include 的生产文件，测试不重编，跑的是旧二进制。
+$(TEST_BUILD)/test_p25rls_pic: $(TEST_P25RLS_PIC_SRCS) Application/Src/P25RLS/app_p25rls_pic.c \
+	Application/Inc/P25RLS/app_p25rls_pic.h Application/Inc/app_cfg_sched.h \
+	Device/Inc/Storage/dev_cfg_record.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(TEST_CFLAGS) -o $@ $(TEST_P25RLS_PIC_SRCS) $(TEST_LDFLAGS)
 
 # 用例 TU-include 了板级驱动 .c（不在 SRCS 里）与板级 main.h，必须单独挂依赖 ——
 # 否则改了被测源码/引脚表测试不重编，跑的是旧二进制。
