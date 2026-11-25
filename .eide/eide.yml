@@ -549,8 +549,8 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/3833024/Project_STD.hex verify reset exit"
-        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+        commandLine: openocd -f ${workspaceFolder}/Compiler/stm32f407zg.cfg -c "init; halt; program ${workspaceFolder}/build/3833024/Project_STD.hex verify reset exit"
+        eraseChipCommand: openocd -f ${workspaceFolder}/Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""
         bin: ""
@@ -712,8 +712,8 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; program ./build/5006048/${workspaceFolderBasename}.hex verify reset exit"
-        eraseChipCommand: openocd -f ./Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
+        commandLine: openocd -f ${workspaceFolder}/Compiler/stm32f407zg.cfg -c "init; halt; program ${workspaceFolder}/build/5006048/${workspaceFolderBasename}.hex verify reset exit"
+        eraseChipCommand: openocd -f ${workspaceFolder}/Compiler/stm32f407zg.cfg -c "init; halt; stm32f4x unlock 0; stm32f4x mass_erase 0; shutdown"
       JLink:
         baseAddr: ""
         bin: ""
