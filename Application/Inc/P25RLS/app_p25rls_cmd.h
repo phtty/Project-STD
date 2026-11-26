@@ -41,7 +41,7 @@
 typedef struct [[gnu::packed]] {
     uint8_t brightness; /**< 亮度，**线上口径** 0~31（0 最暗、31 最亮）/ 255 自动 */
     uint8_t pic_num;    /**< 图片编号 0/1/2（= 图片槽号） */
-    uint8_t bitmap[];   /**< 先红平面 288B、后绿平面 288B；每像素 1bit、行优先、MSB 为最左 */
+    uint8_t bitmap[];   /**< 先红平面 288B、后绿平面 288B；每像素 1bit、行优先、**每字节 bit0 为最左**（实测上位机口径，落屏前翻成内部 MSB-first） */
 } app_p25rls_display_t;
 
 /** @brief `IP` / `SC` / `RB` 的网络配置：IP + 掩码 + 网关（协议帧里没有端口字段） */

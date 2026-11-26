@@ -79,11 +79,29 @@ static void _p25rls_fill_black(void)
     });
 }
 
+/** @brief 线上位序 → 内部位序：每字节内位序翻转
+ *
+ *  **线上是 LSB-first**（每字节 bit0 = 最左），实测自现场上位机发给本版的"车道关闭"
+ *  四字图：按 MSB-first 解出来是碎片，翻位后才是完整字形。而渲染引擎/画布的位图
+ *  原语是 **MSB-first**（`(宽+7)/8` 行字节、bit7 为最左），所以绘制前逐字节翻一次。
+ *
+ *  槽里存的是**线上原样字节**（调试/回读时能直接和抓包对照），翻转只发生在落屏前。
+ *  注意与 RLS 的差别：RLS 那边按 MSB-first 解（现场运行过的口径），两者**不可照抄**。
+ *  @param b 线上字节
+ *  @return 内部 MSB-first 字节 */
+static uint8_t _p25rls_bit_reverse(uint8_t b)
+{
+    b = (uint8_t)(((b & 0xF0U) >> 4) | ((b & 0x0FU) << 4));
+    b = (uint8_t)(((b & 0xCCU) >> 2) | ((b & 0x33U) << 2));
+    b = (uint8_t)(((b & 0xAAU) >> 1) | ((b & 0x55U) << 1));
+    return b;
+}
+
 /** @brief 把一个双平面位图按"红独有 / 绿独有 / 两平面都有"三遍画上屏
  *
  *  渲染引擎的位图原语是"一张 1bpp 图 + 一个颜色"，而本协议一个像素可能是三种颜色
  *  之一；三个掩码互不相交，依次画就得到逐像素正确的结果。
- *  @param bitmap 576B：先红平面、后绿平面（各 288B，1bpp、行优先、MSB 为最左） */
+ *  @param bitmap 576B：先红平面、后绿平面（各 288B，1bpp、行优先、**线上 LSB 为最左**） */
 static void _p25rls_pic_draw(const uint8_t *bitmap)
 {
     static const dev_display_color_t k_colors[3] = {
@@ -94,8 +112,9 @@ static void _p25rls_pic_draw(const uint8_t *bitmap)
 
     for (uint8_t pass = 0; pass < 3U; pass++) {
         for (uint16_t i = 0; i < P25RLS_PLANE_BYTES; i++) {
-            const uint8_t r = red[i];
-            const uint8_t g = green[i];
+            /* 线上 LSB-first → 内部 MSB-first（见 _p25rls_bit_reverse） */
+            const uint8_t r = _p25rls_bit_reverse(red[i]);
+            const uint8_t g = _p25rls_bit_reverse(green[i]);
             /* 位级独立，可以整字节算：红独有 / 绿独有 / 两者都有 */
             s_mask[i] = (pass == 0U) ? (uint8_t)(r & (uint8_t)~g)
                         : (pass == 1U) ? (uint8_t)(g & (uint8_t)~r)

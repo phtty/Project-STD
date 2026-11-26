@@ -301,6 +301,12 @@ SUITES: dict[str, list[tuple[str, str, str, str]]] = {
          "W6  重放不看有效位（把未写过的槽画成黑屏）",
          "    if (0U == (s_rec.valid_mask & (uint8_t)(1U << s_rec.last_shown))) return false;",
          "    if (false) return false;"),
+        ("Application/Src/P25RLS/app_p25rls_pic.c",
+         "W7  位序按 MSB 解（实测上位机是 LSB-first）",
+         "            const uint8_t r = _p25rls_bit_reverse(red[i]);\n"
+         "            const uint8_t g = _p25rls_bit_reverse(green[i]);",
+         "            const uint8_t r = (red[i]);\n"
+         "            const uint8_t g = (green[i]);"),
     ],
     # 协议探针（帧的**结构**判定）—— 断言见 test/dispatch/test_probes.c。
     # 这里只登记 GZZH 的：其余协议的探针变异体在各自命令层套件里没有落点。

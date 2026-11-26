@@ -203,6 +203,15 @@ static void fixture_reset(void)
     s_frame_end   = 0;
 }
 
+/** @brief 独立的位序 oracle：逐位搬（不复用被测实现） */
+static uint8_t reverse_bits(uint8_t b)
+{
+    uint8_t out = 0;
+    for (uint8_t i = 0; i < 8U; i++)
+        if (b & (uint8_t)(1U << i)) out |= (uint8_t)(1U << (7U - i));
+    return out;
+}
+
 /** @brief 造一张双平面位图：红/绿平面各按给定基值铺满
  *  @param red 红平面字节值
  *  @param green 绿平面字节值
@@ -410,12 +419,14 @@ static void case_show(void)
     uint8_t *red   = bm;
     uint8_t *green = &bm[P25RLS_PLANE_BYTES];
 
-    red[0]   = 0x80; /* 字节 0：红独有 */
-    green[1] = 0x80; /* 字节 1：绿独有 */
-    red[2]   = 0x01; /* 字节 2：两平面都有 → 黄 */
+    /* **槽里存的是线上原样字节：每字节 bit0 = 最左**（实测上位机口径），
+       落屏前才翻成 MSB-first。所以这里造"线上"位：bit0 对应每组 8 像素的最左。 */
+    red[0]   = 0x01; /* 字节 0：红独有（最左那一列） */
+    green[1] = 0x01; /* 字节 1：绿独有（x=8） */
+    red[2]   = 0x01; /* 字节 2：两平面都有 → 黄（x=16） */
     green[2] = 0x01;
     /* 字节 3：两平面都没有 → 三遍都不该出现 */
-    red[4]   = 0xFF; /* 字节 4：红独有 0x0F、黄 0xF0 */
+    red[4]   = 0xFF; /* 字节 4：翻转后红 0xFF / 绿 0x0F → 红独有 0xF0、黄 0x0F */
     green[4] = 0xF0;
 
     CHECK_MSG(p25rls_pic_save(1, bm), "先存进槽 1");
@@ -453,25 +464,25 @@ static void case_show(void)
     const draw_t *grn_pass = &s_draws[2];
     const draw_t *yel_pass = &s_draws[3];
 
-    CHECK_MSG(red_pass->bm[0] == 0x80, "字节 0：红独有应为 80，实际 %02X",
+    CHECK_MSG(red_pass->bm[0] == 0x80, "字节 0：线上 bit0（最左）翻成内部 80，实际 %02X",
               (unsigned)red_pass->bm[0]);
     CHECK_MSG(grn_pass->bm[0] == 0x00, "字节 0：绿遍应为 0，实际 %02X", (unsigned)grn_pass->bm[0]);
     CHECK_MSG(grn_pass->bm[1] == 0x80, "字节 1：绿独有应为 80，实际 %02X",
               (unsigned)grn_pass->bm[1]);
     CHECK_MSG(red_pass->bm[2] == 0x00, "字节 2：红遍应剔除同时为绿的位，实际 %02X",
               (unsigned)red_pass->bm[2]);
-    CHECK_MSG(yel_pass->bm[2] == 0x01, "字节 2：两平面都有 → 黄，实际 %02X",
+    CHECK_MSG(yel_pass->bm[2] == 0x80, "字节 2：两平面都有 → 黄（x=16 → 内部 80），实际 %02X",
               (unsigned)yel_pass->bm[2]);
     CHECK_MSG((red_pass->bm[3] | grn_pass->bm[3] | yel_pass->bm[3]) == 0x00,
               "字节 3：两平面都为 0 → 三遍都不画");
-    CHECK_MSG(red_pass->bm[4] == 0x0F && yel_pass->bm[4] == 0xF0,
-              "字节 4：红/黄拆分应为 0F/F0，实际 %02X/%02X", (unsigned)red_pass->bm[4],
-              (unsigned)yel_pass->bm[4]);
+    CHECK_MSG(red_pass->bm[4] == 0xF0 && yel_pass->bm[4] == 0x0F,
+              "字节 4：翻转后红 0xFF/绿 0x0F → 红独有 F0、黄 0F，实际 %02X/%02X",
+              (unsigned)red_pass->bm[4], (unsigned)yel_pass->bm[4]);
 
     int bad = 0;
     for (uint16_t i = 0; i < P25RLS_PLANE_BYTES; i++) {
-        const uint8_t r = red[i];
-        const uint8_t g = green[i];
+        const uint8_t r = reverse_bits(red[i]);  /* 线上 LSB-first → 内部 MSB-first */
+        const uint8_t g = reverse_bits(green[i]);
         if ((red_pass->bm[i] != (uint8_t)(r & (uint8_t)~g)) ||
             (grn_pass->bm[i] != (uint8_t)(g & (uint8_t)~r)) ||
             (yel_pass->bm[i] != (uint8_t)(r & g)))
